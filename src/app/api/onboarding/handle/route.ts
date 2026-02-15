@@ -167,10 +167,17 @@ Rules:
   const goal = (onboardingData.goal as string) || "general_fitness";
   const raceDate = (onboardingData.race_date as string) || null;
 
-  // Estimate starting mileage
+  // Assess fitness from Strava stats (synced during OAuth callback)
+  const stravaStats = onboardingData.strava_stats as {
+    all_run_totals?: { count?: number; distance?: number };
+    recent_run_totals?: { count?: number; distance?: number };
+  } | undefined;
+
+  const fitnessLevel = assessFitnessLevel(stravaStats);
   const { weeklyMileage, longRun } = estimateWeeklyMileage(
-    "beginner",
-    parsed.days_per_week
+    fitnessLevel,
+    parsed.days_per_week,
+    stravaStats
   );
 
   // Create training profile, training state, and clear onboarding — all in parallel
@@ -180,7 +187,7 @@ Rules:
         user_id: user.id,
         goal,
         race_date: raceDate,
-        fitness_level: "beginner",
+        fitness_level: fitnessLevel,
         days_per_week: parsed.days_per_week,
         training_days: parsed.training_days,
         updated_at: new Date().toISOString(),
@@ -234,10 +241,56 @@ async function sendAndStore(userId: string, phone: string, message: string) {
   ]);
 }
 
+interface StravaStats {
+  all_run_totals?: { count?: number; distance?: number };
+  recent_run_totals?: { count?: number; distance?: number };
+}
+
+/**
+ * Assess fitness level from Strava history.
+ */
+function assessFitnessLevel(stats: StravaStats | undefined): string {
+  if (!stats?.all_run_totals) return "beginner";
+
+  const totalRuns = stats.all_run_totals.count ?? 0;
+  const totalMiles = (stats.all_run_totals.distance ?? 0) / 1609.34;
+
+  // Recent 4-week activity level
+  const recentRuns = stats.recent_run_totals?.count ?? 0;
+  const recentMiles = (stats.recent_run_totals?.distance ?? 0) / 1609.34;
+  const recentWeeklyMiles = recentMiles / 4;
+
+  // Advanced: lots of history AND currently active
+  if ((totalRuns >= 200 || totalMiles >= 2000) && recentWeeklyMiles >= 20)
+    return "advanced";
+
+  // Intermediate: moderate history or moderate current volume
+  if (totalRuns >= 50 || totalMiles >= 500 || recentWeeklyMiles >= 12)
+    return "intermediate";
+
+  return "beginner";
+}
+
+/**
+ * Estimate starting weekly mileage target.
+ * If Strava stats are available, use recent 4-week average as baseline.
+ */
 function estimateWeeklyMileage(
   fitnessLevel: string,
-  daysPerWeek: number
+  daysPerWeek: number,
+  stravaStats?: StravaStats
 ): { weeklyMileage: number; longRun: number } {
+  // If we have recent Strava data, use it as the baseline
+  if (stravaStats?.recent_run_totals?.distance) {
+    const recentWeeklyMiles =
+      stravaStats.recent_run_totals.distance / 1609.34 / 4;
+    // Use the actual recent average, rounded to nearest 5
+    const weeklyMileage = Math.round(recentWeeklyMiles / 5) * 5 || 10;
+    const longRun = Math.round(weeklyMileage * 0.3);
+    return { weeklyMileage, longRun };
+  }
+
+  // Fallback: estimate from fitness level
   const baseMileagePerDay: Record<string, number> = {
     beginner: 2.5,
     intermediate: 5,

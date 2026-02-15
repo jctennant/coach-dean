@@ -63,8 +63,9 @@ export async function POST(request: Request) {
       const distanceMiles = activity.distance / 1609.34;
       const movingTimeMinutes = activity.moving_time / 60;
       const avgPaceMinutes = distanceMiles > 0 ? movingTimeMinutes / distanceMiles : 0;
-      const paceMin = Math.floor(avgPaceMinutes);
-      const paceSec = Math.round((avgPaceMinutes - paceMin) * 60);
+      const totalPaceSec = Math.round(avgPaceMinutes * 60);
+      const paceMin = Math.floor(totalPaceSec / 60);
+      const paceSec = totalPaceSec % 60;
       const averagePace = `${paceMin}:${paceSec.toString().padStart(2, "0")}/mi`;
 
       // Store the activity

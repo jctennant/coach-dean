@@ -95,3 +95,75 @@ export async function getAthlete(accessToken: string) {
 
   return response.json();
 }
+
+/**
+ * Fetch a page of activities for the authenticated athlete.
+ * Strava returns max 200 per page.
+ */
+export async function listActivities(
+  accessToken: string,
+  options?: { before?: number; after?: number; page?: number; per_page?: number }
+) {
+  const { before, after, page = 1, per_page = 200 } = options || {};
+  const params = new URLSearchParams({
+    page: page.toString(),
+    per_page: per_page.toString(),
+  });
+  if (before) params.append("before", before.toString());
+  if (after) params.append("after", after.toString());
+
+  const response = await fetch(
+    `${STRAVA_API_BASE}/athlete/activities?${params}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Strava API error: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch all activities with automatic pagination.
+ * Optionally limit to activities after a given Unix timestamp.
+ */
+export async function getAllActivities(
+  accessToken: string,
+  options?: { after?: number; maxPages?: number }
+): Promise<unknown[]> {
+  const allActivities: unknown[] = [];
+  let page = 1;
+  const maxPages = options?.maxPages ?? 10; // Safety limit (2000 activities)
+
+  while (page <= maxPages) {
+    const activities = await listActivities(accessToken, {
+      after: options?.after,
+      page,
+      per_page: 200,
+    });
+
+    if (!Array.isArray(activities) || activities.length === 0) break;
+    allActivities.push(...activities);
+    if (activities.length < 200) break; // Last page
+    page++;
+  }
+
+  return allActivities;
+}
+
+/**
+ * Fetch athlete statistics (all-time, YTD, recent 4 weeks).
+ */
+export async function getAthleteStats(accessToken: string, athleteId: number) {
+  const response = await fetch(
+    `${STRAVA_API_BASE}/athletes/${athleteId}/stats`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Strava API error: ${response.statusText}`);
+  }
+
+  return response.json();
+}
