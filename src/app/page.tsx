@@ -115,12 +115,16 @@ export default function Home() {
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16">
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left">
-            <h1 className="max-w-xl text-4xl font-bold leading-tight tracking-tight md:text-5xl lg:text-6xl">
-              Train smarter. Stay healthy. Get faster.
+            <p className="text-md font-semibold uppercase tracking-widest text-green-800">
+              Meet Coach Dean
+            </p>
+            <h1 className="max-w-xl text-3xl font-bold leading-tight tracking-tight md:text-4xl lg:text-4xl">
+              Your plan should adapt to you. <br />
+              Not the other way around.
             </h1>
             <p className="max-w-lg text-lg text-muted-foreground">
-              Dean is your AI running coach — analyzing every run and texting you
-              personalized workouts, feedback, and race plans.
+            Dean is an AI coach that watches every run, adjusts when something feels off, 
+            and texts you what to do next — so you stay healthy all the way to race day.
             </p>
             <Suspense>
               <SignupForm />
