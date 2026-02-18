@@ -59,14 +59,16 @@ export async function POST(request: Request) {
   console.log("[linq-webhook] full payload:", JSON.stringify(payload, null, 2));
 
   // Extract sender phone and message text from the payload.
-  // Supports both v2025-01-01 and v2026-02-03 payload formats.
+  // Webhook v2026-02-03: data is nested under payload.data
+  const data = payload.data || payload;
   const senderPhone =
-    payload.sender_handle || payload.from_handle || null;
-  const parts = payload.message?.parts || payload.parts || [];
+    data.sender_handle?.handle || data.from_handle?.handle ||
+    data.sender_handle || data.from_handle || null;
+  const parts = data.parts || data.message?.parts || [];
   const textPart = parts.find(
     (p: { type: string; value?: string }) => p.type === "text"
   );
-  const body = textPart?.value || "";
+  const body = textPart?.value?.trim() || "";
 
   console.log("[linq-webhook] parsed:", { senderPhone, body, partsCount: parts.length });
 
