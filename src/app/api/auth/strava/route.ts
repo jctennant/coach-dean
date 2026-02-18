@@ -23,7 +23,8 @@ export async function GET(request: Request) {
     state: userId, // Pass user ID through OAuth state
   });
 
+  // Use /oauth/mobile/authorize to open the Strava app on mobile
   return NextResponse.redirect(
-    `https://www.strava.com/oauth/authorize?${params.toString()}`
+    `https://www.strava.com/oauth/mobile/authorize?${params.toString()}`
   );
 }

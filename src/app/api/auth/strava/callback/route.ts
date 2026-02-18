@@ -13,7 +13,10 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const userId = searchParams.get("state"); // User ID passed via OAuth state
 
+  console.log("[strava-callback] code:", !!code, "userId:", userId);
+
   if (!code || !userId) {
+    console.error("[strava-callback] missing params");
     return NextResponse.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}?error=missing_params`
     );
@@ -32,6 +35,8 @@ export async function GET(request: Request) {
   });
 
   if (!tokenResponse.ok) {
+    const errorBody = await tokenResponse.text();
+    console.error("[strava-callback] token exchange failed:", tokenResponse.status, errorBody);
     return NextResponse.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}?error=token_exchange_failed`
     );
@@ -56,11 +61,13 @@ export async function GET(request: Request) {
     .single();
 
   if (error || !user) {
-    console.error("Error updating user with Strava tokens:", error);
+    console.error("[strava-callback] db update failed:", error);
     return NextResponse.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}?error=db_error`
     );
   }
+
+  console.log("[strava-callback] user updated:", user.id, "sending schedule SMS");
 
   // Sync historical activities and athlete stats in the background
   // Don't block the redirect — fire and forget
