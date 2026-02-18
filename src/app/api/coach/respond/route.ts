@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS } from "@/lib/twilio";
+import { sendSMS } from "@/lib/linq";
 
 type TriggerType = "morning_plan" | "post_run" | "user_message";
 

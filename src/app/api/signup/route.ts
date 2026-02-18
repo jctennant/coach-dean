@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { sendSMS } from "@/lib/twilio";
+import { sendSMS } from "@/lib/linq";
 
 const E164_REGEX = /^\+1\d{10}$/;
 

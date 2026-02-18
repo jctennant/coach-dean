@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { sendSMS } from "@/lib/twilio";
+import { sendSMS } from "@/lib/linq";
 import { getAllActivities, getAthleteStats } from "@/lib/strava";
 
 /**
