@@ -64,7 +64,7 @@ async function handleGoal(
     max_tokens: 256,
     system: `Extract the running goal and optional race date from the user's message. Respond with ONLY valid JSON, no other text.
 
-Output format: {"goal": "5k" | "10k" | "half_marathon" | "marathon" | "general_fitness", "race_date": "YYYY-MM-DD" | null}
+Output format: {"goal": "5k" | "10k" | "half_marathon" | "marathon" | "30k" | "50k" | "100k" | "general_fitness", "race_date": "YYYY-MM-DD" | null}
 
 Rules:
 - If they mention a month but no year, assume ${new Date().getFullYear()} (or next year if the month has passed)
@@ -72,6 +72,8 @@ Rules:
 - If no date mentioned, set race_date to null
 - "Just getting in shape" or similar → goal: "general_fitness"
 - "Half marathon" or "half" → "half_marathon"
+- "30k", "50k", "100k", "ultra" or similar trail/ultra distances → use the matching distance
+- "End of [month]" → use the last day of that month
 - Today's date is ${new Date().toISOString().split("T")[0]}`,
     messages: [{ role: "user", content: message }],
   });
@@ -325,6 +327,9 @@ function formatGoal(goal: string): string {
     "10k": "A 10K",
     half_marathon: "A half marathon",
     marathon: "A marathon",
+    "30k": "A 30K trail race",
+    "50k": "A 50K ultra",
+    "100k": "A 100K ultra",
     general_fitness: "General fitness",
   };
   return labels[goal] || goal;
