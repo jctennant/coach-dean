@@ -8,6 +8,17 @@ interface OnboardingRequest {
   message: string;
 }
 
+/** Extract JSON from Claude's response, handling markdown code blocks */
+function extractJSON(text: string): string {
+  // Try to extract from ```json ... ``` or ``` ... ``` blocks
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) return codeBlockMatch[1].trim();
+  // Try to find raw JSON object
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) return jsonMatch[0];
+  return text;
+}
+
 /**
  * POST /api/onboarding/handle
  * Processes inbound SMS during onboarding. Uses Claude to parse natural-language
@@ -70,10 +81,13 @@ Rules:
       ? parseResponse.content[0].text
       : "{}";
 
+  console.log("[onboarding] goal raw response:", parseText);
+
   let parsed: { goal: string; race_date: string | null };
   try {
-    parsed = JSON.parse(parseText);
-  } catch {
+    parsed = JSON.parse(extractJSON(parseText));
+  } catch (e) {
+    console.error("[onboarding] goal parse failed:", e);
     // If parsing fails, ask them to clarify
     const clarifyMsg =
       "I didn't quite catch that. What are you training for? (e.g., half marathon in June, 10K, just getting in shape)";
@@ -147,10 +161,13 @@ Rules:
       ? parseResponse.content[0].text
       : "{}";
 
+  console.log("[onboarding] schedule raw response:", parseText);
+
   let parsed: { training_days: string[]; days_per_week: number };
   try {
-    parsed = JSON.parse(parseText);
-  } catch {
+    parsed = JSON.parse(extractJSON(parseText));
+  } catch (e) {
+    console.error("[onboarding] schedule parse failed:", e);
     const clarifyMsg =
       "I didn't catch which days work for you. Which days of the week can you run? (e.g., Tue, Thu, Sat, Sun)";
     await sendAndStore(user.id, user.phone_number, clarifyMsg);
