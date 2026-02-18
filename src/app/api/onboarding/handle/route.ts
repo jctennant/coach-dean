@@ -199,6 +199,9 @@ Rules:
     stravaStats
   );
 
+  // Compute paces from synced Strava activities
+  const paces = await computePacesFromActivities(user.id);
+
   // Create training profile, training state, and clear onboarding — all in parallel
   await Promise.all([
     supabase.from("training_profiles").upsert(
@@ -209,6 +212,9 @@ Rules:
         fitness_level: fitnessLevel,
         days_per_week: parsed.days_per_week,
         training_days: parsed.training_days,
+        current_easy_pace: paces.easy,
+        current_tempo_pace: paces.tempo,
+        current_interval_pace: paces.interval,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
@@ -234,17 +240,65 @@ Rules:
       .eq("id", user.id),
   ]);
 
-  // Trigger first coaching message via coach/respond
-  await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+  // Fire-and-forget first coaching message — don't await
+  fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       userId: user.id,
-      trigger: "user_message",
+      trigger: "initial_plan",
     }),
-  });
+  }).catch((err) => console.error("[onboarding] coach trigger failed:", err));
 
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Compute easy/tempo/interval paces from stored Strava activities.
+ * Uses pace distribution: easy = ~75th percentile (slower), tempo = ~25th, interval = ~10th (fastest).
+ */
+async function computePacesFromActivities(
+  userId: string
+): Promise<{ easy: string | null; tempo: string | null; interval: string | null }> {
+  const { data: activities } = await supabase
+    .from("activities")
+    .select("distance_meters, moving_time_seconds")
+    .eq("user_id", userId)
+    .gt("distance_meters", 800) // ignore very short runs
+    .order("start_date", { ascending: false })
+    .limit(50);
+
+  if (!activities || activities.length < 3) {
+    return { easy: null, tempo: null, interval: null };
+  }
+
+  // Calculate pace in min/mile for each activity
+  const paces = activities
+    .map((a) => {
+      const miles = a.distance_meters / 1609.34;
+      return miles > 0 ? a.moving_time_seconds / 60 / miles : null;
+    })
+    .filter((p): p is number => p !== null && p < 15) // filter out walks
+    .sort((a, b) => a - b); // fastest to slowest
+
+  if (paces.length < 3) {
+    return { easy: null, tempo: null, interval: null };
+  }
+
+  const formatPace = (minPerMile: number): string => {
+    const totalSec = Math.round(minPerMile * 60);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${min}:${String(sec).padStart(2, "0")}/mi`;
+  };
+
+  const percentile = (arr: number[], p: number) => arr[Math.floor(arr.length * p)];
+
+  return {
+    easy: formatPace(percentile(paces, 0.75)),
+    tempo: formatPace(percentile(paces, 0.25)),
+    interval: formatPace(percentile(paces, 0.1)),
+  };
 }
 
 /** Store an outbound message and send via SMS */

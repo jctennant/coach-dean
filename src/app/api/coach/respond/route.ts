@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 
-type TriggerType = "morning_plan" | "post_run" | "user_message";
+type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan";
 
 interface CoachRequest {
   userId: string;
@@ -90,6 +90,7 @@ export async function POST(request: Request) {
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
+  const userTimezone = (user.timezone as string) || "America/New_York";
 
   const systemPrompt = buildSystemPrompt(
     user,
@@ -97,7 +98,8 @@ export async function POST(request: Request) {
     state,
     recentMessages,
     activitySummary,
-    stravaStats
+    stravaStats,
+    userTimezone
   );
 
   // Build user message based on trigger
@@ -126,7 +128,7 @@ export async function POST(request: Request) {
         ? "post_run"
         : trigger === "morning_plan"
           ? "morning_plan"
-          : "coach_response",
+          : "coach_response", // initial_plan and user_message both stored as coach_response
     strava_activity_id: activityId || null,
   });
 
@@ -263,7 +265,8 @@ function buildSystemPrompt(
     message_type: string;
   }>,
   activitySummary: string,
-  stravaStats?: Record<string, unknown>
+  stravaStats?: Record<string, unknown>,
+  timezone?: string
 ): string {
   const conversationHistory = recentMessages
     .map((m) => `${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}`)
@@ -285,8 +288,30 @@ function buildSystemPrompt(
     ? (profile.training_days as string[]).join(", ")
     : "TBD";
 
+  // Build date context in user's timezone
+  const tz = timezone || "America/New_York";
+  const now = new Date();
+  const dateFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const todayStr = dateFormatter.format(now);
+
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Timezone: ${tz}\n`;
+  if (profile?.race_date) {
+    const raceDate = new Date((profile.race_date as string) + "T00:00:00");
+    const daysUntil = Math.ceil((raceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+    const weeksUntil = Math.round(daysUntil / 7);
+    dateContext += `- Race date: ${profile.race_date} (${daysUntil} days / ~${weeksUntil} weeks away)\n`;
+    dateContext += `- Plan backwards from race date: allocate taper (2 weeks), peak (2-3 weeks), build, and base phases\n`;
+  }
+
   return `You are Coach Dean, an expert running coach communicating via text message. You specialize in trail running, ultra running, and periodized training. You are coaching ${user.name || "this athlete"} for ${profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness"}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
 
+${dateContext}
 TRAINING PHILOSOPHY:
 - Follow periodized training: base → build → peak → taper
 - 80/20 rule: ~80% easy effort, ~20% quality workouts
@@ -348,5 +373,19 @@ function buildUserMessage(
       return `The athlete just completed a workout. Here are the details:\n${JSON.stringify(activityData, null, 2)}\n\nProvide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
+    case "initial_plan":
+      return `This athlete just completed onboarding. Generate their first training plan. You MUST:
+
+1. Welcome them by name and acknowledge their goal and race (use the DATE CONTEXT above for exact weeks remaining)
+2. Briefly assess their current fitness based on their Strava data (weekly mileage, pace range, trail vs road mix)
+3. Outline the training phases from now to race day (base/build/peak/taper with approximate week ranges)
+4. Give THIS WEEK's specific workouts — day by day for their training days, with:
+   - Distances in miles
+   - Target paces (use their actual pace data, not generic ranges)
+   - Effort descriptions (easy, tempo, intervals, long run)
+5. Use 80/20 polarized approach appropriate for their fitness level — experienced runners need quality sessions, not all easy miles
+6. End by asking about any current injuries, niggles, or limitations you should know about
+
+Be specific with numbers. Reference their actual Strava data. Keep it under 300 words.`;
   }
 }

@@ -6,7 +6,8 @@ import { getAllActivities, getAthleteStats } from "@/lib/strava";
 /**
  * GET /api/auth/strava/callback
  * Handles the OAuth callback from Strava. Exchanges the code for tokens,
- * updates the user, syncs historical activities, and advances onboarding.
+ * syncs athlete stats synchronously, then sends schedule SMS.
+ * Activity import runs in the background (fire-and-forget).
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -45,7 +46,39 @@ export async function GET(request: Request) {
   const tokenData = await tokenResponse.json();
   const { access_token, refresh_token, expires_at, athlete } = tokenData;
 
-  // Update user with Strava tokens
+  // Extract timezone from Strava athlete profile
+  // Strava returns e.g. "(GMT-08:00) America/Los_Angeles" — extract the IANA part
+  let timezone: string | null = null;
+  if (athlete.timezone) {
+    const tzMatch = (athlete.timezone as string).match(
+      /\)\s*(.+)$/
+    );
+    timezone = tzMatch ? tzMatch[1] : athlete.timezone;
+  }
+
+  // Fetch athlete stats synchronously — this is a fast single API call
+  // We need this data available before the user answers the schedule question
+  let stats: Record<string, unknown> = {};
+  try {
+    stats = await getAthleteStats(access_token, athlete.id);
+    console.log("[strava-callback] stats fetched:", {
+      allTimeRuns: (stats.all_run_totals as Record<string, unknown>)?.count,
+    });
+  } catch (err) {
+    console.error("[strava-callback] stats fetch failed (non-fatal):", err);
+  }
+
+  // Fetch current onboarding_data to merge with stats
+  const { data: currentUser } = await supabase
+    .from("users")
+    .select("onboarding_data")
+    .eq("id", userId)
+    .single();
+
+  const onboardingData =
+    (currentUser?.onboarding_data as Record<string, unknown>) || {};
+
+  // Update user with Strava tokens, timezone, and stats
   const { data: user, error } = await supabase
     .from("users")
     .update({
@@ -55,6 +88,15 @@ export async function GET(request: Request) {
       strava_token_expires_at: new Date(expires_at * 1000).toISOString(),
       name: athlete.firstname || athlete.username || null,
       onboarding_step: "awaiting_schedule",
+      ...(timezone ? { timezone } : {}),
+      onboarding_data: {
+        ...onboardingData,
+        strava_stats: {
+          all_run_totals: stats.all_run_totals,
+          ytd_run_totals: stats.ytd_run_totals,
+          recent_run_totals: stats.recent_run_totals,
+        },
+      },
     })
     .eq("id", userId)
     .select("id, phone_number, name")
@@ -67,12 +109,11 @@ export async function GET(request: Request) {
     );
   }
 
-  console.log("[strava-callback] user updated:", user.id, "sending schedule SMS");
+  console.log("[strava-callback] user updated:", user.id, "tz:", timezone);
 
-  // Sync historical activities and athlete stats in the background
-  // Don't block the redirect — fire and forget
-  syncStravaHistory(user.id, access_token, athlete.id).catch((err) =>
-    console.error("Error syncing Strava history:", err)
+  // Fire-and-forget activity import (slow, paginated) — don't block redirect
+  importStravaActivities(user.id, access_token).catch((err) =>
+    console.error("[strava-callback] activity import error:", err)
   );
 
   // Send SMS asking about training schedule
@@ -95,49 +136,19 @@ export async function GET(request: Request) {
 }
 
 /**
- * Import recent activities (last 6 months) and athlete stats from Strava.
- * Stores activities in the DB and saves athlete stats in onboarding_data.
+ * Import recent activities (last 6 months) from Strava into the DB.
+ * This is the slow part — paginated API calls + individual upserts.
  */
-async function syncStravaHistory(
-  userId: string,
-  accessToken: string,
-  athleteId: number
-) {
-  // Fetch athlete stats and recent activities in parallel
+async function importStravaActivities(userId: string, accessToken: string) {
   const sixMonthsAgo = Math.floor(
     (Date.now() - 6 * 30 * 24 * 60 * 60 * 1000) / 1000
   );
 
-  const [stats, activities] = await Promise.all([
-    getAthleteStats(accessToken, athleteId),
-    getAllActivities(accessToken, { after: sixMonthsAgo, maxPages: 5 }),
-  ]);
+  const activities = await getAllActivities(accessToken, {
+    after: sixMonthsAgo,
+    maxPages: 5,
+  });
 
-  // Store athlete stats in onboarding_data for later use
-  const { data: currentUser } = await supabase
-    .from("users")
-    .select("onboarding_data")
-    .eq("id", userId)
-    .single();
-
-  const onboardingData =
-    (currentUser?.onboarding_data as Record<string, unknown>) || {};
-
-  await supabase
-    .from("users")
-    .update({
-      onboarding_data: {
-        ...onboardingData,
-        strava_stats: {
-          all_run_totals: stats.all_run_totals,
-          ytd_run_totals: stats.ytd_run_totals,
-          recent_run_totals: stats.recent_run_totals,
-        },
-      },
-    })
-    .eq("id", userId);
-
-  // Store activities — batch upsert
   const typedActivities = activities as Array<Record<string, unknown>>;
   const runActivities = typedActivities.filter((a) =>
     ["Run", "TrailRun", "VirtualRun"].includes(a.type as string)
@@ -175,7 +186,6 @@ async function syncStravaHistory(
   }
 
   console.log(
-    `Synced ${runActivities.length} activities for user ${userId}. ` +
-      `All-time: ${stats.all_run_totals?.count} runs, ${Math.round((stats.all_run_totals?.distance || 0) / 1609.34)} mi`
+    `[strava-callback] imported ${runActivities.length} activities for user ${userId}`
   );
 }
