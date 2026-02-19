@@ -1,19 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
-const DAY_NAMES = [
-  "sunday",
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-];
-
 /**
  * GET /api/cron/nightly-reminder
- * Runs hourly 00:00–06:00 UTC, covering 8pm in all US timezones (EDT through HST).
+ * Runs daily at 02:00 UTC (6pm PST / 7pm PDT).
  * Sends a workout reminder to users who opted into nightly reminders and have a
  * training session scheduled for tomorrow.
  */
@@ -40,25 +30,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, sent: 0 });
   }
 
-  const now = new Date();
+  // Cron fires at 02:00 UTC (6pm PST). "Tomorrow" in Pacific time is the same
+  // calendar day at 02:00 UTC, so just use the current UTC date + 1 day.
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   let sent = 0;
 
   for (const profile of profiles) {
     const user = profile.users as unknown as { timezone: string | null; onboarding_step: string | null };
-    const tz = user.timezone || "America/New_York";
+    const tz = user.timezone || "America/Los_Angeles";
     const trainingDays = (profile.training_days as string[]) || [];
 
-    // Check if it is currently the 8pm hour (20:xx) in the user's timezone
-    const localHour = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      hour: "numeric",
-      hour12: false,
-    }).format(now);
-
-    if (parseInt(localHour, 10) !== 20) continue;
-
     // Find tomorrow's day name in the user's timezone
-    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const tomorrowWeekday = new Intl.DateTimeFormat("en-US", {
       timeZone: tz,
       weekday: "long",
