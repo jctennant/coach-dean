@@ -72,19 +72,14 @@ export function SignupForm({ smsPhone }: SignupFormProps) {
 
   return (
     <div className="flex w-full max-w-sm flex-col gap-3">
+      {/* Mobile: deep link only */}
       {smsPhone && (
-        <div className="md:hidden flex flex-col gap-3">
-          <a href={`sms:${smsPhone}&body=Hi%20Dean!`}>
-            <Button size="lg" className="w-full h-12">Text Dean to get started</Button>
-          </a>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <div className="flex-1 h-px bg-border" />
-            or
-            <div className="flex-1 h-px bg-border" />
-          </div>
-        </div>
+        <a href={`sms:${smsPhone}&body=Hi%20Dean!`} className="md:hidden">
+          <Button size="lg" className="w-full h-12">Get started</Button>
+        </a>
       )}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      {/* Desktop: phone number form */}
+      <form onSubmit={handleSubmit} className={`flex-col gap-3 ${smsPhone ? "hidden md:flex" : "flex"}`}>
         <div className="flex gap-2">
           <Input
             type="tel"
