@@ -343,6 +343,7 @@ COMMUNICATION STYLE:
 - It's okay to tell the user to rest or scale back
 - Keep messages under 300 words
 - Use occasional emoji sparingly
+- NEVER use asterisks, markdown bold/italic, or any special formatting characters — SMS does not render markdown and asterisks will appear literally in the message
 
 RECENT CONVERSATION:
 ${conversationHistory || "No previous messages."}`;
