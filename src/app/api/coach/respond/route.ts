@@ -380,16 +380,15 @@ function buildUserMessage(
     case "initial_plan":
       return `This athlete just completed onboarding. Generate their first training plan. You MUST:
 
-1. Welcome them by name and acknowledge their goal and race (use the DATE CONTEXT above for exact weeks remaining)
-2. Briefly assess their current fitness based on their Strava data (weekly mileage, pace range, trail vs road mix)
-3. Outline the training phases from now to race day (base/build/peak/taper with approximate week ranges)
-4. Give THIS WEEK's specific workouts — day by day for their training days, with:
+1. Welcome them warmly and acknowledge their goal and race date (use DATE CONTEXT for exact weeks remaining)
+2. Briefly acknowledge their current fitness level based on their self-reported experience and weekly mileage
+3. Give THIS WEEK's specific workouts — day by day for their scheduled training days, with:
    - Distances in miles
-   - Target paces (use their actual pace data, not generic ranges)
-   - Effort descriptions (easy, tempo, intervals, long run)
-5. Use 80/20 polarized approach appropriate for their fitness level — experienced runners need quality sessions, not all easy miles
-6. End by asking about any current injuries, niggles, or limitations you should know about
+   - Target paces or effort descriptions (easy, tempo, long run) — estimate reasonable paces from their fitness level if no pace data exists
+   - Purpose of each session
+4. Use 80/20 approach: mostly easy miles, one quality session per week for beginners, two for intermediate/advanced
+5. End by asking about any current injuries, niggles, or time constraints you should know about
 
-Be specific with numbers. Reference their actual Strava data. Keep it under 300 words.`;
+Keep it conversational and encouraging. Be specific with numbers. Keep it under 300 words.`;
   }
 }

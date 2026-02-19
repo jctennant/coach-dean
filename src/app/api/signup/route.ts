@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   }
 
   const welcomeMessage =
-    "Hey! I'm Dean, your AI running coach. What are you training for? (e.g., half marathon in June, 10K, just getting in shape)";
+    "Hey, I'm Coach Dean! 👋 I'm your personal running coach, and I'll be working with you entirely over text.\n\nFirst things first — what are you training for? (e.g. 5K, half marathon, full marathon, ultra, triathlon, or something else?)";
 
   // Send welcome SMS and store in conversations
   await Promise.all([
