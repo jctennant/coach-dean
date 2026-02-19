@@ -108,8 +108,7 @@ const valueProps = [
 /* ------------------------------------------------------------------ */
 
 export default function Home() {
-  const smsPhone = process.env.LINQ_PHONE_NUMBER;
-  if (!smsPhone) console.warn("[page] LINQ_PHONE_NUMBER is not set — mobile SMS CTA will not render");
+  const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
   return (
     <div className="flex min-h-screen flex-col">
       {/* Hero */}
@@ -185,11 +184,12 @@ export default function Home() {
           Ready to run smarter?
         </h2>
         <Suspense>
-          <SignupForm />
+          <SignupForm smsPhone={smsPhone} />
         </Suspense>
         <p className="max-w-sm text-[11px] leading-snug text-muted-foreground/70">
           By signing up, you agree to receive recurring SMS messages from Coach
-          Dean. Message and data rates may apply. Reply STOP to unsubscribe.
+          Dean at the number provided. Message and data rates may apply. Reply
+          STOP to unsubscribe at any time. Reply HELP for support.
         </p>
       </section>
 
@@ -206,6 +206,10 @@ export default function Home() {
               jake.c.tennant@gmail.com
             </a>
           </p>
+          <div className="flex gap-4 text-xs">
+            <a href="/privacy" className="underline hover:text-foreground">Privacy Policy</a>
+            <a href="/terms" className="underline hover:text-foreground">Terms of Service</a>
+          </div>
           <p className="text-xs text-muted-foreground/70">
             &copy; {new Date().getFullYear()} CoachDeanAI. All rights reserved.
           </p>
