@@ -109,6 +109,7 @@ const valueProps = [
 
 export default function Home() {
   const smsPhone = process.env.LINQ_PHONE_NUMBER;
+  if (!smsPhone) console.warn("[page] LINQ_PHONE_NUMBER is not set — mobile SMS CTA will not render");
   return (
     <div className="flex min-h-screen flex-col">
       {/* Hero */}
