@@ -45,9 +45,13 @@ export async function POST(request: Request) {
     case "awaiting_goal":
       return handleGoal(user, message, onboardingData);
     case "awaiting_strava":
-      return handleStravaReminder(user);
+      return handleStravaReminder(user, message, onboardingData);
+    case "awaiting_manual_fitness":
+      return handleManualFitness(user, message, onboardingData);
     case "awaiting_schedule":
       return handleSchedule(user, message, onboardingData);
+    case "awaiting_preferences":
+      return handlePreferences(user, message, onboardingData);
     default:
       return NextResponse.json({ ok: true });
   }
@@ -126,12 +130,114 @@ Rules:
 }
 
 async function handleStravaReminder(
-  user: { id: string; phone_number: string }
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
 ) {
-  const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-  const reminderMsg = `I still need to connect to your Strava! Tap this link to authorize: ${stravaUrl}`;
+  // Detect if user is saying they don't have Strava
+  const classifyResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 64,
+    system: `Classify whether the user's message indicates they don't have Strava or want to skip connecting it. Respond with ONLY valid JSON: {"no_strava": true} or {"no_strava": false}
 
-  await sendAndStore(user.id, user.phone_number, reminderMsg);
+Examples of "no Strava": "I don't have Strava", "skip", "no thanks", "I don't use it", "no Strava", "nope", "can we skip this", "I'm not on Strava"
+Examples of NOT "no Strava": any URL, "ok", "I'll do it", "how do I connect", "help", "linked"`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const classifyText =
+    classifyResponse.content[0].type === "text"
+      ? classifyResponse.content[0].text
+      : "{}";
+
+  console.log("[onboarding] strava classify response:", classifyText);
+
+  let classified: { no_strava: boolean } = { no_strava: false };
+  try {
+    classified = JSON.parse(extractJSON(classifyText));
+  } catch (e) {
+    console.error("[onboarding] strava classify parse failed:", e);
+  }
+
+  if (classified.no_strava) {
+    // Route to manual fitness collection
+    await supabase
+      .from("users")
+      .update({ onboarding_step: "awaiting_manual_fitness", onboarding_data: onboardingData })
+      .eq("id", user.id);
+
+    const manualMsg =
+      "No problem! To tailor your training, roughly how many miles are you running per week, how long have you been running, and what's a typical easy run pace? (e.g., ~25 mi/week, 2 years, ~9:30/mi)";
+    await sendAndStore(user.id, user.phone_number, manualMsg);
+  } else {
+    // Resend Strava link
+    const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+    const reminderMsg = `I still need to connect to your Strava! Tap this link to authorize: ${stravaUrl}`;
+    await sendAndStore(user.id, user.phone_number, reminderMsg);
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+async function handleManualFitness(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  // Use Claude to extract fitness info from natural language
+  const parseResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 128,
+    system: `Extract the user's running fitness info from their message. Respond with ONLY valid JSON, no other text.
+
+Output format: {"weekly_miles": <number>, "experience_years": <number>, "easy_pace": "<M:SS/mi>" | null}
+
+Rules:
+- weekly_miles: approximate miles per week. If not mentioned, estimate from context or use 15.
+- experience_years: years running. "2 years" → 2, "a few months" → 0.3, "just started" → 0, "10+ years" → 10.
+- easy_pace: format as "M:SS/mi". If not mentioned, set to null.
+- "~25 mi/week, 2 years, ~9:30/mi" → {"weekly_miles": 25, "experience_years": 2, "easy_pace": "9:30/mi"}`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const parseText =
+    parseResponse.content[0].type === "text"
+      ? parseResponse.content[0].text
+      : "{}";
+
+  console.log("[onboarding] manual fitness raw response:", parseText);
+
+  let parsed: { weekly_miles: number; experience_years: number; easy_pace: string | null };
+  try {
+    parsed = JSON.parse(extractJSON(parseText));
+  } catch (e) {
+    console.error("[onboarding] manual fitness parse failed:", e);
+    const clarifyMsg =
+      "I didn't quite catch that. Could you share roughly how many miles you run per week, how long you've been running, and your typical easy pace? (e.g., ~20 mi/week, 3 years, ~10:00/mi)";
+    await sendAndStore(user.id, user.phone_number, clarifyMsg);
+    return NextResponse.json({ ok: true });
+  }
+
+  const updatedData = {
+    ...onboardingData,
+    manual_fitness: {
+      weekly_miles: parsed.weekly_miles,
+      experience_years: parsed.experience_years,
+      easy_pace: parsed.easy_pace,
+    },
+  };
+
+  await supabase
+    .from("users")
+    .update({
+      onboarding_step: "awaiting_schedule",
+      onboarding_data: updatedData,
+    })
+    .eq("id", user.id);
+
+  const scheduleMsg =
+    "Got it! Which days of the week work best for running? (e.g., Tue, Thu, Sat, Sun)";
+  await sendAndStore(user.id, user.phone_number, scheduleMsg);
   return NextResponse.json({ ok: true });
 }
 
@@ -176,33 +282,101 @@ Rules:
     return NextResponse.json({ ok: true });
   }
 
-  // Save schedule and finalize onboarding
+  // Save schedule to onboarding_data only — do NOT create training_profile yet
   const updatedData = {
     ...onboardingData,
     training_days: parsed.training_days,
     days_per_week: parsed.days_per_week,
   };
 
+  await supabase
+    .from("users")
+    .update({
+      onboarding_step: "awaiting_preferences",
+      onboarding_data: updatedData,
+    })
+    .eq("id", user.id);
+
+  const prefsMsg =
+    "Two quick things: (1) Any access to a treadmill, bike, pool, or gym for cross-training? (2) Want a reminder the night before each workout, or just your weekly plan and Sunday check-in? You can always text me anytime.";
+  await sendAndStore(user.id, user.phone_number, prefsMsg);
+  return NextResponse.json({ ok: true });
+}
+
+async function handlePreferences(
+  user: { id: string; phone_number: string; name: string | null },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  // Use Claude to extract cross-training tools and nightly reminder preference
+  const parseResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 128,
+    system: `Extract cross-training tools and messaging cadence preference from the user's message. Respond with ONLY valid JSON, no other text.
+
+Output format: {"crosstraining_tools": ["treadmill" | "bike" | "pool" | "gym" | ...], "nightly_reminders": true | false}
+
+Rules:
+- crosstraining_tools: list any equipment/facilities mentioned. Empty array if none mentioned or "no" / "none".
+- nightly_reminders: true if they want nightly reminders before workouts; false if weekly-only or no preference stated.
+- "treadmill and a bike" → ["treadmill", "bike"]
+- "just a gym membership" → ["gym"]
+- "nightly sounds great" → nightly_reminders: true
+- "weekly is fine" or no clear preference → nightly_reminders: false`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const parseText =
+    parseResponse.content[0].type === "text"
+      ? parseResponse.content[0].text
+      : "{}";
+
+  console.log("[onboarding] preferences raw response:", parseText);
+
+  let parsed: { crosstraining_tools: string[]; nightly_reminders: boolean };
+  try {
+    parsed = JSON.parse(extractJSON(parseText));
+  } catch (e) {
+    console.error("[onboarding] preferences parse failed:", e);
+    parsed = { crosstraining_tools: [], nightly_reminders: false };
+  }
+
+  // Determine fitness level and mileage from whichever data source we have
+  const stravaStats = onboardingData.strava_stats as StravaStats | undefined;
+  const manualFitness = onboardingData.manual_fitness as {
+    weekly_miles?: number;
+    experience_years?: number;
+    easy_pace?: string | null;
+  } | undefined;
+
+  const daysPerWeek = (onboardingData.days_per_week as number) || 4;
+  const trainingDays = (onboardingData.training_days as string[]) || [];
   const goal = (onboardingData.goal as string) || "general_fitness";
   const raceDate = (onboardingData.race_date as string) || null;
 
-  // Assess fitness from Strava stats (synced during OAuth callback)
-  const stravaStats = onboardingData.strava_stats as {
-    all_run_totals?: { count?: number; distance?: number };
-    recent_run_totals?: { count?: number; distance?: number };
-  } | undefined;
-
-  const fitnessLevel = assessFitnessLevel(stravaStats);
+  const fitnessLevel = assessFitnessLevel(stravaStats, manualFitness);
   const { weeklyMileage, longRun } = estimateWeeklyMileage(
     fitnessLevel,
-    parsed.days_per_week,
-    stravaStats
+    daysPerWeek,
+    stravaStats,
+    manualFitness
   );
 
-  // Compute paces from synced Strava activities
+  // Fetch paces from Strava activities (returns nulls for non-Strava users)
   const paces = await computePacesFromActivities(user.id);
 
-  // Create training profile, training state, and clear onboarding — all in parallel
+  // If no Strava paces but manual easy_pace provided, use it
+  const easyPace = paces.easy ?? manualFitness?.easy_pace ?? null;
+
+  const proactiveCadence = parsed.nightly_reminders ? "nightly_reminders" : "weekly_only";
+
+  const updatedData = {
+    ...onboardingData,
+    crosstraining_tools: parsed.crosstraining_tools,
+    nightly_reminders: parsed.nightly_reminders,
+  };
+
+  // Upsert training_profile, training_state, and clear onboarding — all in parallel
   await Promise.all([
     supabase.from("training_profiles").upsert(
       {
@@ -210,11 +384,13 @@ Rules:
         goal,
         race_date: raceDate,
         fitness_level: fitnessLevel,
-        days_per_week: parsed.days_per_week,
-        training_days: parsed.training_days,
-        current_easy_pace: paces.easy,
+        days_per_week: daysPerWeek,
+        training_days: trainingDays,
+        current_easy_pace: easyPace,
         current_tempo_pace: paces.tempo,
         current_interval_pace: paces.interval,
+        crosstraining_tools: parsed.crosstraining_tools,
+        proactive_cadence: proactiveCadence,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
@@ -319,46 +495,67 @@ interface StravaStats {
   recent_run_totals?: { count?: number; distance?: number };
 }
 
+interface ManualFitness {
+  weekly_miles?: number;
+  experience_years?: number;
+  easy_pace?: string | null;
+}
+
 /**
- * Assess fitness level from Strava history.
+ * Assess fitness level from Strava history or manual fitness data.
  */
-function assessFitnessLevel(stats: StravaStats | undefined): string {
-  if (!stats?.all_run_totals) return "beginner";
+function assessFitnessLevel(
+  stats: StravaStats | undefined,
+  manual: ManualFitness | undefined
+): string {
+  // Prefer Strava data if available
+  if (stats?.all_run_totals) {
+    const totalRuns = stats.all_run_totals.count ?? 0;
+    const totalMiles = (stats.all_run_totals.distance ?? 0) / 1609.34;
+    const recentMiles = (stats.recent_run_totals?.distance ?? 0) / 1609.34;
+    const recentWeeklyMiles = recentMiles / 4;
 
-  const totalRuns = stats.all_run_totals.count ?? 0;
-  const totalMiles = (stats.all_run_totals.distance ?? 0) / 1609.34;
+    if ((totalRuns >= 200 || totalMiles >= 2000) && recentWeeklyMiles >= 20)
+      return "advanced";
+    if (totalRuns >= 50 || totalMiles >= 500 || recentWeeklyMiles >= 12)
+      return "intermediate";
+    return "beginner";
+  }
 
-  // Recent 4-week activity level
-  const recentRuns = stats.recent_run_totals?.count ?? 0;
-  const recentMiles = (stats.recent_run_totals?.distance ?? 0) / 1609.34;
-  const recentWeeklyMiles = recentMiles / 4;
+  // Fall back to manual fitness data
+  if (manual) {
+    const weeklyMiles = manual.weekly_miles ?? 0;
+    const years = manual.experience_years ?? 0;
 
-  // Advanced: lots of history AND currently active
-  if ((totalRuns >= 200 || totalMiles >= 2000) && recentWeeklyMiles >= 20)
-    return "advanced";
-
-  // Intermediate: moderate history or moderate current volume
-  if (totalRuns >= 50 || totalMiles >= 500 || recentWeeklyMiles >= 12)
-    return "intermediate";
+    if (weeklyMiles >= 30 || years >= 3) return "advanced";
+    if (weeklyMiles >= 15 || years >= 1) return "intermediate";
+  }
 
   return "beginner";
 }
 
 /**
  * Estimate starting weekly mileage target.
- * If Strava stats are available, use recent 4-week average as baseline.
+ * Uses Strava recent stats, manual fitness, or fitness-level defaults.
  */
 function estimateWeeklyMileage(
   fitnessLevel: string,
   daysPerWeek: number,
-  stravaStats?: StravaStats
+  stravaStats?: StravaStats,
+  manual?: ManualFitness
 ): { weeklyMileage: number; longRun: number } {
   // If we have recent Strava data, use it as the baseline
   if (stravaStats?.recent_run_totals?.distance) {
     const recentWeeklyMiles =
       stravaStats.recent_run_totals.distance / 1609.34 / 4;
-    // Use the actual recent average, rounded to nearest 5
     const weeklyMileage = Math.round(recentWeeklyMiles / 5) * 5 || 10;
+    const longRun = Math.round(weeklyMileage * 0.3);
+    return { weeklyMileage, longRun };
+  }
+
+  // If manual weekly miles provided, use that
+  if (manual?.weekly_miles) {
+    const weeklyMileage = Math.round(manual.weekly_miles / 5) * 5 || 10;
     const longRun = Math.round(weeklyMileage * 0.3);
     return { weeklyMileage, longRun };
   }

@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 
-type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan";
+type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder";
 
 interface CoachRequest {
   userId: string;
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
         ? "post_run"
         : trigger === "morning_plan"
           ? "morning_plan"
-          : "coach_response", // initial_plan and user_message both stored as coach_response
+          : "coach_response", // initial_plan, user_message, weekly_recap stored as coach_response
     strava_activity_id: activityId || null,
   });
 
@@ -373,6 +373,10 @@ function buildUserMessage(
       return `The athlete just completed a workout. Here are the details:\n${JSON.stringify(activityData, null, 2)}\n\nProvide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
+    case "nightly_reminder":
+      return "Send a brief nightly reminder for tomorrow's scheduled workout. Include the workout type (easy run, tempo, long run, etc.), the target distance, and the target pace. 2-3 sentences max — this is a gentle heads-up, not a full plan.";
+    case "weekly_recap":
+      return `It's Sunday — generate a weekly training recap and preview of next week. If activity data is available for the past 7 days, analyze volume/paces/consistency and give 2-3 specific observations. If no activity data, ask how last week went and what they want to focus on next week. Either way, give a brief preview of next week's key sessions. Keep it under 250 words.`;
     case "initial_plan":
       return `This athlete just completed onboarding. Generate their first training plan. You MUST:
 

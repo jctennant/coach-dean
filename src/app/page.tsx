@@ -108,6 +108,7 @@ const valueProps = [
 /* ------------------------------------------------------------------ */
 
 export default function Home() {
+  const smsPhone = process.env.LINQ_PHONE_NUMBER;
   return (
     <div className="flex min-h-screen flex-col">
       {/* Hero */}
@@ -127,7 +128,7 @@ export default function Home() {
             and texts you what to do next — so you stay healthy all the way to race day.
             </p>
             <Suspense>
-              <SignupForm />
+              <SignupForm smsPhone={smsPhone} />
             </Suspense>
             <p className="text-xs text-muted-foreground">
               Free during beta &middot; US phone numbers only
