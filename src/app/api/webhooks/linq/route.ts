@@ -3,11 +3,18 @@ import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import crypto from "crypto";
 
+// Allow up to 30s so the 10s debounce sleep fits within the function timeout
+export const maxDuration = 30;
+
 /**
  * POST /api/webhooks/linq
  * Receives inbound messages and events from Linq.
  * Webhook signature verified via HMAC-SHA256.
  * Returns 200 immediately, processes message asynchronously via after().
+ *
+ * Coaching messages are debounced: if a second message arrives within 10 seconds
+ * of the first, only the last one triggers a response. Onboarding messages are
+ * processed immediately (each step expects exactly one reply).
  */
 export async function POST(request: Request) {
   const signature = request.headers.get("x-webhook-signature");
@@ -124,7 +131,7 @@ async function handleInboundMessage(
     }
 
     const welcomeMessage =
-      "Hey! I'm Dean, your AI running coach. What are you training for? (e.g., half marathon in June, 10K, just getting in shape)";
+      "Hey, I'm Coach Dean! 👋 I'm your personal running coach, and I'll be working with you entirely over text.\n\nFirst things first — what are you training for? (e.g. 5K, half marathon, full marathon, ultra, triathlon, or something else?)";
 
     await Promise.all([
       sendSMS(senderPhone, welcomeMessage),
@@ -151,34 +158,52 @@ async function handleInboundMessage(
 
   console.log("[linq-webhook] existing user:", user.id, "step:", user.onboarding_step);
 
-  // Store the inbound message
-  await supabase.from("conversations").insert({
-    user_id: user.id,
-    role: "user",
-    content: body,
-    message_type: "user_message",
-    external_message_id: messageId,
-  });
+  // Store the inbound message and capture its ID for debounce comparison
+  const { data: storedMsg } = await supabase
+    .from("conversations")
+    .insert({
+      user_id: user.id,
+      role: "user",
+      content: body,
+      message_type: "user_message",
+      external_message_id: messageId,
+    })
+    .select("id")
+    .single();
 
   if (user.onboarding_step) {
-    // Route to onboarding handler
+    // Onboarding: no debounce — each step expects exactly one reply
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId: user.id,
-        message: body,
-      }),
+      body: JSON.stringify({ userId: user.id, message: body }),
     });
-  } else {
-    // Normal coaching flow
-    await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId: user.id,
-        trigger: "user_message",
-      }),
-    });
+    return;
   }
+
+  // Coaching flow: debounce 10 seconds so rapid multi-part messages are batched
+  console.log("[linq-webhook] debounce: waiting 10s for user", user.id);
+  await new Promise((resolve) => setTimeout(resolve, 10_000));
+
+  // After the wait, check if a newer user message has arrived
+  const { data: latestMsg } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("role", "user")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!latestMsg || latestMsg.id !== storedMsg?.id) {
+    console.log("[linq-webhook] debounce: newer message arrived, skipping response for", storedMsg?.id);
+    return;
+  }
+
+  console.log("[linq-webhook] debounce: firing response for", user.id);
+  await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: user.id, trigger: "user_message" }),
+  });
 }
