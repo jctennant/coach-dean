@@ -9,6 +9,7 @@ interface CoachRequest {
   userId: string;
   trigger: TriggerType;
   activityId?: number;
+  dry_run?: boolean;
 }
 
 interface ActivityRow {
@@ -26,7 +27,7 @@ interface ActivityRow {
  * Core coaching function. Given a user + trigger, generates and sends a coaching response via SMS.
  */
 export async function POST(request: Request) {
-  const { userId, trigger, activityId }: CoachRequest = await request.json();
+  const { userId, trigger, activityId, dry_run }: CoachRequest = await request.json();
 
   // Fetch user context in parallel
   const [
@@ -115,10 +116,12 @@ export async function POST(request: Request) {
   const coachMessage =
     response.content[0].type === "text" ? response.content[0].text : "";
 
-  // Send SMS
-  await sendSMS(user.phone_number, coachMessage);
+  // Send SMS (skip if dry run)
+  if (!dry_run) await sendSMS(user.phone_number, coachMessage);
 
-  // Store the response
+  // Store the response (skip if dry run)
+  if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
+
   await supabase.from("conversations").insert({
     user_id: userId,
     role: "assistant",
