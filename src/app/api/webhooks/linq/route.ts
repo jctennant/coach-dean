@@ -130,29 +130,23 @@ async function handleInboundMessage(
       return;
     }
 
-    const welcomeMessage =
-      "Hey, I'm Coach Dean! 👋 I'm your personal running coach, and I'll be working with you entirely over text.\n\nFirst things first — what are you training for? (e.g. 5K, half marathon, full marathon, ultra, triathlon, or something else?)";
+    // Store the inbound message, then route to onboarding/handle so handleGoal
+    // can detect a goal in the first message (e.g. "Hi Dean! half marathon June").
+    await supabase.from("conversations").insert({
+      user_id: newUser.id,
+      role: "user",
+      content: body,
+      message_type: "user_message",
+      external_message_id: messageId,
+    });
 
-    await Promise.all([
-      sendSMS(senderPhone, welcomeMessage),
-      supabase.from("conversations").insert([
-        {
-          user_id: newUser.id,
-          role: "user",
-          content: body,
-          message_type: "user_message",
-          external_message_id: messageId,
-        },
-        {
-          user_id: newUser.id,
-          role: "assistant",
-          content: welcomeMessage,
-          message_type: "coach_response",
-        },
-      ]),
-    ]);
+    await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: newUser.id, message: body }),
+    });
 
-    console.log("[linq-webhook] welcome flow completed for:", senderPhone);
+    console.log("[linq-webhook] new user routed to onboarding/handle:", senderPhone);
     return;
   }
 
