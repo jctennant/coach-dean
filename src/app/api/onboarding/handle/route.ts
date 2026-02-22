@@ -52,8 +52,11 @@ export async function POST(request: Request) {
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
 
   // Before routing to a step handler, check if the message is off-topic.
-  // If it is, respond naturally and re-ask the current question — don't advance the step.
-  if (step) {
+  // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
+  // For all other steps: only intercept messages that are CLEARLY unrelated (questions about
+  // Dean's services, chit-chat, etc.). Partial answers pass through to the step handler
+  // which has its own completeness logic.
+  if (step && step !== "awaiting_goal") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       await sendAndStore(user.id, user.phone_number, offTopicResult.response);
@@ -720,31 +723,14 @@ async function checkOffTopic(
   step: string,
   message: string
 ): Promise<{ offTopic: false } | { offTopic: true; response: string }> {
-  const stepContext: Record<string, { expecting: string }> = {
-    awaiting_goal: {
-      expecting: "their running or fitness goal (e.g. 5K, marathon, general fitness, ultra). A greeting alone with no goal is NOT on-topic.",
-    },
-    awaiting_race_date: {
-      expecting: "the date of their race or target event, or an indication they don't have one yet.",
-    },
-    awaiting_experience: {
-      expecting: "how long they've been running and their current weekly mileage or km.",
-    },
-    awaiting_pacing: {
-      expecting: "whether they have a race time or best effort to share, or that they don't have one.",
-    },
-    awaiting_conversational_pace: {
-      expecting: "their comfortable, easy running pace per mile or per km.",
-    },
-    awaiting_crosstraining: {
-      expecting: "any cross-training activities they do alongside running, or that they don't do any.",
-    },
-    awaiting_schedule: {
-      expecting: "which specific days of the week they want to run.",
-    },
-    awaiting_preferences: {
-      expecting: "whether they want nightly workout reminders, weekly plan only, or both.",
-    },
+  const stepContext: Record<string, { topic: string }> = {
+    awaiting_race_date: { topic: "their race date or target event" },
+    awaiting_experience: { topic: "their running background and weekly mileage" },
+    awaiting_pacing: { topic: "their race times or running performance" },
+    awaiting_conversational_pace: { topic: "their easy running pace" },
+    awaiting_crosstraining: { topic: "cross-training or other fitness activities" },
+    awaiting_schedule: { topic: "their weekly training schedule and availability" },
+    awaiting_preferences: { topic: "how often they want to receive messages" },
   };
 
   const ctx = stepContext[step];
@@ -753,15 +739,21 @@ async function checkOffTopic(
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 200,
-    system: `You are Coach Dean, an AI running coach onboarding a new athlete via SMS.
+    system: `You are Coach Dean, an AI running coach onboarding a new athlete via SMS. You are currently collecting information about ${ctx.topic}.
 
-You asked a question and are waiting for: ${ctx.expecting}
+Read the athlete's message and decide: is it ATTEMPTING to address the topic (even partially, vaguely, or incompletely), or is it COMPLETELY UNRELATED?
 
-Read the athlete's message. Does it directly answer what you asked (even briefly or partially)?
+On-topic — return only this JSON: {"on_topic": true}
+- Any answer to the question, even partial or brief
+- Saying they don't know, aren't sure, or don't have the info
+- Simple acknowledgments like "yeah", "not really", "not sure"
+- Anything that touches on the subject even loosely
 
-If YES — respond with only this exact JSON, nothing else: {"on_topic": true}
-
-If NO (they asked a question, made a comment, or went off-topic) — respond as Coach Dean in plain text: answer their question or comment warmly in 1 sentence, then ask your question again. No markdown, no asterisks. Keep it natural and short.`,
+Off-topic — write a plain text response as Coach Dean:
+- Questions about Dean's services or capabilities (e.g. "do you coach cycling?")
+- Random chit-chat with no relation to the topic
+- Completely unrelated statements or questions
+If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. No markdown, no asterisks.`,
     messages: [{ role: "user", content: message }],
   });
 
