@@ -51,6 +51,16 @@ export async function POST(request: Request) {
   const step = user.onboarding_step;
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
 
+  // Before routing to a step handler, check if the message is off-topic.
+  // If it is, respond naturally and re-ask the current question — don't advance the step.
+  if (step) {
+    const offTopicResult = await checkOffTopic(step, message);
+    if (offTopicResult.offTopic) {
+      await sendAndStore(user.id, user.phone_number, offTopicResult.response);
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   switch (step) {
     case "awaiting_goal":
       return handleGoal(user, message, onboardingData);
@@ -692,6 +702,80 @@ function estimatePacesFromEasyPace(paceStr: string | null): {
     tempo: easySec > 90 ? fmt(easySec - 90) : null,
     interval: easySec > 150 ? fmt(easySec - 150) : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Off-topic detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Before processing a step, check whether the user's message actually answers
+ * the expected question. If it's off-topic (a question, comment, or unrelated
+ * statement), Claude responds naturally and re-asks the current question.
+ *
+ * Returns { offTopic: false } if the message is on-topic (caller should proceed).
+ * Returns { offTopic: true, response: string } if it was handled here.
+ */
+async function checkOffTopic(
+  step: string,
+  message: string
+): Promise<{ offTopic: false } | { offTopic: true; response: string }> {
+  const stepContext: Record<string, { expecting: string }> = {
+    awaiting_goal: {
+      expecting: "their running or fitness goal (e.g. 5K, marathon, general fitness, ultra). A greeting alone with no goal is NOT on-topic.",
+    },
+    awaiting_race_date: {
+      expecting: "the date of their race or target event, or an indication they don't have one yet.",
+    },
+    awaiting_experience: {
+      expecting: "how long they've been running and their current weekly mileage or km.",
+    },
+    awaiting_pacing: {
+      expecting: "whether they have a race time or best effort to share, or that they don't have one.",
+    },
+    awaiting_conversational_pace: {
+      expecting: "their comfortable, easy running pace per mile or per km.",
+    },
+    awaiting_crosstraining: {
+      expecting: "any cross-training activities they do alongside running, or that they don't do any.",
+    },
+    awaiting_schedule: {
+      expecting: "which specific days of the week they want to run.",
+    },
+    awaiting_preferences: {
+      expecting: "whether they want nightly workout reminders, weekly plan only, or both.",
+    },
+  };
+
+  const ctx = stepContext[step];
+  if (!ctx) return { offTopic: false };
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 200,
+    system: `You are Coach Dean, an AI running coach onboarding a new athlete via SMS.
+
+You asked a question and are waiting for: ${ctx.expecting}
+
+Read the athlete's message. Does it directly answer what you asked (even briefly or partially)?
+
+If YES — respond with only this exact JSON, nothing else: {"on_topic": true}
+
+If NO (they asked a question, made a comment, or went off-topic) — respond as Coach Dean in plain text: answer their question or comment warmly in 1 sentence, then ask your question again. No markdown, no asterisks. Keep it natural and short.`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text.trim() : "";
+
+  try {
+    const parsed = JSON.parse(extractJSON(text));
+    if (parsed.on_topic === true) return { offTopic: false };
+  } catch {
+    // Not JSON — Claude wrote a plain-text off-topic response
+  }
+
+  return { offTopic: true, response: text };
 }
 
 // ---------------------------------------------------------------------------
