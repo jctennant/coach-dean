@@ -658,7 +658,7 @@ Rules:
     "Perfect, I have everything I need. Give me a moment and I'll put together your first training week. 🏃"
   );
 
-  await Promise.all([
+  const [profileResult, stateResult, userResult] = await Promise.all([
     supabase.from("training_profiles").upsert(
       {
         user_id: user.id,
@@ -697,6 +697,10 @@ Rules:
       })
       .eq("id", user.id),
   ]);
+
+  if (profileResult.error) console.error("[onboarding] training_profiles upsert failed:", profileResult.error);
+  if (stateResult.error) console.error("[onboarding] training_state upsert failed:", stateResult.error);
+  if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
 
   // Use after() so the coach/respond call is guaranteed to run even after this
   // route handler returns — fire-and-forget alone is killed by serverless exit.
