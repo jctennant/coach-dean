@@ -71,6 +71,8 @@ export async function POST(request: Request) {
       return handleRaceDate(user, message, onboardingData);
     case "awaiting_experience":
       return handleExperience(user, message, onboardingData);
+    case "awaiting_injury":
+      return handleInjury(user, message, onboardingData);
     case "awaiting_pacing":
       return handlePacing(user, message, onboardingData);
     case "awaiting_conversational_pace":
@@ -213,15 +215,16 @@ async function handleExperience(
     max_tokens: 200,
     system: `Extract running experience and weekly volume from the user's message. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "experience_years": number|null, "weekly_miles": number|null, "follow_up": string|null}
+Output format: {"complete": true|false, "experience_years": number|null, "weekly_miles": number|null, "injury_mentioned": boolean, "follow_up": string|null}
 
 Rules:
 - complete: true only if BOTH experience duration AND weekly volume are clearly stated or strongly implied
 - "just started" or "beginner" implies experience_years: 0 and weekly_miles: ~5 → complete: true
 - If only experience is given (e.g. "3 years"): complete: false, experience_years: 3, weekly_miles: null
 - If only volume is given (e.g. "about 25 miles a week"): complete: false, experience_years: null, weekly_miles: 25
-- weekly_miles: convert km to miles if needed (1 km = 0.621 mi), keep the unit the user prefers in mind
+- weekly_miles: convert km to miles if needed (1 km = 0.621 mi)
 - experience_years: "a few months" → 0.3, "about a year" → 1, "5+ years" → 5
+- injury_mentioned: true if the user mentions an injury, being hurt, recovering, or any physical limitation affecting their running
 - follow_up: a short, natural message acknowledging what was shared and asking specifically for the missing piece. Example: "3 years, nice! And roughly how many miles (or km) a week are you running right now?"
 - If complete is true, follow_up must be null`,
     messages: [{ role: "user", content: message }],
@@ -235,8 +238,9 @@ Rules:
     complete: boolean;
     experience_years: number | null;
     weekly_miles: number | null;
+    injury_mentioned: boolean;
     follow_up: string | null;
-  } = { complete: false, experience_years: null, weekly_miles: null, follow_up: null };
+  } = { complete: false, experience_years: null, weekly_miles: null, injury_mentioned: false, follow_up: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
@@ -244,7 +248,6 @@ Rules:
   }
 
   if (!parsed.complete) {
-    // Acknowledge what was shared, ask for the missing piece — stay on this step
     const followUp =
       parsed.follow_up ||
       "Got part of that! Could you share both how long you've been running and roughly how many miles (or km) per week you're doing?";
@@ -252,22 +255,84 @@ Rules:
     return NextResponse.json({ ok: true });
   }
 
+  const updatedData = {
+    ...onboardingData,
+    experience_years: parsed.experience_years ?? 1,
+    weekly_miles: parsed.weekly_miles ?? 15,
+  };
+
+  if (parsed.injury_mentioned) {
+    // Collect injury details before moving to pacing
+    await supabase
+      .from("users")
+      .update({ onboarding_step: "awaiting_injury", onboarding_data: updatedData })
+      .eq("id", user.id);
+
+    await sendAndStore(
+      user.id,
+      user.phone_number,
+      "Understood — thanks for flagging that. What's the injury, and where are you in recovery? Any specific limits I should plan around (max distance, terrain to avoid, no back-to-back days, etc.)?"
+    );
+  } else {
+    await supabase
+      .from("users")
+      .update({ onboarding_step: "awaiting_pacing", onboarding_data: updatedData })
+      .eq("id", user.id);
+
+    await sendAndStore(
+      user.id,
+      user.phone_number,
+      "Have you run any races before? If so, what's your best time — even a 5K or a recent training run you remember? That helps me set the right paces for your workouts."
+    );
+  }
+  return NextResponse.json({ ok: true });
+}
+
+async function handleInjury(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  const parseResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 128,
+    system: `Summarize an athlete's injury situation from their message. Respond with ONLY valid JSON, no other text.
+
+Output format: {"injury_type": string|null, "notes": string}
+
+Rules:
+- injury_type: brief label (e.g. "knee pain", "stress fracture", "IT band syndrome", "achilles tendinopathy", "shin splints")
+- notes: a single concise sentence capturing what the injury is, how far along recovery is, and any running constraints mentioned
+- If vague, still summarize what was shared
+- Example: {"injury_type": "knee pain", "notes": "Recovering from knee pain, currently limited to 2 miles/week, avoiding hills and back-to-back run days."}`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const parseText =
+    parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
+  console.log("[onboarding] injury raw response:", parseText);
+
+  let parsed: { injury_type: string | null; notes: string } = { injury_type: null, notes: message };
+  try {
+    parsed = JSON.parse(extractJSON(parseText));
+  } catch (e) {
+    console.error("[onboarding] injury parse failed:", e);
+  }
+
+  const injuryNotes = parsed.notes || message;
+
   await supabase
     .from("users")
     .update({
       onboarding_step: "awaiting_pacing",
-      onboarding_data: {
-        ...onboardingData,
-        experience_years: parsed.experience_years ?? 1,
-        weekly_miles: parsed.weekly_miles ?? 15,
-      },
+      onboarding_data: { ...onboardingData, injury_notes: injuryNotes },
     })
     .eq("id", user.id);
 
   await sendAndStore(
     user.id,
     user.phone_number,
-    "Have you run any races before? If so, what's your best time — even a 5K or a recent training run you remember? That helps me set the right paces for your workouts."
+    "Got it — I'll keep that in mind and make sure we build back carefully. Have you run any races before? If so, what's your best time — even a 5K or a time trial? That helps me set the right training paces."
   );
   return NextResponse.json({ ok: true });
 }
@@ -573,10 +638,17 @@ Rules:
   const easyPace = (onboardingData.easy_pace as string) || null;
   const tempoPace = (onboardingData.tempo_pace as string) || null;
   const intervalPace = (onboardingData.interval_pace as string) || null;
+  const injuryNotes = (onboardingData.injury_notes as string) || null;
   const proactiveCadence = parsed.nightly_reminders ? "nightly_reminders" : "weekly_only";
 
   const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles);
-  const weeklyMileage = weeklyMiles > 0 ? Math.round(weeklyMiles / 5) * 5 || 10 : 15;
+  // Reflect the athlete's actual current volume — don't round up or impose a minimum.
+  // Very low mileage (< 5 miles/week) signals to the coach prompt to use walk-jog sessions
+  // rather than prescribing pure running distances that would be unsafe.
+  const weeklyMileage =
+    weeklyMiles <= 0 ? 10 :
+    weeklyMiles <= 10 ? Math.ceil(weeklyMiles) :
+    Math.round(weeklyMiles / 5) * 5 || 15;
   const longRun = Math.round(weeklyMileage * 0.3);
 
   // Send wrap-up immediately so it arrives before the (slower) initial plan
@@ -600,6 +672,7 @@ Rules:
         current_interval_pace: intervalPace,
         crosstraining_tools: crosstrain,
         proactive_cadence: proactiveCadence,
+        injury_notes: injuryNotes,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
@@ -726,6 +799,7 @@ async function checkOffTopic(
   const stepContext: Record<string, { topic: string }> = {
     awaiting_race_date: { topic: "their race date or target event" },
     awaiting_experience: { topic: "their running background and weekly mileage" },
+    awaiting_injury: { topic: "their injury — what it is, where they are in recovery, and any running constraints" },
     awaiting_pacing: { topic: "their race times or running performance" },
     awaiting_conversational_pace: { topic: "their easy running pace" },
     awaiting_crosstraining: { topic: "cross-training or other fitness activities" },

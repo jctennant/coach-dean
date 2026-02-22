@@ -320,11 +320,12 @@ TRAINING PHILOSOPHY:
 - Long runs progress by ~1 mile per week
 - Quality workouts: tempo runs, intervals, race pace work (introduced in build phase)
 - For trail races: include vert-specific training, technical downhill practice, power hiking
+- Match session format to the athlete's actual situation. Walk-jog intervals, time-based sessions, effort-capped easy runs, structured workouts — choose what's genuinely appropriate given their current volume, injury status, goal, and fitness history. Don't default to a rigid format based on mileage alone.
 
 ATHLETE HISTORY:
 ${allTimeInfo}- Fitness level: ${profile?.fitness_level || "unknown"}
 - Training days: ${trainingDays}
-- Constraints: ${profile?.constraints || "None"}
+- Injury / constraints: ${profile?.injury_notes || "None reported"}
 
 ${activitySummary}
 
@@ -392,7 +393,12 @@ function buildUserMessage(
    - Target paces or effort descriptions (easy, tempo, long run) — estimate reasonable paces from their fitness level if no pace data exists
    - Purpose of each session
 4. Use 80/20 approach: mostly easy miles, one quality session per week for beginners, two for intermediate/advanced
-5. End by asking about any current injuries, niggles, or time constraints you should know about
+
+CURRENT VOLUME AND INJURY — use your judgment:
+- The athlete's current weekly mileage and any reported injury are the most important constraints for week 1. Don't prescribe more volume than they're currently doing.
+- Beyond that safety floor, use your coaching knowledge to determine the right session types, formats, and intensities for this specific person — their goal, race date, fitness history, injury status, and cross-training all matter. A runner at low mileage training for a fast mile has very different needs than one recovering from a stress fracture targeting a 100K. Don't apply a generic template.
+- Apply the 10% rule from the current baseline, not any historical peak.
+- If the athlete has a reported injury: acknowledge it by name, briefly explain how the plan accounts for it, and ask one follow-up question about any remaining constraints.
 
 Keep it conversational and encouraging. Be specific with numbers. Keep it under 300 words.`;
   }
