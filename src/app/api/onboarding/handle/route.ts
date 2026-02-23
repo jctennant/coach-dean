@@ -140,21 +140,26 @@ Rules:
     return NextResponse.json({ ok: true });
   }
 
+  // Also try to extract other fields from this first message (race date, experience, etc.)
+  // so we can skip questions the user already answered in passing.
+  const extra = await extractAdditionalFields(message);
+  const mergedData = { ...onboardingData, goal: parsed.goal, ...extra };
+
+  const nextStep = findNextStep("awaiting_goal", mergedData);
+
   await supabase
     .from("users")
-    .update({
-      onboarding_step: "awaiting_race_date",
-      onboarding_data: { ...onboardingData, goal: parsed.goal },
-    })
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
   const goalLabel = formatGoalInline(parsed.goal);
-  const responseMsg =
+  const acknowledgment =
     parsed.goal === "general_fitness"
-      ? "Love it — building consistent fitness is a great foundation. Do you have a target event or date in mind? If not, just say 'no race' and we'll keep the plan open-ended."
-      : `Love it, a ${goalLabel} — great goal. What's the exact date of your race? If you don't have one locked in yet, give me your best target and we can adjust later.`;
+      ? "Love it — building consistent fitness is a great foundation."
+      : `Love it, a ${goalLabel} — great goal.`;
 
-  await sendAndStore(user.id, user.phone_number, responseMsg);
+  const question = nextStep ? getStepQuestion(nextStep, mergedData) : "";
+  await sendAndStore(user.id, user.phone_number, `${acknowledgment} ${question}`.trim());
   return NextResponse.json({ ok: true });
 }
 
@@ -189,19 +194,15 @@ Rules:
     console.error("[onboarding] race_date parse failed:", e);
   }
 
+  const mergedData = { ...onboardingData, race_date: parsed.race_date };
+  const nextStep = findNextStep("awaiting_race_date", mergedData);
+
   await supabase
     .from("users")
-    .update({
-      onboarding_step: "awaiting_experience",
-      onboarding_data: { ...onboardingData, race_date: parsed.race_date },
-    })
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
-  await sendAndStore(
-    user.id,
-    user.phone_number,
-    "How long have you been running, and roughly how many miles (or km) are you putting in most weeks right now? Don't overthink it — a ballpark is totally fine."
-  );
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData));
   return NextResponse.json({ ok: true });
 }
 
@@ -261,30 +262,14 @@ Rules:
     weekly_miles: parsed.weekly_miles ?? 15,
   };
 
-  if (parsed.injury_mentioned) {
-    // Collect injury details before moving to pacing
-    await supabase
-      .from("users")
-      .update({ onboarding_step: "awaiting_injury", onboarding_data: updatedData })
-      .eq("id", user.id);
+  const nextStep = findNextStep("awaiting_experience", updatedData);
 
-    await sendAndStore(
-      user.id,
-      user.phone_number,
-      "Understood — thanks for flagging that. What's the injury, and where are you in recovery? Any specific limits I should plan around (max distance, terrain to avoid, no back-to-back days, etc.)?"
-    );
-  } else {
-    await supabase
-      .from("users")
-      .update({ onboarding_step: "awaiting_pacing", onboarding_data: updatedData })
-      .eq("id", user.id);
+  await supabase
+    .from("users")
+    .update({ onboarding_step: nextStep, onboarding_data: updatedData })
+    .eq("id", user.id);
 
-    await sendAndStore(
-      user.id,
-      user.phone_number,
-      "Have you run any races before? If so, what's your best time — even a 5K or a recent training run you remember? That helps me set the right paces for your workouts."
-    );
-  }
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, updatedData));
   return NextResponse.json({ ok: true });
 }
 
@@ -321,19 +306,18 @@ Rules:
 
   const injuryNotes = parsed.notes || message;
 
+  const mergedData = { ...onboardingData, injury_notes: injuryNotes };
+  const nextStep = findNextStep("awaiting_injury", mergedData);
+
   await supabase
     .from("users")
-    .update({
-      onboarding_step: "awaiting_pacing",
-      onboarding_data: { ...onboardingData, injury_notes: injuryNotes },
-    })
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
-  await sendAndStore(
-    user.id,
-    user.phone_number,
-    "Got it — I'll keep that in mind and make sure we build back carefully. Have you run any races before? If so, what's your best time — even a 5K or a time trial? That helps me set the right training paces."
-  );
+  if (nextStep) {
+    const q = getStepQuestion(nextStep, mergedData);
+    await sendAndStore(user.id, user.phone_number, `Got it — I'll keep that in mind and make sure we build back carefully. ${q}`);
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -390,37 +374,33 @@ Rules:
 
   if (parsed.has_race_data && parsed.distance_km && parsed.time_minutes) {
     const paces = calculateVDOTPaces(parsed.distance_km, parsed.time_minutes);
+    const mergedData = {
+      ...onboardingData,
+      easy_pace: paces.easy,
+      tempo_pace: paces.tempo,
+      interval_pace: paces.interval,
+    };
+    const nextStep = findNextStep("awaiting_pacing", mergedData);
 
     await supabase
       .from("users")
-      .update({
-        onboarding_step: "awaiting_crosstraining",
-        onboarding_data: {
-          ...onboardingData,
-          easy_pace: paces.easy,
-          tempo_pace: paces.tempo,
-          interval_pace: paces.interval,
-        },
-      })
+      .update({ onboarding_step: nextStep, onboarding_data: mergedData })
       .eq("id", user.id);
 
-    await sendAndStore(
-      user.id,
-      user.phone_number,
-      "Perfect, that gives me what I need to set your training paces. Do you do any cross-training alongside running — cycling, lifting, swimming, yoga? If so, I can work those into your plan on non-running days so your whole week stays active."
-    );
+    if (nextStep) {
+      const q = getStepQuestion(nextStep, mergedData);
+      await sendAndStore(user.id, user.phone_number, `Perfect, that gives me what I need to set your training paces. ${q}`);
+    }
   } else {
-    // No race data — ask for conversational pace
+    // No race data — need conversational pace; findNextStep will land on awaiting_conversational_pace
+    const nextStep = findNextStep("awaiting_pacing", onboardingData);
+
     await supabase
       .from("users")
-      .update({ onboarding_step: "awaiting_conversational_pace" })
+      .update({ onboarding_step: nextStep })
       .eq("id", user.id);
 
-    await sendAndStore(
-      user.id,
-      user.phone_number,
-      "No worries — what would you say your comfortable, conversational running pace is per mile (or per km)?"
-    );
+    if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, onboardingData));
   }
 
   return NextResponse.json({ ok: true });
@@ -459,24 +439,23 @@ Rules:
 
   const paces = estimatePacesFromEasyPace(parsed.pace);
 
+  const mergedData = {
+    ...onboardingData,
+    easy_pace: paces.easy,
+    tempo_pace: paces.tempo,
+    interval_pace: paces.interval,
+  };
+  const nextStep = findNextStep("awaiting_conversational_pace", mergedData);
+
   await supabase
     .from("users")
-    .update({
-      onboarding_step: "awaiting_crosstraining",
-      onboarding_data: {
-        ...onboardingData,
-        easy_pace: paces.easy,
-        tempo_pace: paces.tempo,
-        interval_pace: paces.interval,
-      },
-    })
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
-  await sendAndStore(
-    user.id,
-    user.phone_number,
-    "Got it. Do you do any cross-training alongside running — cycling, lifting, swimming, yoga? If so, I can work those into your plan on non-running days so your whole week stays active."
-  );
+  if (nextStep) {
+    const q = getStepQuestion(nextStep, mergedData);
+    await sendAndStore(user.id, user.phone_number, `Got it. ${q}`);
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -509,19 +488,15 @@ Rules:
     console.error("[onboarding] crosstraining parse failed:", e);
   }
 
+  const mergedData = { ...onboardingData, crosstraining_tools: parsed.crosstraining_tools };
+  const nextStep = findNextStep("awaiting_crosstraining", mergedData);
+
   await supabase
     .from("users")
-    .update({
-      onboarding_step: "awaiting_schedule",
-      onboarding_data: { ...onboardingData, crosstraining_tools: parsed.crosstraining_tools },
-    })
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
-  await sendAndStore(
-    user.id,
-    user.phone_number,
-    "How many days a week do you want to run? And which days work best for you — including which day you'd prefer for your long run?"
-  );
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData));
   return NextResponse.json({ ok: true });
 }
 
@@ -578,24 +553,20 @@ Rules:
   const trainingDays = parsed.training_days ?? ["tuesday", "thursday", "saturday", "sunday"];
   const daysPerWeek = parsed.days_per_week ?? trainingDays.length;
 
+  const mergedData = {
+    ...onboardingData,
+    days_per_week: daysPerWeek,
+    training_days: trainingDays,
+    long_run_day: parsed.long_run_day,
+  };
+  const nextStep = findNextStep("awaiting_schedule", mergedData);
+
   await supabase
     .from("users")
-    .update({
-      onboarding_step: "awaiting_preferences",
-      onboarding_data: {
-        ...onboardingData,
-        days_per_week: daysPerWeek,
-        training_days: trainingDays,
-        long_run_day: parsed.long_run_day,
-      },
-    })
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
-  await sendAndStore(
-    user.id,
-    user.phone_number,
-    "Last one: how do you want me to reach out? I can send you a full weekly plan every Sunday, or I can also text you the night before each workout as a reminder. Which works better for you, or do you want both?"
-  );
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData));
   return NextResponse.json({ ok: true });
 }
 
@@ -782,6 +753,134 @@ function estimatePacesFromEasyPace(paceStr: string | null): {
     tempo: easySec > 90 ? fmt(easySec - 90) : null,
     interval: easySec > 150 ? fmt(easySec - 150) : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Step routing helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Ordered list of onboarding steps after awaiting_goal.
+ * findNextStep walks this list and returns the first unsatisfied step.
+ */
+const STEP_ORDER = [
+  "awaiting_race_date",
+  "awaiting_experience",
+  "awaiting_injury",
+  "awaiting_pacing",
+  "awaiting_conversational_pace",
+  "awaiting_crosstraining",
+  "awaiting_schedule",
+  "awaiting_preferences",
+];
+
+/**
+ * Returns true if the data collected so far already satisfies this step,
+ * meaning we can skip asking about it.
+ */
+function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
+  switch (step) {
+    case "awaiting_race_date":
+      // Satisfied if race_date key exists (even null = "no race")
+      return Object.prototype.hasOwnProperty.call(data, "race_date");
+    case "awaiting_experience":
+      return data.experience_years != null && data.weekly_miles != null;
+    case "awaiting_injury":
+      // Only required when injury was mentioned; skip if no injury flagged
+      return !data.injury_mentioned || data.injury_notes != null;
+    case "awaiting_pacing":
+      // Satisfied if we already have pace data
+      return data.easy_pace != null;
+    case "awaiting_conversational_pace":
+      return data.easy_pace != null;
+    case "awaiting_crosstraining":
+      return Object.prototype.hasOwnProperty.call(data, "crosstraining_tools");
+    case "awaiting_schedule":
+      return Array.isArray(data.training_days) && (data.training_days as string[]).length > 0;
+    case "awaiting_preferences":
+      return Object.prototype.hasOwnProperty.call(data, "nightly_reminders");
+    default:
+      return false;
+  }
+}
+
+/**
+ * Returns the next step the user needs to answer, or null if all are done.
+ * Skips steps where data is already available.
+ */
+function findNextStep(afterStep: string, data: Record<string, unknown>): string | null {
+  const afterIdx = STEP_ORDER.indexOf(afterStep);
+  const remaining = afterIdx >= 0 ? STEP_ORDER.slice(afterIdx + 1) : [...STEP_ORDER];
+  for (const step of remaining) {
+    if (!isStepSatisfied(step, data)) return step;
+  }
+  return null;
+}
+
+/** Returns the question to ask for a given step, given current onboarding data. */
+function getStepQuestion(step: string, data: Record<string, unknown>): string {
+  switch (step) {
+    case "awaiting_race_date":
+      return data.goal === "general_fitness"
+        ? "Do you have a target event or date in mind? If not, just say 'no race' and we'll keep the plan open-ended."
+        : "What's the exact date of your race? If you don't have one locked in yet, give me your best target and we can adjust later.";
+    case "awaiting_experience":
+      return "How long have you been running, and roughly how many miles (or km) are you putting in most weeks right now? Don't overthink it — a ballpark is totally fine.";
+    case "awaiting_injury":
+      return "Understood — thanks for flagging that. What's the injury, and where are you in recovery? Any specific limits I should plan around (max distance, terrain to avoid, no back-to-back days, etc.)?";
+    case "awaiting_pacing":
+      return "Have you run any races before? If so, what's your best time — even a 5K or a recent training run you remember? That helps me set the right paces for your workouts.";
+    case "awaiting_conversational_pace":
+      return "No worries — what would you say your comfortable, conversational running pace is per mile (or per km)?";
+    case "awaiting_crosstraining":
+      return "Do you do any cross-training alongside running — cycling, lifting, swimming, yoga? If so, I can work those into your plan on non-running days so your whole week stays active.";
+    case "awaiting_schedule":
+      return "How many days a week do you want to run? And which days work best for you — including which day you'd prefer for your long run?";
+    case "awaiting_preferences":
+      return "Last one: how do you want me to reach out? I can send you a full weekly plan every Sunday, or I can also text you the night before each workout as a reminder. Which works better for you, or do you want both?";
+    default:
+      return "";
+  }
+}
+
+/**
+ * Tries to extract any additional onboarding fields from a message beyond
+ * what the current step is asking for. Used to pre-fill data and skip questions
+ * the user already answered in passing.
+ */
+async function extractAdditionalFields(
+  message: string
+): Promise<Record<string, unknown>> {
+  const today = new Date().toISOString().split("T")[0];
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 256,
+    system: `Extract any running/training information explicitly stated in this message. Only extract what is clearly present — do not infer or guess.
+
+Output format (omit fields that are not mentioned):
+{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "injury_mentioned": boolean}
+
+Rules:
+- race_date: only if a specific target race date is mentioned. Today is ${today}. "March 28th" → infer year from context.
+- experience_years: only if running experience duration is explicitly stated
+- weekly_miles: only if current weekly running volume is stated. Convert km to miles if needed (×0.621).
+- injury_mentioned: true only if an injury or physical limitation is explicitly mentioned
+- Return {} if nothing additional is clearly present`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+  try {
+    const parsed = JSON.parse(extractJSON(text));
+    const result: Record<string, unknown> = {};
+    if (parsed.race_date != null) result.race_date = parsed.race_date;
+    if (parsed.experience_years != null) result.experience_years = parsed.experience_years;
+    if (parsed.weekly_miles != null) result.weekly_miles = parsed.weekly_miles;
+    if (parsed.injury_mentioned === true) result.injury_mentioned = true;
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 // ---------------------------------------------------------------------------
