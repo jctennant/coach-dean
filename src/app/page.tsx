@@ -116,7 +116,7 @@ export default function Home() {
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16">
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left">
-            <p className="text-md font-semibold uppercase tracking-widest text-green-800">
+            <p className="text-md font-semibold uppercase tracking-widest text-primary">
               Meet Coach Dean
             </p>
             <h1 className="max-w-xl text-3xl font-bold leading-tight tracking-tight md:text-4xl lg:text-4xl">

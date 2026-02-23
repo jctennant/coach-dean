@@ -11,7 +11,7 @@ export function SmsMockup({ messages, className }: SmsMockupProps) {
       <div className="rounded-2xl bg-white border border-black/[0.07] shadow-[0_16px_48px_-12px_rgba(0,0,0,0.10)]">
         {/* Minimal brand header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-4">
-          <div className="h-8 w-8 shrink-0 rounded-full bg-green-700 flex items-center justify-center text-white text-xs font-bold">
+          <div className="h-8 w-8 shrink-0 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">
             D
           </div>
           <span className="text-sm font-semibold text-gray-900 tracking-tight">Coach Dean</span>
