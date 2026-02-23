@@ -343,15 +343,16 @@ async function handlePacing(
 Output format: {"complete": true|false, "has_performance_data": true|false, "run_distance_km": number|null, "run_time_minutes": number|null, "swim_pace": string|null, "bike_info": string|null, "run_pace": string|null, "follow_up": string|null}
 
 Rules:
-- has_performance_data: true if they share any race splits, times, or paces
+- has_performance_data: true if they share any race, time trial, or estimated pace
 - complete: true if has_performance_data is false (no data is a valid answer)
-- complete: true if has_performance_data is true and enough data is provided to work with
-- complete: false if they imply they have data but don't share it
-- run_distance_km: running race distance (5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609)
-- run_time_minutes: run finish or split time in minutes ("25:30"=25.5, "1:45:00"=105)
-- swim_pace: swim pace per 100m if mentioned (e.g. "1:45/100m")
+- complete: true if has_performance_data is true and at least one usable time or pace is present
+- complete: false only if they say they have raced but give NO times or paces at all
+- run_distance_km: running race distance for the best time given (5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609)
+- run_time_minutes: extract any explicitly stated run time, even if the user qualifies it ("I'm slower now", "that was last year", "my best was"). A historical or approximate time is far more useful than nothing. "17:23"=17.38, "25:30"=25.5, "1:45:00"=105
+- If the user mentions multiple races, prefer the one with the most specific time. A 5K time is more useful for pace calibration than a 100K without a time.
+- swim_pace: swim pace per 100m if mentioned
 - bike_info: any bike split, speed, or power mentioned as a string
-- run_pace: easy or conversational run pace if mentioned (e.g. "9:30/mi")
+- run_pace: easy or conversational run pace if explicitly stated (e.g. "9:30/mi")
 - "no", "never raced", "don't have any" → has_performance_data: false, complete: true
 - If complete is true, follow_up must be null`,
     messages: [{ role: "user", content: message }],
