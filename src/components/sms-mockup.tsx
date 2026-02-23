@@ -8,26 +8,27 @@ interface SmsMockupProps {
 export function SmsMockup({ messages, className }: SmsMockupProps) {
   return (
     <div className={`w-full max-w-sm ${className ?? ""}`}>
-      {/* Phone frame */}
-      <div className="overflow-hidden rounded-3xl border bg-card shadow-xl">
-        {/* Status bar */}
-        <div className="flex items-center justify-between bg-muted/60 px-5 py-2 text-xs text-muted-foreground">
-          <span className="font-medium">Coach Dean</span>
-          <span>iMessage</span>
+      <div className="rounded-2xl bg-white border border-black/[0.07] shadow-[0_16px_48px_-12px_rgba(0,0,0,0.10)]">
+        {/* Minimal brand header */}
+        <div className="flex items-center gap-3 px-5 pt-5 pb-4">
+          <div className="h-8 w-8 shrink-0 rounded-full bg-green-700 flex items-center justify-center text-white text-xs font-bold">
+            D
+          </div>
+          <span className="text-sm font-semibold text-gray-900 tracking-tight">Coach Dean</span>
         </div>
 
-        {/* Messages */}
-        <div className="flex flex-col gap-2.5 p-4">
+        {/* Thread */}
+        <div className="flex flex-col gap-2.5 px-5 pb-5">
           {messages.map((msg, i) => (
             <div
               key={i}
               className={`flex ${msg.from === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                className={`max-w-[84%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
                   msg.from === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-foreground"
+                    ? "bg-[#007aff] text-white"
+                    : "bg-[#f1f1f4] text-gray-900"
                 }`}
               >
                 {msg.text}

@@ -130,15 +130,6 @@ export default function Home() {
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
             </Suspense>
-            <p className="text-xs text-muted-foreground">
-              Free during beta &middot; US phone numbers only
-            </p>
-            <p className="max-w-sm text-[11px] leading-snug text-muted-foreground/70">
-              By signing up, you agree to receive recurring SMS messages from
-              Coach Dean at the number provided. Message and data rates may
-              apply. Reply STOP to unsubscribe at any time. Reply HELP for
-              support.
-            </p>
           </div>
           {/* SMS mockup */}
           <div className="flex flex-1 justify-center">
