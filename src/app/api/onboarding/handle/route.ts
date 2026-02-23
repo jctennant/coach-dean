@@ -100,18 +100,21 @@ async function handleGoal(
   const parseResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 128,
-    system: `Classify whether the user's message contains a clear running or fitness goal. Respond with ONLY valid JSON, no other text.
+    system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"triathlon"|"general_fitness"|null}
+Output format: {"complete": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|null}
 
 Rules:
 - complete: true only if a clear training goal is identifiable
-- Pure greetings ("Hi", "Hi Dean!", "Hey", "Hello", "yo") with no goal context → complete: false, goal: null
-- "Hi Dean! I want to run a half marathon" → complete: true, goal: "half_marathon"
+- Pure greetings with no goal context → complete: false, goal: null
 - "half marathon" or "half" → "half_marathon"
 - "full marathon" or "marathon" → "marathon"
 - "ultra" without distance → "50k"
-- "triathlon" → "triathlon"
+- "triathlon" or "tri" without a distance → "olympic_tri"
+- "sprint tri" or "sprint triathlon" → "sprint_tri"
+- "70.3", "half ironman", "half-ironman" → "70.3"
+- "ironman", "full ironman", "140.6" → "ironman"
+- "cycling", "gravel race", "gran fondo", "bike race" → "cycling"
 - "just getting in shape", "get fit", "lose weight", "general" → "general_fitness"
 - When complete is false, goal must be null`,
     messages: [{ role: "user", content: message }],
@@ -135,7 +138,7 @@ Rules:
     await sendAndStore(
       user.id,
       user.phone_number,
-      "Hey, I'm Coach Dean! 👋 I'll be your running coach over text.\n\nWhat are you training for? (e.g. 5K, half marathon, full marathon, ultra, triathlon, or just general fitness?)"
+      "Hey, I'm Coach Dean! 👋 I'll be your endurance coach over text.\n\nWhat are you training for? (e.g. 5K, marathon, ultra, triathlon, 70.3, Ironman, cycling, or general fitness?)"
     );
     return NextResponse.json({ ok: true });
   }
@@ -143,7 +146,8 @@ Rules:
   // Also try to extract other fields from this first message (race date, experience, etc.)
   // so we can skip questions the user already answered in passing.
   const extra = await extractAdditionalFields(message);
-  const mergedData = { ...onboardingData, goal: parsed.goal, ...extra };
+  const sportType = getSportType(parsed.goal);
+  const mergedData = { ...onboardingData, goal: parsed.goal, sport_type: sportType, ...extra };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
 
@@ -211,22 +215,22 @@ async function handleExperience(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
+  const sport = (onboardingData.sport_type as string) || "running";
   const parseResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 200,
-    system: `Extract running experience and weekly volume from the user's message. Respond with ONLY valid JSON, no other text.
+    system: `Extract training experience and weekly volume from the user's message. The athlete is training for a ${sport} goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "experience_years": number|null, "weekly_miles": number|null, "injury_mentioned": boolean, "follow_up": string|null}
+Output format: {"complete": true|false, "experience_years": number|null, "weekly_miles": number|null, "weekly_hours": number|null, "injury_mentioned": boolean, "follow_up": string|null}
 
 Rules:
-- complete: true only if BOTH experience duration AND weekly volume are clearly stated or strongly implied
-- "just started" or "beginner" implies experience_years: 0 and weekly_miles: ~5 → complete: true
-- If only experience is given (e.g. "3 years"): complete: false, experience_years: 3, weekly_miles: null
-- If only volume is given (e.g. "about 25 miles a week"): complete: false, experience_years: null, weekly_miles: 25
-- weekly_miles: convert km to miles if needed (1 km = 0.621 mi)
-- experience_years: "a few months" → 0.3, "about a year" → 1, "5+ years" → 5
-- injury_mentioned: true if the user mentions an injury, being hurt, recovering, or any physical limitation affecting their running
-- follow_up: a short, natural message acknowledging what was shared and asking specifically for the missing piece. Example: "3 years, nice! And roughly how many miles (or km) a week are you running right now?"
+- complete: true only if BOTH experience duration AND some training volume are clearly stated or strongly implied
+- experience_years: how long they've been training in this sport. "a few months" → 0.3, "about a year" → 1, "5+ years" → 5
+- weekly_miles: weekly running/cycling miles (convert km if needed, 1km = 0.621mi). For cyclists use riding miles.
+- weekly_hours: total weekly training hours across all disciplines. Use this for triathletes or when volume is given in hours.
+- At least one of weekly_miles or weekly_hours should be set when complete is true.
+- injury_mentioned: true if any injury, pain, or physical limitation is mentioned
+- follow_up: short natural message acknowledging what was shared and asking for the missing piece
 - If complete is true, follow_up must be null`,
     messages: [{ role: "user", content: message }],
   });
@@ -239,9 +243,10 @@ Rules:
     complete: boolean;
     experience_years: number | null;
     weekly_miles: number | null;
+    weekly_hours: number | null;
     injury_mentioned: boolean;
     follow_up: string | null;
-  } = { complete: false, experience_years: null, weekly_miles: null, injury_mentioned: false, follow_up: null };
+  } = { complete: false, experience_years: null, weekly_miles: null, weekly_hours: null, injury_mentioned: false, follow_up: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
@@ -256,10 +261,11 @@ Rules:
     return NextResponse.json({ ok: true });
   }
 
-  const updatedData = {
+  const updatedData: Record<string, unknown> = {
     ...onboardingData,
     experience_years: parsed.experience_years ?? 1,
-    weekly_miles: parsed.weekly_miles ?? 15,
+    weekly_miles: parsed.weekly_miles ?? null,
+    ...(parsed.weekly_hours != null ? { weekly_hours: parsed.weekly_hours } : {}),
   };
 
   const nextStep = findNextStep("awaiting_experience", updatedData);
@@ -326,22 +332,27 @@ async function handlePacing(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
+  const sport = (onboardingData.sport_type as string) || "running";
+  const isTri = sport === "triathlon";
+
   const parseResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
-    max_tokens: 200,
-    system: `Extract race or time trial performance data from the user's message. Respond with ONLY valid JSON, no other text.
+    max_tokens: 256,
+    system: `Extract performance/pacing data from the user's message. The athlete is training for a ${sport} goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "has_race_data": true|false, "distance_km": number|null, "time_minutes": number|null, "follow_up": string|null}
+Output format: {"complete": true|false, "has_performance_data": true|false, "run_distance_km": number|null, "run_time_minutes": number|null, "swim_pace": string|null, "bike_info": string|null, "run_pace": string|null, "follow_up": string|null}
 
 Rules:
-- has_race_data: true if they mention any race or specific run with a time
-- complete: true if has_race_data is false (no race is a complete, valid answer)
-- complete: true if has_race_data is true AND both distance_km and time_minutes are provided
-- complete: false if they confirm they have raced but don't give an actual time or distance
-- distance_km: 5K=5, 10K=10, half marathon=21.0975, marathon=42.195, 1 mile=1.609, 3 miles=4.828
-- time_minutes: "25:30"=25.5, "1:45:00"=105, "21 minutes"=21, "sub-2-hour half"=119
-- "no", "never raced", "I don't have any" → has_race_data: false, complete: true
-- "yes I have raced" with no time → complete: false, follow_up: "What race and roughly what was your time?"
+- has_performance_data: true if they share any race splits, times, or paces
+- complete: true if has_performance_data is false (no data is a valid answer)
+- complete: true if has_performance_data is true and enough data is provided to work with
+- complete: false if they imply they have data but don't share it
+- run_distance_km: running race distance (5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609)
+- run_time_minutes: run finish or split time in minutes ("25:30"=25.5, "1:45:00"=105)
+- swim_pace: swim pace per 100m if mentioned (e.g. "1:45/100m")
+- bike_info: any bike split, speed, or power mentioned as a string
+- run_pace: easy or conversational run pace if mentioned (e.g. "9:30/mi")
+- "no", "never raced", "don't have any" → has_performance_data: false, complete: true
 - If complete is true, follow_up must be null`,
     messages: [{ role: "user", content: message }],
   });
@@ -352,11 +363,14 @@ Rules:
 
   let parsed: {
     complete: boolean;
-    has_race_data: boolean;
-    distance_km: number | null;
-    time_minutes: number | null;
+    has_performance_data: boolean;
+    run_distance_km: number | null;
+    run_time_minutes: number | null;
+    swim_pace: string | null;
+    bike_info: string | null;
+    run_pace: string | null;
     follow_up: string | null;
-  } = { complete: false, has_race_data: false, distance_km: null, time_minutes: null, follow_up: null };
+  } = { complete: false, has_performance_data: false, run_distance_km: null, run_time_minutes: null, swim_pace: null, bike_info: null, run_pace: null, follow_up: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
@@ -364,43 +378,45 @@ Rules:
   }
 
   if (!parsed.complete) {
-    // They mentioned racing but didn't give a time — ask specifically
-    const followUp =
-      parsed.follow_up ||
-      "What race and roughly what was your time? Even a ballpark helps.";
+    const followUp = parsed.follow_up || (isTri
+      ? "What event and roughly what were your splits or finish time?"
+      : "What race and roughly what was your time? Even a ballpark helps.");
     await sendAndStore(user.id, user.phone_number, followUp);
     return NextResponse.json({ ok: true });
   }
 
-  if (parsed.has_race_data && parsed.distance_km && parsed.time_minutes) {
-    const paces = calculateVDOTPaces(parsed.distance_km, parsed.time_minutes);
-    const mergedData = {
-      ...onboardingData,
-      easy_pace: paces.easy,
-      tempo_pace: paces.tempo,
-      interval_pace: paces.interval,
-    };
-    const nextStep = findNextStep("awaiting_pacing", mergedData);
+  // Build pace data from whatever was provided
+  let paceData: Record<string, string | null> = { easy_pace: null, tempo_pace: null, interval_pace: null };
 
-    await supabase
-      .from("users")
-      .update({ onboarding_step: nextStep, onboarding_data: mergedData })
-      .eq("id", user.id);
+  if (parsed.run_distance_km && parsed.run_time_minutes) {
+    // Use VDOT for running pace zones if we have a run result
+    const vdotPaces = calculateVDOTPaces(parsed.run_distance_km, parsed.run_time_minutes);
+    paceData = vdotPaces;
+  } else if (parsed.run_pace) {
+    // Use stated easy pace as fallback
+    const estimated = estimatePacesFromEasyPace(parsed.run_pace);
+    paceData = estimated;
+  }
 
-    if (nextStep) {
-      const q = getStepQuestion(nextStep, mergedData);
-      await sendAndStore(user.id, user.phone_number, `Perfect, that gives me what I need to set your training paces. ${q}`);
-    }
-  } else {
-    // No race data — need conversational pace; findNextStep will land on awaiting_conversational_pace
-    const nextStep = findNextStep("awaiting_pacing", onboardingData);
+  const mergedData = {
+    ...onboardingData,
+    ...paceData,
+    ...(parsed.swim_pace ? { swim_pace: parsed.swim_pace } : {}),
+    ...(parsed.bike_info ? { bike_info: parsed.bike_info } : {}),
+  };
 
-    await supabase
-      .from("users")
-      .update({ onboarding_step: nextStep })
-      .eq("id", user.id);
+  const nextStep = findNextStep("awaiting_pacing", mergedData);
 
-    if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, onboardingData));
+  await supabase
+    .from("users")
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
+    .eq("id", user.id);
+
+  if (nextStep) {
+    const hasPaces = paceData.easy_pace != null;
+    const q = getStepQuestion(nextStep, mergedData);
+    const ack = hasPaces ? "Perfect, that gives me what I need to set your training paces." : "Got it.";
+    await sendAndStore(user.id, user.phone_number, `${ack} ${q}`);
   }
 
   return NextResponse.json({ ok: true });
@@ -413,16 +429,16 @@ async function handleConversationalPace(
 ) {
   const parseResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
-    max_tokens: 32,
-    system: `Extract a running pace from the user's message. Respond with ONLY valid JSON, no other text.
+    max_tokens: 128,
+    system: `Extract comfortable training paces from the user's message. Respond with ONLY valid JSON, no other text.
 
-Output format: {"pace": "M:SS" | null}
+Output format: {"run_pace": "M:SS" | null, "swim_pace": string | null, "bike_info": string | null}
 
 Rules:
-- Convert any format to M:SS (per mile or per km — just capture the numbers)
-- "9:30", "9 and a half minutes", "nine thirty" → "9:30"
-- "10 minute mile" → "10:00"
-- If no clear pace given → null`,
+- run_pace: comfortable easy running pace in M:SS format ("9:30", "10 minute mile" → "10:00")
+- swim_pace: swim pace per 100m if mentioned (e.g. "1:45/100m", "2 minutes per 100")
+- bike_info: bike speed or effort if mentioned (e.g. "18 mph", "zone 2 on the bike")
+- Set fields to null if not clearly stated`,
     messages: [{ role: "user", content: message }],
   });
 
@@ -430,20 +446,22 @@ Rules:
     parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
   console.log("[onboarding] conversational pace raw response:", parseText);
 
-  let parsed: { pace: string | null } = { pace: null };
+  let parsed: { run_pace: string | null; swim_pace: string | null; bike_info: string | null } = { run_pace: null, swim_pace: null, bike_info: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
     console.error("[onboarding] conversational pace parse failed:", e);
   }
 
-  const paces = estimatePacesFromEasyPace(parsed.pace);
+  const paces = estimatePacesFromEasyPace(parsed.run_pace);
 
   const mergedData = {
     ...onboardingData,
     easy_pace: paces.easy,
     tempo_pace: paces.tempo,
     interval_pace: paces.interval,
+    ...(parsed.swim_pace ? { swim_pace: parsed.swim_pace } : {}),
+    ...(parsed.bike_info ? { bike_info: parsed.bike_info } : {}),
   };
   const nextStep = findNextStep("awaiting_conversational_pace", mergedData);
 
@@ -612,7 +630,12 @@ Rules:
   const injuryNotes = (onboardingData.injury_notes as string) || null;
   const proactiveCadence = parsed.nightly_reminders ? "nightly_reminders" : "weekly_only";
 
-  const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles);
+  const weeklyHours = (onboardingData.weekly_hours as number) || null;
+  const swimPace = (onboardingData.swim_pace as string) || null;
+  const bikeInfo = (onboardingData.bike_info as string) || null;
+  const sportType = (onboardingData.sport_type as string) || "running";
+
+  const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles, weeklyHours);
   // Reflect the athlete's actual current volume — don't round up or impose a minimum.
   // Very low mileage (< 5 miles/week) signals to the coach prompt to use walk-jog sessions
   // rather than prescribing pure running distances that would be unsafe.
@@ -759,6 +782,16 @@ function estimatePacesFromEasyPace(paceStr: string | null): {
 // Step routing helpers
 // ---------------------------------------------------------------------------
 
+const TRIATHLON_GOALS = ["sprint_tri", "olympic_tri", "70.3", "ironman"];
+const CYCLING_GOALS = ["cycling"];
+
+function getSportType(goal: string): "running" | "triathlon" | "cycling" | "general" {
+  if (TRIATHLON_GOALS.includes(goal)) return "triathlon";
+  if (CYCLING_GOALS.includes(goal)) return "cycling";
+  if (goal === "general_fitness") return "general";
+  return "running";
+}
+
 /**
  * Ordered list of onboarding steps after awaiting_goal.
  * findNextStep walks this list and returns the first unsatisfied step.
@@ -819,25 +852,48 @@ function findNextStep(afterStep: string, data: Record<string, unknown>): string 
 
 /** Returns the question to ask for a given step, given current onboarding data. */
 function getStepQuestion(step: string, data: Record<string, unknown>): string {
+  const sport = (data.sport_type as string) || "running";
+  const isTri = sport === "triathlon";
+  const isCycling = sport === "cycling";
+  const isMultiSport = isTri || isCycling;
+
   switch (step) {
     case "awaiting_race_date":
       return data.goal === "general_fitness"
-        ? "Do you have a target event or date in mind? If not, just say 'no race' and we'll keep the plan open-ended."
-        : "What's the exact date of your race? If you don't have one locked in yet, give me your best target and we can adjust later.";
+        ? "Do you have a target event or date in mind? If not, just say 'no event' and we'll keep the plan open-ended."
+        : "What's the date of your event? If you don't have one locked in yet, give me your best target and we can adjust later.";
+
     case "awaiting_experience":
+      if (isTri) return "How long have you been training for triathlon? And roughly how many hours a week are you putting in across swim, bike, and run right now?";
+      if (isCycling) return "How long have you been cycling, and roughly how many miles (or km) are you riding most weeks?";
       return "How long have you been running, and roughly how many miles (or km) are you putting in most weeks right now? Don't overthink it — a ballpark is totally fine.";
+
     case "awaiting_injury":
-      return "Understood — thanks for flagging that. What's the injury, and where are you in recovery? Any specific limits I should plan around (max distance, terrain to avoid, no back-to-back days, etc.)?";
+      return "Understood — thanks for flagging that. What's the injury, and where are you in recovery? Any specific limits I should plan around (max distance or duration, activities to avoid, no back-to-back days, etc.)?";
+
     case "awaiting_pacing":
+      if (isTri) return "Have you done any triathlons or time trials recently? If so, what were your swim/bike/run splits or finish time? If not, just tell me your comfortable pace in each discipline.";
+      if (isCycling) return "Have you done any cycling events or time trials recently? If so, what was your time or average speed? If not, what's your comfortable cruising pace?";
       return "Have you run any races before? If so, what's your best time — even a 5K or a recent training run you remember? That helps me set the right paces for your workouts.";
+
     case "awaiting_conversational_pace":
+      if (isTri) return "No worries — just give me a rough sense of your comfortable pace in each: swim (per 100m), bike (speed or power if you have it), and run (per mile or km).";
+      if (isCycling) return "No worries — what's a comfortable cruising speed or effort for you on the bike?";
       return "No worries — what would you say your comfortable, conversational running pace is per mile (or per km)?";
+
     case "awaiting_crosstraining":
+      if (isTri) return "Do you do any strength work or yoga alongside your swim/bike/run training? I can slot those in as recovery or supplemental sessions.";
+      if (isCycling) return "Do you do any other training alongside cycling — running, gym work, yoga? I can work those into your plan as well.";
       return "Do you do any cross-training alongside running — cycling, lifting, swimming, yoga? If so, I can work those into your plan on non-running days so your whole week stays active.";
+
     case "awaiting_schedule":
+      if (isTri) return "How many days a week are you training total? And do you have any days that work better for longer sessions like a long ride or long run?";
+      if (isCycling) return "How many days a week do you want to ride? And which days work best for your longer rides?";
       return "How many days a week do you want to run? And which days work best for you — including which day you'd prefer for your long run?";
+
     case "awaiting_preferences":
-      return "Last one: how do you want me to reach out? I can send you a full weekly plan every Sunday, or I can also text you the night before each workout as a reminder. Which works better for you, or do you want both?";
+      return "Last one: how do you want me to reach out? I can send you a full weekly plan every Sunday, or also text you the night before each session as a reminder. Which works better, or do you want both?";
+
     default:
       return "";
   }
@@ -963,9 +1019,16 @@ async function sendAndStore(userId: string, phone: string, message: string) {
   ]);
 }
 
-function assessFitnessLevel(experienceYears: number, weeklyMiles: number): string {
-  if (weeklyMiles >= 30 || experienceYears >= 3) return "advanced";
-  if (weeklyMiles >= 15 || experienceYears >= 1) return "intermediate";
+function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null, weeklyHours: number | null): string {
+  // Use hours as primary signal for multi-sport athletes
+  if (weeklyHours != null) {
+    if (weeklyHours >= 10 || experienceYears >= 3) return "advanced";
+    if (weeklyHours >= 5 || experienceYears >= 1) return "intermediate";
+    return "beginner";
+  }
+  const miles = weeklyMiles ?? 0;
+  if (miles >= 30 || experienceYears >= 3) return "advanced";
+  if (miles >= 15 || experienceYears >= 1) return "intermediate";
   return "beginner";
 }
 
@@ -978,7 +1041,11 @@ function formatGoalInline(goal: string): string {
     "30k": "30K trail race",
     "50k": "50K ultra",
     "100k": "100K ultra",
-    triathlon: "triathlon",
+    sprint_tri: "sprint triathlon",
+    olympic_tri: "Olympic-distance triathlon",
+    "70.3": "70.3 Half Ironman",
+    ironman: "Full Ironman",
+    cycling: "cycling event",
     general_fitness: "general fitness",
   };
   return labels[goal] || goal;

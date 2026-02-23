@@ -312,7 +312,14 @@ function buildSystemPrompt(
     dateContext += `- Plan backwards from race date: allocate taper (2 weeks), peak (2-3 weeks), build, and base phases\n`;
   }
 
-  return `You are Coach Dean, an expert running coach communicating via text message. You specialize in trail running, ultra running, and periodized training. You are coaching ${user.name || "this athlete"} for ${profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness"}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
+  const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
+  const swimPace = onboardingData.swim_pace as string | null;
+  const bikeInfo = onboardingData.bike_info as string | null;
+  const weeklyHours = onboardingData.weekly_hours as number | null;
+  const sportType = onboardingData.sport_type as string || "running";
+  const isTri = ["sprint_tri", "olympic_tri", "70.3", "ironman"].includes(profile?.goal as string || "");
+
+  return `You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness"}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
 
 ${dateContext}
 TRAINING PHILOSOPHY:
@@ -326,9 +333,12 @@ TRAINING PHILOSOPHY:
 - Match session format to the athlete's actual situation. Walk-jog intervals, time-based sessions, effort-capped easy runs, structured workouts — choose what's genuinely appropriate given their current volume, injury status, goal, and fitness history. Don't default to a rigid format based on mileage alone.
 
 ATHLETE HISTORY:
-${allTimeInfo}- Fitness level: ${profile?.fitness_level || "unknown"}
+${allTimeInfo}- Sport: ${sportType}
+- Fitness level: ${profile?.fitness_level || "unknown"}
 - Training days: ${trainingDays}
+- Weekly volume: ${weeklyHours ? `~${weeklyHours} hours/week` : state?.weekly_mileage_target ? `${state.weekly_mileage_target} miles/week` : "unknown"}
 - Injury / constraints: ${profile?.injury_notes || "None reported"}
+${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
 
 ${activitySummary}
 
@@ -367,6 +377,11 @@ function formatGoalLabel(goal: string): string {
     "30k": "a 30K trail race",
     "50k": "a 50K ultra",
     "100k": "a 100K ultra",
+    sprint_tri: "a sprint triathlon",
+    olympic_tri: "an Olympic-distance triathlon",
+    "70.3": "a 70.3 Half Ironman",
+    ironman: "a Full Ironman",
+    cycling: "a cycling event",
   };
   return labels[goal] || goal;
 }
@@ -387,22 +402,25 @@ function buildUserMessage(
     case "weekly_recap":
       return `It's Sunday — generate a weekly training recap and preview of next week. If activity data is available for the past 7 days, analyze volume/paces/consistency and give 2-3 specific observations. If no activity data, ask how last week went and what they want to focus on next week. Either way, give a brief preview of next week's key sessions. Keep it under 250 words.`;
     case "initial_plan":
-      return `This athlete just completed onboarding. Generate their first training plan. You MUST:
+      return `This athlete just completed onboarding. Generate their first week training plan.
 
-1. Welcome them warmly and acknowledge their goal and race date (use DATE CONTEXT for exact weeks remaining)
-2. Briefly acknowledge their current fitness level based on their self-reported experience and weekly mileage
-3. Give THIS WEEK's specific workouts — day by day for their scheduled training days, with:
-   - Distances in miles
-   - Target paces or effort descriptions (easy, tempo, long run) — estimate reasonable paces from their fitness level if no pace data exists
-   - Purpose of each session
-4. Use 80/20 approach: mostly easy miles, one quality session per week for beginners, two for intermediate/advanced
+1. Welcome them and acknowledge their goal and event date (use DATE CONTEXT for exact weeks remaining)
+2. Briefly note their current fitness starting point
+3. Give THIS WEEK's specific sessions — day by day for their scheduled training days, including session type, duration or distance, intensity/effort, and purpose
 
-CURRENT VOLUME AND INJURY — use your judgment:
-- The athlete's current weekly mileage and any reported injury are the most important constraints for week 1. Don't prescribe more volume than they're currently doing.
-- Beyond that safety floor, use your coaching knowledge to determine the right session types, formats, and intensities for this specific person — their goal, race date, fitness history, injury status, and cross-training all matter. A runner at low mileage training for a fast mile has very different needs than one recovering from a stress fracture targeting a 100K. Don't apply a generic template.
-- Apply the 10% rule from the current baseline, not any historical peak.
-- If the athlete has a reported injury: acknowledge it by name, briefly explain how the plan accounts for it, and ask one follow-up question about any remaining constraints.
+SPORT-SPECIFIC GUIDANCE:
+- For runners: running sessions with paces or effort descriptions. Cross-training on off days if applicable.
+- For triathletes: distribute swim, bike, and run sessions across the week appropriately for their goal distance. Include strength/yoga if they mentioned it. Use their stated paces/times as reference.
+- For cyclists: rides with duration/distance and effort levels. Include any supplemental work they mentioned.
+- For general fitness: mix of whatever makes sense for their lifestyle and any activities they mentioned.
 
-Keep it conversational and encouraging. Be specific with numbers. Keep it under 300 words.`;
+Use your full coaching knowledge to determine the right session types, formats, intensities, and weekly structure for this specific person. Their goal, event date, fitness history, sport, injury status, and weekly volume all matter — don't apply a generic template.
+
+VOLUME AND SAFETY:
+- Don't exceed their current weekly volume in week 1. Apply the 10% rule from current baseline, not historical peak.
+- If they have an injury, acknowledge it, explain how the plan accounts for it, and ask one follow-up question about constraints.
+- If no injury, end with a brief open question about any niggles or schedule constraints.
+
+Keep it conversational and specific. Under 300 words.`;
   }
 }
