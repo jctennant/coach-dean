@@ -108,6 +108,7 @@ const valueProps = [
 /* ------------------------------------------------------------------ */
 
 export default function Home() {
+  const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
   return (
     <div className="flex min-h-screen flex-col">
       {/* Hero */}
@@ -127,10 +128,16 @@ export default function Home() {
             and texts you what to do next — so you stay healthy all the way to race day.
             </p>
             <Suspense>
-              <SignupForm />
+              <SignupForm smsPhone={smsPhone} />
             </Suspense>
             <p className="text-xs text-muted-foreground">
               Free during beta &middot; US phone numbers only
+            </p>
+            <p className="max-w-sm text-[11px] leading-snug text-muted-foreground/70">
+              By signing up, you agree to receive recurring SMS messages from
+              Coach Dean at the number provided. Message and data rates may
+              apply. Reply STOP to unsubscribe at any time. Reply HELP for
+              support.
             </p>
           </div>
           {/* SMS mockup */}
@@ -177,8 +184,13 @@ export default function Home() {
           Ready to run smarter?
         </h2>
         <Suspense>
-          <SignupForm />
+          <SignupForm smsPhone={smsPhone} />
         </Suspense>
+        <p className="max-w-sm text-[11px] leading-snug text-muted-foreground/70">
+          By signing up, you agree to receive recurring SMS messages from Coach
+          Dean at the number provided. Message and data rates may apply. Reply
+          STOP to unsubscribe at any time. Reply HELP for support.
+        </p>
       </section>
 
       {/* Footer */}

@@ -11,7 +11,11 @@ function formatToE164(raw: string): string | null {
   return null;
 }
 
-export function SignupForm() {
+interface SignupFormProps {
+  smsPhone?: string;
+}
+
+export function SignupForm({ smsPhone }: SignupFormProps) {
   const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -58,9 +62,9 @@ export function SignupForm() {
   if (success) {
     return (
       <div className="flex w-full max-w-sm flex-col items-center gap-2 text-center">
-        <p className="text-lg font-semibold">You&apos;re in!</p>
+        <p className="text-lg font-semibold">Check your texts!</p>
         <p className="text-sm text-muted-foreground">
-          Expect a text from Coach Dean shortly.
+          Dean just sent you a message. Everything happens over SMS from here.
         </p>
       </div>
     );
@@ -68,7 +72,14 @@ export function SignupForm() {
 
   return (
     <div className="flex w-full max-w-sm flex-col gap-3">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      {/* Mobile: deep link only */}
+      {smsPhone && (
+        <a href={`sms:${smsPhone}&body=Hi%20Dean!`} className="md:hidden">
+          <Button size="lg" className="w-full h-12">Get started</Button>
+        </a>
+      )}
+      {/* Desktop: phone number form */}
+      <form onSubmit={handleSubmit} className={`flex-col gap-3 ${smsPhone ? "hidden md:flex" : "flex"}`}>
         <div className="flex gap-2">
           <Input
             type="tel"
@@ -79,7 +90,7 @@ export function SignupForm() {
             aria-label="Phone number"
           />
           <Button type="submit" size="lg" className="h-12 shrink-0 px-6" disabled={loading}>
-            {loading ? "Sending..." : "Get started"}
+            {loading ? "Sending..." : "Let's go"}
           </Button>
         </div>
         {error && (
@@ -88,11 +99,6 @@ export function SignupForm() {
           </p>
         )}
       </form>
-      <p className="text-[11px] leading-snug text-muted-foreground/70">
-        By signing up, you agree to receive recurring SMS messages from Coach
-        Dean at the number provided. Message and data rates may apply. Reply
-        STOP to unsubscribe at any time. Reply HELP for support.
-      </p>
     </div>
   );
 }
