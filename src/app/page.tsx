@@ -226,7 +226,7 @@ export default function Home() {
           Ready to run smarter?
         </h2>
         <Suspense>
-          <SignupForm smsPhone={smsPhone} />
+          <SignupForm smsPhone={smsPhone} centered />
         </Suspense>
         <p className="max-w-sm text-[11px] leading-snug text-muted-foreground/70">
           By signing up, you agree to receive recurring SMS messages from Coach
