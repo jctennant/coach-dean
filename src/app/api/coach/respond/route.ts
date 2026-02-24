@@ -303,7 +303,7 @@ function buildSystemPrompt(
   });
   const todayStr = dateFormatter.format(now);
 
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Timezone: ${tz}\n`;
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Timezone: ${tz}\n- Always use specific calendar dates (e.g. "Monday, Feb 23") rather than relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n`;
   if (profile?.race_date) {
     const raceDate = new Date((profile.race_date as string) + "T00:00:00");
     const daysUntil = Math.ceil((raceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
@@ -400,13 +400,13 @@ function buildUserMessage(
     case "nightly_reminder":
       return "Send a brief nightly reminder for tomorrow's scheduled workout. Include the workout type (easy run, tempo, long run, etc.), the target distance, and the target pace. 2-3 sentences max — this is a gentle heads-up, not a full plan.";
     case "weekly_recap":
-      return `It's Sunday — generate a weekly training recap and preview of next week. If activity data is available for the past 7 days, analyze volume/paces/consistency and give 2-3 specific observations. If no activity data, ask how last week went and what they want to focus on next week. Either way, give a brief preview of next week's key sessions. Keep it under 250 words.`;
+      return `Generate a weekly training recap and preview of the coming week (use DATE CONTEXT for the current day). If activity data is available for the past 7 days, analyze volume/paces/consistency and give 2-3 specific observations. If no activity data, ask how last week went and what they want to focus on next week. Either way, give a brief preview of the coming week's key sessions with specific dates. Keep it under 250 words.`;
     case "initial_plan":
       return `This athlete just completed onboarding. Generate their first week training plan.
 
 1. Welcome them and acknowledge their goal and event date (use DATE CONTEXT for exact weeks remaining)
 2. Briefly note their current fitness starting point
-3. Give THIS WEEK's specific sessions — day by day for their scheduled training days, including session type, duration or distance, intensity/effort, and purpose
+3. Give THIS WEEK's specific sessions — day by day with specific calendar dates (e.g. "Monday, Feb 23") for their scheduled training days, including session type, duration or distance, intensity/effort, and purpose
 
 SPORT-SPECIFIC GUIDANCE:
 - For runners: running sessions with paces or effort descriptions. Cross-training on off days if applicable.
