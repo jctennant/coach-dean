@@ -8,7 +8,7 @@ interface SmsMockupProps {
 export function SmsMockup({ messages, className }: SmsMockupProps) {
   return (
     <div className={`w-full max-w-sm ${className ?? ""}`}>
-      <div className="rounded-2xl bg-white border border-black/[0.07] shadow-[0_16px_48px_-12px_rgba(0,0,0,0.10)]">
+      <div className="relative max-h-[480px] overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_16px_48px_-12px_rgba(0,0,0,0.10)]">
         {/* Minimal brand header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-4">
           <div className="h-8 w-8 shrink-0 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">
@@ -36,6 +36,9 @@ export function SmsMockup({ messages, className }: SmsMockupProps) {
             </div>
           ))}
         </div>
+
+        {/* Bottom fade */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white to-transparent" />
       </div>
     </div>
   );

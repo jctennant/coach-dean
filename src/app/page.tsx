@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { SignupForm } from "@/components/signup-form";
 import { SmsMockup, type Message } from "@/components/sms-mockup";
+import { Navbar } from "@/components/navbar";
 
 /* ------------------------------------------------------------------ */
 /*  SMS conversations for each section                                 */
@@ -109,19 +110,18 @@ const valueProps = [
 
 export default function Home() {
   const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
+  const smsUrl = `sms:${smsPhone}&body=Hi%20Dean!`;
   return (
     <div className="flex min-h-screen flex-col">
+      <Navbar smsUrl={smsUrl} />
+
       {/* Hero */}
-      <section className="px-6 pt-24 pb-16 md:pt-32 md:pb-24">
+      <section id="get-started" className="mt-16 flex min-h-[calc(100svh-4rem)] items-center px-6 py-16">
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16">
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left">
-            <p className="text-md font-semibold uppercase tracking-widest text-primary">
-              Meet Coach Dean
-            </p>
-            <h1 className="max-w-xl text-3xl font-bold leading-tight tracking-tight md:text-4xl lg:text-4xl">
-              Your plan should adapt to you. <br />
-              Not the other way around.
+            <h1 className="max-w-xl font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
+              Your training. Relentlessly adapted.
             </h1>
             <p className="max-w-lg text-lg text-muted-foreground">
             Dean is an AI coach that watches every run, adjusts when something feels off, 
@@ -153,7 +153,7 @@ export default function Home() {
             >
               {/* Text */}
               <div className="flex-1 text-center md:text-left">
-                <h2 className="mb-4 text-2xl font-semibold md:text-3xl">
+                <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
                   {prop.title}
                 </h2>
                 <p className="text-muted-foreground leading-relaxed">
@@ -172,7 +172,7 @@ export default function Home() {
       {/* FAQ */}
       <section className="border-t px-6 py-16 md:py-24">
         <div className="mx-auto max-w-2xl">
-          <h2 className="mb-10 text-center text-2xl font-semibold md:text-3xl">
+          <h2 className="mb-10 text-center font-serif text-2xl font-normal md:text-3xl">
             Frequently asked questions
           </h2>
           <div className="divide-y">
@@ -222,7 +222,7 @@ export default function Home() {
 
       {/* Final CTA */}
       <section className="flex flex-col items-center gap-6 border-t bg-muted/40 px-6 py-16 text-center md:py-24">
-        <h2 className="max-w-xl text-2xl font-semibold md:text-3xl">
+        <h2 className="max-w-xl font-serif text-2xl font-normal md:text-3xl">
           Ready to run smarter?
         </h2>
         <Suspense>
