@@ -124,8 +124,8 @@ export default function Home() {
               Your training. Relentlessly adapted.
             </h1>
             <p className="max-w-lg text-lg text-muted-foreground">
-            Dean is an AI coach that watches every run, adjusts when something feels off, 
-            and texts you what to do next — so you stay healthy all the way to race day.
+            Dean tracks your training and injury history, learns how your body responds, 
+            and texts you exactly what to do next — so you arrive at the start line healthy and ready for a new PR.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
