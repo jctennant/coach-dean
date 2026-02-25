@@ -1,11 +1,12 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import crypto from "crypto";
 
-// Allow up to 30s so the 10s debounce sleep fits within the function timeout
-export const maxDuration = 30;
+// Allow up to 60s for image fetch + Claude vision + coach response
+export const maxDuration = 60;
 
 /**
  * POST /api/webhooks/linq
@@ -16,6 +17,8 @@ export const maxDuration = 30;
  * Coaching messages are debounced: if a second message arrives within 10 seconds
  * of the first, only the last one triggers a response. Onboarding messages are
  * processed immediately (each step expects exactly one reply).
+ *
+ * Image messages (MMS) bypass the text pipeline and go through workout extraction.
  */
 export async function POST(request: Request) {
   const signature = request.headers.get("x-webhook-signature");
@@ -55,7 +58,7 @@ export async function POST(request: Request) {
 
   const payload = JSON.parse(rawBody);
 
-  // Extract sender phone and message text from the payload.
+  // Extract sender phone and message parts from the payload.
   // Webhook v2026-02-03: data is nested under payload.data
   const data = payload.data || payload;
   const messageId: string | null = data.id || null;
@@ -63,22 +66,48 @@ export async function POST(request: Request) {
     data.sender_handle?.handle || data.from_handle?.handle ||
     data.sender_handle || data.from_handle || null;
   const parts = data.parts || data.message?.parts || [];
+
   const textPart = parts.find(
     (p: { type: string; value?: string }) => p.type === "text"
   );
   const body = textPart?.value?.trim() || "";
 
-  console.log("[linq-webhook] parsed:", { senderPhone, body: body.slice(0, 50), messageId });
+  // Detect image/media parts. Linq may use type "image", "media", or "mms".
+  // Value may be in p.value, p.url, or p.media_url — try all three.
+  const imagePart = parts.find(
+    (p: { type: string }) => p.type === "image" || p.type === "media" || p.type === "mms"
+  );
+  const imageUrl: string | null = imagePart
+    ? (imagePart.value || imagePart.url || imagePart.media_url || null)
+    : null;
 
-  if (!body || !senderPhone) {
-    console.warn("[linq-webhook] missing body or senderPhone, skipping");
+  // Log the full parts array whenever a non-text part is present so we can
+  // verify the field names against real Linq MMS payloads.
+  if (imagePart || (!body && parts.length > 0)) {
+    console.log("[linq-webhook] non-text parts detected:", JSON.stringify(parts));
+  }
+
+  console.log("[linq-webhook] parsed:", {
+    senderPhone,
+    body: body.slice(0, 50),
+    messageId,
+    hasImage: !!imageUrl,
+  });
+
+  if (!senderPhone) {
+    console.warn("[linq-webhook] missing senderPhone, skipping");
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!body && !imageUrl) {
+    console.warn("[linq-webhook] no text or image found in message, skipping");
     return NextResponse.json({ ok: true });
   }
 
   // Return 200 immediately, process in background
   after(async () => {
     try {
-      await handleInboundMessage(senderPhone, body, messageId);
+      await handleInboundMessage(senderPhone, body, imageUrl, messageId);
     } catch (err) {
       console.error("[linq-webhook] async processing error:", err);
     }
@@ -90,6 +119,7 @@ export async function POST(request: Request) {
 async function handleInboundMessage(
   senderPhone: string,
   body: string,
+  imageUrl: string | null,
   messageId: string | null
 ) {
   // Deduplicate by external message ID
@@ -132,12 +162,13 @@ async function handleInboundMessage(
       return;
     }
 
-    // Store the inbound message, then route to onboarding/handle so handleGoal
-    // can detect a goal in the first message (e.g. "Hi Dean! half marathon June").
+    // For new users, images before onboarding are unusual — treat as no message
+    // and let onboarding start normally.
+    const messageBody = body || (imageUrl ? "[Workout image received]" : "");
     await supabase.from("conversations").insert({
       user_id: newUser.id,
       role: "user",
-      content: body,
+      content: messageBody,
       message_type: "user_message",
       external_message_id: messageId,
     });
@@ -145,7 +176,7 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: newUser.id, message: body }),
+      body: JSON.stringify({ userId: newUser.id, message: messageBody }),
     });
 
     console.log("[linq-webhook] new user routed to onboarding/handle:", senderPhone);
@@ -154,13 +185,22 @@ async function handleInboundMessage(
 
   console.log("[linq-webhook] existing user:", user.id, "step:", user.onboarding_step);
 
-  // Store the inbound message and capture its ID for debounce comparison
+  // Image message from an onboarded user: extract workout and generate feedback.
+  // Images during onboarding are unexpected — fall through to text path.
+  if (imageUrl && !user.onboarding_step) {
+    await handleImageWorkout(user.id, senderPhone, imageUrl, body || null, messageId);
+    return;
+  }
+
+  // --- Text message path (existing flow) ---
+  const messageBody = body || "[Image received]";
+
   const { data: storedMsg } = await supabase
     .from("conversations")
     .insert({
       user_id: user.id,
       role: "user",
-      content: body,
+      content: messageBody,
       message_type: "user_message",
       external_message_id: messageId,
     })
@@ -172,7 +212,7 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user.id, message: body }),
+      body: JSON.stringify({ userId: user.id, message: messageBody }),
     });
     return;
   }
@@ -202,4 +242,283 @@ async function handleInboundMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userId: user.id, trigger: "user_message" }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Image workout handler
+// ---------------------------------------------------------------------------
+
+interface WorkoutExtracted {
+  date: string | null;
+  activity_type: string | null;
+  distance_km: number | null;
+  distance_miles: number | null;
+  duration_seconds: number | null;
+  average_pace_per_mile: string | null;
+  average_pace_per_km: string | null;
+  average_hr: number | null;
+  elevation_gain_feet: number | null;
+  elevation_gain_meters: number | null;
+  splits: Array<{ mile?: number; km?: number; pace: string }> | null;
+  calories: number | null;
+  is_workout_image: boolean;
+}
+
+async function handleImageWorkout(
+  userId: string,
+  phone: string,
+  imageUrl: string,
+  caption: string | null,
+  messageId: string | null
+) {
+  console.log("[linq-webhook] processing image workout for user:", userId, "url:", imageUrl);
+
+  // 1. Fetch the image and convert to base64
+  let base64: string;
+  let mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp" = "image/jpeg";
+  try {
+    const resp = await fetch(imageUrl);
+    if (!resp.ok) throw new Error(`Image fetch failed: ${resp.status}`);
+    const buffer = await resp.arrayBuffer();
+    base64 = Buffer.from(buffer).toString("base64");
+    const ct = resp.headers.get("content-type") || "";
+    if (ct.includes("png")) mediaType = "image/png";
+    else if (ct.includes("webp")) mediaType = "image/webp";
+    else if (ct.includes("gif")) mediaType = "image/gif";
+  } catch (err) {
+    console.error("[linq-webhook] image fetch failed:", err);
+    await sendAndStore(userId, phone, "I couldn't load that image — can you try sending it again?", messageId);
+    return;
+  }
+
+  // 2. Extract structured workout data via Claude vision
+  const extracted = await extractWorkoutFromImage(base64, mediaType);
+
+  if (!extracted.is_workout_image) {
+    // Not a workout screenshot — store message and route to standard coaching
+    console.log("[linq-webhook] image is not a workout screenshot, routing to coach");
+    const content = caption || "[Image]";
+    await supabase.from("conversations").insert({
+      user_id: userId,
+      role: "user",
+      content,
+      message_type: "user_message",
+      external_message_id: messageId,
+    });
+    await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, trigger: "user_message" }),
+    });
+    return;
+  }
+
+  // 3. Build a human-readable summary of the extracted workout to store in the conversation
+  const workoutSummary = formatWorkoutSummary(extracted, caption);
+  await supabase.from("conversations").insert({
+    user_id: userId,
+    role: "user",
+    content: workoutSummary,
+    message_type: "user_message",
+    external_message_id: messageId,
+  });
+
+  // 4. Store the activity in the activities table
+  const distanceMeters = extracted.distance_km
+    ? extracted.distance_km * 1000
+    : extracted.distance_miles
+      ? extracted.distance_miles * 1609.34
+      : null;
+
+  const elevationGain = extracted.elevation_gain_meters
+    ?? (extracted.elevation_gain_feet ? extracted.elevation_gain_feet * 0.3048 : null);
+
+  const averagePace = extracted.average_pace_per_mile || extracted.average_pace_per_km || null;
+
+  const startDate = extracted.date
+    ? new Date(extracted.date + "T00:00:00").toISOString()
+    : new Date().toISOString();
+
+  const { data: activity } = await supabase
+    .from("activities")
+    .insert({
+      user_id: userId,
+      source: "image_upload",
+      activity_type: extracted.activity_type || "Run",
+      distance_meters: distanceMeters,
+      moving_time_seconds: extracted.duration_seconds,
+      average_heartrate: extracted.average_hr,
+      average_pace: averagePace,
+      elevation_gain: elevationGain,
+      start_date: startDate,
+      summary: extracted as unknown as Record<string, unknown>,
+    })
+    .select("id")
+    .single();
+
+  console.log("[linq-webhook] stored image activity:", activity?.id);
+
+  // 5. Update training state with this week's mileage
+  if (distanceMeters) {
+    const distanceMiles = distanceMeters / 1609.34;
+    const { data: state } = await supabase
+      .from("training_state")
+      .select("week_mileage_so_far")
+      .eq("user_id", userId)
+      .single();
+
+    await supabase
+      .from("training_state")
+      .update({
+        week_mileage_so_far: (state?.week_mileage_so_far || 0) + distanceMiles,
+        last_activity_date: startDate.split("T")[0],
+        last_activity_summary: {
+          type: extracted.activity_type || "Run",
+          distance_miles: Math.round(distanceMiles * 100) / 100,
+          pace: averagePace,
+          hr: extracted.average_hr,
+          source: "image_upload",
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId);
+  }
+
+  // 6. Fire coaching response with pre-extracted data (no DB lookup needed)
+  await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userId,
+      trigger: "workout_image",
+      imageActivity: extracted,
+    }),
+  });
+}
+
+/**
+ * Use Claude vision to extract structured workout data from an image.
+ * Handles screenshots from Strava, Garmin, Apple Fitness, Nike Run Club, etc.
+ */
+async function extractWorkoutFromImage(
+  base64: string,
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+): Promise<WorkoutExtracted> {
+  const empty: WorkoutExtracted = {
+    date: null,
+    activity_type: null,
+    distance_km: null,
+    distance_miles: null,
+    duration_seconds: null,
+    average_pace_per_mile: null,
+    average_pace_per_km: null,
+    average_hr: null,
+    elevation_gain_feet: null,
+    elevation_gain_meters: null,
+    splits: null,
+    calories: null,
+    is_workout_image: false,
+  };
+
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 512,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mediaType, data: base64 },
+            },
+            {
+              type: "text",
+              text: `Extract workout data from this image. It may be a screenshot from Strava, Garmin, Apple Fitness, Nike Run Club, or a similar app. Respond with ONLY valid JSON, no other text.
+
+Output format:
+{
+  "is_workout_image": true|false,
+  "date": "YYYY-MM-DD" | null,
+  "activity_type": "Run"|"TrailRun"|"Ride"|"Walk"|"Swim"|"Workout"|null,
+  "distance_km": number | null,
+  "distance_miles": number | null,
+  "duration_seconds": number | null,
+  "average_pace_per_mile": "M:SS" | null,
+  "average_pace_per_km": "M:SS" | null,
+  "average_hr": number | null,
+  "elevation_gain_feet": number | null,
+  "elevation_gain_meters": number | null,
+  "splits": [{"mile": number, "pace": "M:SS"} | {"km": number, "pace": "M:SS"}] | null,
+  "calories": number | null
+}
+
+Rules:
+- is_workout_image: true only if this is clearly a workout/activity summary screenshot
+- date: extract from the image if visible. Use YYYY-MM-DD format.
+- distance: extract whichever unit is shown and leave the other null. Do not convert.
+- duration_seconds: convert from any format (e.g. "47:23" → 2843, "1:12:05" → 4325)
+- average_pace_per_mile / average_pace_per_km: extract whichever is shown. Format as M:SS (e.g. "9:06", "4:45").
+- splits: include if a splits table is visible. Use the same unit (mile or km) as shown.
+- If this is not a workout screenshot (photo, meme, etc.), set is_workout_image: false and all other fields to null.`,
+            },
+          ],
+        },
+      ],
+    });
+
+    const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+    console.log("[linq-webhook] vision extraction:", text.slice(0, 200));
+
+    // Strip markdown code fences if present
+    const jsonStr = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    console.error("[linq-webhook] vision extraction failed:", err);
+    return empty;
+  }
+}
+
+/** Build a plain-text summary of extracted workout data for conversation storage. */
+function formatWorkoutSummary(w: WorkoutExtracted, caption: string | null): string {
+  const lines: string[] = ["[Workout image]"];
+  if (w.activity_type) lines.push(`Type: ${w.activity_type}`);
+  if (w.date) lines.push(`Date: ${w.date}`);
+  if (w.distance_miles) lines.push(`Distance: ${w.distance_miles.toFixed(2)} mi`);
+  else if (w.distance_km) lines.push(`Distance: ${w.distance_km.toFixed(2)} km`);
+  if (w.duration_seconds) {
+    const h = Math.floor(w.duration_seconds / 3600);
+    const m = Math.floor((w.duration_seconds % 3600) / 60);
+    const s = w.duration_seconds % 60;
+    const dur = h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+      : `${m}:${String(s).padStart(2, "0")}`;
+    lines.push(`Duration: ${dur}`);
+  }
+  if (w.average_pace_per_mile) lines.push(`Avg pace: ${w.average_pace_per_mile}/mi`);
+  else if (w.average_pace_per_km) lines.push(`Avg pace: ${w.average_pace_per_km}/km`);
+  if (w.average_hr) lines.push(`Avg HR: ${w.average_hr} bpm`);
+  if (w.elevation_gain_feet) lines.push(`Elevation: ${w.elevation_gain_feet} ft`);
+  else if (w.elevation_gain_meters) lines.push(`Elevation: ${w.elevation_gain_meters} m`);
+  if (w.splits?.length) {
+    const splitLines = w.splits.map((s) =>
+      "mile" in s ? `  Mile ${s.mile}: ${s.pace}` : `  km ${s.km}: ${s.pace}`
+    );
+    lines.push(`Splits:\n${splitLines.join("\n")}`);
+  }
+  if (caption) lines.push(`Note: ${caption}`);
+  return lines.join("\n");
+}
+
+async function sendAndStore(userId: string, phone: string, message: string, messageId: string | null) {
+  await Promise.all([
+    sendSMS(phone, message),
+    supabase.from("conversations").insert({
+      user_id: userId,
+      role: "assistant",
+      content: message,
+      message_type: "coach_response",
+      external_message_id: messageId,
+    }),
+  ]);
 }

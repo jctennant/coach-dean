@@ -3,12 +3,13 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 
-type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder";
+type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "workout_image";
 
 interface CoachRequest {
   userId: string;
   trigger: TriggerType;
   activityId?: number;
+  imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
 }
 
@@ -27,7 +28,7 @@ interface ActivityRow {
  * Core coaching function. Given a user + trigger, generates and sends a coaching response via SMS.
  */
 export async function POST(request: Request) {
-  const { userId, trigger, activityId, dry_run }: CoachRequest = await request.json();
+  const { userId, trigger, activityId, imageActivity, dry_run }: CoachRequest = await request.json();
 
   // Fetch user context in parallel
   const [
@@ -104,7 +105,7 @@ export async function POST(request: Request) {
   );
 
   // Build user message based on trigger
-  const userMessage = buildUserMessage(trigger, activityData);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity);
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
@@ -416,7 +417,8 @@ function formatGoalLabel(goal: string): string {
 
 function buildUserMessage(
   trigger: TriggerType,
-  activityData: Record<string, unknown> | null
+  activityData: Record<string, unknown> | null,
+  imageActivity?: Record<string, unknown>
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -429,6 +431,9 @@ function buildUserMessage(
       return "Send a brief nightly reminder for tomorrow's scheduled workout. Include the workout type (easy run, tempo, long run, etc.), the target distance, and the target pace. 2-3 sentences max — this is a gentle heads-up, not a full plan.";
     case "weekly_recap":
       return `Generate a weekly training recap and preview of the coming week (use DATE CONTEXT for the current day). If activity data is available for the past 7 days, analyze volume/paces/consistency and give 2-3 specific observations. If no activity data, ask how last week went and what they want to focus on next week. Either way, give a brief preview of the coming week's key sessions with specific dates. Keep it under 250 words.`;
+    case "workout_image":
+      return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nProvide post-workout coaching feedback. Analyze their performance against their training paces and recent history. Note what went well, flag anything worth discussing (pace, HR, effort), and briefly mention what's next in their plan. Keep it concise — 2-3 short paragraphs, SMS tone.`;
+
     case "initial_plan":
       return `This athlete just completed onboarding. Generate their first week training plan.
 
