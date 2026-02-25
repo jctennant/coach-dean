@@ -140,7 +140,7 @@ async function handleInboundMessage(
   // Look up user by phone number
   const { data: user } = await supabase
     .from("users")
-    .select("id, onboarding_step")
+    .select("id, onboarding_step, timezone")
     .eq("phone_number", senderPhone)
     .single();
 
@@ -188,7 +188,7 @@ async function handleInboundMessage(
   // Image message from an onboarded user: extract workout and generate feedback.
   // Images during onboarding are unexpected — fall through to text path.
   if (imageUrl && !user.onboarding_step) {
-    await handleImageWorkout(user.id, senderPhone, imageUrl, body || null, messageId);
+    await handleImageWorkout(user.id, senderPhone, imageUrl, body || null, messageId, (user.timezone as string) || "America/New_York");
     return;
   }
 
@@ -269,7 +269,8 @@ async function handleImageWorkout(
   phone: string,
   imageUrl: string,
   caption: string | null,
-  messageId: string | null
+  messageId: string | null,
+  timezone: string
 ) {
   console.log("[linq-webhook] processing image workout for user:", userId, "url:", imageUrl);
 
@@ -292,7 +293,16 @@ async function handleImageWorkout(
   }
 
   // 2. Extract structured workout data via Claude vision
-  const extracted = await extractWorkoutFromImage(base64, mediaType);
+  // Compute today's date in the user's local timezone so relative labels like
+  // "Today" or "Yesterday" in the app screenshot resolve to the correct date.
+  const todayLocal = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date()); // en-CA gives YYYY-MM-DD format natively
+
+  const extracted = await extractWorkoutFromImage(base64, mediaType, todayLocal);
 
   if (!extracted.is_workout_image) {
     // Not a workout screenshot — store message and route to standard coaching
@@ -402,7 +412,8 @@ async function handleImageWorkout(
  */
 async function extractWorkoutFromImage(
   base64: string,
-  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+  todayDate: string // YYYY-MM-DD in the user's local timezone
 ): Promise<WorkoutExtracted> {
   const empty: WorkoutExtracted = {
     date: null,
@@ -435,6 +446,11 @@ async function extractWorkoutFromImage(
             {
               type: "text",
               text: `Extract workout data from this image. It may be a screenshot from Strava, Garmin, Apple Fitness, Nike Run Club, or a similar app. Respond with ONLY valid JSON, no other text.
+
+Today's date is ${todayDate}. Use this to resolve relative date labels in the image:
+- "Today" → ${todayDate}
+- "Yesterday" → one day before ${todayDate}
+- Any other relative label → calculate from ${todayDate}
 
 Output format:
 {
