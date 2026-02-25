@@ -302,22 +302,32 @@ function buildSystemPrompt(
     month: "long",
     day: "numeric",
   });
+  const todayStr = dateFormatter.format(now);
+
+  // Determine today's calendar date in the user's local timezone, then build
+  // the next 7 days using explicit UTC date arithmetic so the weekday and date
+  // always align correctly. Using Date.UTC avoids any server-timezone influence.
+  // We use "en-CA" to get "YYYY-MM-DD" format reliably.
+  const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+  const [ty, tm, td] = todayLocal.split("-").map(Number);
+
   const shortFormatter = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     weekday: "short",
     month: "short",
     day: "numeric",
   });
-  const todayStr = dateFormatter.format(now);
 
-  // Pre-compute the next 7 days so Claude never has to calculate dates itself
+  // Pre-compute the next 7 days so Claude never has to calculate dates itself.
+  // Joined with " | " (not ", ") so the comma inside "Thu, Feb 26" is never
+  // confused with the list separator.
   const upcomingDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(now.getTime() + (i + 1) * 24 * 60 * 60 * 1000);
+    const d = new Date(Date.UTC(ty, tm - 1, td + i + 1));
     return shortFormatter.format(d);
   });
   const tomorrowStr = upcomingDays[0];
 
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(", ")}\n- Timezone: ${tz}\n- Always use specific calendar dates (e.g. "Mon, Feb 23") rather than relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n`;
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- Always use specific calendar dates (e.g. "Thu, Feb 26") rather than relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n`;
   if (profile?.race_date) {
     const raceDate = new Date((profile.race_date as string) + "T00:00:00");
     const daysUntil = Math.ceil((raceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
