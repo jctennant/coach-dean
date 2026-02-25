@@ -37,7 +37,7 @@ After completing **any meaningful change** to the codebase, always append a new 
 ## 2025-02-25 — Fixed date off-by-one for evening runs
 
 **Type:** Bug Fix
-**Reported by:** User feedback
+**Reported by:** Gwyneth 
 **User feedback:** "Coach Dean told me my Tuesday run was on Wednesday, really annoying"
 **Root cause:** Server was using UTC timestamps from Strava without converting to user's local timezone. A 9pm MT run was being read as the next day in UTC.
 **Fix / Change:** Pull timezone from Strava athlete endpoint on account connect, store as IANA string (e.g. America/Denver), apply to all date formatting and reasoning logic.
