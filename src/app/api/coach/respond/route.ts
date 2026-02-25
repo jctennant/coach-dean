@@ -301,9 +301,22 @@ function buildSystemPrompt(
     month: "long",
     day: "numeric",
   });
+  const shortFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
   const todayStr = dateFormatter.format(now);
 
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Timezone: ${tz}\n- Always use specific calendar dates (e.g. "Monday, Feb 23") rather than relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n`;
+  // Pre-compute the next 7 days so Claude never has to calculate dates itself
+  const upcomingDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now.getTime() + (i + 1) * 24 * 60 * 60 * 1000);
+    return shortFormatter.format(d);
+  });
+  const tomorrowStr = upcomingDays[0];
+
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(", ")}\n- Timezone: ${tz}\n- Always use specific calendar dates (e.g. "Mon, Feb 23") rather than relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n`;
   if (profile?.race_date) {
     const raceDate = new Date((profile.race_date as string) + "T00:00:00");
     const daysUntil = Math.ceil((raceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));

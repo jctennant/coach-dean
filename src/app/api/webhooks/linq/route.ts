@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
+import { inferTimezoneFromPhone } from "@/lib/timezone";
 import crypto from "crypto";
 
 // Allow up to 30s so the 10s debounce sleep fits within the function timeout
@@ -121,6 +122,7 @@ async function handleInboundMessage(
       .insert({
         phone_number: senderPhone,
         onboarding_step: "awaiting_goal",
+        timezone: inferTimezoneFromPhone(senderPhone),
       })
       .select("id")
       .single();

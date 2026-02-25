@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
   for (const profile of profiles) {
     const user = profile.users as unknown as { timezone: string | null; onboarding_step: string | null };
-    const tz = user.timezone || "America/Los_Angeles";
+    const tz = user.timezone || "America/New_York";
     const trainingDays = (profile.training_days as string[]) || [];
 
     // Find tomorrow's day name in the user's timezone
