@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
+import { trackEvent } from "@/lib/track";
 import crypto from "crypto";
 
 // Allow up to 60s for image fetch + Claude vision + coach response
@@ -162,6 +163,9 @@ async function handleInboundMessage(
       return;
     }
 
+    void trackEvent(newUser.id, "onboarding_started");
+    void trackEvent(newUser.id, "message_received", { has_image: !!imageUrl });
+
     // For new users, images before onboarding are unusual — treat as no message
     // and let onboarding start normally.
     const messageBody = body || (imageUrl ? "[Workout image received]" : "");
@@ -184,6 +188,8 @@ async function handleInboundMessage(
   }
 
   console.log("[linq-webhook] existing user:", user.id, "step:", user.onboarding_step);
+
+  void trackEvent(user.id, "message_received", { has_image: !!imageUrl });
 
   // Image message from an onboarded user: extract workout and generate feedback.
   // Images during onboarding are unexpected — fall through to text path.
@@ -367,6 +373,11 @@ async function handleImageWorkout(
     .single();
 
   console.log("[linq-webhook] stored image activity:", activity?.id);
+  void trackEvent(userId, "workout_logged", {
+    source: "image_upload",
+    activity_type: extracted.activity_type,
+    distance_miles: extracted.distance_miles ?? (extracted.distance_km ? extracted.distance_km * 0.621371 : null),
+  });
 
   // 5. Update training state with this week's mileage
   if (distanceMeters) {

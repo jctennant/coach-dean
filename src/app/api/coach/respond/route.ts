@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
+import { trackEvent } from "@/lib/track";
 
 type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "workout_image";
 
@@ -135,6 +136,14 @@ export async function POST(request: Request) {
           : "coach_response", // initial_plan, user_message, weekly_recap stored as coach_response
     strava_activity_id: activityId || null,
   });
+
+  void trackEvent(userId, "coaching_response_sent", { trigger });
+
+  if (trigger === "initial_plan") {
+    void trackEvent(userId, "plan_generated", { plan_type: "initial" });
+  } else if (trigger === "weekly_recap") {
+    void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
+  }
 
   // Update training state if post_run
   if (trigger === "post_run" && activityData) {

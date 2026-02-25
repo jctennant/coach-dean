@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
+import { trackEvent } from "@/lib/track";
 
 interface OnboardingRequest {
   userId: string;
@@ -144,6 +145,8 @@ Rules:
     .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
+  void trackEvent(user.id, "onboarding_step_completed", { step: "goal", goal: parsed.goal });
+
   const goalLabel = formatGoalInline(parsed.goal);
   const acknowledgment =
     parsed.goal === "general_fitness"
@@ -205,6 +208,8 @@ Rules:
     .from("users")
     .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_step_completed", { step: "race_date", race_date: parsed.race_date });
 
   if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData));
   return NextResponse.json({ ok: true });
@@ -281,6 +286,8 @@ Rules:
     .update({ onboarding_step: nextStep, onboarding_data: mergedData })
     .eq("id", user.id);
 
+  void trackEvent(user.id, "onboarding_step_completed", { step: "days_per_week", days_per_week: daysPerWeek, training_days: trainingDays });
+
   if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData));
   return NextResponse.json({ ok: true });
 }
@@ -318,6 +325,8 @@ async function handleAnythingElse(
     .from("users")
     .update({ onboarding_step: nextStep, onboarding_data: merged })
     .eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_step_completed", { step: "anything_else" });
 
   if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, merged));
   return NextResponse.json({ ok: true });
@@ -396,9 +405,12 @@ async function handleName(
   if (stateResult.error) console.error("[onboarding] training_state upsert failed:", stateResult.error);
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
 
+  void trackEvent(user.id, "onboarding_step_completed", { step: "name" });
+
   // No wrap-up SMS — the initial_plan IS the response, addressed by name.
   after(async () => {
     try {
+      await trackEvent(user.id, "onboarding_completed", { goal });
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
