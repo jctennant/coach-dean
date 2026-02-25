@@ -548,12 +548,17 @@ Output format: {"complete": true|false, "days_per_week": number|null, "training_
 
 Rules:
 - Normalize all day names to full lowercase
-- complete: true only if SPECIFIC DAYS are provided or clearly implied (e.g. "weekdays", "Mon/Wed/Fri")
-- "4 days" alone with no day names → complete: false, days_per_week: 4, follow_up asks which specific days and preferred long run day
-- "Weekdays" → complete: true, training_days: ["monday","tuesday","wednesday","thursday","friday"]
+- complete: true whenever you have enough to build a schedule — even if every specific day isn't named
+- "3-4 days, weekdays better, Sunday long run" → complete: true. Pick 3 or 4 weekdays + Sunday, long_run_day: "sunday"
+- "Weekdays" alone → complete: true, training_days: ["monday","tuesday","wednesday","thursday","friday"]
 - "Weekends" → complete: true, training_days: ["saturday","sunday"]
+- A count + day preference is enough: "4 days, prefer Mon/Wed/Fri/Sat" → complete: true, fill in all 4
+- "doesn't matter", "no preference", "whatever works", "any days" → complete: true. Use a balanced default (e.g. Mon, Wed, Fri, Sun for 4 days). Set long_run_day: "sunday" unless otherwise stated.
+- For a range like "3-4 days" with no other info → complete: false, follow_up asks preference or just long run day
+- complete: false ONLY if there is truly not enough to infer any schedule at all
 - long_run_day: null if not mentioned
-- follow_up: short, natural message. Example: "4 days works great! Which days of the week, and which would you prefer for your long run?"
+- days_per_week: use the number or the midpoint of a range ("3-4" → 4)
+- follow_up: only what's still missing — do NOT re-ask for info already given. If days_per_week is known, don't ask again.
 - If complete is true, follow_up must be null`,
     messages: [{ role: "user", content: message }],
   });
