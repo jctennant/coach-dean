@@ -143,9 +143,12 @@ Rules:
     return NextResponse.json({ ok: true });
   }
 
-  // Also try to extract other fields from this first message (race date, experience, etc.)
-  // so we can skip questions the user already answered in passing.
-  const extra = await extractAdditionalFields(message);
+  // Run in parallel: extract additional onboarding fields the user already answered in passing,
+  // and detect any immediate coaching questions that deserve a quick answer.
+  const [extra, immediateAnswer] = await Promise.all([
+    extractAdditionalFields(message),
+    detectAndAnswerImmediate(message, parsed.goal),
+  ]);
   const sportType = getSportType(parsed.goal);
   const mergedData = { ...onboardingData, goal: parsed.goal, sport_type: sportType, ...extra };
 
@@ -163,7 +166,19 @@ Rules:
       : `Love it, a ${goalLabel} — great goal.`;
 
   const question = nextStep ? getStepQuestion(nextStep, mergedData) : "";
-  await sendAndStore(user.id, user.phone_number, `${acknowledgment} ${question}`.trim());
+
+  let responseText: string;
+  if (immediateAnswer) {
+    // Bridge from the coaching answer back to the onboarding flow naturally
+    const bridge =
+      parsed.goal === "general_fitness"
+        ? "Would you like me to put together a training plan around your goals? I have just a few quick questions."
+        : `Would you like me to build you a proper ${goalLabel} training plan? I just have a few quick questions.`;
+    responseText = `${immediateAnswer}\n\n${bridge}${question ? `\n\n${question}` : ""}`.trim();
+  } else {
+    responseText = `${acknowledgment}${question ? ` ${question}` : ""}`.trim();
+  }
+  await sendAndStore(user.id, user.phone_number, responseText);
   return NextResponse.json({ ok: true });
 }
 
@@ -912,17 +927,18 @@ async function extractAdditionalFields(
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 256,
-    system: `Extract any running/training information explicitly stated in this message. Only extract what is clearly present — do not infer or guess.
+    system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
-Output format (omit fields that are not mentioned):
-{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "injury_mentioned": boolean}
+Output format (omit fields that are not present):
+{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "injury_mentioned": boolean}
 
 Rules:
-- race_date: only if a specific target race date is mentioned. Today is ${today}. "March 28th" → infer year from context.
-- experience_years: only if running experience duration is explicitly stated
-- weekly_miles: only if current weekly running volume is stated. Convert km to miles if needed (×0.621).
-- injury_mentioned: true only if an injury or physical limitation is explicitly mentioned
-- Return {} if nothing additional is clearly present`,
+- race_date: if a specific target race date is mentioned. Today is ${today}.
+- experience_years: infer from any experience signal. "new runner" or "just started" → 0. "fairly inexperienced" → 0.2. "completed an 8 week plan" with no prior context → 0.15. "a year" → 1. "5+ years" → 5.
+- weekly_miles: if weekly running volume is stated or clearly implied. Convert km to miles (×0.621).
+- easy_pace: any stated comfortable, easy, conversational, or GPS/Strava estimated running pace. Format as M:SS per mile. "8:30/m" or "8:30/mile" → "8:30". "5:00/km" → "8:03". Extract even if the athlete thinks they can beat it — it's still a useful baseline.
+- injury_mentioned: true if any injury or physical limitation is mentioned.
+- Return {} if nothing is present.`,
     messages: [{ role: "user", content: message }],
   });
 
@@ -933,11 +949,45 @@ Rules:
     if (parsed.race_date != null) result.race_date = parsed.race_date;
     if (parsed.experience_years != null) result.experience_years = parsed.experience_years;
     if (parsed.weekly_miles != null) result.weekly_miles = parsed.weekly_miles;
+    if (parsed.easy_pace != null) result.easy_pace = parsed.easy_pace;
     if (parsed.injury_mentioned === true) result.injury_mentioned = true;
     return result;
   } catch {
     return {};
   }
+}
+
+/**
+ * Detects whether the user's first message contains an immediate coaching question
+ * (e.g. race-day prep, pacing advice, route suggestions) and returns a brief answer.
+ * Returns null if no immediate question is present.
+ */
+async function detectAndAnswerImmediate(
+  message: string,
+  goal: string
+): Promise<string | null> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 250,
+    system: `You are Coach Dean, a friendly AI endurance coach. A new athlete training for a ${goal} just sent their first message. It may contain immediate coaching questions alongside background info about themselves.
+
+If the message contains a genuine immediate question (race prep, pacing advice, route suggestions, race-day tactics, etc.):
+- Answer it briefly and helpfully in 2-3 sentences. Be specific and practical.
+- Plain text only — no markdown, no bullet points, no asterisks.
+- Return only your answer.
+
+If there is no immediate question — just goal-setting or background info — return only: {"no_question": true}`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+  try {
+    const parsed = JSON.parse(extractJSON(text));
+    if (parsed.no_question === true) return null;
+  } catch {
+    if (text.length > 10) return text;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
