@@ -25,6 +25,7 @@ function extractJSON(text: string): string {
  *   → awaiting_race_date
  *   → awaiting_schedule
  *   → awaiting_anything_else   ← "Before I put your plan together, anything else?"
+ *   → awaiting_name            ← "What's your name?"
  *   → null (complete → initial_plan fires)
  *
  * Steps are skipped automatically if data was already captured in an earlier message.
@@ -47,8 +48,8 @@ export async function POST(request: Request) {
 
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
-  // Skip awaiting_anything_else — any response is valid there (user can write anything).
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else") {
+  // Skip awaiting_anything_else and awaiting_name — any response is valid for those.
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       await sendAndStore(user.id, user.phone_number, offTopicResult.response);
@@ -65,6 +66,8 @@ export async function POST(request: Request) {
       return handleSchedule(user, message, onboardingData);
     case "awaiting_anything_else":
       return handleAnythingElse(user, message, onboardingData);
+    case "awaiting_name":
+      return handleName(user, message, onboardingData);
     default:
       return NextResponse.json({ ok: true });
   }
@@ -309,18 +312,36 @@ async function handleAnythingElse(
     }
   }
 
-  const goal = (merged.goal as string) || "general_fitness";
-  const raceDate = (merged.race_date as string) || null;
-  const experienceYears = (merged.experience_years as number) ?? 1;
-  const weeklyMiles = (merged.weekly_miles as number) ?? null;
-  const weeklyHours = (merged.weekly_hours as number) || null;
-  const crosstrain = (merged.crosstraining_tools as string[]) || [];
-  const daysPerWeek = (merged.days_per_week as number) ?? 4;
-  const trainingDays = (merged.training_days as string[]) || [];
-  const easyPace = (merged.easy_pace as string) || null;
-  const tempoPace = (merged.tempo_pace as string) || null;
-  const intervalPace = (merged.interval_pace as string) || null;
-  const injuryNotes = (merged.injury_notes as string) || null;
+  // Save merged data and advance to awaiting_name
+  const nextStep = findNextStep("awaiting_anything_else", merged);
+  await supabase
+    .from("users")
+    .update({ onboarding_step: nextStep, onboarding_data: merged })
+    .eq("id", user.id);
+
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, merged));
+  return NextResponse.json({ ok: true });
+}
+
+async function handleName(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  const name = await extractName(message);
+
+  const goal = (onboardingData.goal as string) || "general_fitness";
+  const raceDate = (onboardingData.race_date as string) || null;
+  const experienceYears = (onboardingData.experience_years as number) ?? 1;
+  const weeklyMiles = (onboardingData.weekly_miles as number) ?? null;
+  const weeklyHours = (onboardingData.weekly_hours as number) || null;
+  const crosstrain = (onboardingData.crosstraining_tools as string[]) || [];
+  const daysPerWeek = (onboardingData.days_per_week as number) ?? 4;
+  const trainingDays = (onboardingData.training_days as string[]) || [];
+  const easyPace = (onboardingData.easy_pace as string) || null;
+  const tempoPace = (onboardingData.tempo_pace as string) || null;
+  const intervalPace = (onboardingData.interval_pace as string) || null;
+  const injuryNotes = (onboardingData.injury_notes as string) || null;
 
   const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles, weeklyHours);
   const weeklyMilesRaw = weeklyMiles ?? 15;
@@ -364,8 +385,9 @@ async function handleAnythingElse(
     supabase
       .from("users")
       .update({
+        name: name ?? undefined,
         onboarding_step: null,
-        onboarding_data: merged,
+        onboarding_data: onboardingData,
       })
       .eq("id", user.id),
   ]);
@@ -374,7 +396,7 @@ async function handleAnythingElse(
   if (stateResult.error) console.error("[onboarding] training_state upsert failed:", stateResult.error);
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
 
-  // No wrap-up SMS — the initial_plan IS the response.
+  // No wrap-up SMS — the initial_plan IS the response, addressed by name.
   after(async () => {
     try {
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
@@ -477,6 +499,7 @@ const STEP_ORDER = [
   "awaiting_race_date",
   "awaiting_schedule",
   "awaiting_anything_else",
+  "awaiting_name",
 ];
 
 /**
@@ -492,6 +515,8 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       return Array.isArray(data.training_days) && (data.training_days as string[]).length > 0;
     case "awaiting_anything_else":
       return false; // Always ask exactly once — never pre-satisfied
+    case "awaiting_name":
+      return false; // Always ask — name is never pre-filled during onboarding
     default:
       return false;
   }
@@ -529,6 +554,9 @@ function getStepQuestion(step: string, data: Record<string, unknown>): string {
 
     case "awaiting_anything_else":
       return "Before I put your plan together — anything else worth knowing? Injuries, recent races, target paces, that sort of thing.";
+
+    case "awaiting_name":
+      return "What's your name?";
 
     default:
       return "";
@@ -643,6 +671,23 @@ Rules:
     console.error("[onboarding] anything_else parse failed:", e);
     return empty;
   }
+}
+
+/**
+ * Extracts a first name (or full name) from the user's response.
+ * Handles "I'm Sarah", "Sarah Thomas", "it's Sarah", etc.
+ */
+async function extractName(message: string): Promise<string | null> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 32,
+    system: `Extract the person's name from their message. Return ONLY the name — no punctuation, no extra words. Capitalize properly (e.g. "sarah" → "Sarah", "sarah thomas" → "Sarah Thomas"). If no name is present, return the single word: null`,
+    messages: [{ role: "user", content: message }],
+  });
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+  console.log("[onboarding] name raw response:", text);
+  if (!text || text.toLowerCase() === "null") return null;
+  return text;
 }
 
 /** Strip null/undefined values from an object so pre-existing data isn't overwritten. */
