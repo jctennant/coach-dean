@@ -1,34 +1,13 @@
 import { Suspense } from "react";
 import { SignupForm } from "@/components/signup-form";
 import { SmsMockup, type Message } from "@/components/sms-mockup";
+import { IMessageMockup } from "@/components/imessage-mockup";
 import { Navbar } from "@/components/navbar";
 
 /* ------------------------------------------------------------------ */
 /*  SMS conversations for each section                                 */
 /* ------------------------------------------------------------------ */
 
-const heroMessages: Message[] = [
-  {
-    from: "coach",
-    text: "Great run today! 5.2 mi in 42:18 — that's an 8:08/mi pace, right in your easy zone. Your consistency this week is paying off.",
-  },
-  {
-    from: "user",
-    text: "Thanks! Felt good but my left knee was a little tight around mile 3",
-  },
-  {
-    from: "coach",
-    text: "Good to flag that. Since it eased up, it's likely just tightness from the tempo on Tuesday. Add 5 min of quad/IT band rolling tonight. If it shows up again tomorrow, we'll swap your long run for a bike day.",
-  },
-  {
-    from: "user",
-    text: "Will do. What's on the schedule tomorrow?",
-  },
-  {
-    from: "coach",
-    text: "Rest day — you've earned it. Wednesday is 4x800m at 7:15 pace with 90s jog recovery. We're building toward that half marathon PR.",
-  },
-];
 
 const weeklyPlanMessages: Message[] = [
   {
@@ -112,28 +91,28 @@ export default function Home() {
   const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
   const smsUrl = `sms:${smsPhone}&body=Hi%20Dean!`;
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col" style={{ minHeight: "100vh" }}>
       <Navbar smsUrl={smsUrl} />
 
       {/* Hero */}
-      <section id="get-started" className="mt-16 flex min-h-[calc(100svh-4rem)] items-center px-6 py-16">
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16">
+      <section id="get-started" className="flex items-center px-6" style={{ minHeight: "100vh", paddingTop: "calc(4rem + 48px)", paddingBottom: "48px" }}>
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:items-center md:gap-16">
           {/* Text + form */}
-          <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left">
-            <h1 className="max-w-xl font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              Your training. Relentlessly adapted.
+          <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
+            <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
+              Your training.<br />Relentlessly adapted.
             </h1>
-            <p className="max-w-lg text-lg" style={{ color: "#3a3a3a" }}>
-            Dean tracks your training and injury history, learns how your body responds, 
-            and texts you exactly what to do next — so you arrive at the start line healthy and ready for a new PR.
+            <p className="text-lg" style={{ color: "#4a4a4a" }}>
+              Dean tracks your training and injury history, learns how your body responds,
+              and texts you exactly what to do next — so you arrive at the start line healthy and ready for a new PR.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
             </Suspense>
           </div>
-          {/* SMS mockup */}
+          {/* iPhone mockup */}
           <div className="flex flex-1 justify-center">
-            <SmsMockup messages={heroMessages} className="mx-auto" />
+            <IMessageMockup />
           </div>
         </div>
       </section>
