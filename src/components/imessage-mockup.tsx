@@ -65,6 +65,7 @@ export function IMessageMockup({ className }: { className?: string }) {
 
     // Instantly reset every message back to the hidden CSS-class state
     function resetMessages() {
+      if (!wrapper) return;
       msgRefs.current.forEach((el) => {
         if (!el) return;
         el.style.transition = "none";
