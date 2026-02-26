@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS } from "@/lib/linq";
+import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
 type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "workout_image";
@@ -108,6 +108,12 @@ export async function POST(request: Request) {
   // Build user message based on trigger
   const userMessage = buildUserMessage(trigger, activityData, imageActivity);
 
+  // Show typing indicator before generating — gives the experience of Dean
+  // "thinking". Fires and forgets; never blocks or throws on failure.
+  const chatId = (user.linq_chat_id as string | null) ?? null;
+  if (!dry_run && chatId) void startTyping(chatId);
+  const typingStartMs = Date.now();
+
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 1024,
@@ -118,8 +124,26 @@ export async function POST(request: Request) {
   const coachMessage =
     response.content[0].type === "text" ? response.content[0].text : "";
 
-  // Send SMS (skip if dry run)
-  if (!dry_run) await sendSMS(user.phone_number, coachMessage);
+  // Wait long enough for the typing indicator to feel proportional to the
+  // message length. If generation already took longer than the target, skip.
+  if (!dry_run && chatId) {
+    const target = typingDurationMs(coachMessage.length);
+    const elapsed = Date.now() - typingStartMs;
+    const remaining = Math.max(0, target - elapsed);
+    if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+  }
+
+  // Send SMS and capture chatId for future typing/read-receipt calls
+  if (!dry_run) {
+    const { chatId: returnedChatId } = await sendSMS(user.phone_number, coachMessage);
+    // Persist chatId if we learned it for the first time
+    if (returnedChatId && !chatId) {
+      void supabase
+        .from("users")
+        .update({ linq_chat_id: returnedChatId })
+        .eq("id", userId);
+    }
+  }
 
   // Store the response (skip if dry run)
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });

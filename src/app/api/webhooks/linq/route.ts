@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS } from "@/lib/linq";
+import { sendSMS, markRead } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
 import crypto from "crypto";
@@ -63,6 +63,13 @@ export async function POST(request: Request) {
   // Webhook v2026-02-03: data is nested under payload.data
   const data = payload.data || payload;
   const messageId: string | null = data.id || null;
+  // Try common field names for the chat ID — we log it so we can confirm the
+  // real field name once real payloads come through.
+  const payloadChatId: string | null =
+    data.chat_id ?? data.chatId ?? data.chat?.id ?? null;
+  if (payloadChatId) {
+    console.log("[linq-webhook] chatId from payload:", payloadChatId);
+  }
   const senderPhone =
     data.sender_handle?.handle || data.from_handle?.handle ||
     data.sender_handle || data.from_handle || null;
@@ -108,7 +115,7 @@ export async function POST(request: Request) {
   // Return 200 immediately, process in background
   after(async () => {
     try {
-      await handleInboundMessage(senderPhone, body, imageUrl, messageId);
+      await handleInboundMessage(senderPhone, body, imageUrl, messageId, payloadChatId);
     } catch (err) {
       console.error("[linq-webhook] async processing error:", err);
     }
@@ -121,7 +128,8 @@ async function handleInboundMessage(
   senderPhone: string,
   body: string,
   imageUrl: string | null,
-  messageId: string | null
+  messageId: string | null,
+  payloadChatId: string | null
 ) {
   // Deduplicate by external message ID
   if (messageId) {
@@ -141,7 +149,7 @@ async function handleInboundMessage(
   // Look up user by phone number
   const { data: user } = await supabase
     .from("users")
-    .select("id, onboarding_step, timezone")
+    .select("id, onboarding_step, timezone, linq_chat_id")
     .eq("phone_number", senderPhone)
     .single();
 
@@ -188,6 +196,21 @@ async function handleInboundMessage(
   }
 
   console.log("[linq-webhook] existing user:", user.id, "step:", user.onboarding_step);
+
+  // Resolve the chatId: prefer what's already stored, fall back to payload.
+  const resolvedChatId: string | null =
+    (user.linq_chat_id as string | null) ?? payloadChatId;
+
+  // Mark the message as read so the user sees a read receipt immediately.
+  if (resolvedChatId) void markRead(resolvedChatId);
+
+  // Cache the chatId if we learned it from the payload and didn't have it yet.
+  if (payloadChatId && !user.linq_chat_id) {
+    void supabase
+      .from("users")
+      .update({ linq_chat_id: payloadChatId })
+      .eq("id", user.id);
+  }
 
   void trackEvent(user.id, "message_received", { has_image: !!imageUrl });
 
