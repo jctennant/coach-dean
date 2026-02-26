@@ -22,9 +22,7 @@ export function Navbar({ smsUrl }: { smsUrl: string }) {
       <div className="mx-auto flex h-full max-w-5xl items-center justify-between px-5 md:px-8">
         {/* Wordmark */}
         <a href="/" className="flex items-center">
-          <span className="text-[20px] font-semibold tracking-tight text-primary">
-            Coach Dean
-          </span>
+          <img src="/logo.svg" alt="Coach Dean" height={40} style={{ height: 40 }} />
         </a>
 
         {/* CTA */}
