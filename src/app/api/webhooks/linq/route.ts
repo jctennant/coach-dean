@@ -146,12 +146,20 @@ async function handleInboundMessage(
     }
   }
 
-  // Look up user by phone number
-  const { data: user } = await supabase
+  // Look up user by phone number.
+  // Use maybeSingle() so "no rows" returns { data: null, error: null } rather
+  // than a PGRST116 error — that lets us distinguish "user not found" from a
+  // real DB error (e.g. missing column) without falling into the insert path.
+  const { data: user, error: lookupError } = await supabase
     .from("users")
     .select("id, onboarding_step, timezone, linq_chat_id")
     .eq("phone_number", senderPhone)
-    .single();
+    .maybeSingle();
+
+  if (lookupError) {
+    console.error("[linq-webhook] user lookup failed — aborting to avoid spurious insert:", lookupError);
+    return;
+  }
 
   if (!user) {
     console.log("[linq-webhook] new user, creating:", senderPhone);
