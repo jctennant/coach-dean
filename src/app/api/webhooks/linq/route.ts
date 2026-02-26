@@ -225,7 +225,7 @@ async function handleInboundMessage(
   // Image message from an onboarded user: extract workout and generate feedback.
   // Images during onboarding are unexpected — fall through to text path.
   if (imageUrl && !user.onboarding_step) {
-    await handleImageWorkout(user.id, senderPhone, imageUrl, body || null, messageId, (user.timezone as string) || "America/New_York");
+    await handleImageWorkout(user.id, senderPhone, imageUrl, body || null, messageId, (user.timezone as string) || "America/New_York", resolvedChatId);
     return;
   }
 
@@ -277,7 +277,7 @@ async function handleInboundMessage(
   await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: user.id, trigger: "user_message" }),
+    body: JSON.stringify({ userId: user.id, trigger: "user_message", chatId: resolvedChatId }),
   });
 }
 
@@ -307,7 +307,8 @@ async function handleImageWorkout(
   imageUrl: string,
   caption: string | null,
   messageId: string | null,
-  timezone: string
+  timezone: string,
+  chatId: string | null
 ) {
   console.log("[linq-webhook] processing image workout for user:", userId, "url:", imageUrl);
 
@@ -355,7 +356,7 @@ async function handleImageWorkout(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, trigger: "user_message" }),
+      body: JSON.stringify({ userId, trigger: "user_message", chatId }),
     });
     return;
   }
@@ -444,6 +445,7 @@ async function handleImageWorkout(
       userId,
       trigger: "workout_image",
       imageActivity: extracted,
+      chatId,
     }),
   });
 }

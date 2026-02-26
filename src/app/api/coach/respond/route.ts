@@ -12,6 +12,7 @@ interface CoachRequest {
   activityId?: number;
   imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
+  chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
 }
 
 interface ActivityRow {
@@ -29,7 +30,7 @@ interface ActivityRow {
  * Core coaching function. Given a user + trigger, generates and sends a coaching response via SMS.
  */
 export async function POST(request: Request) {
-  const { userId, trigger, activityId, imageActivity, dry_run }: CoachRequest = await request.json();
+  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId }: CoachRequest = await request.json();
 
   // Fetch user context in parallel
   const [
@@ -108,10 +109,17 @@ export async function POST(request: Request) {
   // Build user message based on trigger
   const userMessage = buildUserMessage(trigger, activityData, imageActivity);
 
+  // Prefer chatId passed directly in the request (avoids a DB round-trip and
+  // works even before linq_chat_id is persisted). Fall back to the stored value.
+  const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+  console.log("[coach/respond] chatId:", chatId, "trigger:", trigger);
+
   // Show typing indicator before generating — gives the experience of Dean
   // "thinking". Fires and forgets; never blocks or throws on failure.
-  const chatId = (user.linq_chat_id as string | null) ?? null;
-  if (!dry_run && chatId) void startTyping(chatId);
+  if (!dry_run && chatId) {
+    console.log("[coach/respond] starting typing indicator");
+    void startTyping(chatId);
+  }
   const typingStartMs = Date.now();
 
   const response = await anthropic.messages.create({
