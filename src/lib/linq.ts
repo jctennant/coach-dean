@@ -83,6 +83,8 @@ export async function startTyping(chatId: string): Promise<void> {
     });
     if (!res.ok) {
       console.warn("[linq] startTyping failed:", res.status, await res.text());
+    } else {
+      console.log("[linq] startTyping ok:", res.status);
     }
   } catch (err) {
     console.error("[linq] startTyping error:", err);

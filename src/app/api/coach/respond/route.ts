@@ -4,6 +4,8 @@ import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
+export const maxDuration = 60;
+
 type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "workout_image";
 
 interface CoachRequest {
@@ -114,11 +116,11 @@ export async function POST(request: Request) {
   const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
   console.log("[coach/respond] chatId:", chatId, "trigger:", trigger);
 
-  // Show typing indicator before generating — gives the experience of Dean
-  // "thinking". Fires and forgets; never blocks or throws on failure.
+  // Show typing indicator before generating. Awaited so Linq receives the call
+  // before we start the Claude generation — startTyping never throws.
   if (!dry_run && chatId) {
     console.log("[coach/respond] starting typing indicator");
-    void startTyping(chatId);
+    await startTyping(chatId);
   }
   const typingStartMs = Date.now();
 
