@@ -123,7 +123,7 @@ export default function Home() {
             <h1 className="max-w-xl font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
               Your training. Relentlessly adapted.
             </h1>
-            <p className="max-w-lg text-lg text-muted-foreground">
+            <p className="max-w-lg text-lg" style={{ color: "#3a3a3a" }}>
             Dean tracks your training and injury history, learns how your body responds, 
             and texts you exactly what to do next — so you arrive at the start line healthy and ready for a new PR.
             </p>
