@@ -140,18 +140,18 @@ Rules:
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
 
-  await supabase
-    .from("users")
-    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
-    .eq("id", user.id);
+  const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
+  if (extra.name) updatePayload.name = extra.name;
+  await supabase.from("users").update(updatePayload).eq("id", user.id);
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "goal", goal: parsed.goal });
 
+  const name = extra.name as string | undefined;
   const goalLabel = formatGoalInline(parsed.goal);
   const acknowledgment =
     parsed.goal === "general_fitness"
-      ? "Love it — building consistent fitness is a great foundation."
-      : `Love it, a ${goalLabel} — great goal.`;
+      ? `Love it${name ? `, ${name}` : ""} — building consistent fitness is a great foundation.`
+      : `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal.`;
 
   const question = nextStep ? getStepQuestion(nextStep, mergedData) : "";
 
@@ -319,16 +319,31 @@ async function handleAnythingElse(
     }
   }
 
-  // Save merged data and advance to awaiting_name
   const nextStep = findNextStep("awaiting_anything_else", merged);
+
+  // Acknowledge any injury the athlete shared so they feel heard
+  const injuryAck = extracted.injury_notes
+    ? await acknowledgeInjury(extracted.injury_notes)
+    : null;
+
+  void trackEvent(user.id, "onboarding_step_completed", { step: "anything_else" });
+
+  if (!nextStep) {
+    // Name was already captured in an earlier message — complete onboarding now
+    if (injuryAck) await sendAndStore(user.id, user.phone_number, injuryAck);
+    await completeOnboarding(user, merged);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Save progress and ask the next question (typically awaiting_name)
   await supabase
     .from("users")
     .update({ onboarding_step: nextStep, onboarding_data: merged })
     .eq("id", user.id);
 
-  void trackEvent(user.id, "onboarding_step_completed", { step: "anything_else" });
-
-  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, merged));
+  const question = getStepQuestion(nextStep, merged);
+  const responseText = injuryAck ? `${injuryAck}\n\n${question}` : question;
+  await sendAndStore(user.id, user.phone_number, responseText);
   return NextResponse.json({ ok: true });
 }
 
@@ -338,19 +353,39 @@ async function handleName(
   onboardingData: Record<string, unknown>
 ) {
   const name = await extractName(message);
+  const mergedData = name ? { ...onboardingData, name } : onboardingData;
 
-  const goal = (onboardingData.goal as string) || "general_fitness";
-  const raceDate = (onboardingData.race_date as string) || null;
-  const experienceYears = (onboardingData.experience_years as number) ?? 1;
-  const weeklyMiles = (onboardingData.weekly_miles as number) ?? null;
-  const weeklyHours = (onboardingData.weekly_hours as number) || null;
-  const crosstrain = (onboardingData.crosstraining_tools as string[]) || [];
-  const daysPerWeek = (onboardingData.days_per_week as number) ?? 4;
-  const trainingDays = (onboardingData.training_days as string[]) || [];
-  const easyPace = (onboardingData.easy_pace as string) || null;
-  const tempoPace = (onboardingData.tempo_pace as string) || null;
-  const intervalPace = (onboardingData.interval_pace as string) || null;
-  const injuryNotes = (onboardingData.injury_notes as string) || null;
+  void trackEvent(user.id, "onboarding_step_completed", { step: "name" });
+  await completeOnboarding(user, mergedData);
+  return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding completion
+// ---------------------------------------------------------------------------
+
+/**
+ * Finalize onboarding: write training_profiles + training_state, mark user complete,
+ * and fire the initial_plan coaching trigger. Called by handleName and by
+ * handleAnythingElse when the name was already captured in an earlier message.
+ */
+async function completeOnboarding(
+  user: { id: string },
+  data: Record<string, unknown>
+): Promise<void> {
+  const goal = (data.goal as string) || "general_fitness";
+  const raceDate = (data.race_date as string) || null;
+  const experienceYears = (data.experience_years as number) ?? 1;
+  const weeklyMiles = (data.weekly_miles as number) ?? null;
+  const weeklyHours = (data.weekly_hours as number) || null;
+  const crosstrain = (data.crosstraining_tools as string[]) || [];
+  const daysPerWeek = (data.days_per_week as number) ?? 4;
+  const trainingDays = (data.training_days as string[]) || [];
+  const easyPace = (data.easy_pace as string) || null;
+  const tempoPace = (data.tempo_pace as string) || null;
+  const intervalPace = (data.interval_pace as string) || null;
+  const injuryNotes = (data.injury_notes as string) || null;
+  const name = (data.name as string) || null;
 
   const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles, weeklyHours);
   const weeklyMilesRaw = weeklyMiles ?? 15;
@@ -396,7 +431,7 @@ async function handleName(
       .update({
         name: name ?? undefined,
         onboarding_step: null,
-        onboarding_data: onboardingData,
+        onboarding_data: data,
       })
       .eq("id", user.id),
   ]);
@@ -404,8 +439,6 @@ async function handleName(
   if (profileResult.error) console.error("[onboarding] training_profiles upsert failed:", profileResult.error);
   if (stateResult.error) console.error("[onboarding] training_state upsert failed:", stateResult.error);
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
-
-  void trackEvent(user.id, "onboarding_step_completed", { step: "name" });
 
   // No wrap-up SMS — the initial_plan IS the response, addressed by name.
   after(async () => {
@@ -420,8 +453,6 @@ async function handleName(
       console.error("[onboarding] coach trigger failed:", err);
     }
   });
-
-  return NextResponse.json({ ok: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +559,7 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
     case "awaiting_anything_else":
       return false; // Always ask exactly once — never pre-satisfied
     case "awaiting_name":
-      return false; // Always ask — name is never pre-filled during onboarding
+      return typeof data.name === "string" && (data.name as string).length > 0;
     default:
       return false;
   }
@@ -590,9 +621,10 @@ async function extractAdditionalFields(
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "injury_mentioned": boolean}
+{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "injury_mentioned": boolean, "name": "FirstName" | null}
 
 Rules:
+- name: the athlete's first name if explicitly stated (e.g. "I'm Ray", "My name is Sarah", "Hi, this is Jake"). null if not mentioned. Capitalize properly.
 - race_date: if a specific target race date is mentioned. Today is ${today}.
 - experience_years: infer from any experience signal. "new runner" or "just started" → 0. "fairly inexperienced" → 0.2. "completed an 8 week plan" with no prior context → 0.15. "a year" → 1. "5+ years" → 5.
 - weekly_miles: if weekly running volume is stated or clearly implied. Convert km to miles (×0.621).
@@ -611,6 +643,7 @@ Rules:
     if (parsed.weekly_miles != null) result.weekly_miles = parsed.weekly_miles;
     if (parsed.easy_pace != null) result.easy_pace = parsed.easy_pace;
     if (parsed.injury_mentioned === true) result.injury_mentioned = true;
+    if (parsed.name != null) result.name = parsed.name;
     return result;
   } catch {
     return {};
@@ -699,6 +732,21 @@ async function extractName(message: string): Promise<string | null> {
   const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
   console.log("[onboarding] name raw response:", text);
   if (!text || text.toLowerCase() === "null") return null;
+  return text;
+}
+
+/**
+ * Generates a warm, specific 1-2 sentence acknowledgment of an injury or physical
+ * limitation so the athlete feels heard before we move on.
+ */
+async function acknowledgeInjury(injuryNotes: string): Promise<string> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 100,
+    system: `You are Coach Dean, an AI endurance coach. An athlete just mentioned a physical limitation or injury during onboarding. Respond in 1-2 sentences acknowledging it warmly and specifically, and assure them you'll factor it into their training plan. Plain text only — no markdown, no asterisks, no emojis.`,
+    messages: [{ role: "user", content: injuryNotes }],
+  });
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
   return text;
 }
 
