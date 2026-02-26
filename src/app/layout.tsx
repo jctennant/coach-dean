@@ -19,9 +19,25 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://coachdean.ai"),
   title: "Coach Dean — AI Running Coach",
   description:
     "An AI-powered running coach that connects to Strava and coaches you via SMS.",
+  icons: {
+    icon: [
+      { url: "/bubble-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/bubble-64.png", sizes: "64x64", type: "image/png" },
+    ],
+    apple: [{ url: "/bubble-64.png", sizes: "64x64", type: "image/png" }],
+  },
+  openGraph: {
+    title: "Coach Dean — AI Running Coach",
+    description:
+      "An AI-powered running coach that connects to Strava and coaches you via SMS.",
+    url: "https://coachdean.ai",
+    siteName: "Coach Dean",
+    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Coach Dean" }],
+  },
 };
 
 export default function RootLayout({
