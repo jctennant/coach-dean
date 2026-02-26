@@ -46,8 +46,8 @@ export function IMessageMockup({ className }: { className?: string }) {
   const msgRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
+    if (!wrapperRef.current) return;
+    const wrapper: HTMLDivElement = wrapperRef.current;
 
     let alive = true;
     let tid: ReturnType<typeof setTimeout>;
@@ -65,7 +65,6 @@ export function IMessageMockup({ className }: { className?: string }) {
 
     // Instantly reset every message back to the hidden CSS-class state
     function resetMessages() {
-      if (!wrapper) return;
       msgRefs.current.forEach((el) => {
         if (!el) return;
         el.style.transition = "none";
