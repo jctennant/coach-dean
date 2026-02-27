@@ -98,6 +98,8 @@ export async function POST(request: Request) {
   )?.strava_stats as Record<string, unknown> | undefined;
   const userTimezone = (user.timezone as string) || "America/New_York";
 
+  const shouldUseWebSearch = trigger === "user_message" || trigger === "initial_plan";
+
   const systemPrompt = buildSystemPrompt(
     user,
     profile,
@@ -105,7 +107,8 @@ export async function POST(request: Request) {
     recentMessages,
     activitySummary,
     stravaStats,
-    userTimezone
+    userTimezone,
+    shouldUseWebSearch
   );
 
   // Build user message based on trigger
@@ -129,10 +132,15 @@ export async function POST(request: Request) {
     max_tokens: 1024,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
+    ...(shouldUseWebSearch
+      ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" }] }
+      : {}),
   });
 
-  const coachMessage =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  // Web search may produce multiple content blocks (server_tool_use, web_search_tool_result, text).
+  // Always use the last text block — that's Claude's final reply after any searches.
+  const textBlock = response.content.filter(b => b.type === "text").pop();
+  const coachMessage = textBlock?.type === "text" ? textBlock.text : "";
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -383,7 +391,8 @@ function buildSystemPrompt(
   }>,
   activitySummary: string,
   stravaStats?: Record<string, unknown>,
-  timezone?: string
+  timezone?: string,
+  hasWebSearch?: boolean
 ): string {
   const conversationHistory = recentMessages
     .map((m) => `${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}`)
@@ -528,7 +537,13 @@ TONE WHEN ATHLETE DOES A DIFFERENT WORKOUT THAN PRESCRIBED:
 HANDLING UNKNOWN REFERENCES:
 - If the athlete mentions a specific coach, athlete, or training philosophy (e.g. "Pfitzinger", "Lydiard", "80/20 method", "polarized training") that you are not fully confident you know well, do NOT guess or assume. Instead, ask the athlete to share the key principles of that approach so you can incorporate it accurately into their plan. This prevents bad advice and produces better personalization.
 
-RECENT CONVERSATION:
+${hasWebSearch ? `WEB SEARCH:
+You have access to web search. Use it proactively when:
+- The athlete mentions a specific race, event, or trail by name — search for course details, elevation profile, terrain, cutoff times
+- The athlete asks about something requiring current or specific information you're not fully confident about (race logistics, course records, a specific training methodology)
+- You need factual details about a route, venue, or event to give accurate training advice
+Do NOT search for general training concepts, coaching methodology, or things you already know well.
+` : ""}RECENT CONVERSATION:
 ${conversationHistory || "No previous messages."}`;
 }
 
