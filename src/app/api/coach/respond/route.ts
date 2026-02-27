@@ -134,42 +134,57 @@ export async function POST(request: Request) {
   const coachMessage =
     response.content[0].type === "text" ? response.content[0].text : "";
 
-  // Wait long enough for the typing indicator to feel proportional to the
-  // message length. If generation already took longer than the target, skip.
-  if (!dry_run && chatId) {
-    const target = typingDurationMs(coachMessage.length);
-    const elapsed = Date.now() - typingStartMs;
-    const remaining = Math.max(0, target - elapsed);
-    if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
-  }
-
-  // Send SMS and capture chatId for future typing/read-receipt calls
-  if (!dry_run) {
-    const { chatId: returnedChatId } = await sendSMS(user.phone_number, coachMessage);
-    // Persist chatId if we learned it for the first time
-    if (returnedChatId && !chatId) {
-      void supabase
-        .from("users")
-        .update({ linq_chat_id: returnedChatId })
-        .eq("id", userId);
-    }
-  }
-
-  // Store the response (skip if dry run)
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
-  await supabase.from("conversations").insert({
-    user_id: userId,
-    role: "assistant",
-    content: coachMessage,
-    message_type:
-      trigger === "post_run"
-        ? "post_run"
-        : trigger === "morning_plan"
-          ? "morning_plan"
-          : "coach_response", // initial_plan, user_message, weekly_recap stored as coach_response
-    strava_activity_id: activityId || null,
-  });
+  // Split into iMessage-sized chunks. Each part is sent as a separate text
+  // with its own typing indicator so it feels like a real person composing
+  // multiple follow-up messages.
+  const parts = splitIntoMessages(coachMessage);
+  const msgType =
+    trigger === "post_run"
+      ? "post_run"
+      : trigger === "morning_plan"
+        ? "morning_plan"
+        : "coach_response";
+
+  let learnedChatId: string | null = null;
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+
+    if (i === 0) {
+      // First part: typing indicator was started before generation.
+      // Wait only the time remaining to hit the proportional target.
+      const target = typingDurationMs(part.length);
+      const elapsed = Date.now() - typingStartMs;
+      const remaining = Math.max(0, target - elapsed);
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+    } else {
+      // Subsequent parts: restart typing, pause briefly to feel like composing.
+      if (chatId) await startTyping(chatId);
+      const composeMs = Math.min(2000, Math.max(800, part.length * 8));
+      await new Promise((r) => setTimeout(r, composeMs));
+    }
+
+    const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
+    if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
+
+    await supabase.from("conversations").insert({
+      user_id: userId,
+      role: "assistant",
+      content: part,
+      message_type: msgType,
+      strava_activity_id: activityId || null,
+    });
+  }
+
+  // Persist chatId if we learned it for the first time
+  if (learnedChatId && !chatId) {
+    void supabase
+      .from("users")
+      .update({ linq_chat_id: learnedChatId })
+      .eq("id", userId);
+  }
 
   void trackEvent(userId, "coaching_response_sent", { trigger });
 
@@ -199,6 +214,61 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ ok: true, message: coachMessage });
+}
+
+/**
+ * Split a coach response into iMessage-sized chunks (≤ MAX_CHARS each).
+ *
+ * Strategy:
+ *   1. Split on blank lines (paragraph breaks) — Claude is prompted to use these.
+ *   2. If any paragraph still exceeds MAX_CHARS, split further at sentence boundaries.
+ *
+ * Each chunk is sent as a separate text message with its own typing indicator,
+ * so it feels like a real person sending a few short follow-up texts.
+ */
+const MAX_MSG_CHARS = 480;
+
+function splitIntoMessages(text: string): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length <= MAX_MSG_CHARS) return [trimmed];
+
+  const chunks: string[] = [];
+  const paragraphs = trimmed.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+
+  let current = "";
+
+  for (const para of paragraphs) {
+    if (para.length > MAX_MSG_CHARS) {
+      // Flush current buffer first
+      if (current) { chunks.push(current); current = ""; }
+
+      // Split long paragraph at sentence boundaries
+      const sentences = para.match(/[^.!?…]+(?:[.!?…]+\s*|$)/g) ?? [para];
+      for (const raw of sentences) {
+        const s = raw.trim();
+        if (!s) continue;
+        if (!current) {
+          current = s;
+        } else if (current.length + 1 + s.length <= MAX_MSG_CHARS) {
+          current += " " + s;
+        } else {
+          chunks.push(current);
+          current = s;
+        }
+      }
+    } else if (!current) {
+      current = para;
+    } else if (current.length + 2 + para.length <= MAX_MSG_CHARS) {
+      // Fits in the same bubble — join with a single newline (not blank line)
+      current += "\n" + para;
+    } else {
+      chunks.push(current);
+      current = para;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks.filter((c) => c.length > 0);
 }
 
 /**
@@ -420,12 +490,23 @@ CURRENT TRAINING STATE:
 - Active adjustments: ${state?.plan_adjustments || "None"}
 
 COMMUNICATION STYLE:
-- Text message tone: concise, encouraging, knowledgeable — more like a supportive training partner than a strict authority
-- Use numbers and paces specifically — don't be vague
-- Keep responses to 2-3 short paragraphs max — responses should feel like texts from a coach, not essays. If a topic genuinely needs more detail, send multiple sequential short messages rather than one long wall of text.
-- Use occasional emoji sparingly
-- NEVER use asterisks, markdown bold/italic, or any special formatting characters — SMS does not render markdown and asterisks will appear literally in the message
-- If the athlete uses metric units (km, kilometers, min/km), give all distances and paces in metric. If they use imperial (miles, min/mi), use imperial. Match their preference consistently throughout.
+You are texting over iMessage. Write exactly like a real human coach would text — not an email, not a report, not a bullet-point summary.
+
+LENGTH — this is the most important rule:
+- Keep responses under 480 characters. Most replies should be a single short text.
+- If you genuinely need more space, you can split into 2–3 messages by separating them with a blank line — the system will send each as its own bubble. But this isn't required; one tight message is usually better.
+- When in doubt, cut it. A short reply that nails the key point beats a long reply that covers everything.
+
+TONE:
+- Cut filler openers. Never start with "Great job!", "Awesome!", "That's fantastic!" — get straight to the substance. Specific, earned praise ("That negative split shows real fitness") is fine; generic openers are not.
+- No sign-offs, no "Let me know if you have questions", no "You've got this!" at the end.
+- Sound like a knowledgeable friend, not a customer service bot.
+- Use specific numbers — never be vague about paces, distances, or dates.
+- One emoji max per response. Often none is better.
+
+FORMATTING:
+- NEVER use asterisks, markdown bold/italic, bullet points, or dashes as list markers — SMS does not render markdown and they appear as raw characters.
+- If the athlete uses metric (km, min/km), respond in metric. If imperial (miles, min/mi), respond in imperial. Match consistently.
 
 TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
 - Lead with genuine excitement — celebrate the effort and the fitness it reflects
@@ -483,11 +564,11 @@ function buildUserMessage(
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
     case "nightly_reminder":
-      return "Send a brief nightly reminder for tomorrow's scheduled workout. Include the workout type (easy run, tempo, long run, etc.), the target distance, and the target pace. 2-3 sentences max — this is a gentle heads-up, not a full plan.";
+      return "Send a single short text reminding the athlete of tomorrow's workout. One sentence: workout type, distance, and target pace or effort. Nothing else.";
     case "weekly_recap":
-      return `Generate a weekly training recap and preview of the coming week (use DATE CONTEXT for the current day). If activity data is available for the past 7 days, analyze volume/paces/consistency and give 2-3 specific observations. If no activity data, ask how last week went and what they want to focus on next week. Either way, give a brief preview of the coming week's key sessions with specific dates. Keep it under 250 words.`;
+      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation). Second: 2-3 key sessions this week with dates and targets. Third (optional): one brief note on the training focus. No intro fluff.`;
     case "workout_image":
-      return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nProvide post-workout coaching feedback. Analyze their performance against their training paces and recent history. Note what went well, flag anything worth discussing (pace, HR, effort), and briefly mention what's next in their plan. Keep it concise — 2-3 short paragraphs, SMS tone.`;
+      return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
 
     case "initial_plan":
       return `This athlete just completed onboarding. Generate their first week training plan.
@@ -509,6 +590,6 @@ VOLUME AND SAFETY:
 - If they have an injury, acknowledge it, explain how the plan accounts for it, and ask one follow-up question about constraints.
 - If no injury, end with a brief open question about any niggles or schedule constraints.
 
-Keep it conversational and specific. Under 300 words.`;
+Write as 2–3 short iMessage texts separated by blank lines. Each text under 480 characters. First text: warm welcome + goal + weeks to race. Second: this week's sessions day by day (dates, type, target). Third (optional): one note on injury/constraints. No filler.`;
   }
 }
