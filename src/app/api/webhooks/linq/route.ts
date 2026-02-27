@@ -129,6 +129,22 @@ async function handleInboundMessage(
   messageId: string | null,
   payloadChatId: string | null
 ) {
+  // Fire read receipt + typing immediately — before any DB operations.
+  // payloadChatId is already extracted from the webhook payload so there's no
+  // reason to wait 1-2s for user lookup / creation before the indicator appears.
+  if (payloadChatId) {
+    void markRead(payloadChatId);
+    void startTyping(payloadChatId);
+    // Keep refreshing every 4.5s — Linq auto-clears "..." after ~5-10s without a refresh.
+    // We fire 4 times to cover up to ~18s (goal step with web search can take that long).
+    void (async (id: string) => {
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 4500));
+        void startTyping(id);
+      }
+    })(payloadChatId);
+  }
+
   // Deduplicate by external message ID
   if (messageId) {
     const { data: existing } = await supabase
@@ -180,16 +196,8 @@ async function handleInboundMessage(
     void trackEvent(newUser.id, "onboarding_started");
     void trackEvent(newUser.id, "message_received", { has_image: !!imageUrl });
 
-    // Fire read receipt + typing for brand-new users too.
+    // Persist chatId for future messages (typing indicator started above already)
     if (payloadChatId) {
-      void markRead(payloadChatId);
-      void startTyping(payloadChatId);
-      void (async (id: string) => {
-        for (let i = 0; i < 2; i++) {
-          await new Promise((r) => setTimeout(r, 4500));
-          void startTyping(id);
-        }
-      })(payloadChatId);
       void supabase.from("users").update({ linq_chat_id: payloadChatId }).eq("id", newUser.id);
     }
 
@@ -220,22 +228,11 @@ async function handleInboundMessage(
   const resolvedChatId: string | null =
     (user.linq_chat_id as string | null) ?? payloadChatId;
 
-  // Mark the message as read so the user sees a read receipt immediately.
-  if (resolvedChatId) void markRead(resolvedChatId);
-
-  // Show typing indicator immediately for all messages (onboarding and coaching).
-  // Keep refreshing every 4.5s — Apple auto-clears "..." after ~5-10s without a refresh.
-  // During coaching, the 10s debounce means we need 2 refreshes to stay alive until
-  // coach/respond takes over. During onboarding, the handler is fast so 1-2 refreshes
-  // covers the response time.
-  if (resolvedChatId) {
-    void startTyping(resolvedChatId);
-    void (async (id: string) => {
-      for (let i = 0; i < 2; i++) {
-        await new Promise((r) => setTimeout(r, 4500));
-        void startTyping(id);
-      }
-    })(resolvedChatId);
+  // Typing/read-receipt was already fired at the top of handleInboundMessage using
+  // payloadChatId. If the stored linq_chat_id differs from the payload (shouldn't happen
+  // but possible after a chat migration), fire a second read on the stored one too.
+  if (resolvedChatId && resolvedChatId !== payloadChatId) {
+    void markRead(resolvedChatId);
   }
 
   // Cache the chatId if we learned it from the payload and didn't have it yet.
