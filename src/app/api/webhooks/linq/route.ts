@@ -212,10 +212,12 @@ async function handleInboundMessage(
   // Mark the message as read so the user sees a read receipt immediately.
   if (resolvedChatId) void markRead(resolvedChatId);
 
-  // Show typing indicator immediately, then keep refreshing every 4.5s throughout
-  // the 10s debounce. Apple auto-clears "..." after ~5-10s without a refresh, so a
-  // single call at the start would go dark before the debounce even finishes.
-  if (resolvedChatId && !user.onboarding_step) {
+  // Show typing indicator immediately for all messages (onboarding and coaching).
+  // Keep refreshing every 4.5s — Apple auto-clears "..." after ~5-10s without a refresh.
+  // During coaching, the 10s debounce means we need 2 refreshes to stay alive until
+  // coach/respond takes over. During onboarding, the handler is fast so 1-2 refreshes
+  // covers the response time.
+  if (resolvedChatId) {
     void startTyping(resolvedChatId);
     void (async (id: string) => {
       for (let i = 0; i < 2; i++) {
