@@ -212,9 +212,18 @@ async function handleInboundMessage(
   // Mark the message as read so the user sees a read receipt immediately.
   if (resolvedChatId) void markRead(resolvedChatId);
 
-  // Show typing indicator immediately — don't wait for the 10s debounce or
-  // coach/respond to boot up. User should see "..." within ~1-2s of their message.
-  if (resolvedChatId && !user.onboarding_step) void startTyping(resolvedChatId);
+  // Show typing indicator immediately, then keep refreshing every 4.5s throughout
+  // the 10s debounce. Apple auto-clears "..." after ~5-10s without a refresh, so a
+  // single call at the start would go dark before the debounce even finishes.
+  if (resolvedChatId && !user.onboarding_step) {
+    void startTyping(resolvedChatId);
+    void (async (id: string) => {
+      for (let i = 0; i < 2; i++) {
+        await new Promise((r) => setTimeout(r, 4500));
+        void startTyping(id);
+      }
+    })(resolvedChatId);
+  }
 
   // Cache the chatId if we learned it from the payload and didn't have it yet.
   if (payloadChatId && !user.linq_chat_id) {
