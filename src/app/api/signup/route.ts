@@ -49,8 +49,11 @@ export async function POST(request: Request) {
   const welcomeMessage =
     "Hey, I'm Coach Dean! 👋 I'm your personal running coach, and I'll be working with you entirely over text.\n\nFirst things first — what are you training for? (e.g. 5K, half marathon, full marathon, ultra, triathlon, or something else?)";
 
-  // Send welcome SMS and store in conversations
-  await Promise.all([
+  // Send welcome SMS and store in conversations.
+  // Capture the chatId from Linq so read receipts and typing indicators work
+  // from the very first reply — otherwise linq_chat_id stays null until the
+  // first inbound webhook, which misses the first exchange.
+  const [{ chatId }] = await Promise.all([
     sendSMS(phone, welcomeMessage),
     supabase.from("conversations").insert({
       user_id: user.id,
@@ -59,6 +62,10 @@ export async function POST(request: Request) {
       message_type: "coach_response",
     }),
   ]);
+
+  if (chatId) {
+    void supabase.from("users").update({ linq_chat_id: chatId }).eq("id", user.id);
+  }
 
   return NextResponse.json({ ok: true });
 }

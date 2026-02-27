@@ -7,6 +7,7 @@ import { trackEvent } from "@/lib/track";
 interface OnboardingRequest {
   userId: string;
   message: string;
+  chatId?: string | null;
 }
 
 /** Extract JSON from Claude's response, handling markdown code blocks */
@@ -32,7 +33,7 @@ function extractJSON(text: string): string {
  * Steps are skipped automatically if data was already captured in an earlier message.
  */
 export async function POST(request: Request) {
-  const { userId, message }: OnboardingRequest = await request.json();
+  const { userId, message, chatId }: OnboardingRequest = await request.json();
 
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -60,15 +61,15 @@ export async function POST(request: Request) {
 
   switch (step) {
     case "awaiting_goal":
-      return handleGoal(user, message, onboardingData);
+      return handleGoal(user, message, onboardingData, chatId);
     case "awaiting_race_date":
       return handleRaceDate(user, message, onboardingData);
     case "awaiting_schedule":
       return handleSchedule(user, message, onboardingData);
     case "awaiting_anything_else":
-      return handleAnythingElse(user, message, onboardingData);
+      return handleAnythingElse(user, message, onboardingData, chatId);
     case "awaiting_name":
-      return handleName(user, message, onboardingData);
+      return handleName(user, message, onboardingData, chatId);
     default:
       return NextResponse.json({ ok: true });
   }
@@ -81,7 +82,8 @@ export async function POST(request: Request) {
 async function handleGoal(
   user: { id: string; phone_number: string },
   message: string,
-  onboardingData: Record<string, unknown>
+  onboardingData: Record<string, unknown>,
+  chatId?: string | null
 ) {
   const parseResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
@@ -295,7 +297,8 @@ Rules:
 async function handleAnythingElse(
   user: { id: string; phone_number: string },
   message: string,
-  onboardingData: Record<string, unknown>
+  onboardingData: Record<string, unknown>,
+  chatId?: string | null
 ) {
   const extracted = await extractAnythingElse(message);
 
@@ -331,7 +334,7 @@ async function handleAnythingElse(
   if (!nextStep) {
     // Name was already captured in an earlier message — complete onboarding now
     if (injuryAck) await sendAndStore(user.id, user.phone_number, injuryAck);
-    await completeOnboarding(user, merged);
+    await completeOnboarding(user, merged, chatId);
     return NextResponse.json({ ok: true });
   }
 
@@ -350,13 +353,14 @@ async function handleAnythingElse(
 async function handleName(
   user: { id: string; phone_number: string },
   message: string,
-  onboardingData: Record<string, unknown>
+  onboardingData: Record<string, unknown>,
+  chatId?: string | null
 ) {
   const name = await extractName(message);
   const mergedData = name ? { ...onboardingData, name } : onboardingData;
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "name" });
-  await completeOnboarding(user, mergedData);
+  await completeOnboarding(user, mergedData, chatId);
   return NextResponse.json({ ok: true });
 }
 
@@ -371,7 +375,8 @@ async function handleName(
  */
 async function completeOnboarding(
   user: { id: string },
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  chatId?: string | null
 ): Promise<void> {
   const goal = (data.goal as string) || "general_fitness";
   const raceDate = (data.race_date as string) || null;
@@ -447,7 +452,7 @@ async function completeOnboarding(
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, trigger: "initial_plan" }),
+        body: JSON.stringify({ userId: user.id, trigger: "initial_plan", chatId: chatId ?? undefined }),
       });
     } catch (err) {
       console.error("[onboarding] coach trigger failed:", err);

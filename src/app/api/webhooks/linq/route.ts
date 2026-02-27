@@ -182,6 +182,19 @@ async function handleInboundMessage(
     void trackEvent(newUser.id, "onboarding_started");
     void trackEvent(newUser.id, "message_received", { has_image: !!imageUrl });
 
+    // Fire read receipt + typing for brand-new users too.
+    if (payloadChatId) {
+      void markRead(payloadChatId);
+      void startTyping(payloadChatId);
+      void (async (id: string) => {
+        for (let i = 0; i < 2; i++) {
+          await new Promise((r) => setTimeout(r, 4500));
+          void startTyping(id);
+        }
+      })(payloadChatId);
+      void supabase.from("users").update({ linq_chat_id: payloadChatId }).eq("id", newUser.id);
+    }
+
     // For new users, images before onboarding are unusual — treat as no message
     // and let onboarding start normally.
     const messageBody = body || (imageUrl ? "[Workout image received]" : "");
@@ -196,7 +209,7 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: newUser.id, message: messageBody }),
+      body: JSON.stringify({ userId: newUser.id, message: messageBody, chatId: payloadChatId }),
     });
 
     console.log("[linq-webhook] new user routed to onboarding/handle:", senderPhone);
@@ -264,7 +277,7 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user.id, message: messageBody }),
+      body: JSON.stringify({ userId: user.id, message: messageBody, chatId: resolvedChatId }),
     });
     return;
   }
