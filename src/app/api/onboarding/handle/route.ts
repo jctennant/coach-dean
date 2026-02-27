@@ -4,6 +4,8 @@ import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
+export const maxDuration = 60;
+
 interface OnboardingRequest {
   userId: string;
   message: string;
@@ -131,11 +133,12 @@ Rules:
     return NextResponse.json({ ok: true });
   }
 
-  // Run in parallel: extract additional onboarding fields the user already answered in passing,
-  // and detect any immediate coaching questions that deserve a quick answer.
-  const [extra, immediateAnswer] = await Promise.all([
+  // Run in parallel: extract onboarding fields, detect immediate coaching questions,
+  // and search for the specific race (if named) to acknowledge real course details.
+  const [extra, immediateAnswer, raceAck] = await Promise.all([
     extractAdditionalFields(message),
     detectAndAnswerImmediate(message, parsed.goal),
+    generateRaceAcknowledgment(message),
   ]);
   const sportType = getSportType(parsed.goal);
   const mergedData = { ...onboardingData, goal: parsed.goal, sport_type: sportType, ...extra };
@@ -150,8 +153,11 @@ Rules:
 
   const name = extra.name as string | undefined;
   const goalLabel = formatGoalInline(parsed.goal);
-  const acknowledgment =
-    parsed.goal === "general_fitness"
+  // If we found a specific named race via web search, lead with real course details.
+  // Otherwise fall back to the generic goal acknowledgment.
+  const acknowledgment = raceAck
+    ? `Love it${name ? `, ${name}` : ""} — ${raceAck}`
+    : parsed.goal === "general_fitness"
       ? `Love it${name ? `, ${name}` : ""} — building consistent fitness is a great foundation.`
       : `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal.`;
 
@@ -616,6 +622,36 @@ function getStepQuestion(step: string, data: Record<string, unknown>): string {
  * what the current step is asking for. Used to pre-fill data and skip questions
  * the user already answered in passing.
  */
+/**
+ * Search for a specific named race and return one sentence of course facts.
+ * Returns null if no specific named event is found or search fails.
+ * Runs in parallel with the Haiku extraction calls in handleGoal.
+ */
+async function generateRaceAcknowledgment(message: string): Promise<string | null> {
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 200,
+      tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
+      system: `You help a running coach identify a specific race from an athlete's message.
+
+If the message mentions a specific named race or event (e.g. "Broken Arrow 46K", "Boston Marathon", "UTMB", "Gorge Waterfalls 50K"), search for it and return ONE plain-text sentence describing its most notable characteristics — exact distance, total elevation gain, terrain type. Start with the race name. Under 140 characters. No greeting, no markdown, no asterisks.
+
+If no specific named event is mentioned (just a generic category like "marathon" or "50K trail run"), return only the word: null`,
+      messages: [{ role: "user", content: message }],
+    });
+    const text = response.content
+      .filter(b => b.type === "text")
+      .map(b => b.type === "text" ? b.text : "")
+      .join("")
+      .trim();
+    if (!text || text.toLowerCase() === "null") return null;
+    return text;
+  } catch {
+    return null;
+  }
+}
+
 async function extractAdditionalFields(
   message: string
 ): Promise<Record<string, unknown>> {
@@ -629,7 +665,7 @@ Output format (omit fields that are not present):
 {"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "injury_mentioned": boolean, "name": "FirstName" | null}
 
 Rules:
-- name: the athlete's first name if explicitly stated (e.g. "I'm Ray", "My name is Sarah", "Hi, this is Jake"). null if not mentioned. Capitalize properly.
+- name: ONLY extract if the athlete explicitly introduces themselves — phrases like "I'm [name]", "My name is [name]", "Hi, this is [name]", "Call me [name]". NEVER extract from greetings like "Hey Dean!" or "Hi Coach!" — those address Coach Dean, not the athlete. Return null if there is any doubt.
 - race_date: if a specific target race date is mentioned. Today is ${today}.
 - experience_years: infer from any experience signal. "new runner" or "just started" → 0. "fairly inexperienced" → 0.2. "completed an 8 week plan" with no prior context → 0.15. "a year" → 1. "5+ years" → 5.
 - weekly_miles: if weekly running volume is stated or clearly implied. Convert km to miles (×0.621).
