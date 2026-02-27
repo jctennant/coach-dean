@@ -68,8 +68,8 @@ export async function POST(request: Request) {
 
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
-  // Skip awaiting_anything_else and awaiting_name — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name") {
+  // Skip awaiting_anything_else, awaiting_name, awaiting_cadence — any response is valid for those.
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -94,6 +94,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_name":
       result = await handleName(user, message, onboardingData, chatId);
+      break;
+    case "awaiting_cadence":
+      result = await handleCadence(user, message);
       break;
     default:
       result = NextResponse.json({ ok: true });
@@ -411,6 +414,41 @@ async function handleName(
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "name" });
   await completeOnboarding(user, mergedData, chatId);
+  return NextResponse.json({ ok: true });
+}
+
+async function handleCadence(
+  user: { id: string; phone_number: string },
+  message: string
+) {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 16,
+    system: `The athlete is responding to a question about whether they want nightly workout reminders or just a weekly plan overview on Sundays.
+
+Classify their reply. Return only one word: "nightly" or "weekly".
+
+- "yes", "yeah", "sure", "please", "sounds good", "reminders", "nightly", "that works" → nightly
+- "no", "nope", "weekly", "sunday", "just weekly", "no thanks" → weekly
+- Anything ambiguous → weekly`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "weekly";
+  const cadence = raw.startsWith("nightly") ? "nightly_reminders" : "weekly_only";
+
+  const confirmation =
+    cadence === "nightly_reminders"
+      ? "Perfect — I'll send you a heads-up the evening before each session."
+      : "Got it — I'll send you a weekly plan overview every Sunday.";
+
+  await Promise.all([
+    supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", user.id),
+    supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
+    sendAndStore(user.id, user.phone_number, confirmation),
+  ]);
+
+  void trackEvent(user.id, "cadence_preference_set", { cadence });
   return NextResponse.json({ ok: true });
 }
 

@@ -216,6 +216,23 @@ export async function POST(request: Request) {
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
+
+    // After the plan lands, follow up with a cadence preference question.
+    // Natural pause → typing indicator → send as a separate bubble.
+    const cadenceQ = "Quick question — want me to text you a reminder the evening before each workout? Or would you prefer just a weekly plan overview each Sunday?";
+    await new Promise((r) => setTimeout(r, 4000));
+    if (chatId) await startTyping(chatId);
+    await new Promise((r) => setTimeout(r, 2500));
+    await sendSMS(user.phone_number, cadenceQ);
+    await supabase.from("conversations").insert({
+      user_id: userId,
+      role: "assistant",
+      content: cadenceQ,
+      message_type: "coach_response",
+    });
+    // Route next reply to the cadence handler in the onboarding flow
+    void supabase.from("users").update({ onboarding_step: "awaiting_cadence" }).eq("id", userId);
+
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
   }
