@@ -119,11 +119,21 @@ export async function POST(request: Request) {
   const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
   console.log("[coach/respond] chatId:", chatId, "trigger:", trigger);
 
-  // Show typing indicator before generating. Awaited so Linq receives the call
-  // before we start the Claude generation — startTyping never throws.
+  // Show typing indicator before generating, then keep it alive every 4.5s
+  // during Claude's response. Most platforms auto-clear "..." after ~5-10s
+  // without a refresh, so a single call often expires before the message arrives.
+  let keepTypingAlive = false;
   if (!dry_run && chatId) {
     console.log("[coach/respond] starting typing indicator");
     await startTyping(chatId);
+    keepTypingAlive = true;
+    const refreshId = chatId;
+    void (async () => {
+      while (keepTypingAlive) {
+        await new Promise((r) => setTimeout(r, 4500));
+        if (keepTypingAlive) void startTyping(refreshId);
+      }
+    })();
   }
   const typingStartMs = Date.now();
 
@@ -136,6 +146,9 @@ export async function POST(request: Request) {
       ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" }] }
       : {}),
   });
+
+  // Stop the typing refresh loop — generation is done, message is about to send.
+  keepTypingAlive = false;
 
   // Web search may produce multiple content blocks (server_tool_use, web_search_tool_result, text).
   // Always use the last text block — that's Claude's final reply after any searches.

@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS, markRead } from "@/lib/linq";
+import { sendSMS, markRead, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
 import crypto from "crypto";
@@ -211,6 +211,10 @@ async function handleInboundMessage(
 
   // Mark the message as read so the user sees a read receipt immediately.
   if (resolvedChatId) void markRead(resolvedChatId);
+
+  // Show typing indicator immediately — don't wait for the 10s debounce or
+  // coach/respond to boot up. User should see "..." within ~1-2s of their message.
+  if (resolvedChatId && !user.onboarding_step) void startTyping(resolvedChatId);
 
   // Cache the chatId if we learned it from the payload and didn't have it yet.
   if (payloadChatId && !user.linq_chat_id) {
