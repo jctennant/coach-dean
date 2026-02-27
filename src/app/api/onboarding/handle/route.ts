@@ -645,20 +645,26 @@ async function generateRaceAcknowledgment(message: string): Promise<string | nul
   try {
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 200,
+      max_tokens: 300,
       tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
       system: `You help a running coach identify a specific race from an athlete's message.
 
-If the message mentions a specific named race or event (e.g. "Broken Arrow 46K", "Boston Marathon", "UTMB", "Gorge Waterfalls 50K"), search for it and return ONE plain-text sentence describing its most notable characteristics — exact distance, total elevation gain, terrain type. Start with the race name. Under 140 characters. No greeting, no markdown, no asterisks.
+If the message mentions a specific named race or event, search for it, then output EXACTLY ONE plain-text sentence with the verified facts: exact distance (in km and miles), total elevation gain, terrain. Start with the race name. Under 150 characters. No markdown, no asterisks.
 
-If no specific named event is mentioned (just a generic category like "marathon" or "50K trail run"), return only the word: null`,
+CRITICAL RULES:
+- Do NOT narrate your search process. Do not output anything until you have your final one-sentence answer.
+- Your ENTIRE response must be that one sentence (or the word null). Never output intermediate thoughts.
+- If search results are ambiguous or conflicting, return only: null
+- If no specific named event is mentioned (just generic categories like "marathon" or "50K trail run"), return only: null`,
       messages: [{ role: "user", content: message }],
     });
-    const text = response.content
-      .filter(b => b.type === "text")
-      .map(b => b.type === "text" ? b.text : "")
-      .join("")
-      .trim();
+
+    // Only take the LAST text block — intermediate blocks are Claude's between-search narration.
+    // (This is the opposite of coach/respond where all blocks form one continuous answer.)
+    const textBlocks = response.content.filter(b => b.type === "text");
+    const lastBlock = textBlocks[textBlocks.length - 1];
+    const text = lastBlock?.type === "text" ? lastBlock.text.trim() : "";
+
     if (!text || text.toLowerCase() === "null") return null;
     return text;
   } catch {
