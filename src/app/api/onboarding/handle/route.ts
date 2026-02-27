@@ -165,14 +165,21 @@ Rules:
   }
 
   // Run in parallel: extract onboarding fields, detect immediate coaching questions,
-  // and search for the specific race (if named) to acknowledge real course details.
-  const [extra, immediateAnswer, raceAck] = await Promise.all([
+  // and search for the specific race (if named) to acknowledge real course details + date.
+  const [extra, immediateAnswer, raceInfo] = await Promise.all([
     extractAdditionalFields(message),
     detectAndAnswerImmediate(message, parsed.goal),
     generateRaceAcknowledgment(message),
   ]);
   const sportType = getSportType(parsed.goal);
-  const mergedData = { ...onboardingData, goal: parsed.goal, sport_type: sportType, ...extra };
+  // If the web search found the race date, pre-fill it so we skip asking the user.
+  const mergedData = {
+    ...onboardingData,
+    goal: parsed.goal,
+    sport_type: sportType,
+    ...extra,
+    ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
+  };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
 
@@ -186,8 +193,8 @@ Rules:
   const goalLabel = formatGoalInline(parsed.goal);
   // If we found a specific named race via web search, lead with real course details.
   // Otherwise fall back to the generic goal acknowledgment.
-  const acknowledgment = raceAck
-    ? `Love it${name ? `, ${name}` : ""} — ${raceAck}`
+  const acknowledgment = raceInfo.ack
+    ? `Love it${name ? `, ${name}` : ""} — ${raceInfo.ack}`
     : parsed.goal === "general_fitness"
       ? `Love it${name ? `, ${name}` : ""} — building consistent fitness is a great foundation.`
       : `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal.`;
@@ -439,8 +446,8 @@ Classify their reply. Return only one word: "nightly" or "weekly".
 
   const confirmation =
     cadence === "nightly_reminders"
-      ? "Perfect — I'll send you a heads-up the evening before each session."
-      : "Got it — I'll send you a weekly plan overview every Sunday.";
+      ? "Perfect — I'll send you a heads-up the evening before each session. How does the plan look? Let me know if anything needs tweaking."
+      : "Got it — I'll send you a weekly plan overview every Sunday. How does the plan look? Happy to adjust anything.";
 
   await Promise.all([
     supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", user.id),
@@ -689,7 +696,7 @@ function getStepQuestion(step: string, data: Record<string, unknown>): string {
       return "How many days a week do you want to run? And which days work best for you — including which day you'd prefer for your long run?";
 
     case "awaiting_anything_else":
-      return "Before I put your plan together — anything else worth knowing? Injuries, recent races, target paces, that sort of thing.";
+      return "Before I put your plan together — anything else worth knowing? Current weekly mileage, injuries, recent races, target paces, that sort of thing.";
 
     case "awaiting_name":
       return "What's your name?";
@@ -709,34 +716,53 @@ function getStepQuestion(step: string, data: Record<string, unknown>): string {
  * Returns null if no specific named event is found or search fails.
  * Runs in parallel with the Haiku extraction calls in handleGoal.
  */
-async function generateRaceAcknowledgment(message: string): Promise<string | null> {
+interface RaceInfo {
+  ack: string | null;
+  raceDate: string | null;
+}
+
+async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
+  const empty: RaceInfo = { ack: null, raceDate: null };
   try {
+    const today = new Date().toISOString().split("T")[0];
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 300,
       tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
-      system: `You help a running coach identify a specific race from an athlete's message.
+      system: `You help a running coach identify a specific race from an athlete's message. Today is ${today}.
 
-If the message mentions a specific named race or event, search for it, then output EXACTLY ONE plain-text sentence with the verified facts: exact distance (in km and miles), total elevation gain, terrain. Start with the race name. Under 150 characters. No markdown, no asterisks.
+If the message mentions a specific named race or event, search for it, then output a JSON object:
+- "ack": ONE plain-text sentence with the verified facts: exact distance (in km and miles), total elevation gain, terrain. Start with the race name. Under 150 chars. No markdown, no asterisks.
+- "date": The confirmed date of the upcoming or current-year edition as "YYYY-MM-DD", or null if not found.
+
+Example: {"ack": "Broken Arrow 46K is a technical Sierra Nevada skyrace with 10,200ft of elevation gain.", "date": "2026-06-20"}
 
 CRITICAL RULES:
-- Do NOT narrate your search process. Do not output anything until you have your final one-sentence answer.
-- Your ENTIRE response must be that one sentence (or the word null). Never output intermediate thoughts.
-- If search results are ambiguous or conflicting, return only: null
-- If no specific named event is mentioned (just generic categories like "marathon" or "50K trail run"), return only: null`,
+- Do NOT narrate your search process. Output nothing until you have the final JSON answer.
+- Your ENTIRE response must be that JSON object (or the word null). Never output intermediate thoughts.
+- If results are ambiguous or conflicting, set "ack" to null.
+- Only include "date" if you find a specific confirmed upcoming date — do not guess.
+- If no specific named event is mentioned (just generic categories), return only: null`,
       messages: [{ role: "user", content: message }],
     });
 
     // Only take the LAST text block — intermediate blocks are Claude's between-search narration.
-    // (This is the opposite of coach/respond where all blocks form one continuous answer.)
     const textBlocks = response.content.filter(b => b.type === "text");
     const lastBlock = textBlocks[textBlocks.length - 1];
     const text = lastBlock?.type === "text" ? lastBlock.text.trim() : "";
 
-    if (!text || text.toLowerCase() === "null") return null;
-    return text;
+    if (!text || text.toLowerCase() === "null") return empty;
+
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+      return { ack: parsed?.ack ?? null, raceDate: parsed?.date ?? null };
+    } catch {
+      // Fallback: treat as plain-text ack if JSON parse fails
+      return { ack: text, raceDate: null };
+    }
   } catch {
-    return null;
+    return empty;
   }
 }
 
