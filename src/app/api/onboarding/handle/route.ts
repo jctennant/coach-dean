@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS } from "@/lib/linq";
+import { sendSMS, startTyping } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
 export const maxDuration = 60;
@@ -50,31 +50,57 @@ export async function POST(request: Request) {
   const step = user.onboarding_step;
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
 
+  // Start a typing keep-alive loop here, before any Claude calls.
+  // The webhook fires typing at 0s/4.5s/9s, but handleGoal with web search
+  // can take 15-18s — the indicator would expire before the reply arrives.
+  // This loop keeps it alive for the full duration of the step handler.
+  let keepTypingAlive = false;
+  if (chatId) {
+    keepTypingAlive = true;
+    const typingId = chatId;
+    void (async () => {
+      while (keepTypingAlive) {
+        await new Promise((r) => setTimeout(r, 4500));
+        if (keepTypingAlive) void startTyping(typingId);
+      }
+    })();
+  }
+
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
   // Skip awaiting_anything_else and awaiting_name — any response is valid for those.
   if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
+      keepTypingAlive = false;
       await sendAndStore(user.id, user.phone_number, offTopicResult.response);
       return NextResponse.json({ ok: true });
     }
   }
 
+  let result: NextResponse;
   switch (step) {
     case "awaiting_goal":
-      return handleGoal(user, message, onboardingData, chatId);
+      result = await handleGoal(user, message, onboardingData, chatId);
+      break;
     case "awaiting_race_date":
-      return handleRaceDate(user, message, onboardingData);
+      result = await handleRaceDate(user, message, onboardingData);
+      break;
     case "awaiting_schedule":
-      return handleSchedule(user, message, onboardingData);
+      result = await handleSchedule(user, message, onboardingData);
+      break;
     case "awaiting_anything_else":
-      return handleAnythingElse(user, message, onboardingData, chatId);
+      result = await handleAnythingElse(user, message, onboardingData, chatId);
+      break;
     case "awaiting_name":
-      return handleName(user, message, onboardingData, chatId);
+      result = await handleName(user, message, onboardingData, chatId);
+      break;
     default:
-      return NextResponse.json({ ok: true });
+      result = NextResponse.json({ ok: true });
   }
+
+  keepTypingAlive = false;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -933,7 +959,7 @@ If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. 
 // ---------------------------------------------------------------------------
 
 async function sendAndStore(userId: string, phone: string, message: string) {
-  await Promise.all([
+  const [{ chatId }] = await Promise.all([
     sendSMS(phone, message),
     supabase.from("conversations").insert({
       user_id: userId,
@@ -942,6 +968,11 @@ async function sendAndStore(userId: string, phone: string, message: string) {
       message_type: "coach_response",
     }),
   ]);
+  // Persist chatId when we learn it from an outbound message — same pattern as coach/respond.
+  // This ensures linq_chat_id is set after the first reply even if the signup sendSMS missed it.
+  if (chatId) {
+    void supabase.from("users").update({ linq_chat_id: chatId }).eq("id", userId).is("linq_chat_id", null);
+  }
 }
 
 function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null, weeklyHours: number | null): string {

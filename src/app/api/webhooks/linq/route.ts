@@ -63,13 +63,11 @@ export async function POST(request: Request) {
   // Webhook v2026-02-03: data is nested under payload.data
   const data = payload.data || payload;
   const messageId: string | null = data.id || null;
-  // Try common field names for the chat ID — we log it so we can confirm the
-  // real field name once real payloads come through.
+  // Try common field names for the chat ID. Log always so we can confirm the
+  // real field name against actual payloads.
   const payloadChatId: string | null =
-    data.chat_id ?? data.chatId ?? data.chat?.id ?? null;
-  if (payloadChatId) {
-    console.log("[linq-webhook] chatId from payload:", payloadChatId);
-  }
+    data.chat_id ?? data.chatId ?? data.chat?.id ?? data.conversation_id ?? data.id ?? null;
+  console.log("[linq-webhook] chatId from payload:", payloadChatId, "| top-level keys:", Object.keys(data || {}));
   const senderPhone =
     data.sender_handle?.handle || data.from_handle?.handle ||
     data.sender_handle || data.from_handle || null;

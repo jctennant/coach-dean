@@ -56,15 +56,24 @@ export async function sendSMS(
 
   const json = await response.json();
 
-  // Try common field names — log what we see to confirm the real one
+  // Log the full response so we can confirm the correct field name against real payloads.
+  console.log("[linq] sendSMS response:", JSON.stringify(json));
+
+  // Try common field name patterns. Linq sends `to` as an array so the response
+  // may be an array or nested under data[]. Try both top-level and array shapes.
+  const first = Array.isArray(json) ? json[0] : (json?.data?.[0] ?? json?.chats?.[0] ?? null);
   const chatId: string | null =
     json?.chat_id ??
     json?.chatId ??
     json?.chat?.id ??
+    first?.chat_id ??
+    first?.chatId ??
+    first?.chat?.id ??
+    first?.id ??
     json?.id ??
     null;
 
-  console.log("[linq] sendSMS response keys:", Object.keys(json ?? {}), "chatId:", chatId);
+  console.log("[linq] sendSMS chatId resolved:", chatId);
 
   return { chatId };
 }
