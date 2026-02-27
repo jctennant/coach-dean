@@ -139,7 +139,7 @@ export async function POST(request: Request) {
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
     ...(shouldUseWebSearch
@@ -150,10 +150,15 @@ export async function POST(request: Request) {
   // Stop the typing refresh loop — generation is done, message is about to send.
   keepTypingAlive = false;
 
-  // Web search may produce multiple content blocks (server_tool_use, web_search_tool_result, text).
-  // Always use the last text block — that's Claude's final reply after any searches.
-  const textBlock = response.content.filter(b => b.type === "text").pop();
-  const coachMessage = textBlock?.type === "text" ? textBlock.text : "";
+  // Web search splits Claude's response across multiple text blocks: text generated
+  // before each search call, and text generated after. Joining them all reconstructs
+  // the full response. (Without search, there's only one text block — join is a no-op.)
+  const coachMessage = stripMarkdown(
+    response.content
+      .filter(b => b.type === "text")
+      .map(b => b.type === "text" ? b.text : "")
+      .join("")
+  );
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -235,6 +240,19 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ ok: true, message: coachMessage });
+}
+
+/**
+ * Strip markdown formatting that Claude occasionally generates despite instructions.
+ * SMS renders all characters literally — asterisks, hashes, etc. appear as-is.
+ */
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1") // **bold** → bold
+    .replace(/\*([^*\n]+)\*/g, "$1")      // *italic* → italic
+    .replace(/`([^`\n]+)`/g, "$1")        // `code` → code
+    .replace(/^#+\s+/gm, "")             // ## Header → Header
+    .trim();
 }
 
 /**
