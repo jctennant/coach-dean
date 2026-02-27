@@ -89,7 +89,8 @@ export default function Home() {
                 <img
                   src={prop.screenshot}
                   alt={prop.title}
-                  className="w-full max-w-[280px] rounded-[2rem] shadow-2xl"
+                  className="w-full object-contain"
+                  style={{ maxWidth: "min(380px, 100%)", maxHeight: 520 }}
                 />
               </div>
             </div>
