@@ -101,6 +101,28 @@ export async function startTyping(chatId: string): Promise<void> {
 }
 
 /**
+ * Share Coach Dean's contact card in a chat so the user can save him as a contact.
+ * The contact card must be configured in the Linq dashboard first.
+ * No request body needed — just POST to the endpoint.
+ */
+export async function shareContactCard(chatId: string): Promise<void> {
+  const { apiKey } = getConfig();
+  try {
+    const res = await fetch(`${LINQ_CHATS_URL}/${chatId}/share_contact_card`, {
+      method: "POST",
+      headers: authHeaders(apiKey),
+    });
+    if (!res.ok) {
+      console.warn("[linq] shareContactCard failed:", res.status, await res.text());
+    } else {
+      console.log("[linq] shareContactCard ok:", res.status);
+    }
+  } catch (err) {
+    console.error("[linq] shareContactCard error:", err);
+  }
+}
+
+/**
  * Mark all messages in a chat as read.
  * Call this when we receive an inbound message so the user sees a read receipt.
  */

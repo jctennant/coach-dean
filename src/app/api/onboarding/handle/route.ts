@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS, startTyping } from "@/lib/linq";
+import { sendSMS, startTyping, shareContactCard } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
 export const maxDuration = 60;
@@ -151,11 +151,13 @@ Rules:
     // No goal detected (pure greeting, ambiguous message, etc.)
     // Send the welcome + goal question — this covers both new users arriving via SMS
     // and existing awaiting_goal users who sent something unclear.
-    await sendAndStore(
+    const { chatId: learnedChatId } = await sendAndStore(
       user.id,
       user.phone_number,
       "Hey, I'm Coach Dean! 👋 I'll be your endurance coach over text.\n\nWhat are you training for? (e.g. 5K, marathon, ultra, triathlon, 70.3, Ironman, cycling, or general fitness?)"
     );
+    const effectiveChatId = chatId ?? learnedChatId;
+    if (effectiveChatId) void shareContactCard(effectiveChatId);
     return NextResponse.json({ ok: true });
   }
 
@@ -200,7 +202,9 @@ Rules:
   } else {
     responseText = `${acknowledgment}${question ? ` ${question}` : ""}`.trim();
   }
-  await sendAndStore(user.id, user.phone_number, responseText);
+  const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText);
+  const effectiveChatId = chatId ?? learnedChatId;
+  if (effectiveChatId) void shareContactCard(effectiveChatId);
   return NextResponse.json({ ok: true });
 }
 
@@ -958,7 +962,7 @@ If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. 
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-async function sendAndStore(userId: string, phone: string, message: string) {
+async function sendAndStore(userId: string, phone: string, message: string): Promise<{ chatId: string | null }> {
   const [{ chatId }] = await Promise.all([
     sendSMS(phone, message),
     supabase.from("conversations").insert({
@@ -973,6 +977,7 @@ async function sendAndStore(userId: string, phone: string, message: string) {
   if (chatId) {
     void supabase.from("users").update({ linq_chat_id: chatId }).eq("id", userId).is("linq_chat_id", null);
   }
+  return { chatId };
 }
 
 function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null, weeklyHours: number | null): string {
