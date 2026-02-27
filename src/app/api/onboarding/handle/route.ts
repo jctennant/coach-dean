@@ -183,10 +183,11 @@ async function handleRaceDate(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  const parseResponse = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 64,
-    system: `Extract a race/target date from the user's message. Respond with ONLY valid JSON, no other text.
+  const [parseResponse, extra] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 64,
+      system: `Extract a race/target date from the user's message. Respond with ONLY valid JSON, no other text.
 
 Output format: {"race_date": "YYYY-MM-DD" | null}
 
@@ -195,8 +196,10 @@ Rules:
 - "no race", "not sure", "open-ended", "no date", "TBD" → null
 - "end of October" → last day of October
 - Today is ${new Date().toISOString().split("T")[0]}`,
-    messages: [{ role: "user", content: message }],
-  });
+      messages: [{ role: "user", content: message }],
+    }),
+    extractAdditionalFields(message),
+  ]);
 
   const parseText =
     parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
@@ -209,13 +212,13 @@ Rules:
     console.error("[onboarding] race_date parse failed:", e);
   }
 
-  const mergedData = { ...onboardingData, race_date: parsed.race_date };
+  // Merge extra fields first, then apply the dedicated race_date parse result on top
+  const mergedData = { ...onboardingData, ...removeNulls(extra), race_date: parsed.race_date };
   const nextStep = findNextStep("awaiting_race_date", mergedData);
 
-  await supabase
-    .from("users")
-    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
-    .eq("id", user.id);
+  const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
+  if (extra.name) updatePayload.name = extra.name;
+  await supabase.from("users").update(updatePayload).eq("id", user.id);
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "race_date", race_date: parsed.race_date });
 
@@ -228,10 +231,11 @@ async function handleSchedule(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  const parseResponse = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 200,
-    system: `Extract training schedule preferences from the user's message. Respond with ONLY valid JSON, no other text.
+  const [parseResponse, extra] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 200,
+      system: `Extract training schedule preferences from the user's message. Respond with ONLY valid JSON, no other text.
 
 Output format: {"complete": true|false, "days_per_week": number|null, "training_days": ["monday"|...|"sunday"]|null, "long_run_day": "<day>"|null, "follow_up": string|null}
 
@@ -249,8 +253,10 @@ Rules:
 - days_per_week: use the number or the midpoint of a range ("3-4" → 4)
 - follow_up: only what's still missing — do NOT re-ask for info already given. If days_per_week is known, don't ask again.
 - If complete is true, follow_up must be null`,
-    messages: [{ role: "user", content: message }],
-  });
+      messages: [{ role: "user", content: message }],
+    }),
+    extractAdditionalFields(message),
+  ]);
 
   const parseText =
     parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
@@ -270,6 +276,13 @@ Rules:
   }
 
   if (!parsed.complete) {
+    // Save any extra fields gleaned from this message even if schedule wasn't complete
+    if (Object.keys(extra).length > 0) {
+      const partialMerge = { ...onboardingData, ...removeNulls(extra) };
+      const updatePayload: Record<string, unknown> = { onboarding_data: partialMerge };
+      if (extra.name) updatePayload.name = extra.name;
+      void supabase.from("users").update(updatePayload).eq("id", user.id);
+    }
     const followUp =
       parsed.follow_up ||
       "Which specific days of the week work best for you — and which day would you prefer for your long run?";
@@ -281,18 +294,19 @@ Rules:
   const trainingDays = parsed.training_days ?? ["tuesday", "thursday", "saturday", "sunday"];
   const daysPerWeek = parsed.days_per_week ?? trainingDays.length;
 
+  // Merge extra fields, then apply the dedicated schedule parse results on top
   const mergedData = {
     ...onboardingData,
+    ...removeNulls(extra),
     days_per_week: daysPerWeek,
     training_days: trainingDays,
     long_run_day: parsed.long_run_day,
   };
   const nextStep = findNextStep("awaiting_schedule", mergedData);
 
-  await supabase
-    .from("users")
-    .update({ onboarding_step: nextStep, onboarding_data: mergedData })
-    .eq("id", user.id);
+  const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
+  if (extra.name) updatePayload.name = extra.name;
+  await supabase.from("users").update(updatePayload).eq("id", user.id);
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "days_per_week", days_per_week: daysPerWeek, training_days: trainingDays });
 
@@ -306,7 +320,12 @@ async function handleAnythingElse(
   onboardingData: Record<string, unknown>,
   chatId?: string | null
 ) {
-  const extracted = await extractAnythingElse(message);
+  // Run extraction and acknowledgment in parallel — both are Haiku calls and
+  // neither depends on the other's result.
+  const [extracted, acknowledgment] = await Promise.all([
+    extractAnythingElse(message),
+    acknowledgeSharedInfo(message),
+  ]);
 
   // Merge: strip nulls from extracted so pre-existing data isn't overwritten
   const merged = { ...onboardingData, ...removeNulls(extracted as unknown as Record<string, unknown>) };
@@ -330,16 +349,11 @@ async function handleAnythingElse(
 
   const nextStep = findNextStep("awaiting_anything_else", merged);
 
-  // Acknowledge any injury the athlete shared so they feel heard
-  const injuryAck = extracted.injury_notes
-    ? await acknowledgeInjury(extracted.injury_notes)
-    : null;
-
   void trackEvent(user.id, "onboarding_step_completed", { step: "anything_else" });
 
   if (!nextStep) {
     // Name was already captured in an earlier message — complete onboarding now
-    if (injuryAck) await sendAndStore(user.id, user.phone_number, injuryAck);
+    if (acknowledgment) await sendAndStore(user.id, user.phone_number, acknowledgment);
     await completeOnboarding(user, merged, chatId);
     return NextResponse.json({ ok: true });
   }
@@ -351,7 +365,7 @@ async function handleAnythingElse(
     .eq("id", user.id);
 
   const question = getStepQuestion(nextStep, merged);
-  const responseText = injuryAck ? `${injuryAck}\n\n${question}` : question;
+  const responseText = acknowledgment ? `${acknowledgment}\n\n${question}` : question;
   await sendAndStore(user.id, user.phone_number, responseText);
   return NextResponse.json({ ok: true });
 }
@@ -658,11 +672,11 @@ async function extractAdditionalFields(
   const today = new Date().toISOString().split("T")[0];
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 256,
+    max_tokens: 300,
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "injury_mentioned": boolean, "name": "FirstName" | null}
+{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null}
 
 Rules:
 - name: ONLY extract if the athlete explicitly introduces themselves — phrases like "I'm [name]", "My name is [name]", "Hi, this is [name]", "Call me [name]". NEVER extract from greetings like "Hey Dean!" or "Hi Coach!" — those address Coach Dean, not the athlete. Return null if there is any doubt.
@@ -671,6 +685,9 @@ Rules:
 - weekly_miles: if weekly running volume is stated or clearly implied. Convert km to miles (×0.621).
 - easy_pace: any stated comfortable, easy, conversational, or GPS/Strava estimated running pace. Format as M:SS per mile. "8:30/m" or "8:30/mile" → "8:30". "5:00/km" → "8:03". Extract even if the athlete thinks they can beat it — it's still a useful baseline.
 - injury_mentioned: true if any injury or physical limitation is mentioned.
+- injury_notes: brief description of injury type, severity, and recovery status if an injury is mentioned (e.g. "IT band syndrome, recovering, avoiding back-to-back days"). null if no injury.
+- crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
+- other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, etc. null if nothing else.
 - Return {} if nothing is present.`,
     messages: [{ role: "user", content: message }],
   });
@@ -684,6 +701,9 @@ Rules:
     if (parsed.weekly_miles != null) result.weekly_miles = parsed.weekly_miles;
     if (parsed.easy_pace != null) result.easy_pace = parsed.easy_pace;
     if (parsed.injury_mentioned === true) result.injury_mentioned = true;
+    if (parsed.injury_notes != null) result.injury_notes = parsed.injury_notes;
+    if (Array.isArray(parsed.crosstraining_tools) && parsed.crosstraining_tools.length > 0) result.crosstraining_tools = parsed.crosstraining_tools;
+    if (parsed.other_notes != null) result.other_notes = parsed.other_notes;
     if (parsed.name != null) result.name = parsed.name;
     return result;
   } catch {
@@ -777,17 +797,26 @@ async function extractName(message: string): Promise<string | null> {
 }
 
 /**
- * Generates a warm, specific 1-2 sentence acknowledgment of an injury or physical
- * limitation so the athlete feels heard before we move on.
+ * Generates a warm, specific acknowledgment of whatever the athlete shared in response
+ * to "anything else worth knowing?" — injuries, strengthening preferences, cross-training
+ * goals, race history, target paces, or any other context they offered.
+ * Returns null if they said nothing ("nope", "no", "I'm good", etc.).
  */
-async function acknowledgeInjury(injuryNotes: string): Promise<string> {
+async function acknowledgeSharedInfo(message: string): Promise<string | null> {
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 100,
-    system: `You are Coach Dean, an AI endurance coach. An athlete just mentioned a physical limitation or injury during onboarding. Respond in 1-2 sentences acknowledging it warmly and specifically, and assure them you'll factor it into their training plan. Plain text only — no markdown, no asterisks, no emojis.`,
-    messages: [{ role: "user", content: injuryNotes }],
+    max_tokens: 150,
+    system: `You are Coach Dean, a friendly endurance coach onboarding a new athlete via SMS. The athlete just answered "anything else worth knowing?" before their plan is built.
+
+If they shared anything substantive — strengthening goals, injury history or prevention concerns, cross-training preferences, recent race history, target paces, lifestyle constraints, or anything else — acknowledge it in 1-2 warm, specific sentences. Be concrete: reference what they actually said. Assure them it will shape their plan.
+
+If they said nothing / "nope" / "no" / "nothing" / "I'm good" / "nah", return only the word: null
+
+Plain text only — no markdown, no asterisks.`,
+    messages: [{ role: "user", content: message }],
   });
   const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+  if (!text || text.toLowerCase() === "null") return null;
   return text;
 }
 

@@ -220,6 +220,21 @@ export async function POST(request: Request) {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
   }
 
+  // For user_message, background-extract any profile updates (injuries, new cross-training,
+  // preferences) and write them back to training_profiles / onboarding_data so future
+  // responses and plans automatically reflect what the athlete shared.
+  if (trigger === "user_message") {
+    const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
+    if (latestUserMsg) {
+      void extractAndPersistProfileUpdates(
+        userId,
+        latestUserMsg.content,
+        profile,
+        (user.onboarding_data as Record<string, unknown>) || {}
+      );
+    }
+  }
+
   // Update training state if post_run
   if (trigger === "post_run" && activityData) {
     const distanceMiles = activityData.distance_meters / 1609.34;
@@ -497,6 +512,10 @@ function buildSystemPrompt(
   const weeklyHours = onboardingData.weekly_hours as number | null;
   const sportType = onboardingData.sport_type as string || "running";
   const isTri = ["sprint_tri", "olympic_tri", "70.3", "ironman"].includes(profile?.goal as string || "");
+  // Additional athlete preferences captured during onboarding (strengthening, cross-training
+  // requests, injury prevention goals, race history notes, etc.)
+  const otherNotes = onboardingData.other_notes as string | null;
+  const crosstrainingTools = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean);
 
   return `You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness"}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
 
@@ -517,7 +536,8 @@ ${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}
 - Weekly volume: ${weeklyHours ? `~${weeklyHours} hours/week` : state?.weekly_mileage_target ? `${state.weekly_mileage_target} miles/week` : "unknown"}
 - Injury / constraints: ${profile?.injury_notes || "None reported"}
-${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
+- Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
+${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
 
 ${activitySummary}
 
@@ -595,6 +615,85 @@ function formatGoalLabel(goal: string): string {
     cycling: "a cycling event",
   };
   return labels[goal] || goal;
+}
+
+/**
+ * Background function: extracts any new injury notes, cross-training tools, or preference
+ * changes from the athlete's message and persists them to training_profiles and onboarding_data.
+ * Called fire-and-forget for user_message triggers so future responses reflect current context.
+ */
+async function extractAndPersistProfileUpdates(
+  userId: string,
+  message: string,
+  profile: Record<string, unknown> | null,
+  onboardingData: Record<string, unknown>
+): Promise<void> {
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      system: `Extract profile-relevant updates from an athlete's message to their coach.
+
+Extract ONLY explicitly stated NEW information:
+- A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week")
+- New cross-training activities or equipment access mentioned (pool, bike, gym, yoga, etc.) → new_crosstraining (array of normalized strings)
+- New training preferences, goals, or constraints (e.g. "I want more hill work", "please add strength training", "I can't run Tuesdays anymore") → other_notes
+
+Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null}
+
+Return {} if nothing new is present. Do not extract from routine workout reports or conversation.`,
+      messages: [{ role: "user", content: message }],
+    });
+
+    const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+    let extracted: {
+      injury_notes?: string | null;
+      new_crosstraining?: string[] | null;
+      other_notes?: string | null;
+    } = {};
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      extracted = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    } catch {
+      return;
+    }
+
+    const hasInjury = !!extracted.injury_notes;
+    const hasCrosstraining = Array.isArray(extracted.new_crosstraining) && extracted.new_crosstraining.length > 0;
+    const hasOtherNotes = !!extracted.other_notes;
+
+    if (!hasInjury && !hasCrosstraining && !hasOtherNotes) return;
+
+    console.log("[coach/respond] persisting profile updates from user message:", extracted);
+
+    // Build profile update
+    const profileUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (hasInjury) profileUpdate.injury_notes = extracted.injury_notes;
+    if (hasCrosstraining) {
+      const existing = (profile?.crosstraining_tools as string[]) || [];
+      profileUpdate.crosstraining_tools = Array.from(new Set([...existing, ...(extracted.new_crosstraining as string[])]));
+    }
+
+    // Build onboarding_data update
+    const updatedOnboardingData = { ...onboardingData };
+    if (hasOtherNotes) {
+      const existing = (onboardingData.other_notes as string) || "";
+      updatedOnboardingData.other_notes = existing
+        ? `${existing}; ${extracted.other_notes}`
+        : (extracted.other_notes as string);
+    }
+
+    await Promise.all([
+      Object.keys(profileUpdate).length > 1
+        ? supabase.from("training_profiles").update(profileUpdate).eq("user_id", userId)
+        : Promise.resolve(),
+      hasOtherNotes
+        ? supabase.from("users").update({ onboarding_data: updatedOnboardingData }).eq("id", userId)
+        : Promise.resolve(),
+    ]);
+  } catch (err) {
+    console.error("[coach/respond] extractAndPersistProfileUpdates failed:", err);
+  }
 }
 
 function buildUserMessage(
