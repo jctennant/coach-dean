@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-02-27 — Fix silent onboarding failure leaving users in broken completed state
+
+**Type:** Bug Fix
+**Reported by:** User (Jake's wife)
+**User feedback:** User had no training_profiles row despite onboarding_step being null — never received any coaching messages
+**Root cause:** `completeOnboarding` ran all three DB writes (`training_profiles` upsert, `training_state` upsert, `users` update) in a single `Promise.all`. If `training_profiles` failed (e.g. empty `training_days` array violating a constraint), the error was logged but `onboarding_step: null` still got written, permanently marking the user as complete with no profile.
+**Fix / Change:** Split the writes — run `training_profiles` and `training_state` upserts first, check for errors and return early if either fails (leaving `onboarding_step` intact so the user can retry), then write `onboarding_step: null` only on success.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-02-27 — Landing page value prop revamp with real iOS screenshots
 
 **Type:** Improvement

@@ -36,7 +36,7 @@ export function Navbar({ smsUrl }: { smsUrl: string }) {
             <div className="flex flex-col items-center gap-3 rounded-2xl border bg-white p-4 shadow-xl">
               <QRCodeSVG value={smsUrl} size={128} />
               <p className="whitespace-nowrap text-xs text-muted-foreground">
-                On desktop? Continue on your phone
+                On desktop? Text Dean on your phone
               </p>
             </div>
           </div>

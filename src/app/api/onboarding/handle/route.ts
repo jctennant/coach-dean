@@ -495,7 +495,7 @@ async function completeOnboarding(
     Math.round(weeklyMilesRaw / 5) * 5 || 15;
   const longRun = Math.round(weeklyMileage * 0.3);
 
-  const [profileResult, stateResult, userResult] = await Promise.all([
+  const [profileResult, stateResult] = await Promise.all([
     supabase.from("training_profiles").upsert(
       {
         user_id: user.id,
@@ -526,18 +526,26 @@ async function completeOnboarding(
       },
       { onConflict: "user_id" }
     ),
-    supabase
-      .from("users")
-      .update({
-        name: name ?? undefined,
-        onboarding_step: null,
-        onboarding_data: data,
-      })
-      .eq("id", user.id),
   ]);
 
-  if (profileResult.error) console.error("[onboarding] training_profiles upsert failed:", profileResult.error);
-  if (stateResult.error) console.error("[onboarding] training_state upsert failed:", stateResult.error);
+  if (profileResult.error) {
+    console.error("[onboarding] training_profiles upsert failed:", profileResult.error);
+    return;
+  }
+  if (stateResult.error) {
+    console.error("[onboarding] training_state upsert failed:", stateResult.error);
+    return;
+  }
+
+  const userResult = await supabase
+    .from("users")
+    .update({
+      name: name ?? undefined,
+      onboarding_step: null,
+      onboarding_data: data,
+    })
+    .eq("id", user.id);
+
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
 
   // No wrap-up SMS — the initial_plan IS the response, addressed by name.
