@@ -451,14 +451,27 @@ function buildSystemPrompt(
     role: string;
     content: string;
     message_type: string;
+    created_at?: string;
   }>,
   activitySummary: string,
   stravaStats?: Record<string, unknown>,
   timezone?: string,
   hasWebSearch?: boolean
 ): string {
+  const tz2 = timezone || "America/New_York";
+  const msgFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz2,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   const conversationHistory = recentMessages
-    .map((m) => `${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}`)
+    .map((m) => {
+      const ts = m.created_at ? `[${msgFormatter.format(new Date(m.created_at))}] ` : "";
+      return `${ts}${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}`;
+    })
     .join("\n");
 
   // All-time stats from Strava

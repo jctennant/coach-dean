@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-01 — Include message timestamps in conversation history passed to Dean
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth
+**User feedback:** "Dean thought she did intervals yesterday since she hasn't texted with him since last Tuesday, which is when she did her intervals"
+**Root cause:** created_at was fetched from the conversations table but silently dropped when formatting the conversation history for the prompt. Dean saw message content with no temporal context, so a message from 6 days ago looked identical to one from yesterday.
+**Fix / Change:** Each conversation message now includes a formatted timestamp (e.g. "[Tue, Feb 25 at 6:12 PM]") in the history passed to Dean, using the user's local timezone. No schema changes needed — the data was already being fetched.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-01 — Fix morning cron firing for users who haven't completed onboarding
 
 **Type:** Bug Fix
