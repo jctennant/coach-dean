@@ -168,7 +168,7 @@ async function handleInboundMessage(
   const isHardStop = normalizedBody === "STOP" || normalizedBody === "STOPALL" || normalizedBody === "UNSUBSCRIBE" || normalizedBody === "CANCEL" || normalizedBody === "QUIT";
   const isSoftStop = !isHardStop && /don['']?t (want|send|text)|no more (messages|texts)|stop (texting|messaging|sending)|opt.?out|unsubscribe/i.test(body);
 
-  const isRestart = normalizedBody === "START" || normalizedBody === "UNSTOP" || normalizedBody === "YES";
+  const isRestart = normalizedBody === "START" || normalizedBody === "UNSTOP" || normalizedBody === "RESUME" || normalizedBody === "YES";
 
   if (isRestart) {
     const { data: restartUser } = await supabase
@@ -202,7 +202,7 @@ async function handleInboundMessage(
       void trackEvent(optOutUser.id, "messaging_opted_out");
       const chatId = (optOutUser.linq_chat_id as string | null) ?? payloadChatId;
       if (chatId) {
-        await sendSMS(optOutUser.id, senderPhone, "You've been unsubscribed and won't receive any more messages from Coach Dean. Reply START if you ever want to resume.", chatId);
+        await sendSMS(optOutUser.id, senderPhone, "You've been unsubscribed from Coach Dean and won't receive any more messages. Text RESUME anytime to start back up.", chatId);
       }
     }
     console.log("[linq-webhook] opt-out received from:", senderPhone);
