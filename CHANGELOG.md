@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-01 — Fix morning cron firing for users who haven't completed onboarding
+
+**Type:** Bug Fix
+**Reported by:** User (Jake's wife received a stray workout message with no context)
+**User feedback:** "it looks like my wife just got an accidental summary message: Wednesday Mar 4: 3 mi easy, flat, HR <150 — true recovery pace after those intervals. out of nowhere."
+**Root cause:** morning-workout cron queried all users with a Strava token, with no check on onboarding_step. Users mid-onboarding or in a broken completed state could receive coaching messages they had no context for.
+**Fix / Change:** Added .is("onboarding_step", null) and .not("phone_number", "is", null) to the morning cron query, matching the same guards used by the nightly-reminder and sunday-recap crons.
+**Files changed:** src/app/api/cron/morning-workout/route.ts
+
+---
+
 ## 2026-03-01 — Front-load name question into Dean's first message, remove awaiting_name step
 
 **Type:** Improvement
