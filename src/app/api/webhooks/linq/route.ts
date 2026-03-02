@@ -180,10 +180,7 @@ async function handleInboundMessage(
     if (restartUser?.messaging_opted_out) {
       await supabase.from("users").update({ messaging_opted_out: false }).eq("id", restartUser.id);
       void trackEvent(restartUser.id, "messaging_resumed");
-      const chatId = (restartUser.linq_chat_id as string | null) ?? payloadChatId;
-      if (chatId) {
-        await sendSMS(restartUser.id, senderPhone, "Welcome back! You're re-subscribed to Coach Dean. Just text me anytime to pick up where we left off.", chatId);
-      }
+      await sendSMS(senderPhone, "Welcome back! You're re-subscribed to Coach Dean. Just text me anytime to pick up where we left off.");
       console.log("[linq-webhook] opt-in resume from:", senderPhone);
       return;
     }
@@ -200,10 +197,7 @@ async function handleInboundMessage(
     if (optOutUser) {
       await supabase.from("users").update({ messaging_opted_out: true }).eq("id", optOutUser.id);
       void trackEvent(optOutUser.id, "messaging_opted_out");
-      const chatId = (optOutUser.linq_chat_id as string | null) ?? payloadChatId;
-      if (chatId) {
-        await sendSMS(optOutUser.id, senderPhone, "You've been unsubscribed from Coach Dean and won't receive any more messages. Text RESUME anytime to start back up.", chatId);
-      }
+      await sendSMS(senderPhone, "You've been unsubscribed from Coach Dean and won't receive any more messages. Text RESUME anytime to start back up.");
     }
     console.log("[linq-webhook] opt-out received from:", senderPhone);
     return;
