@@ -30,9 +30,9 @@ const MESSAGES = [
   },
 ];
 
-const BETWEEN_MS = 1800;
-const INITIAL_MS = 800;
-const FINAL_PAUSE_MS = 4000;
+const BETWEEN_MS = 1600;
+const INITIAL_MS = 500;
+const FINAL_PAUSE_MS = 5000;
 const FADE_MS = 400;
 const CONV_HEIGHT = 420;
 
