@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS, markRead, startTyping } from "@/lib/linq";
+import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
 import crypto from "crypto";
@@ -129,11 +129,10 @@ async function handleInboundMessage(
   messageId: string | null,
   payloadChatId: string | null
 ) {
-  // Fire read receipt + typing immediately — before any DB operations.
+  // Fire typing indicator immediately — before any DB operations.
   // payloadChatId is already extracted from the webhook payload so there's no
   // reason to wait 1-2s for user lookup / creation before the indicator appears.
   if (payloadChatId) {
-    void markRead(payloadChatId);
     void startTyping(payloadChatId);
     // Keep refreshing every 4.5s — Linq auto-clears "..." after ~5-10s without a refresh.
     // We fire 4 times to cover up to ~18s (goal step with web search can take that long).
@@ -227,13 +226,6 @@ async function handleInboundMessage(
   // Resolve the chatId: prefer what's already stored, fall back to payload.
   const resolvedChatId: string | null =
     (user.linq_chat_id as string | null) ?? payloadChatId;
-
-  // Typing/read-receipt was already fired at the top of handleInboundMessage using
-  // payloadChatId. If the stored linq_chat_id differs from the payload (shouldn't happen
-  // but possible after a chat migration), fire a second read on the stored one too.
-  if (resolvedChatId && resolvedChatId !== payloadChatId) {
-    void markRead(resolvedChatId);
-  }
 
   // Cache the chatId if we learned it from the payload and didn't have it yet.
   if (payloadChatId && !user.linq_chat_id) {
