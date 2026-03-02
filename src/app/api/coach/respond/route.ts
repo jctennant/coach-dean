@@ -766,7 +766,9 @@ function buildUserMessage(
     case "nightly_reminder":
       return "Send a single short text reminding the athlete of tomorrow's workout. One sentence: workout type, distance, and target pace or effort. Nothing else.";
     case "weekly_recap":
-      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation). Second: 2-3 key sessions this week with dates and targets. Third (optional): one brief note on the training focus. No intro fluff.`;
+      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation). Second: 2-3 key sessions this week with dates and targets. Third (optional): one brief note on the training focus. No intro fluff.
+
+MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), you must first add up every individual session distance you've listed and confirm the sum matches. Never state a total that doesn't equal the sum of the sessions you've written. If you're not listing every session, don't state a total — just describe the key sessions.`;
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
 
@@ -789,6 +791,8 @@ VOLUME AND SAFETY:
 - Don't exceed their current weekly volume in week 1. Apply the 10% rule from current baseline, not historical peak.
 - If they have an injury, acknowledge it, explain how the plan accounts for it, and ask one follow-up question about constraints.
 - If no injury, end with a brief open question about any niggles or schedule constraints.
+
+MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), add up every individual session distance you've listed and confirm the sum matches before including it. Never state a total that doesn't equal the sum of the sessions. If you're unsure of the total, omit it and just list the sessions.
 
 Write as 2–3 short iMessage texts separated by blank lines. Each text under 480 characters. First text: warm welcome + goal + weeks to race. Second: this week's sessions day by day (dates, type, target). Third (optional): one note on injury/constraints. No filler.`;
   }

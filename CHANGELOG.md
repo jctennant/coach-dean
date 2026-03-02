@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-02 — Require Dean to verify mileage totals match session sum before stating them
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "Dean said 'This week we are at 28 miles' but the key sessions only added up to 19 miles"
+**Root cause:** Dean generated the weekly total and the individual sessions independently without cross-checking. LLMs are prone to this — stating a round number and then listing sessions that don't add up.
+**Fix / Change:** Added MILEAGE ACCURACY instruction to both the weekly_recap and initial_plan prompts: verify the sum of all listed sessions matches any stated total before including it. If unsure, omit the total rather than guess.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-02 — Fix pace calculation: extract PRs from conversation, compute VDOT correctly
 
 **Type:** Bug Fix
