@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-01 — Front-load name question into Dean's first message, remove awaiting_name step
+
+**Type:** Improvement
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Name was collected as a separate late-stage onboarding step (awaiting_name), making onboarding feel longer and more form-like than conversational.
+**Fix / Change:** Updated the welcome message to introduce Dean, explain the value prop, and ask for the user's name and goal in one message. Removed awaiting_name from STEP_ORDER — name is now captured via extractAdditionalFields from the user's first reply. The awaiting_name handler is kept for any existing users already at that step.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-02-27 — Fix silent onboarding failure leaving users in broken completed state
 
 **Type:** Bug Fix

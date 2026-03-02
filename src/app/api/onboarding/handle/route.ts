@@ -25,11 +25,10 @@ function extractJSON(text: string): string {
  * POST /api/onboarding/handle
  *
  * Flow:
- *   awaiting_goal
+ *   awaiting_goal              ← intro + asks name + goal in one message
  *   → awaiting_race_date
  *   → awaiting_schedule
  *   → awaiting_anything_else   ← "Before I put your plan together, anything else?"
- *   → awaiting_name            ← "What's your name?"
  *   → null (complete → initial_plan fires)
  *
  * Steps are skipped automatically if data was already captured in an earlier message.
@@ -157,7 +156,7 @@ Rules:
     const { chatId: learnedChatId } = await sendAndStore(
       user.id,
       user.phone_number,
-      "Hey, I'm Coach Dean! 👋 I'll be your endurance coach over text.\n\nWhat are you training for? (e.g. 5K, marathon, ultra, triathlon, 70.3, Ironman, cycling, or general fitness?)"
+      "Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?"
     );
     const effectiveChatId = chatId ?? learnedChatId;
     if (effectiveChatId) void shareContactCard(effectiveChatId);
@@ -650,7 +649,6 @@ const STEP_ORDER = [
   "awaiting_race_date",
   "awaiting_schedule",
   "awaiting_anything_else",
-  "awaiting_name",
 ];
 
 /**
