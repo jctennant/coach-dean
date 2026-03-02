@@ -17,9 +17,10 @@ export async function GET(request: Request) {
   // training_profiles.proactive_cadence = 'nightly_reminders'
   const { data: profiles, error } = await supabase
     .from("training_profiles")
-    .select("user_id, training_days, users!inner(timezone, onboarding_step)")
+    .select("user_id, training_days, users!inner(timezone, onboarding_step, messaging_opted_out)")
     .eq("proactive_cadence", "nightly_reminders")
-    .is("users.onboarding_step", null);
+    .is("users.onboarding_step", null)
+    .eq("users.messaging_opted_out", false);
 
   if (error) {
     console.error("[nightly-reminder] query error:", error);

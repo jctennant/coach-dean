@@ -163,14 +163,66 @@ async function handleInboundMessage(
   // Use maybeSingle() so "no rows" returns { data: null, error: null } rather
   // than a PGRST116 error — that lets us distinguish "user not found" from a
   // real DB error (e.g. missing column) without falling into the insert path.
+  // Check for opt-out before anything else — even before creating a new user.
+  const normalizedBody = body.trim().toUpperCase();
+  const isHardStop = normalizedBody === "STOP" || normalizedBody === "STOPALL" || normalizedBody === "UNSUBSCRIBE" || normalizedBody === "CANCEL" || normalizedBody === "QUIT";
+  const isSoftStop = !isHardStop && /don['']?t (want|send|text)|no more (messages|texts)|stop (texting|messaging|sending)|opt.?out|unsubscribe/i.test(body);
+
+  const isRestart = normalizedBody === "START" || normalizedBody === "UNSTOP" || normalizedBody === "YES";
+
+  if (isRestart) {
+    const { data: restartUser } = await supabase
+      .from("users")
+      .select("id, linq_chat_id, messaging_opted_out")
+      .eq("phone_number", senderPhone)
+      .maybeSingle();
+
+    if (restartUser?.messaging_opted_out) {
+      await supabase.from("users").update({ messaging_opted_out: false }).eq("id", restartUser.id);
+      void trackEvent(restartUser.id, "messaging_resumed");
+      const chatId = (restartUser.linq_chat_id as string | null) ?? payloadChatId;
+      if (chatId) {
+        await sendSMS(restartUser.id, senderPhone, "Welcome back! You're re-subscribed to Coach Dean. Just text me anytime to pick up where we left off.", chatId);
+      }
+      console.log("[linq-webhook] opt-in resume from:", senderPhone);
+      return;
+    }
+    // START from a non-opted-out user — fall through to normal handling
+  }
+
+  if (isHardStop || isSoftStop) {
+    const { data: optOutUser } = await supabase
+      .from("users")
+      .select("id, linq_chat_id")
+      .eq("phone_number", senderPhone)
+      .maybeSingle();
+
+    if (optOutUser) {
+      await supabase.from("users").update({ messaging_opted_out: true }).eq("id", optOutUser.id);
+      void trackEvent(optOutUser.id, "messaging_opted_out");
+      const chatId = (optOutUser.linq_chat_id as string | null) ?? payloadChatId;
+      if (chatId) {
+        await sendSMS(optOutUser.id, senderPhone, "You've been unsubscribed and won't receive any more messages from Coach Dean. Reply START if you ever want to resume.", chatId);
+      }
+    }
+    console.log("[linq-webhook] opt-out received from:", senderPhone);
+    return;
+  }
+
   const { data: user, error: lookupError } = await supabase
     .from("users")
-    .select("id, onboarding_step, timezone, linq_chat_id")
+    .select("id, onboarding_step, timezone, linq_chat_id, messaging_opted_out")
     .eq("phone_number", senderPhone)
     .maybeSingle();
 
   if (lookupError) {
     console.error("[linq-webhook] user lookup failed — aborting to avoid spurious insert:", lookupError);
+    return;
+  }
+
+  // If they're opted out and it wasn't a START/STOP keyword, ignore silently.
+  if (user?.messaging_opted_out) {
+    console.log("[linq-webhook] message from opted-out user, ignoring:", user.id);
     return;
   }
 

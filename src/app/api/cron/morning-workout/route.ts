@@ -13,13 +13,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Fetch users who have completed onboarding and have Strava connected
+  // Fetch users who have completed onboarding, have Strava connected, and haven't opted out
   const { data: users } = await supabase
     .from("users")
     .select("id, timezone")
     .not("strava_access_token", "is", null)
     .is("onboarding_step", null)
-    .not("phone_number", "is", null);
+    .not("phone_number", "is", null)
+    .eq("messaging_opted_out", false);
 
   if (!users || users.length === 0) {
     return NextResponse.json({ ok: true, sent: 0 });

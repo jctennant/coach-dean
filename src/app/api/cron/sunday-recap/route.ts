@@ -12,12 +12,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Fetch all users who have completed onboarding
+  // Fetch all users who have completed onboarding and haven't opted out
   const { data: users } = await supabase
     .from("users")
     .select("id")
     .is("onboarding_step", null)
-    .not("phone_number", "is", null);
+    .not("phone_number", "is", null)
+    .eq("messaging_opted_out", false);
 
   if (!users || users.length === 0) {
     return NextResponse.json({ ok: true, sent: 0 });
