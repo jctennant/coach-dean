@@ -41,6 +41,29 @@ function paceAtVDOTPct(vdot: number, pct: number): string {
 }
 
 /**
+ * Convert a stored exact easy pace (e.g. "7:44/mi") into a display range.
+ * Rounds to nearest 5 seconds, then adds 30s for the upper bound.
+ * e.g. "7:44/mi" → "7:45–8:15/mi"
+ */
+export function easyPaceRange(paceStr: string | null): string | null {
+  if (!paceStr) return null;
+  const match = paceStr.match(/(\d+):(\d+)/);
+  if (!match) return paceStr;
+
+  const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+  const rounded = Math.round(totalSec / 5) * 5;
+  const upper = rounded + 30;
+
+  const fmt = (s: number) => {
+    const min = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${min}:${String(sec).padStart(2, "0")}`;
+  };
+
+  return `${fmt(rounded)}–${fmt(upper)}/mi`;
+}
+
+/**
  * Derive tempo and interval paces from a stated easy pace.
  * Used as a fallback when no race time is available.
  */

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
+import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/lib/paces";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
@@ -577,7 +577,7 @@ CURRENT TRAINING STATE:
 - Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${state?.weekly_mileage_target || "TBD"} mi
 - Mileage so far this week: ${state?.week_mileage_so_far || 0} mi
-- Current paces: Easy ${profile?.current_easy_pace || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
+- Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
 
