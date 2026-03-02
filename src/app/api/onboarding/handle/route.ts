@@ -276,19 +276,17 @@ async function handleSchedule(
       max_tokens: 200,
       system: `Extract training schedule preferences from the user's message. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "days_per_week": number|null, "training_days": ["monday"|...|"sunday"]|null, "long_run_day": "<day>"|null, "follow_up": string|null}
+Output format: {"complete": true|false, "days_per_week": number|null, "training_days": ["monday"|...|"sunday"]|null, "follow_up": string|null}
 
 Rules:
 - Normalize all day names to full lowercase
 - complete: true whenever you have enough to build a schedule — even if every specific day isn't named
-- "3-4 days, weekdays better, Sunday long run" → complete: true. Pick 3 or 4 weekdays + Sunday, long_run_day: "sunday"
 - "Weekdays" alone → complete: true, training_days: ["monday","tuesday","wednesday","thursday","friday"]
 - "Weekends" → complete: true, training_days: ["saturday","sunday"]
 - A count + day preference is enough: "4 days, prefer Mon/Wed/Fri/Sat" → complete: true, fill in all 4
-- "doesn't matter", "no preference", "whatever works", "any days" → complete: true. Use a balanced default (e.g. Mon, Wed, Fri, Sun for 4 days). Set long_run_day: "sunday" unless otherwise stated.
-- For a range like "3-4 days" with no other info → complete: false, follow_up asks preference or just long run day
+- "doesn't matter", "no preference", "whatever works", "any days" → complete: true. Use a balanced default (e.g. Mon, Wed, Fri, Sun for 4 days)
+- For a range like "3-4 days" with no other info → complete: false, follow_up asks which days work best
 - complete: false ONLY if there is truly not enough to infer any schedule at all
-- long_run_day: null if not mentioned
 - days_per_week: use the number or the midpoint of a range ("3-4" → 4)
 - follow_up: only what's still missing — do NOT re-ask for info already given. If days_per_week is known, don't ask again.
 - If complete is true, follow_up must be null`,
@@ -305,9 +303,8 @@ Rules:
     complete: boolean;
     days_per_week: number | null;
     training_days: string[] | null;
-    long_run_day: string | null;
     follow_up: string | null;
-  } = { complete: false, days_per_week: null, training_days: null, long_run_day: null, follow_up: null };
+  } = { complete: false, days_per_week: null, training_days: null, follow_up: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
@@ -324,7 +321,7 @@ Rules:
     }
     const followUp =
       parsed.follow_up ||
-      "Which specific days of the week work best for you — and which day would you prefer for your long run?";
+      "Which specific days of the week work best for you?";
     await sendAndStore(user.id, user.phone_number, followUp);
     return NextResponse.json({ ok: true });
   }
@@ -339,7 +336,6 @@ Rules:
     ...removeNulls(extra),
     days_per_week: daysPerWeek,
     training_days: trainingDays,
-    long_run_day: parsed.long_run_day,
   };
   const nextStep = findNextStep("awaiting_schedule", mergedData);
 
@@ -697,9 +693,9 @@ function getStepQuestion(step: string, data: Record<string, unknown>): string {
         : "What's the date of your event? If you don't have one locked in yet, give me your best target and we can adjust later.";
 
     case "awaiting_schedule":
-      if (isTri) return "How many days a week are you training total? And do you have any days that work better for longer sessions like a long ride or long run?";
-      if (isCycling) return "How many days a week do you want to ride? And which days work best for your longer rides?";
-      return "How many days a week do you want to run? And which days work best for you — including which day you'd prefer for your long run?";
+      if (isTri) return "How many days a week are you training total? And do you have any days that work better for longer sessions?";
+      if (isCycling) return "How many days a week do you want to ride? And which days work best for you?";
+      return "How many days a week do you want to run, and which days work best for you?";
 
     case "awaiting_anything_else":
       return "Before I put your plan together — anything else worth knowing? Current weekly mileage, injuries, recent races, target paces, that sort of thing.";
