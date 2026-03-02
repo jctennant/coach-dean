@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, shareContactCard } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
+import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
 
 export const maxDuration = 60;
 
@@ -365,21 +366,21 @@ async function handleAnythingElse(
   // Merge: strip nulls from extracted so pre-existing data isn't overwritten
   const merged = { ...onboardingData, ...removeNulls(extracted as unknown as Record<string, unknown>) };
 
-  // Compute paces from extracted race data or easy pace
-  if (extracted.recent_race_distance_km && extracted.recent_race_time_minutes) {
-    const paces = calculateVDOTPaces(extracted.recent_race_distance_km, extracted.recent_race_time_minutes);
-    if (!merged.easy_pace) {
-      merged.easy_pace = paces.easy;
-      merged.tempo_pace = paces.tempo;
-      merged.interval_pace = paces.interval;
-    }
+  // Compute paces — prefer VDOT from race data, fall back to easy pace estimation.
+  // Check both the current message extract AND earlier-captured onboarding data
+  // (e.g. a PR mentioned in the first message is stored in onboardingData).
+  const raceDistKm = extracted.recent_race_distance_km ?? (onboardingData.recent_race_distance_km as number | null);
+  const raceTimeMin = extracted.recent_race_time_minutes ?? (onboardingData.recent_race_time_minutes as number | null);
+  if (raceDistKm && raceTimeMin) {
+    const paces = calculateVDOTPaces(raceDistKm, raceTimeMin);
+    merged.easy_pace = paces.easy;
+    merged.tempo_pace = paces.tempo;
+    merged.interval_pace = paces.interval;
   } else if (extracted.easy_pace || merged.easy_pace) {
     const paces = estimatePacesFromEasyPace((extracted.easy_pace ?? merged.easy_pace) as string);
-    if (!merged.easy_pace) {
-      merged.easy_pace = paces.easy;
-      merged.tempo_pace = paces.tempo;
-      merged.interval_pace = paces.interval;
-    }
+    merged.easy_pace = paces.easy;
+    merged.tempo_pace = paces.tempo ?? merged.tempo_pace;
+    merged.interval_pace = paces.interval ?? merged.interval_pace;
   }
 
   const nextStep = findNextStep("awaiting_anything_else", merged);
@@ -559,69 +560,8 @@ async function completeOnboarding(
 }
 
 // ---------------------------------------------------------------------------
-// Pace calculation helpers
+// Pace calculation helpers moved to @/lib/paces
 // ---------------------------------------------------------------------------
-
-/**
- * Calculate VDOT-based training paces from a race performance.
- * Uses Jack Daniels' Running Formula.
- */
-function calculateVDOTPaces(
-  distanceKm: number,
-  timeMinutes: number
-): { easy: string; tempo: string; interval: string } {
-  const v = (distanceKm * 1000) / timeMinutes; // meters per minute
-
-  const pctVO2 =
-    0.8 +
-    0.1894393 * Math.exp(-0.012778 * timeMinutes) +
-    0.2989558 * Math.exp(-0.1932605 * timeMinutes);
-
-  const vo2 = -4.60 + 0.182258 * v + 0.000104 * v * v;
-  const vdot = vo2 / pctVO2;
-
-  return {
-    easy: paceAtVDOTPct(vdot, 0.65),
-    tempo: paceAtVDOTPct(vdot, 0.86),
-    interval: paceAtVDOTPct(vdot, 0.98),
-  };
-}
-
-function paceAtVDOTPct(vdot: number, pct: number): string {
-  const targetVO2 = vdot * pct;
-  const a = 0.000104;
-  const b = 0.182258;
-  const c = -(targetVO2 + 4.60);
-  const v = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
-  const minPerMile = 1609.34 / v;
-  const min = Math.floor(minPerMile);
-  const sec = Math.round((minPerMile - min) * 60);
-  return `${min}:${String(sec).padStart(2, "0")}/mi`;
-}
-
-function estimatePacesFromEasyPace(paceStr: string | null): {
-  easy: string | null;
-  tempo: string | null;
-  interval: string | null;
-} {
-  if (!paceStr) return { easy: null, tempo: null, interval: null };
-
-  const match = paceStr.match(/(\d+):(\d+)/);
-  if (!match) return { easy: paceStr, tempo: null, interval: null };
-
-  const easySec = parseInt(match[1]) * 60 + parseInt(match[2]);
-  const fmt = (s: number) => {
-    const min = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${min}:${String(sec).padStart(2, "0")}/mi`;
-  };
-
-  return {
-    easy: fmt(easySec),
-    tempo: easySec > 90 ? fmt(easySec - 90) : null,
-    interval: easySec > 150 ? fmt(easySec - 150) : null,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Step routing helpers
@@ -778,14 +718,16 @@ async function extractAdditionalFields(
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null}
+{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null}
 
 Rules:
 - name: ONLY extract if the athlete explicitly introduces themselves — phrases like "I'm [name]", "My name is [name]", "Hi, this is [name]", "Call me [name]". NEVER extract from greetings like "Hey Dean!" or "Hi Coach!" — those address Coach Dean, not the athlete. Return null if there is any doubt.
 - race_date: if a specific target race date is mentioned. Today is ${today}.
 - experience_years: infer from any experience signal. "new runner" or "just started" → 0. "fairly inexperienced" → 0.2. "completed an 8 week plan" with no prior context → 0.15. "a year" → 1. "5+ years" → 5.
 - weekly_miles: if weekly running volume is stated or clearly implied. Convert km to miles (×0.621).
-- easy_pace: any stated comfortable, easy, conversational, or GPS/Strava estimated running pace. Format as M:SS per mile. "8:30/m" or "8:30/mile" → "8:30". "5:00/km" → "8:03". Extract even if the athlete thinks they can beat it — it's still a useful baseline.
+- easy_pace: ONLY a stated comfortable, easy, or conversational running pace. Do NOT extract race pace, PR pace, or anything described as a PR, best time, or race effort. Format as M:SS per mile. "8:30/m" → "8:30". "5:00/km" → "8:03".
+- recent_race_distance_km: if a PR or recent race is mentioned. 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If the athlete gives a pace rather than a time (e.g. "5K PR pace is 5:40/mi"), compute the total time: pace_per_mile × distance_in_miles (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
+- recent_race_time_minutes: total race time in minutes for the PR/race above. If given as a pace, compute time = pace_sec/mile × distance_in_miles / 60.
 - injury_mentioned: true if any injury or physical limitation is mentioned.
 - injury_notes: brief description of injury type, severity, and recovery status if an injury is mentioned (e.g. "IT band syndrome, recovering, avoiding back-to-back days"). null if no injury.
 - crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
@@ -802,6 +744,8 @@ Rules:
     if (parsed.experience_years != null) result.experience_years = parsed.experience_years;
     if (parsed.weekly_miles != null) result.weekly_miles = parsed.weekly_miles;
     if (parsed.easy_pace != null) result.easy_pace = parsed.easy_pace;
+    if (parsed.recent_race_distance_km != null) result.recent_race_distance_km = parsed.recent_race_distance_km;
+    if (parsed.recent_race_time_minutes != null) result.recent_race_time_minutes = parsed.recent_race_time_minutes;
     if (parsed.injury_mentioned === true) result.injury_mentioned = true;
     if (parsed.injury_notes != null) result.injury_notes = parsed.injury_notes;
     if (Array.isArray(parsed.crosstraining_tools) && parsed.crosstraining_tools.length > 0) result.crosstraining_tools = parsed.crosstraining_tools;

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
@@ -661,15 +662,17 @@ async function extractAndPersistProfileUpdates(
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
+      max_tokens: 300,
       system: `Extract profile-relevant updates from an athlete's message to their coach.
 
 Extract ONLY explicitly stated NEW information:
 - A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week")
 - New cross-training activities or equipment access mentioned (pool, bike, gym, yoga, etc.) → new_crosstraining (array of normalized strings)
 - New training preferences, goals, or constraints (e.g. "I want more hill work", "please add strength training", "I can't run Tuesdays anymore") → other_notes
+- A PR or recent race time → recent_race_distance_km + recent_race_time_minutes. Distances: 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If given as a pace (e.g. "5K PR pace is 5:40/mi"), compute total time: pace_sec/mile × distance_in_miles / 60 (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
+- A comfortable/easy running pace (NOT a race or PR pace) → easy_pace as M:SS per mile. Convert from km if needed (÷0.621).
 
-Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null}
+Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null}
 
 Return {} if nothing new is present. Do not extract from routine workout reports or conversation.`,
       messages: [{ role: "user", content: message }],
@@ -680,6 +683,9 @@ Return {} if nothing new is present. Do not extract from routine workout reports
       injury_notes?: string | null;
       new_crosstraining?: string[] | null;
       other_notes?: string | null;
+      recent_race_distance_km?: number | null;
+      recent_race_time_minutes?: number | null;
+      easy_pace?: string | null;
     } = {};
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -691,10 +697,24 @@ Return {} if nothing new is present. Do not extract from routine workout reports
     const hasInjury = !!extracted.injury_notes;
     const hasCrosstraining = Array.isArray(extracted.new_crosstraining) && extracted.new_crosstraining.length > 0;
     const hasOtherNotes = !!extracted.other_notes;
+    const hasRaceData = !!(extracted.recent_race_distance_km && extracted.recent_race_time_minutes);
+    const hasEasyPace = !!extracted.easy_pace;
 
-    if (!hasInjury && !hasCrosstraining && !hasOtherNotes) return;
+    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
+
+    // Compute VDOT paces if race data provided, otherwise use easy pace estimate
+    let computedPaces: { easy: string; tempo: string; interval: string } | null = null;
+    if (hasRaceData) {
+      computedPaces = calculateVDOTPaces(
+        extracted.recent_race_distance_km as number,
+        extracted.recent_race_time_minutes as number
+      );
+    } else if (hasEasyPace) {
+      const p = estimatePacesFromEasyPace(extracted.easy_pace as string);
+      if (p.easy) computedPaces = { easy: p.easy, tempo: p.tempo ?? "", interval: p.interval ?? "" };
+    }
 
     // Build profile update
     const profileUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -702,6 +722,11 @@ Return {} if nothing new is present. Do not extract from routine workout reports
     if (hasCrosstraining) {
       const existing = (profile?.crosstraining_tools as string[]) || [];
       profileUpdate.crosstraining_tools = Array.from(new Set([...existing, ...(extracted.new_crosstraining as string[])]));
+    }
+    if (computedPaces) {
+      profileUpdate.current_easy_pace = computedPaces.easy;
+      if (computedPaces.tempo) profileUpdate.current_tempo_pace = computedPaces.tempo;
+      if (computedPaces.interval) profileUpdate.current_interval_pace = computedPaces.interval;
     }
 
     // Build onboarding_data update
