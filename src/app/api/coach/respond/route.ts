@@ -285,6 +285,7 @@ function stripMarkdown(text: string): string {
     .replace(/\*([^*\n]+)\*/g, "$1")      // *italic* → italic
     .replace(/`([^`\n]+)`/g, "$1")        // `code` → code
     .replace(/^#+\s+/gm, "")             // ## Header → Header
+    .replace(/^[-•]\s+/gm, "")           // - bullet or • bullet → plain line
     .trim();
 }
 
@@ -766,7 +767,13 @@ function buildUserMessage(
     case "nightly_reminder":
       return "Send a single short text reminding the athlete of tomorrow's workout. One sentence: workout type, distance, and target pace or effort. Nothing else.";
     case "weekly_recap":
-      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation). Second: 2-3 key sessions this week with dates and targets. Third (optional): one brief note on the training focus. No intro fluff.
+      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation). Second: this week's key sessions. Third (optional): one brief note on the training focus. No intro fluff.
+
+For the sessions text, put each session on its own line using this compact format:
+Mon 3/2 · Easy 5mi @ 9:30/mi
+Wed 3/4 · Tempo 4mi (2mi @ 8:45)
+Sat 3/7 · Long run 8mi easy
+Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
 
 MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), you must first add up every individual session distance you've listed and confirm the sum matches. Never state a total that doesn't equal the sum of the sessions you've written. If you're not listing every session, don't state a total — just describe the key sessions.`;
     case "workout_image":
@@ -794,6 +801,10 @@ VOLUME AND SAFETY:
 
 MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), add up every individual session distance you've listed and confirm the sum matches before including it. Never state a total that doesn't equal the sum of the sessions. If you're unsure of the total, omit it and just list the sessions.
 
-Write as 2–3 short iMessage texts separated by blank lines. Each text under 480 characters. First text: warm welcome + goal + weeks to race. Second: this week's sessions day by day (dates, type, target). Third (optional): one note on injury/constraints. No filler.`;
+Write as 2–3 short iMessage texts separated by blank lines. Each text under 480 characters. First text: warm welcome + goal + weeks to race. Second: this week's sessions, one per line in this compact format:
+Mon 3/2 · Easy 5mi @ 9:30/mi
+Wed 3/4 · Tempo 4mi (2mi @ 8:45)
+Sat 3/7 · Long run 8mi easy
+Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions. Third (optional): one note on injury/constraints. No filler.`;
   }
 }
