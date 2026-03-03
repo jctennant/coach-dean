@@ -599,7 +599,10 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
     case "awaiting_schedule":
       return Array.isArray(data.training_days) && (data.training_days as string[]).length > 0;
     case "awaiting_anything_else":
-      return false; // Always ask exactly once — never pre-satisfied
+      // Skip if the user already shared mileage AND some fitness/pace reference —
+      // that's the core of what this question is designed to capture.
+      // If they've given both, asking again feels like a generic script, not a listening coach.
+      return !!(data.weekly_miles || data.weekly_hours) && !!(data.recent_race_distance_km || data.easy_pace);
     case "awaiting_name":
       return typeof data.name === "string" && (data.name as string).length > 0;
     default:
@@ -854,7 +857,7 @@ async function acknowledgeSharedInfo(message: string): Promise<string | null> {
     max_tokens: 150,
     system: `You are Coach Dean, a friendly endurance coach onboarding a new athlete via SMS. The athlete just answered "anything else worth knowing?" before their plan is built.
 
-If they shared anything substantive — strengthening goals, injury history or prevention concerns, cross-training preferences, recent race history, target paces, lifestyle constraints, or anything else — acknowledge it in 1-2 warm, specific sentences. Be concrete: reference what they actually said. Assure them it will shape their plan.
+If they shared anything substantive — strengthening goals, injury history or prevention concerns, cross-training preferences, recent race history, target paces, lifestyle constraints, or anything else — acknowledge it in ONE short, specific sentence. Be concrete: reference what they actually said. Keep it tight — the plan is coming next and will speak for itself.
 
 If they said nothing / "nope" / "no" / "nothing" / "I'm good" / "nah", return only the word: null
 

@@ -217,21 +217,8 @@ export async function POST(request: Request) {
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
-
-    // After the plan lands, follow up with a cadence preference question.
-    // Natural pause → typing indicator → send as a separate bubble.
-    const cadenceQ = "Quick question — want me to text you a reminder the evening before each workout? Or would you prefer just a weekly plan overview each Sunday?";
-    await new Promise((r) => setTimeout(r, 4000));
-    if (chatId) await startTyping(chatId);
-    await new Promise((r) => setTimeout(r, 2500));
-    await sendSMS(user.phone_number, cadenceQ);
-    await supabase.from("conversations").insert({
-      user_id: userId,
-      role: "assistant",
-      content: cadenceQ,
-      message_type: "coach_response",
-    });
-    // Route next reply to the cadence handler in the onboarding flow
+    // Cadence question is now baked into the initial_plan prompt — Claude asks it
+    // as the last line of the plan. Route the next reply to the cadence handler.
     void supabase.from("users").update({ onboarding_step: "awaiting_cadence" }).eq("id", userId);
 
   } else if (trigger === "weekly_recap") {
@@ -889,6 +876,6 @@ Write as 2–3 short iMessage texts separated by blank lines. Each text under 48
 Mon 3/2 · Easy 5mi @ 9:30/mi
 Wed 3/4 · Tempo 4mi (2mi @ 8:45)
 Sat 3/7 · Long run 8mi easy
-Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions. Third (optional): one note on injury/constraints. No filler.`;
+Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions. Third (optional): one note on injury/constraints if genuinely needed. Last line of the final bubble: end with "Want evening reminders before each workout, or just a weekly overview on Sundays?" — this is always included. No other filler.`;
   }
 }
