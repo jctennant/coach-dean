@@ -851,31 +851,30 @@ MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), you m
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
 
     case "initial_plan":
-      return `This athlete just completed onboarding. Generate their first week training plan.
-
-1. Welcome them and acknowledge their goal and event date (use DATE CONTEXT for exact weeks remaining)
-2. Briefly note their current fitness starting point
-3. Give THIS WEEK's specific sessions — day by day with specific calendar dates (e.g. "Monday, Feb 23") for their scheduled training days, including session type, duration or distance, intensity/effort, and purpose
-
-SPORT-SPECIFIC GUIDANCE:
-- For runners: running sessions with paces or effort descriptions. Cross-training on off days if applicable.
-- For triathletes: distribute swim, bike, and run sessions across the week appropriately for their goal distance. Include strength/yoga if they mentioned it. Use their stated paces/times as reference.
-- For cyclists: rides with duration/distance and effort levels. Include any supplemental work they mentioned.
-- For general fitness: mix of whatever makes sense for their lifestyle and any activities they mentioned.
-
-Use your full coaching knowledge to determine the right session types, formats, intensities, and weekly structure for this specific person. Their goal, event date, fitness history, sport, injury status, and weekly volume all matter — don't apply a generic template.
+      return `This athlete just finished onboarding. Send them an initial week plan — framed as a starting point, not a finished prescription. The goal is to get something in front of them quickly and invite them to shape it.
 
 VOLUME AND SAFETY:
-- Don't exceed their current weekly volume in week 1. Apply the 10% rule from current baseline, not historical peak.
-- If they have an injury, acknowledge it, explain how the plan accounts for it, and ask one follow-up question about constraints.
-- If no injury, end with a brief open question about any niggles or schedule constraints.
+- Be conservative in week 1. Start at or below their stated baseline — do not apply the 10% growth rule yet.
+- For athletes coming back from injury, returning after a long break, or with low current mileage: start shorter than you might think. It's easier to add than to walk back an overambitious first week.
+- Address any injury or physical limitation directly — briefly explain how the plan accounts for it.
 
-MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), add up every individual session distance you've listed and confirm the sum matches before including it. Never state a total that doesn't equal the sum of the sessions. If you're unsure of the total, omit it and just list the sessions.
+SPORT-SPECIFIC GUIDANCE:
+- Runners: runs with effort or pace. Cross-training on off days if they mentioned it.
+- Triathletes: distribute swim/bike/run appropriately. Include strength/yoga if mentioned.
+- Cyclists: rides with duration and effort. Include any supplemental work they mentioned.
+- General fitness: whatever makes sense given their lifestyle and activities mentioned.
 
-Write as 2–3 short iMessage texts separated by blank lines. Each text under 480 characters. First text: warm welcome + goal + weeks to race. Second: this week's sessions, one per line in this compact format:
-Mon 3/2 · Easy 5mi @ 9:30/mi
-Wed 3/4 · Tempo 4mi (2mi @ 8:45)
-Sat 3/7 · Long run 8mi easy
-Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions. Third (optional): one note on injury/constraints if genuinely needed. Last line of the final bubble: end with "Want evening reminders before each workout, or just a weekly overview on Sundays?" — this is always included. No other filler.`;
+MILEAGE ACCURACY: Never state a weekly total unless you've verified it equals the sum of every session listed.
+
+Write as 2 short iMessage texts separated by a blank line. Each under 480 characters.
+
+First bubble: acknowledge their goal and starting point in 1-2 sentences. Frame what follows as your initial thinking, not the final word.
+
+Second bubble: this week's sessions, one per line:
+Mon 3/2 · Easy 3mi @ easy effort
+Wed 3/4 · Easy 3mi
+Sat 3/7 · Easy 4mi
+Use short day abbreviations and M/D dates. Then on a new line at the end: invite feedback and ask the cadence question together — e.g. "How does this feel? Happy to adjust anything. And — want evening reminders before each session, or just a weekly overview on Sundays?"`;
+
   }
 }
