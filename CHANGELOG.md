@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-03 — Workout recaps now always chronological
+
+**Type:** Bug Fix
+**Reported by:** User (Rachel)
+**User feedback:** Rachel received a non-chronological recap when asking for past workouts
+**Root cause:** The activity summary only gave Claude weekly aggregates, not individual workouts with dates. When asked to recap, Claude reconstructed individual workouts from conversation history which has no guaranteed order, resulting in out-of-order recaps.
+**Fix / Change:** Added a `RECENT WORKOUTS (chronological, oldest first)` section to the activity summary in the system prompt. Lists up to the last 20 individual activities sorted oldest→newest with date, type, distance, pace, and elevation. Claude now always has a properly ordered workout list to reference.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-02 — Store manually-reported workouts from SMS
 
 **Type:** Feature

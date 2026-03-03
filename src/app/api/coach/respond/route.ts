@@ -442,6 +442,22 @@ function buildActivitySummary(activities: ActivityRow[]): string {
     summary += `\nHEART RATE: avg ${Math.round(avgHR)} bpm across runs, highest avg ${maxHR} bpm\n`;
   }
 
+  // Individual workout log — chronological (oldest first) so Claude can list them in order
+  const recent = [...activities].reverse().slice(-20);
+  summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
+  for (const a of recent) {
+    const d = new Date(a.start_date);
+    const dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    const miles = a.distance_meters ? (a.distance_meters / 1609.34).toFixed(1) : null;
+    const parts = [
+      a.activity_type || "Workout",
+      miles ? `${miles}mi` : null,
+      a.average_pace ? `@ ${a.average_pace}` : null,
+      a.elevation_gain ? `${Math.round(a.elevation_gain)}ft vert` : null,
+    ].filter(Boolean);
+    summary += `  ${dateLabel}: ${parts.join(", ")}\n`;
+  }
+
   return summary;
 }
 
