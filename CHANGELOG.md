@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-03 — Dean no longer fabricates product features or integrations that don't exist
+
+**Type:** Bug Fix
+**Reported by:** User observation (user b17d9dc9)
+**User feedback:** "User asks how to connect Garmin, and Dean gives plausible-sounding but fabricated instructions ('look for Connected Apps... search for the coaching app'). You don't have Garmin integration. Dean should say so clearly rather than invent a setup flow that will leave the user confused."
+**Root cause:** No explicit system prompt guidance about what integrations/features actually exist, so Claude filled the gap with a hallucinated but plausible-sounding answer.
+**Fix / Change:** Added a PRODUCT CAPABILITIES section to the system prompt explicitly listing what Coach Dean supports (Strava only, SMS only) and what doesn't exist (Garmin, Apple Watch, Wahoo, web dashboard, etc.). Includes a specific instruction and example response for when an athlete asks about an unsupported integration.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-03 — Dean no longer fabricates dates or historical facts it can't verify
 
 **Type:** Bug Fix
