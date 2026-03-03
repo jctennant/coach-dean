@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-03 — Enforce one question per initial plan message
+
+**Type:** Bug Fix
+**Reported by:** User observation (Ian, Jake, Katie 7170bad2)
+**User feedback:** Dean asked the evening-before-or-weekly-overview question, then immediately followed with another question (hip check-in, niggles, pelvic floor) without waiting for a response. In SMS this means one of the two questions gets ignored.
+**Root cause:** The initial_plan prompt instructed Dean to address injuries/niggles as a follow-up question, which stacked on top of the cadence question already required at the end — resulting in two questions sent back-to-back.
+**Fix / Change:** Added an explicit ONE QUESTION RULE to the initial_plan prompt: the closing feedback+cadence line is the only question allowed. Injury/constraint context must be stated as information ("I've kept this conservative given your hip") not as a trailing question.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-03 — Initial plan framed as a starting point, not a prescription
 
 **Type:** Improvement
