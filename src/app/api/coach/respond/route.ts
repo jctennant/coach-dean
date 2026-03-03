@@ -663,8 +663,8 @@ async function extractAndPersistProfileUpdates(
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 300,
-      system: `Extract profile-relevant updates from an athlete's message to their coach.
+      max_tokens: 400,
+      system: `Extract structured data from an athlete's message to their coach.
 
 Extract ONLY explicitly stated NEW information:
 - A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week")
@@ -672,10 +672,17 @@ Extract ONLY explicitly stated NEW information:
 - New training preferences, goals, or constraints (e.g. "I want more hill work", "please add strength training", "I can't run Tuesdays anymore") → other_notes
 - A PR or recent race time → recent_race_distance_km + recent_race_time_minutes. Distances: 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If given as a pace (e.g. "5K PR pace is 5:40/mi"), compute total time: pace_sec/mile × distance_in_miles / 60 (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
 - A comfortable/easy running pace (NOT a race or PR pace) → easy_pace as M:SS per mile. Convert from km if needed (÷0.621).
+- A completed workout the athlete is reporting (e.g. "did a 10 mile run", "just finished 45 min easy", "rode 30 miles this morning") → workout with fields:
+  - activity_type: one of "Run", "Ride", "Swim", "Walk", "TrailRun", "WeightTraining", "Yoga", "Other"
+  - distance_meters: convert miles×1609.34 or km×1000 (null if not stated)
+  - moving_time_seconds: convert from minutes or hours (null if not stated)
+  - average_pace: as "M:SS/mi" for runs (null if not stated or not a run)
+  - elevation_gain: in meters, convert from feet÷3.281 (null if not stated)
+  - date_offset: 0 for today, -1 for yesterday (default 0)
 
-Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null}
+Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
-Return {} if nothing new is present. Do not extract from routine workout reports or conversation.`,
+Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
     });
 
@@ -687,6 +694,14 @@ Return {} if nothing new is present. Do not extract from routine workout reports
       recent_race_distance_km?: number | null;
       recent_race_time_minutes?: number | null;
       easy_pace?: string | null;
+      workout?: {
+        activity_type: string;
+        distance_meters: number | null;
+        moving_time_seconds: number | null;
+        average_pace: string | null;
+        elevation_gain: number | null;
+        date_offset: number;
+      } | null;
     } = {};
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -700,8 +715,9 @@ Return {} if nothing new is present. Do not extract from routine workout reports
     const hasOtherNotes = !!extracted.other_notes;
     const hasRaceData = !!(extracted.recent_race_distance_km && extracted.recent_race_time_minutes);
     const hasEasyPace = !!extracted.easy_pace;
+    const hasWorkout = !!extracted.workout;
 
-    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace) return;
+    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasWorkout) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -739,6 +755,45 @@ Return {} if nothing new is present. Do not extract from routine workout reports
         : (extracted.other_notes as string);
     }
 
+    // Write manual workout to activities table if reported
+    let writeWorkoutPromise: Promise<unknown> = Promise.resolve();
+    if (hasWorkout && extracted.workout) {
+      const w = extracted.workout;
+      const activityDate = new Date();
+      activityDate.setDate(activityDate.getDate() + (w.date_offset ?? 0));
+      activityDate.setHours(12, 0, 0, 0); // noon local — we don't know exact time
+
+      // Dedup: skip if we already have an activity for this user on this date with similar distance
+      const dateStr = activityDate.toISOString().slice(0, 10);
+      const { data: existing } = await supabase
+        .from("activities")
+        .select("id, distance_meters")
+        .eq("user_id", userId)
+        .gte("start_date", `${dateStr}T00:00:00Z`)
+        .lte("start_date", `${dateStr}T23:59:59Z`);
+
+      const isDuplicate = existing?.some((row) => {
+        if (!w.distance_meters || !row.distance_meters) return false;
+        return Math.abs(row.distance_meters - w.distance_meters) < 200; // within ~200m
+      });
+
+      if (!isDuplicate) {
+        writeWorkoutPromise = supabase.from("activities").insert({
+          user_id: userId,
+          activity_type: w.activity_type,
+          distance_meters: w.distance_meters,
+          moving_time_seconds: w.moving_time_seconds,
+          average_pace: w.average_pace,
+          elevation_gain: w.elevation_gain,
+          start_date: activityDate.toISOString(),
+          source: "manual",
+        });
+        console.log("[coach/respond] writing manual activity from user message:", w);
+      } else {
+        console.log("[coach/respond] skipping duplicate manual activity for", dateStr);
+      }
+    }
+
     await Promise.all([
       Object.keys(profileUpdate).length > 1
         ? supabase.from("training_profiles").update(profileUpdate).eq("user_id", userId)
@@ -746,6 +801,7 @@ Return {} if nothing new is present. Do not extract from routine workout reports
       hasOtherNotes
         ? supabase.from("users").update({ onboarding_data: updatedOnboardingData }).eq("id", userId)
         : Promise.resolve(),
+      writeWorkoutPromise,
     ]);
   } catch (err) {
     console.error("[coach/respond] extractAndPersistProfileUpdates failed:", err);
