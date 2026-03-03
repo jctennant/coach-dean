@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { SignupForm } from "@/components/signup-form";
 import { IMessageMockup } from "@/components/imessage-mockup";
 import { Navbar } from "@/components/navbar";
+import { RaceMarquee } from "@/components/race-marquee";
 
 /* ------------------------------------------------------------------ */
 /*  Value prop sections (alternating layout)                           */
@@ -62,6 +63,8 @@ export default function Home() {
         </div>
       </section>
 
+      <RaceMarquee />
+
       {/* Value props — alternating layout */}
       {valueProps.map((prop, i) => {
         const reversed = i % 2 === 1;
@@ -120,7 +123,7 @@ export default function Home() {
               },
               {
                 q: "Do I need a GPS watch or Strava to use Coach Dean?",
-                a: "Nope. All you need is a phone number. Coach Dean works entirely over SMS — no app to download, no account to create, no device required. If you do use Strava or a GPS watch, you can optionally connect it so Dean can pull your actual workout data automatically, but it's never required.",
+                a: "Nope. All you need is a phone number. Coach Dean works entirely over SMS — no app to download, no account to create, no device required.",
               },
               {
                 q: "How much does Coach Dean cost?",
@@ -157,17 +160,12 @@ export default function Home() {
         <Suspense>
           <SignupForm smsPhone={smsPhone} centered />
         </Suspense>
-        <p className="max-w-sm text-[11px] leading-snug text-muted-foreground/70">
-          By signing up, you agree to receive recurring SMS messages from Coach
-          Dean at the number provided. Message and data rates may apply. Reply
-          STOP to unsubscribe at any time. Reply HELP for support.
-        </p>
       </section>
 
       {/* Footer */}
       <footer className="border-t px-6 py-10 text-center text-sm text-muted-foreground">
         <div className="mx-auto flex max-w-2xl flex-col items-center gap-3">
-          <p className="font-medium text-foreground">CoachDeanAI</p>
+          <p className="font-medium text-foreground">CoachDean</p>
           <p>
             Questions or feedback?{" "}
             <a
@@ -182,7 +180,7 @@ export default function Home() {
             <a href="/terms" className="underline hover:text-foreground">Terms of Service</a>
           </div>
           <p className="text-xs text-muted-foreground/70">
-            &copy; {new Date().getFullYear()} CoachDeanAI. All rights reserved.
+            &copy; {new Date().getFullYear()} CoachDean. All rights reserved.
           </p>
         </div>
       </footer>
