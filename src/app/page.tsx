@@ -111,8 +111,13 @@ export default function Home() {
             {[
               {
                 q: "How is Coach Dean different from Runna or using ChatGPT to plan my workouts?",
-                a: "Runna gives you a great static plan, but it doesn't know that you had a rough week, skipped two workouts, or ran your long run way too fast. Coach Dean lives in your text messages and adapts in real time — just reply with how a workout went and he'll adjust. ChatGPT can answer running questions, but it has no memory of your training history, no structured plan, and no one checking in on you. Dean combines the personalization of a real coach with the convenience of SMS — no app to open, no dashboard to check in on.",
-              },
+                a: (
+                  <>
+                    <p>Runna gives you a great static plan, but it doesn't know that you had a rough week, skipped two workouts, or ran your long run way too fast. Coach Dean lives in your text messages and adapts in real time — just reply with how a workout went and he'll adjust.</p>
+                    <p className="mt-3">ChatGPT can answer running questions, but it has no memory of your training history, no structured plan, and no one checking in on you. Dean combines the personalization of a real coach with the convenience of SMS — no app to open, no dashboard to check in on.</p>
+                  </>
+                ),
+              }, 
               {
                 q: "What type of races can Coach Dean help me prepare for?",
                 a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. If you're training for a triathlon, he can factor in your swimming and cycling alongside your run training. Not sure what distance is right for you? Tell Dean where you're at and he'll help you figure it out.",
@@ -145,7 +150,7 @@ export default function Home() {
                     +
                   </span>
                 </summary>
-                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{a}</p>
+                <div className="mt-3 text-sm leading-relaxed text-muted-foreground">{a}</div>
               </details>
             ))}
           </div>
