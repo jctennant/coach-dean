@@ -756,7 +756,6 @@ Return {} if nothing new is present.`,
     }
 
     // Write manual workout to activities table if reported
-    let writeWorkoutPromise: Promise<unknown> = Promise.resolve();
     if (hasWorkout && extracted.workout) {
       const w = extracted.workout;
       const activityDate = new Date();
@@ -778,7 +777,8 @@ Return {} if nothing new is present.`,
       });
 
       if (!isDuplicate) {
-        writeWorkoutPromise = supabase.from("activities").insert({
+        console.log("[coach/respond] writing manual activity from user message:", w);
+        await supabase.from("activities").insert({
           user_id: userId,
           activity_type: w.activity_type,
           distance_meters: w.distance_meters,
@@ -788,7 +788,6 @@ Return {} if nothing new is present.`,
           start_date: activityDate.toISOString(),
           source: "manual",
         });
-        console.log("[coach/respond] writing manual activity from user message:", w);
       } else {
         console.log("[coach/respond] skipping duplicate manual activity for", dateStr);
       }
@@ -801,7 +800,6 @@ Return {} if nothing new is present.`,
       hasOtherNotes
         ? supabase.from("users").update({ onboarding_data: updatedOnboardingData }).eq("id", userId)
         : Promise.resolve(),
-      writeWorkoutPromise,
     ]);
   } catch (err) {
     console.error("[coach/respond] extractAndPersistProfileUpdates failed:", err);
