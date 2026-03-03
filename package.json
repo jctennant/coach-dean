@@ -16,6 +16,8 @@
     "geist": "^1.7.0",
     "lucide-react": "^0.563.0",
     "next": "16.1.6",
+    "posthog-js": "^1.357.2",
+    "posthog-node": "^5.26.2",
     "qrcode.react": "^4.2.0",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
