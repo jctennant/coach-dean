@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-04 — Re-engagement nudges for inactive users
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Users who go silent still receive daily/weekly messages with no mechanism to reduce noise or check in.
+**Fix / Change:** New daily cron (`/api/cron/reengagement`, runs at 16:00 UTC) checks for silent users and either nudges them or downgrades their cadence:
+- **Nudge #1**: `nightly_reminders` users silent for 14+ days → send re-engagement message
+- **Downgrade**: If no reply after 3 days → switch to `weekly_only`
+- **Nudge #2**: `weekly_only` users silent for 30+ days → send a lighter check-in (repeats every 28 days of continued silence)
+When any user replies, `reengagement_sent_at` is cleared so the cycle resets. Tracked in PostHog as `reengagement_nudge_sent` and `reengagement_downgraded`.
+**Files changed:** `supabase/migrations/011_reengagement.sql`, `src/app/api/cron/reengagement/route.ts`, `vercel.json`, `src/app/api/webhooks/linq/route.ts`
+
+---
+
 ## 2026-03-04 — Add onboarding flags to PostHog events
 
 **Type:** Improvement

@@ -205,7 +205,7 @@ async function handleInboundMessage(
 
   const { data: user, error: lookupError } = await supabase
     .from("users")
-    .select("id, onboarding_step, timezone, linq_chat_id, messaging_opted_out")
+    .select("id, onboarding_step, timezone, linq_chat_id, messaging_opted_out, reengagement_sent_at")
     .eq("phone_number", senderPhone)
     .maybeSingle();
 
@@ -282,6 +282,11 @@ async function handleInboundMessage(
   }
 
   void trackEvent(user.id, "message_received", { has_image: !!imageUrl, onboarding: !!user.onboarding_step });
+
+  // Clear any pending re-engagement state — they're back.
+  if ((user as Record<string, unknown>).reengagement_sent_at) {
+    void supabase.from("users").update({ reengagement_sent_at: null }).eq("id", user.id);
+  }
 
   // Image message from an onboarded user: extract workout and generate feedback.
   // Images during onboarding are unexpected — fall through to text path.
