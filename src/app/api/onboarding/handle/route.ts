@@ -272,7 +272,7 @@ async function handleSchedule(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  const [parseResponse, extra] = await Promise.all([
+  const [parseResponse, extra, acknowledgment] = await Promise.all([
     anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 200,
@@ -295,6 +295,7 @@ Rules:
       messages: [{ role: "user", content: message }],
     }),
     extractAdditionalFields(message),
+    acknowledgeSharedInfo(message),
   ]);
 
   const parseText =
@@ -324,7 +325,8 @@ Rules:
     const followUp =
       parsed.follow_up ||
       "Which specific days of the week work best for you?";
-    await sendAndStore(user.id, user.phone_number, followUp, "awaiting_schedule");
+    const incompleteResponse = acknowledgment ? `${acknowledgment}\n\n${followUp}` : followUp;
+    await sendAndStore(user.id, user.phone_number, incompleteResponse, "awaiting_schedule");
     return NextResponse.json({ ok: true });
   }
 
@@ -347,7 +349,11 @@ Rules:
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "days_per_week", days_per_week: daysPerWeek, training_days: trainingDays });
 
-  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData), nextStep);
+  if (nextStep) {
+    const nextQuestion = getStepQuestion(nextStep, mergedData);
+    const completeResponse = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    await sendAndStore(user.id, user.phone_number, completeResponse, nextStep);
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -856,11 +862,11 @@ async function acknowledgeSharedInfo(message: string): Promise<string | null> {
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 150,
-    system: `You are Coach Dean, a friendly endurance coach onboarding a new athlete via SMS. The athlete just answered "anything else worth knowing?" before their plan is built.
+    system: `You are Coach Dean, a friendly endurance coach onboarding a new athlete via SMS.
 
-If they shared anything substantive — strengthening goals, injury history or prevention concerns, cross-training preferences, recent race history, target paces, lifestyle constraints, or anything else — acknowledge it in ONE short, specific sentence. Be concrete: reference what they actually said. Keep it tight — the plan is coming next and will speak for itself.
+The athlete just shared something during the onboarding process. If they shared anything substantive — personal context, lifestyle constraints, logistical details, cross-training, injuries, race history, goals, or anything worth acknowledging — respond with ONE short, warm, specific sentence that shows you actually heard them. Be concrete: reference what they actually said. Don't be generic.
 
-If they said nothing / "nope" / "no" / "nothing" / "I'm good" / "nah", return only the word: null
+If they said only a bare answer with nothing personal or extra (e.g. just "2 days", "Monday and Thursday", "nope", "no", "I'm good"), return only the word: null
 
 Plain text only — no markdown, no asterisks.`,
     messages: [{ role: "user", content: message }],
