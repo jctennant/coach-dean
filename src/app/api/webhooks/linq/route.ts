@@ -239,7 +239,7 @@ async function handleInboundMessage(
     }
 
     void trackEvent(newUser.id, "onboarding_started");
-    void trackEvent(newUser.id, "message_received", { has_image: !!imageUrl });
+    void trackEvent(newUser.id, "message_received", { has_image: !!imageUrl, onboarding: true });
 
     // Persist chatId for future messages (typing indicator started above already)
     if (payloadChatId) {
@@ -281,7 +281,7 @@ async function handleInboundMessage(
       .eq("id", user.id);
   }
 
-  void trackEvent(user.id, "message_received", { has_image: !!imageUrl });
+  void trackEvent(user.id, "message_received", { has_image: !!imageUrl, onboarding: !!user.onboarding_step });
 
   // Image message from an onboarded user: extract workout and generate feedback.
   // Images during onboarding are unexpected — fall through to text path.

@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
-      await sendAndStore(user.id, user.phone_number, offTopicResult.response);
+      await sendAndStore(user.id, user.phone_number, offTopicResult.response, step ?? undefined);
       return NextResponse.json({ ok: true });
     }
   }
@@ -157,7 +157,8 @@ Rules:
     const { chatId: learnedChatId } = await sendAndStore(
       user.id,
       user.phone_number,
-      "Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?"
+      "Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?",
+      "awaiting_goal"
     );
     const effectiveChatId = chatId ?? learnedChatId;
     if (effectiveChatId) void shareContactCard(effectiveChatId);
@@ -212,7 +213,7 @@ Rules:
   } else {
     responseText = `${acknowledgment}${question ? ` ${question}` : ""}`.trim();
   }
-  const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText);
+  const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText, "awaiting_goal");
   const effectiveChatId = chatId ?? learnedChatId;
   if (effectiveChatId) void shareContactCard(effectiveChatId);
   return NextResponse.json({ ok: true });
@@ -262,7 +263,7 @@ Rules:
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "race_date", race_date: parsed.race_date });
 
-  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData));
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData), nextStep);
   return NextResponse.json({ ok: true });
 }
 
@@ -323,7 +324,7 @@ Rules:
     const followUp =
       parsed.follow_up ||
       "Which specific days of the week work best for you?";
-    await sendAndStore(user.id, user.phone_number, followUp);
+    await sendAndStore(user.id, user.phone_number, followUp, "awaiting_schedule");
     return NextResponse.json({ ok: true });
   }
 
@@ -346,7 +347,7 @@ Rules:
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "days_per_week", days_per_week: daysPerWeek, training_days: trainingDays });
 
-  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData));
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData), nextStep);
   return NextResponse.json({ ok: true });
 }
 
@@ -389,7 +390,7 @@ async function handleAnythingElse(
 
   if (!nextStep) {
     // Name was already captured in an earlier message — complete onboarding now
-    if (acknowledgment) await sendAndStore(user.id, user.phone_number, acknowledgment);
+    if (acknowledgment) await sendAndStore(user.id, user.phone_number, acknowledgment, "awaiting_anything_else");
     await completeOnboarding(user, merged, chatId);
     return NextResponse.json({ ok: true });
   }
@@ -402,7 +403,7 @@ async function handleAnythingElse(
 
   const question = getStepQuestion(nextStep, merged);
   const responseText = acknowledgment ? `${acknowledgment}\n\n${question}` : question;
-  await sendAndStore(user.id, user.phone_number, responseText);
+  await sendAndStore(user.id, user.phone_number, responseText, nextStep);
   return NextResponse.json({ ok: true });
 }
 
@@ -448,7 +449,7 @@ Classify their reply. Return only one word: "nightly" or "weekly".
   await Promise.all([
     supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", user.id),
     supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
-    sendAndStore(user.id, user.phone_number, confirmation),
+    sendAndStore(user.id, user.phone_number, confirmation, "awaiting_cadence"),
   ]);
 
   void trackEvent(user.id, "cadence_preference_set", { cadence });
@@ -975,7 +976,7 @@ If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. 
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-async function sendAndStore(userId: string, phone: string, message: string): Promise<{ chatId: string | null }> {
+async function sendAndStore(userId: string, phone: string, message: string, step?: string): Promise<{ chatId: string | null }> {
   const [{ chatId }] = await Promise.all([
     sendSMS(phone, message),
     supabase.from("conversations").insert({
@@ -990,6 +991,7 @@ async function sendAndStore(userId: string, phone: string, message: string): Pro
   if (chatId) {
     void supabase.from("users").update({ linq_chat_id: chatId }).eq("id", userId).is("linq_chat_id", null);
   }
+  void trackEvent(userId, "coaching_response_sent", { onboarding: true, trigger: step ?? "onboarding" });
   return { chatId };
 }
 

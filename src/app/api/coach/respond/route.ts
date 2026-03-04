@@ -213,7 +213,7 @@ export async function POST(request: Request) {
       .eq("id", userId);
   }
 
-  void trackEvent(userId, "coaching_response_sent", { trigger });
+  void trackEvent(userId, "coaching_response_sent", { trigger, onboarding: false });
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
