@@ -837,7 +837,15 @@ function buildUserMessage(
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
     case "nightly_reminder":
-      return "Send a single short text reminding the athlete of tomorrow's workout. One sentence: workout type, distance, and target pace or effort. Nothing else.";
+      return `Send a short reminder text about tomorrow's workout. Three parts, all on one message:
+
+1. A brief, natural opener — vary it each time so it doesn't feel canned. Options: "Tomorrow's workout:", "Here's what's on for tomorrow:", use their name casually ("Hey [name], tomorrow:"), reference the day ("Wednesday's session:"), etc. Mix it up.
+
+2. The workout — type, distance, and target pace or effort. One or two sentences max.
+
+3. A short, warm closer — vary this too. Rotate through things like "Good luck!", "Let me know how it goes.", "Have fun out there.", "You've got this.", "Enjoy the run.", etc. One short phrase, nothing more.
+
+Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
     case "weekly_recap":
       return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation). Second: this week's key sessions. Third (optional): one brief note on the training focus. No intro fluff.
 

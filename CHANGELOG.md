@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-05 — Make nightly reminders feel more human
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** Nightly reminders just gave the date and workout with no warmth — felt like an app notification, not a coach
+**Root cause:** The `nightly_reminder` prompt was "One sentence: workout type, distance, and target pace or effort. Nothing else." — deliberately bare but too robotic.
+**Fix / Change:** Updated prompt to instruct a varied opener (rotate between "Tomorrow's workout:", using the athlete's name, referencing the day, etc.) + workout details + a short warm closer (rotate through "Good luck!", "Let me know how it goes.", "Have fun out there.", etc.). Still under 480 chars, no markdown.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-05 — Handle "nothing on the calendar" gracefully during goal onboarding
 
 **Type:** Improvement
