@@ -116,10 +116,13 @@ async function handleGoal(
   onboardingData: Record<string, unknown>,
   chatId?: string | null
 ) {
-  const parseResponse = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 128,
-    system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
+  // Run goal parse and field extraction in parallel so we always capture the name,
+  // even on messages that don't yet contain a goal (e.g. "Yo Jake it's Ian 🙏").
+  const [parseResponse, extra] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 128,
+      system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
 Output format: {"complete": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|null}
 
@@ -136,8 +139,10 @@ Rules:
 - "cycling", "gravel race", "gran fondo", "bike race" → "cycling"
 - "just getting in shape", "get fit", "lose weight", "general" → "general_fitness"
 - When complete is false, goal must be null`,
-    messages: [{ role: "user", content: message }],
-  });
+      messages: [{ role: "user", content: message }],
+    }),
+    extractAdditionalFields(message),
+  ]);
 
   const parseText =
     parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
@@ -151,24 +156,37 @@ Rules:
   }
 
   if (!parsed.complete || !parsed.goal) {
-    // No goal detected (pure greeting, ambiguous message, etc.)
-    // Send the welcome + goal question — this covers both new users arriving via SMS
-    // and existing awaiting_goal users who sent something unclear.
-    const { chatId: learnedChatId } = await sendAndStore(
-      user.id,
-      user.phone_number,
-      "Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?",
-      "awaiting_goal"
-    );
+    // No goal detected (pure greeting, self-intro without a goal, etc.)
+    // If we extracted a name, save it and send a personalized follow-up.
+    // Otherwise send the full welcome message.
+    const nameFromMessage = extra.name as string | null;
+    const existingName = onboardingData.name as string | null;
+    const name = nameFromMessage || existingName;
+
+    if (nameFromMessage && !existingName) {
+      void supabase
+        .from("users")
+        .update({ name: nameFromMessage, onboarding_data: { ...onboardingData, name: nameFromMessage } })
+        .eq("id", user.id);
+    }
+
+    let responseText: string;
+    if (name) {
+      // We know their name — skip the intro, just ask what they're training for
+      responseText = `Hey ${name}! What are you training for — a race, general fitness, something else?`;
+    } else {
+      // First contact, no name yet — send the full welcome
+      responseText = "Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?";
+    }
+
+    const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText, "awaiting_goal");
     const effectiveChatId = chatId ?? learnedChatId;
     if (effectiveChatId) void shareContactCard(effectiveChatId);
     return NextResponse.json({ ok: true });
   }
 
-  // Run in parallel: extract onboarding fields, detect immediate coaching questions,
-  // and search for the specific race (if named) to acknowledge real course details + date.
-  const [extra, immediateAnswer, raceInfo] = await Promise.all([
-    extractAdditionalFields(message),
+  // Goal detected — run remaining parallel enrichment calls.
+  const [immediateAnswer, raceInfo] = await Promise.all([
     detectAndAnswerImmediate(message, parsed.goal),
     generateRaceAcknowledgment(message),
   ]);
