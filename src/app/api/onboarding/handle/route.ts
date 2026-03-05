@@ -69,7 +69,7 @@ export async function POST(request: Request) {
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
   // Skip awaiting_anything_else, awaiting_name, awaiting_cadence — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence") {
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -88,6 +88,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_schedule":
       result = await handleSchedule(user, message, onboardingData);
+      break;
+    case "awaiting_ultra_background":
+      result = await handleUltraBackground(user, message, onboardingData, chatId);
       break;
     case "awaiting_anything_else":
       result = await handleAnythingElse(user, message, onboardingData, chatId);
@@ -383,6 +386,75 @@ Rules:
   return NextResponse.json({ ok: true });
 }
 
+async function handleUltraBackground(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>,
+  chatId?: string | null
+) {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 200,
+    system: `Extract ultra running background from this message. Respond with ONLY valid JSON.
+
+Output format:
+{
+  "has_ultra_experience": boolean,
+  "ultra_race_history": string | null,
+  "weekly_miles": number | null,
+  "current_long_run_miles": number | null,
+  "experience_years": number | null
+}
+
+Rules:
+- has_ultra_experience: true if they mention completing any ultra distance race (50K or longer)
+- ultra_race_history: brief summary of their ultra background (e.g. "Western States finisher, multiple 50Ks and 100Ks"). null if none mentioned.
+- weekly_miles: total current weekly mileage. If stated as per-day average (e.g. "50 miles a week", "~10 miles a day"), compute the weekly total. Convert km × 0.621.
+- current_long_run_miles: their current typical longest run in miles. Convert km × 0.621.
+- experience_years: infer from context. First ultra → 1. Multiple ultras over several years → 3+. Western States or similar prestigious finish → 5+.`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+  let extracted: {
+    has_ultra_experience?: boolean;
+    ultra_race_history?: string | null;
+    weekly_miles?: number | null;
+    current_long_run_miles?: number | null;
+    experience_years?: number | null;
+  } = {};
+  try {
+    extracted = JSON.parse(extractJSON(text));
+  } catch {
+    extracted = {};
+  }
+
+  const merged: Record<string, unknown> = { ...onboardingData };
+  if (extracted.ultra_race_history) merged.ultra_race_history = extracted.ultra_race_history;
+  if (extracted.weekly_miles != null) merged.weekly_miles = extracted.weekly_miles;
+  if (extracted.current_long_run_miles != null) merged.current_long_run_miles = extracted.current_long_run_miles;
+  if (extracted.experience_years != null) merged.experience_years = extracted.experience_years;
+  // Append to other_notes so it surfaces in the coach system prompt
+  if (extracted.ultra_race_history) {
+    const existing = (onboardingData.other_notes as string) || "";
+    merged.other_notes = existing ? `${existing}; ${extracted.ultra_race_history}` : extracted.ultra_race_history;
+  }
+
+  const nextStep = findNextStep("awaiting_ultra_background", merged);
+  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: merged }).eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_step_completed", { step: "ultra_background", has_ultra_experience: extracted.has_ultra_experience });
+
+  if (nextStep) {
+    const question = getStepQuestion(nextStep, merged);
+    await sendAndStore(user.id, user.phone_number, question, nextStep);
+  } else {
+    await completeOnboarding(user, merged, chatId);
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 async function handleAnythingElse(
   user: { id: string; phone_number: string },
   message: string,
@@ -543,10 +615,11 @@ async function completeOnboarding(
     weeklyMilesRaw <= 0 ? 10 :
     weeklyMilesRaw <= 10 ? Math.ceil(weeklyMilesRaw) :
     Math.round(weeklyMilesRaw / 5) * 5 || 15;
-  // For ultras, long run should be at least 10mi in week 1 — 30% of a low weekly
-  // total produces an unrealistically short long run for ultra training.
+  // Use stated current long run if available (ultra background step captures this),
+  // otherwise fall back to 30% of weekly mileage with a 10mi floor for ultras.
+  const currentLongRunMiles = (data.current_long_run_miles as number) ?? null;
   const longRunRaw = Math.round(weeklyMileage * 0.3);
-  const longRun = isUltra ? Math.max(longRunRaw, 10) : longRunRaw;
+  const longRun = currentLongRunMiles ?? (isUltra ? Math.max(longRunRaw, 10) : longRunRaw);
 
   const [profileResult, stateResult] = await Promise.all([
     supabase.from("training_profiles").upsert(
@@ -641,6 +714,7 @@ function getSportType(goal: string): "running" | "triathlon" | "cycling" | "gene
 const STEP_ORDER = [
   "awaiting_race_date",
   "awaiting_schedule",
+  "awaiting_ultra_background", // only shown for 50K+ goals
   "awaiting_anything_else",
 ];
 
@@ -655,6 +729,11 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       return Object.prototype.hasOwnProperty.call(data, "race_date");
     case "awaiting_schedule":
       return Array.isArray(data.training_days) && (data.training_days as string[]).length > 0;
+    case "awaiting_ultra_background":
+      // Only relevant for ultra goals — skip entirely for everything else.
+      if (!ULTRA_GOALS.includes(data.goal as string)) return true;
+      // Satisfied if we already have both weekly mileage and some race/experience context.
+      return !!(data.weekly_miles) && !!(data.ultra_race_history || data.experience_years != null);
     case "awaiting_anything_else":
       // Skip if the user already shared mileage AND some fitness/pace reference —
       // that's the core of what this question is designed to capture.
@@ -697,8 +776,11 @@ function getStepQuestion(step: string, data: Record<string, unknown>): string {
       if (isCycling) return "How many days a week do you want to ride? And which days work best for you?";
       return "How many days a week do you want to run, and which days work best for you?";
 
+    case "awaiting_ultra_background":
+      return "Before I build your plan — have you run any ultras before? And what's your current weekly mileage and longest recent long run?";
+
     case "awaiting_anything_else":
-      return "Before I put your plan together — anything else worth knowing? Current weekly mileage, injuries, recent races, target paces, that sort of thing.";
+      return "Before I put your plan together — anything else worth knowing? Injuries, target paces, cross-training, that sort of thing.";
 
     case "awaiting_name":
       return "What's your name?";
