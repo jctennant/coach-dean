@@ -174,9 +174,12 @@ Rules:
     if (name) {
       // We know their name — skip the intro, just ask what they're training for
       responseText = `Hey ${name}! What are you training for — a race, general fitness, something else?`;
-    } else {
-      // First contact, no name yet — send the full welcome
+    } else if (!existingName && Object.keys(onboardingData).length === 0) {
+      // True first contact, no data at all — send the full welcome
       responseText = "Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?";
+    } else {
+      // They've already seen the welcome but we still couldn't catch their name — ask directly
+      responseText = "Sorry, didn't quite catch your name — what should I call you?";
     }
 
     const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText, "awaiting_goal");
@@ -767,7 +770,12 @@ Output format (omit fields that are not present):
 {"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null}
 
 Rules:
-- name: ONLY extract if the athlete explicitly introduces themselves — phrases like "I'm [name]", "My name is [name]", "Hi, this is [name]", "Call me [name]". NEVER extract from greetings like "Hey Dean!" or "Hi Coach!" — those address Coach Dean, not the athlete. Return null if there is any doubt.
+- name: Extract if the athlete introduces themselves. Be generous — people introduce themselves in many ways:
+  Explicit: "I'm Mark", "My name is Mark", "Call me Mark", "This is Mark", "It's Mark", "Hey it's Mark"
+  Implicit: a message beginning with a single capitalized word followed by a period, comma, exclamation mark, or emoji (e.g. "Mark. Nothing on the calendar", "Mark, just getting started", "Mark!", "Mark 👋")
+  Bare name: the entire message is just a first name (e.g. "Mark" with nothing else)
+  With "here": "[Name] here" (e.g. "Mark here", "Hey, Mark here")
+  NEVER extract from greetings directed at Coach Dean like "Hey Dean!" or "Hi Coach!" — those address the coach, not the athlete. Return null if genuinely ambiguous.
 - race_date: if a specific target race date is mentioned. Today is ${today}.
 - experience_years: infer from any experience signal. "new runner" or "just started" → 0. "fairly inexperienced" → 0.2. "completed an 8 week plan" with no prior context → 0.15. "a year" → 1. "5+ years" → 5.
 - weekly_miles: if weekly running volume is stated or clearly implied. Convert km to miles (×0.621).
