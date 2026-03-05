@@ -124,11 +124,12 @@ async function handleGoal(
       max_tokens: 128,
       system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|null}
+Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|null}
 
 Rules:
 - complete: true only if a clear training goal is identifiable
-- Pure greetings with no goal context → complete: false, goal: null
+- no_event: true if the athlete explicitly says they have no race or event planned right now ("nothing on the calendar", "no race yet", "not signed up for anything", "no events planned") — regardless of whether complete is true or false
+- Pure greetings with no goal context → complete: false, no_event: false, goal: null
 - "half marathon" or "half" → "half_marathon"
 - "full marathon" or "marathon" → "marathon"
 - "ultra" without distance → "50k"
@@ -148,7 +149,7 @@ Rules:
     parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
   console.log("[onboarding] goal raw response:", parseText);
 
-  let parsed: { complete: boolean; goal: string | null } = { complete: false, goal: null };
+  let parsed: { complete: boolean; no_event: boolean; goal: string | null } = { complete: false, no_event: false, goal: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
@@ -171,7 +172,11 @@ Rules:
     }
 
     let responseText: string;
-    if (name) {
+    if (parsed.no_event) {
+      // They explicitly said no race on the calendar — don't force a goal, coax a direction
+      const namePrefix = name ? `No worries, ${name}` : "No worries";
+      responseText = `${namePrefix} — having a direction still helps even without a date locked in. What kind of event are you drawn to — a 5K, half marathon, something longer, or more just general fitness?`;
+    } else if (name) {
       // We know their name — skip the intro, just ask what they're training for
       responseText = `Hey ${name}! What are you training for — a race, general fitness, something else?`;
     } else if (!existingName && Object.keys(onboardingData).length === 0) {
