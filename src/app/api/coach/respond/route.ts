@@ -172,7 +172,11 @@ export async function POST(request: Request) {
       ? "post_run"
       : trigger === "morning_plan"
         ? "morning_plan"
-        : "coach_response";
+        : trigger === "nightly_reminder"
+          ? "nightly_reminder"
+          : trigger === "weekly_recap"
+            ? "weekly_recap"
+            : "coach_response";
 
   let learnedChatId: string | null = null;
 

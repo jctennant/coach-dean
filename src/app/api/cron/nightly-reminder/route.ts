@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   // training_profiles.proactive_cadence = 'nightly_reminders'
   const { data: profiles, error } = await supabase
     .from("training_profiles")
-    .select("user_id, training_days, users!inner(timezone, onboarding_step, messaging_opted_out)")
+    .select("user_id, training_days, last_nightly_reminder_date, users!inner(timezone, onboarding_step, messaging_opted_out)")
     .eq("proactive_cadence", "nightly_reminders")
     .is("users.onboarding_step", null)
     .eq("users.messaging_opted_out", false);
@@ -34,12 +34,20 @@ export async function GET(request: Request) {
   // Cron fires at 02:00 UTC (6pm PST). "Tomorrow" in Pacific time is the same
   // calendar day at 02:00 UTC, so just use the current UTC date + 1 day.
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const todayUTC = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD" — dedup key
   let sent = 0;
 
   for (const profile of profiles) {
     const user = profile.users as unknown as { timezone: string | null; onboarding_step: string | null };
     const tz = user.timezone || "America/New_York";
     const trainingDays = (profile.training_days as string[]) || [];
+
+    // Skip if we already sent a reminder for this user today — guards against
+    // Vercel cron retries and any double-fire scenarios.
+    if (profile.last_nightly_reminder_date === todayUTC) {
+      console.log(`[nightly-reminder] skipping ${profile.user_id} — already sent today (${todayUTC})`);
+      continue;
+    }
 
     // Find tomorrow's day name in the user's timezone
     const tomorrowWeekday = new Intl.DateTimeFormat("en-US", {
@@ -60,6 +68,11 @@ export async function GET(request: Request) {
           trigger: "nightly_reminder",
         }),
       });
+      // Mark as sent — prevents re-firing if cron retries today
+      await supabase
+        .from("training_profiles")
+        .update({ last_nightly_reminder_date: todayUTC })
+        .eq("user_id", profile.user_id);
       sent++;
     } catch (err) {
       console.error(`[nightly-reminder] failed for user ${profile.user_id}:`, err);
