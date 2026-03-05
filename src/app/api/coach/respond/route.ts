@@ -871,6 +871,13 @@ VOLUME AND SAFETY:
 - For athletes coming back from injury, returning after a long break, or with low current mileage: start shorter than you might think. It's easier to add than to walk back an overambitious first week.
 - Address any injury or physical limitation directly in the plan itself — briefly note how the plan accounts for it. Do NOT ask a follow-up question about it.
 
+ULTRA DISTANCE GOALS (50K, 100K, and beyond):
+- Do NOT apply beginner conservatism. Anyone training for an ultra is already running meaningful volume — calibrate to their stated mileage, not a cautious floor.
+- Long run in week 1 should reflect ultra training reality: at minimum 10–12mi, and up to 16–18mi if their weekly mileage supports it. A 6mi long run for a 100K athlete is not appropriate.
+- Time-on-feet matters more than pace. Frame long runs by duration or easy effort, not a specific pace target.
+- For mountain/technical ultras (Black Canyon, Western States, etc.) include vert-specific work and power hiking from the start — not just later in the build.
+- If a finish time goal is given (e.g. "under 18 hours"), use it to infer experience level and calibrate the plan accordingly. An 18-hour 100K is not a beginner finishing.
+
 SPORT-SPECIFIC GUIDANCE:
 - Runners: runs with effort or pace. Cross-training on off days if they mentioned it.
 - Triathletes: distribute swim/bike/run appropriately. Include strength/yoga if mentioned.

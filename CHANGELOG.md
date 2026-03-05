@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-05 — Fix ultra runner plans being too conservative at onboarding
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Internal observation (Ohnmar's plan review)
+**User feedback:** Experienced 100K runner (Western States finisher) received a 21mi first week with a 6mi long run
+**Root cause:** Four compounding issues: (1) "5-6 miles weekdays" was extracted as 5-6 total weekly miles instead of ~28mi; (2) missing experience_years defaulted fitness_level to intermediate/beginner; (3) long_run_target = 30% of weekly mileage produced a 5mi long run floor; (4) initial_plan prompt applied the same beginner conservatism regardless of goal type.
+**Fix / Change:**
+- weekly_miles extraction now handles "X miles per day/weekday" patterns by multiplying out (weekdays × 5, "every day" × 7)
+- assessFitnessLevel now takes goal + daysPerWeek — anyone running 5+ days/week for a 50K+ is classified advanced regardless of experience_years
+- weeklyMilesRaw default for ultra goals bumped from 15 to 30 when no mileage is provided
+- long_run_target for ultra goals has a 10mi floor (was purely 30% of weekly mileage)
+- initial_plan prompt now has an ULTRA DISTANCE GOALS section: no beginner conservatism, 10-18mi long run in week 1, time-on-feet framing, vert work from day one, finish time used to infer experience
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-05 — Fix double "Got it" at end of onboarding before plan is sent
 
 **Type:** Bug Fix

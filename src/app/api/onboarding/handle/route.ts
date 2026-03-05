@@ -536,13 +536,17 @@ async function completeOnboarding(
   const injuryNotes = (data.injury_notes as string) || null;
   const name = (data.name as string) || null;
 
-  const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles, weeklyHours);
-  const weeklyMilesRaw = weeklyMiles ?? 15;
+  const isUltra = ULTRA_GOALS.includes(goal);
+  const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles, weeklyHours, goal, daysPerWeek);
+  const weeklyMilesRaw = weeklyMiles ?? (isUltra ? 30 : 15);
   const weeklyMileage =
     weeklyMilesRaw <= 0 ? 10 :
     weeklyMilesRaw <= 10 ? Math.ceil(weeklyMilesRaw) :
     Math.round(weeklyMilesRaw / 5) * 5 || 15;
-  const longRun = Math.round(weeklyMileage * 0.3);
+  // For ultras, long run should be at least 10mi in week 1 — 30% of a low weekly
+  // total produces an unrealistically short long run for ultra training.
+  const longRunRaw = Math.round(weeklyMileage * 0.3);
+  const longRun = isUltra ? Math.max(longRunRaw, 10) : longRunRaw;
 
   const [profileResult, stateResult] = await Promise.all([
     supabase.from("training_profiles").upsert(
@@ -785,7 +789,7 @@ Rules:
   NEVER extract from greetings directed at Coach Dean like "Hey Dean!" or "Hi Coach!" — those address the coach, not the athlete. Return null if genuinely ambiguous.
 - race_date: if a specific target race date is mentioned. Today is ${today}.
 - experience_years: infer from any experience signal. "new runner" or "just started" → 0. "fairly inexperienced" → 0.2. "completed an 8 week plan" with no prior context → 0.15. "a year" → 1. "5+ years" → 5.
-- weekly_miles: if weekly running volume is stated or clearly implied. Convert km to miles (×0.621).
+- weekly_miles: total weekly running mileage. If stated as a per-day or per-weekday average (e.g. "I run 5-6 miles a day", "5-6 miles weekdays"), multiply by the number of days implied (weekdays = 5, "every day" = 7) to get a weekly total. Convert km to miles (×0.621).
 - easy_pace: ONLY a stated comfortable, easy, or conversational running pace. Do NOT extract race pace, PR pace, or anything described as a PR, best time, or race effort. Format as M:SS per mile. "8:30/m" → "8:30". "5:00/km" → "8:03".
 - recent_race_distance_km: if a PR or recent race is mentioned. 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If the athlete gives a pace rather than a time (e.g. "5K PR pace is 5:40/mi"), compute the total time: pace_per_mile × distance_in_miles (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
 - recent_race_time_minutes: total race time in minutes for the PR/race above. If given as a pace, compute time = pace_sec/mile × distance_in_miles / 60.
@@ -869,7 +873,7 @@ Rules:
 - recent_race_time_minutes: total race time in minutes (e.g. "25:30" → 25.5, "1:45:00" → 105, "2:05 half marathon" → 125)
 - easy_pace: comfortable conversational running pace in M:SS per mile. Convert from km if needed (÷0.621)
 - experience_years: years running/training. "new" → 0, "a few months" → 0.3, "a year" → 1, "5+ years" → 5
-- weekly_miles: weekly running mileage (convert km × 0.621)
+- weekly_miles: total weekly running mileage. If stated as a per-day or per-weekday average (e.g. "I average 5-6 miles a day", "5-6 miles weekdays"), multiply by the number of days implied (weekdays = 5, "every day" = 7) to get a weekly total. Convert km × 0.621.
 - crosstraining_tools: normalized array e.g. ["cycling", "swimming", "gym"]. null if none mentioned.
 - other_notes: any other relevant info not captured above (target time goals, lifestyle constraints, etc.)
 - Return all fields, using null for those not present`,
@@ -1052,7 +1056,9 @@ async function sendAndStore(userId: string, phone: string, message: string, step
   return { chatId };
 }
 
-function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null, weeklyHours: number | null): string {
+const ULTRA_GOALS = ["50k", "100k", "30k"];
+
+function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null, weeklyHours: number | null, goal?: string, daysPerWeek?: number): string {
   // Use hours as primary signal for multi-sport athletes
   if (weeklyHours != null) {
     if (weeklyHours >= 10 || experienceYears >= 3) return "advanced";
@@ -1060,6 +1066,9 @@ function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null,
     return "beginner";
   }
   const miles = weeklyMiles ?? 0;
+  // Anyone training for an ultra running 5+ days/week is at minimum intermediate,
+  // almost certainly advanced — don't let missing experience data drag them to beginner.
+  if (goal && ULTRA_GOALS.includes(goal) && (daysPerWeek ?? 0) >= 5) return "advanced";
   if (miles >= 30 || experienceYears >= 3) return "advanced";
   if (miles >= 15 || experienceYears >= 1) return "intermediate";
   return "beginner";
