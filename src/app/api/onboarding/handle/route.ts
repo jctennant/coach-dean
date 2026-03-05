@@ -454,15 +454,33 @@ async function handleCadence(
     max_tokens: 16,
     system: `The athlete is responding to a question about whether they want nightly workout reminders or just a weekly plan overview on Sundays.
 
-Classify their reply. Return only one word: "nightly" or "weekly".
+Classify their reply. Return only one word: "nightly", "weekly", or "morning".
 
-- "yes", "yeah", "sure", "please", "sounds good", "reminders", "nightly", "that works" → nightly
+- "yes", "yeah", "sure", "please", "sounds good", "reminders", "nightly", "evening", "night before", "that works" → nightly
 - "no", "nope", "weekly", "sunday", "just weekly", "no thanks" → weekly
+- "morning", "am", "wake up", "start of day", "in the morning", "noon", "midday", "lunch", "daily", any specific time like "8am" or "12pm" → morning
 - Anything ambiguous → weekly`,
     messages: [{ role: "user", content: message }],
   });
 
   const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "weekly";
+
+  // If they asked for morning reminders, explain we don't support that and default to nightly
+  if (raw.startsWith("morning")) {
+    await Promise.all([
+      supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", user.id),
+      supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
+      sendAndStore(
+        user.id,
+        user.phone_number,
+        "I can't do specific times just yet — I'll send you a heads-up the evening before each session instead. How does the plan look? Let me know if anything needs tweaking.",
+        "awaiting_cadence"
+      ),
+    ]);
+    void trackEvent(user.id, "cadence_preference_set", { cadence: "nightly_reminders", requested: "morning" });
+    return NextResponse.json({ ok: true });
+  }
+
   const cadence = raw.startsWith("nightly") ? "nightly_reminders" : "weekly_only";
 
   const confirmation =
