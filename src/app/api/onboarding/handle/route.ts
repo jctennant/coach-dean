@@ -421,8 +421,10 @@ async function handleAnythingElse(
   void trackEvent(user.id, "onboarding_step_completed", { step: "anything_else" });
 
   if (!nextStep) {
-    // Name was already captured in an earlier message — complete onboarding now
-    if (acknowledgment) await sendAndStore(user.id, user.phone_number, acknowledgment, "awaiting_anything_else");
+    // Name was already captured in an earlier message — complete onboarding now.
+    // Do NOT send the acknowledgment here — the initial_plan message opens with
+    // a natural reference to what was just shared, so a separate "Got it" first
+    // produces an awkward double-acknowledgment.
     await completeOnboarding(user, merged, chatId);
     return NextResponse.json({ ok: true });
   }
