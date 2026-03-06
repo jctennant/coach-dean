@@ -548,28 +548,18 @@ Classify their reply. Return only one word: "nightly", "weekly", or "morning".
 
   const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "weekly";
 
-  // If they asked for morning reminders, explain we don't support that and default to nightly
-  if (raw.startsWith("morning")) {
-    await Promise.all([
-      supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", user.id),
-      supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
-      sendAndStore(
-        user.id,
-        user.phone_number,
-        "I can't do specific times just yet — I'll send you a heads-up the evening before each session instead. How does the plan look? Let me know if anything needs tweaking.",
-        "awaiting_cadence"
-      ),
-    ]);
-    void trackEvent(user.id, "cadence_preference_set", { cadence: "nightly_reminders", requested: "morning" });
-    return NextResponse.json({ ok: true });
-  }
-
-  const cadence = raw.startsWith("nightly") ? "nightly_reminders" : "weekly_only";
+  const cadence = raw.startsWith("morning")
+    ? "morning_reminders"
+    : raw.startsWith("nightly")
+      ? "nightly_reminders"
+      : "weekly_only";
 
   const confirmation =
-    cadence === "nightly_reminders"
-      ? "Perfect — I'll send you a heads-up the evening before each session. How does the plan look? Let me know if anything needs tweaking."
-      : "Got it — I'll send you a weekly plan overview every Sunday. How does the plan look? Happy to adjust anything.";
+    cadence === "morning_reminders"
+      ? "Perfect — I'll text you the morning of each session. How does the plan look? Let me know if anything needs tweaking."
+      : cadence === "nightly_reminders"
+        ? "Perfect — I'll send you a heads-up the evening before each session. How does the plan look? Let me know if anything needs tweaking."
+        : "Got it — I'll send you a weekly plan overview every Sunday. How does the plan look? Happy to adjust anything.";
 
   await Promise.all([
     supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", user.id),

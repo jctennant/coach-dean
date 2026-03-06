@@ -8,6 +8,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-06 — Morning reminders (day-of) added as a supported cadence option
+
+**Type:** Feature
+**Reported by:** Ian (user feedback)
+**User feedback:** Ian wanted morning reminders the day-of his workouts, not the evening before. Previously Dean apologized and defaulted to nightly.
+**Root cause:** Morning reminders were explicitly unsupported — `handleCadence` converted all morning preferences to `nightly_reminders` with an apology. No cron existed to send morning-of messages.
+**Fix / Change:**
+- New `GET /api/cron/morning-reminder` endpoint firing at 14:00 UTC (6am PST / 9am EST). Checks TODAY's training days (vs nightly which checks tomorrow). Sends `morning_reminder` trigger. Deduplicates via `last_morning_reminder_date` column.
+- New `morning_reminder` trigger type in coach/respond with a prompt framed around today's session (vs nightly's "tomorrow's workout").
+- `handleCadence` updated: `morning_reminders` is now a real `proactive_cadence` value. Removed the apology/fallback. Confirmation message: "I'll text you the morning of each session."
+- `initial_plan` closing question updated to offer morning OR evening reminders as options.
+- System prompt PRODUCT CAPABILITIES updated — morning reminders now supported.
+- `vercel.json`: added `0 14 * * *` cron for `/api/cron/morning-reminder`.
+- **DB migration required**: `ALTER TABLE training_profiles ADD COLUMN IF NOT EXISTS last_morning_reminder_date date;` then `npm run gen:types`.
+**Files changed:** src/app/api/cron/morning-reminder/route.ts (new), src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts, vercel.json
+
+---
+
 ## 2026-03-06 — Training philosophy: landing page section + system prompt overhaul
 
 **Type:** Feature / Improvement

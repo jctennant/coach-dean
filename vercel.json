@@ -3,6 +3,7 @@
     { "path": "/api/cron/morning-workout", "schedule": "0 12 * * *" },
     { "path": "/api/cron/sunday-recap", "schedule": "0 22 * * 0" },
     { "path": "/api/cron/nightly-reminder", "schedule": "0 2 * * *" },
+    { "path": "/api/cron/morning-reminder", "schedule": "0 14 * * *" },
     { "path": "/api/cron/reengagement", "schedule": "0 16 * * *" }
   ]
 }

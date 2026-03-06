@@ -8,7 +8,7 @@ import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
 
-type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "workout_image" | "welcome_message";
+type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "welcome_message";
 
 interface CoachRequest {
   userId: string;
@@ -201,9 +201,11 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         ? "morning_plan"
         : trigger === "nightly_reminder"
           ? "nightly_reminder"
-          : trigger === "weekly_recap"
-            ? "weekly_recap"
-            : "coach_response";
+          : trigger === "morning_reminder"
+            ? "morning_reminder"
+            : trigger === "weekly_recap"
+              ? "weekly_recap"
+              : "coach_response";
 
   let learnedChatId: string | null = null;
 
@@ -673,9 +675,9 @@ MEMORY AND DATA LIMITATIONS:
 PRODUCT CAPABILITIES — what Coach Dean actually supports:
 - Activity tracking: none currently. There is no automatic sync with Strava, Garmin, Apple Watch, Wahoo, or any other platform right now. Athletes report workouts by texting you directly or sharing screenshots of a workout.
 - Communication: SMS only. No app, no web dashboard, no email.
-- Proactive reminders: evening-before reminders (the night before a session) and weekly Sunday overviews are supported. Morning reminders or any specific time (8am, noon, etc.) are NOT supported.
-- If an athlete asks for morning reminders or says anything like "you can text me in the morning" or "morning of works for me", do NOT agree. Correct it directly: "I can only send reminders the evening before — no morning option yet." Then confirm that's what you'll do.
-- NEVER say "I'll check in Thursday morning" or "I'll text you in the morning" — you can't. Always say "I'll send you a reminder Wednesday evening" (i.e. the evening before). If you're unsure of the day, just say "I'll send you a reminder the evening before your next run."
+- Proactive reminders: morning-of reminders, evening-before reminders, and weekly Sunday overviews are all supported. Specific times (8am, noon, etc.) are NOT supported — just morning or evening.
+- If an athlete asks what time the morning reminder arrives, tell them it goes out around 6-9am their time depending on timezone.
+- NEVER promise a reminder at a specific time like "8am" — just say "morning of" or "evening before".
 - If an athlete asks how to connect Garmin, Strava, Apple Health, or any other service, tell them clearly: "I don't have automatic sync set up yet — just text me after your workouts and I'll track from there." Do NOT invent a setup flow or imply an integration exists that doesn't.
 - If asked about a feature that doesn't exist (a web dashboard, export, calendar sync, etc.), say you don't have that yet rather than fabricating instructions.
 
@@ -905,6 +907,17 @@ function buildUserMessage(
     case "welcome_message":
       return `Send a short, warm message the evening before this athlete's very first training session. Two goals: (1) wish them luck for tomorrow, and (2) let them know they can text you anytime — not just after runs, but with any question about training, how something feels, pacing, nutrition, cross-training, anything. Make it personal: reference their specific goal, and if they mentioned any injury or concern during onboarding, acknowledge it naturally (e.g. "if the back talks to you at any point, just let me know"). One short message, no more than 2-3 sentences. Warm and human — not a feature announcement.`;
 
+    case "morning_reminder":
+      return `Send a short reminder text about today's workout. Three parts, all on one message:
+
+1. A brief, natural opener — vary it each time. Options: "Today's workout:", "Here's what's on for today:", use their name casually, reference the day, etc.
+
+2. The workout — type, distance, and target pace or effort. One or two sentences max.
+
+3. A short, energizing closer — vary this too. "Go get it.", "Have a great one.", "Enjoy the run.", "You've got this.", etc. One short phrase.
+
+Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
+
     case "nightly_reminder":
       return `Send a short reminder text about tomorrow's workout. Three parts, all on one message:
 
@@ -961,7 +974,7 @@ Second bubble: this week's sessions, one per line:
 Mon 3/2 · Easy 3mi @ easy effort
 Wed 3/4 · Easy 3mi
 Sat 3/7 · Easy 4mi
-Use short day abbreviations and M/D dates. Then on a new line at the end: invite feedback and ask the cadence question together — e.g. "How does this feel? Happy to adjust anything. And — want evening reminders before each session, or just a weekly overview on Sundays?"
+Use short day abbreviations and M/D dates. Then on a new line at the end: invite feedback and ask the cadence question together — e.g. "How does this feel? Happy to adjust anything. And — want morning reminders day-of, evening reminders the night before, or just a weekly overview on Sundays?"
 
 ONE QUESTION RULE: The closing line above is the only question in the entire response. Do not ask anything else — no follow-ups about injuries, niggles, schedule, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.`;
 

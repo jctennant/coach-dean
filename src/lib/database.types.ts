@@ -165,6 +165,7 @@ export type Database = {
           goal: string | null
           id: string
           injury_notes: string | null
+          last_morning_reminder_date: string | null
           last_nightly_reminder_date: string | null
           proactive_cadence: string | null
           race_date: string | null
@@ -183,6 +184,7 @@ export type Database = {
           goal?: string | null
           id?: string
           injury_notes?: string | null
+          last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
           proactive_cadence?: string | null
           race_date?: string | null
@@ -201,6 +203,7 @@ export type Database = {
           goal?: string | null
           id?: string
           injury_notes?: string | null
+          last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
           proactive_cadence?: string | null
           race_date?: string | null
