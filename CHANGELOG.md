@@ -8,6 +8,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-06 — Send welcome message before first nightly reminder
+
+**Type:** Feature
+**Reported by:** User feedback (Jake's mom unsure she could text Dean with questions)
+**Root cause:** Nothing in the onboarding or early coaching flow told users they could reach out anytime — it felt like a one-way broadcast.
+**Fix / Change:** On a user's first ever nightly reminder, send a warm intro message before the workout reminder: "Before your first session tomorrow — you can text me anytime with questions: how a run felt, pacing, nutrition, something feels off, anything at all." Uses first name if available. Detected via `last_nightly_reminder_date` being null (already tracked for dedup).
+**Files changed:** `src/app/api/cron/nightly-reminder/route.ts`
+
+---
+
 ## 2026-03-06 — Fix awaiting_cadence routing set too late, causing cadence preference to be lost
 
 **Type:** Bug Fix
