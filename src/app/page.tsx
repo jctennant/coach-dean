@@ -101,8 +101,51 @@ export default function Home() {
         );
       })}
 
-      {/* FAQ */}
+      {/* Training philosophy */}
       <section className="border-t px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-12 text-center">
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              Built on proven training science
+            </h2>
+            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
+              Dean applies a series of evidence-based principles — the same ones elite coaches have used for decades, adapted to your life and fitness level.
+            </p>
+          </div>
+          <div className="grid gap-10 md:grid-cols-3 md:items-start">
+            {[
+              {
+                number: "01",
+                title: "Easy means easy.",
+                body: "Elite athletes spend ~80% of their training at conversational effort. Medium intensity is the gray zone: too hard to recover from, not hard enough to drive adaptation. Easy runs are truly easy. Hard days are genuinely hard.",
+                credit: "80/20 training · Stephen Seiler · Matt Fitzgerald",
+              },
+              {
+                number: "02",
+                title: "Aerobic base first.",
+                body: "Before tempo runs, intervals, or race-specific work, Dean builds your aerobic foundation. Athletes who rush into hard training plateau faster and get injured more often. Build patiently and fitness compounds.",
+                credit: "Lydiard periodization · Jack Daniels VDOT · Uphill Athlete",
+              },
+              {
+                number: "03",
+                title: "Strength keeps you in the game.",
+                body: "Runners break down not because they ran too far, but because specific muscles weren't strong enough to absorb the load. Targeted hip, glute, and single-leg work reduces injury rates — Dean builds it into your plan from day one.",
+                credit: "David & Megan Roche · SWAP Running",
+              },
+            ].map(({ number, title, body, credit }) => (
+              <div key={number} className="flex flex-col gap-3">
+                <span className="font-mono text-sm text-muted-foreground">{number}</span>
+                <h3 className="font-serif text-lg font-normal">{title}</h3>
+                <p className="text-sm leading-relaxed text-muted-foreground">{body}</p>
+                <p className="text-xs italic text-muted-foreground/60">{credit}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="border-t px-6 py-16 md:py-24 bg-muted/40">
         <div className="mx-auto max-w-2xl">
           <h2 className="mb-10 text-center font-serif text-2xl font-normal md:text-3xl">
             Frequently asked questions
