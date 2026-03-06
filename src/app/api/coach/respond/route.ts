@@ -892,7 +892,7 @@ function buildUserMessage(
 
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
     case "weekly_recap":
-      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation). Second: this week's key sessions. Third (optional): one brief note on the training focus. No intro fluff.
+      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — week 4 is a recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
 For the sessions text, put each session on its own line using this compact format:
 Mon 3/2 · Easy 5mi @ 9:30/mi
@@ -931,7 +931,7 @@ MILEAGE ACCURACY: Never state a weekly total unless you've verified it equals th
 
 Write as 2 short iMessage texts separated by a blank line. Each under 480 characters.
 
-First bubble: 1-2 sentences that acknowledge the most important constraint or context the athlete just shared (injury, lifting schedule, recent mileage, etc.) and frame what follows as your initial thinking, not the final word. Do NOT open with "Got it" or any generic acknowledgment phrase — get straight to the substance. Do NOT restate their goal back to them.
+First bubble: 2-3 sentences max. Lead with the most important constraint or context (injury, mileage baseline, race timeline, etc.). Then add one sentence explaining the training rationale behind the plan — why you've structured it this way. Keep it specific and grounded: "Starting with all easy miles to build your aerobic base before introducing quality work" or "Keeping volume conservative given the hip — easier to add than to walk back a flare-up." This is what makes the plan feel like coaching, not a random schedule. Do NOT open with "Got it" or any generic acknowledgment phrase. Do NOT restate their goal back to them.
 
 Second bubble: this week's sessions, one per line:
 Mon 3/2 · Easy 3mi @ easy effort
