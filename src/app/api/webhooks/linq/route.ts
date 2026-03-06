@@ -345,11 +345,11 @@ async function handleInboundMessage(
     }
   }
 
-  // Fire coach/respond without awaiting — it's its own Vercel function with its own
-  // timeout. Awaiting it here risks exceeding this function's maxDuration (60s) when
-  // debounce (10s) + coach response (up to 60s) are combined, causing silent drops.
+  // Await the fetch — void fetch() doesn't work in after() because the runtime
+  // exits before the HTTP request fires. coach/respond returns 200 immediately
+  // and does its work in its own after(), so this completes in milliseconds.
   console.log("[linq-webhook] debounce: firing response for", user.id);
-  void fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+  await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userId: user.id, trigger: "user_message", chatId: resolvedChatId }),

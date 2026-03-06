@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/lib/paces";
 import { anthropic } from "@/lib/anthropic";
@@ -33,7 +33,27 @@ interface ActivityRow {
  * Core coaching function. Given a user + trigger, generates and sends a coaching response via SMS.
  */
 export async function POST(request: Request) {
-  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId }: CoachRequest = await request.json();
+  const body = await request.json();
+
+  // For non-dry_run requests, return 200 immediately and do all the work in
+  // after() so the caller (webhook) isn't left waiting on Claude + SMS time.
+  if (!body.dry_run) {
+    after(async () => {
+      try {
+        await processCoachRequest(body);
+      } catch (err) {
+        console.error("[coach/respond] unhandled error in after():", err);
+      }
+    });
+    return NextResponse.json({ ok: true });
+  }
+
+  // dry_run: process inline so the caller gets the generated message back
+  return await processCoachRequest(body);
+}
+
+async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
+  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId } = body;
 
   // Fetch user context in parallel
   const [
