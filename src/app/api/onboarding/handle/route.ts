@@ -535,14 +535,14 @@ async function handleCadence(
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 16,
-    system: `The athlete is responding to a question about whether they want nightly workout reminders or just a weekly plan overview on Sundays.
+    system: `The athlete is responding to a question offering three reminder options: morning-of reminders, evening-before reminders, or a weekly Sunday overview only.
 
-Classify their reply. Return only one word: "nightly", "weekly", or "morning".
+Classify their reply. Return only one word: "morning", "nightly", or "weekly".
 
-- "yes", "yeah", "sure", "please", "sounds good", "reminders", "nightly", "evening", "night before", "that works" → nightly
-- "no", "nope", "weekly", "sunday", "just weekly", "no thanks" → weekly
-- "morning", "am", "wake up", "start of day", "in the morning", "noon", "midday", "lunch", "daily", any specific time like "8am" or "12pm" → morning
-- Anything ambiguous → weekly`,
+- "morning", "day of", "day-of", "morning of", "same day", "that morning", "am", "wake up", "start of day", any specific morning time like "8am", "7am" → morning
+- "evening", "night before", "nightly", "night of", "the night before", "yes", "yeah", "sure", "please", "sounds good", "reminders", "that works" → nightly
+- "weekly", "sunday", "just weekly", "no", "nope", "no thanks", "just the overview" → weekly
+- Anything ambiguous → nightly`,
     messages: [{ role: "user", content: message }],
   });
 
