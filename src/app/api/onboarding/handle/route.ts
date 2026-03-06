@@ -4,6 +4,7 @@ import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, shareContactCard } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
+import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
 
@@ -441,7 +442,7 @@ Rules:
   }
 
   const nextStep = findNextStep("awaiting_ultra_background", merged);
-  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: merged }).eq("id", user.id);
+  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: merged as unknown as Json }).eq("id", user.id);
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "ultra_background", has_ultra_experience: extracted.has_ultra_experience });
 
@@ -504,7 +505,7 @@ async function handleAnythingElse(
   // Save progress and ask the next question (typically awaiting_name)
   await supabase
     .from("users")
-    .update({ onboarding_step: nextStep, onboarding_data: merged })
+    .update({ onboarding_step: nextStep, onboarding_data: merged as unknown as Json })
     .eq("id", user.id);
 
   const question = getStepQuestion(nextStep, merged);
@@ -668,7 +669,7 @@ async function completeOnboarding(
     .update({
       name: name ?? undefined,
       onboarding_step: null,
-      onboarding_data: data,
+      onboarding_data: data as unknown as Json,
     })
     .eq("id", user.id);
 

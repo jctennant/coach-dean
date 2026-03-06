@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { getPostHogClient } from "@/lib/posthog";
+import type { Json } from "@/lib/database.types";
 
 /**
  * Fire-and-forget event tracking.
@@ -13,7 +14,7 @@ export async function trackEvent(
 ): Promise<void> {
   try {
     const [{ error }] = await Promise.all([
-      supabase.from("events").insert({ user_id: userId, event_name: eventName, properties }),
+      supabase.from("events").insert({ user_id: userId, event_name: eventName, properties: properties as unknown as Json }),
       (async () => {
         const ph = getPostHogClient();
         if (!ph) return;

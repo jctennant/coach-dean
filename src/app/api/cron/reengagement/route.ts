@@ -74,7 +74,7 @@ export async function GET(request: Request) {
           .single(),
       ]);
 
-      const lastInboundAt: Date | null = inboundResult.data
+      const lastInboundAt: Date | null = inboundResult.data?.created_at
         ? new Date(inboundResult.data.created_at)
         : null;
       const cadence = (profileResult.data?.proactive_cadence as string) ?? "weekly_only";

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import { getAllActivities, getAthleteStats } from "@/lib/strava";
+import type { Json } from "@/lib/database.types";
 
 /**
  * GET /api/auth/strava/callback
@@ -96,7 +97,7 @@ export async function GET(request: Request) {
           ytd_run_totals: stats.ytd_run_totals,
           recent_run_totals: stats.recent_run_totals,
         },
-      },
+      } as unknown as Json,
     })
     .eq("id", userId)
     .select("id, phone_number, name")
@@ -168,18 +169,18 @@ async function importStravaActivities(userId: string, accessToken: string) {
     await supabase.from("activities").upsert(
       {
         user_id: userId,
-        strava_activity_id: activity.id,
-        activity_type: activity.type,
+        strava_activity_id: activity.id as number,
+        activity_type: activity.type as string,
         distance_meters: distanceMeters,
         moving_time_seconds: movingTimeSeconds,
-        elapsed_time_seconds: activity.elapsed_time,
-        average_heartrate: activity.average_heartrate || null,
-        max_heartrate: activity.max_heartrate || null,
-        average_cadence: activity.average_cadence || null,
+        elapsed_time_seconds: activity.elapsed_time as number,
+        average_heartrate: (activity.average_heartrate as number | null) || null,
+        max_heartrate: (activity.max_heartrate as number | null) || null,
+        average_cadence: (activity.average_cadence as number | null) || null,
         average_pace: `${paceMin}:${paceSec.toString().padStart(2, "0")}/mi`,
-        elevation_gain: activity.total_elevation_gain,
-        suffer_score: activity.suffer_score || null,
-        start_date: activity.start_date,
+        elevation_gain: activity.total_elevation_gain as number | null,
+        suffer_score: (activity.suffer_score as number | null) || null,
+        start_date: activity.start_date as string,
       },
       { onConflict: "strava_activity_id" }
     );

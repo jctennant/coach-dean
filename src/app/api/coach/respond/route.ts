@@ -4,6 +4,7 @@ import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
+import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
 
@@ -269,7 +270,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Update training state if post_run
   if (trigger === "post_run" && activityData) {
-    const distanceMiles = activityData.distance_meters / 1609.34;
+    const distanceMiles = (activityData.distance_meters ?? 0) / 1609.34;
     await supabase
       .from("training_state")
       .update({
@@ -482,8 +483,8 @@ function buildSystemPrompt(
   recentMessages: Array<{
     role: string;
     content: string;
-    message_type: string;
-    created_at?: string;
+    message_type: string | null;
+    created_at?: string | null;
   }>,
   activitySummary: string,
   stravaStats?: Record<string, unknown>,
@@ -857,7 +858,7 @@ Return {} if nothing new is present.`,
         ? supabase.from("training_profiles").update(profileUpdate).eq("user_id", userId)
         : Promise.resolve(),
       hasOtherNotes
-        ? supabase.from("users").update({ onboarding_data: updatedOnboardingData }).eq("id", userId)
+        ? supabase.from("users").update({ onboarding_data: updatedOnboardingData as unknown as Json }).eq("id", userId)
         : Promise.resolve(),
     ]);
   } catch (err) {

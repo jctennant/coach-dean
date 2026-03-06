@@ -24,10 +24,11 @@ export async function getValidAccessToken(userId: string): Promise<string> {
   if (error || !user) throw new Error(`User not found: ${userId}`);
 
   const now = new Date();
-  const expiresAt = new Date(user.strava_token_expires_at);
+  const expiresAt = new Date(user.strava_token_expires_at ?? 0);
 
   // Refresh if token expires within the next 5 minutes
   if (expiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
+    if (!user.strava_refresh_token) throw new Error(`Missing refresh token for user ${userId}`);
     const tokens = await refreshToken(user.strava_refresh_token);
 
     await supabase
@@ -44,6 +45,7 @@ export async function getValidAccessToken(userId: string): Promise<string> {
     return tokens.access_token;
   }
 
+  if (!user.strava_access_token) throw new Error(`Missing access token for user ${userId}`);
   return user.strava_access_token;
 }
 

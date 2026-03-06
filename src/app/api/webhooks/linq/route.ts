@@ -4,6 +4,7 @@ import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
+import type { Json } from "@/lib/database.types";
 import crypto from "crypto";
 
 // Allow up to 60s for image fetch + Claude vision + coach response
@@ -474,7 +475,7 @@ async function handleImageWorkout(
       average_pace: averagePace,
       elevation_gain: elevationGain,
       start_date: startDate,
-      summary: extracted as unknown as Record<string, unknown>,
+      summary: extracted as unknown as Json,
     })
     .select("id")
     .single();

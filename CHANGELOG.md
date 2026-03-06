@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-06 — Supabase type generation wired into codebase
+
+**Type:** Infra
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Supabase client was untyped (`createClient` with no generic), so missing/renamed DB columns were only caught at runtime. The `reengagement_sent_at` incident was a direct example.
+**Fix / Change:**
+- Ran `supabase gen types typescript` to generate `src/lib/database.types.ts` from live schema
+- Updated `src/lib/supabase.ts` to use `createClient<Database>` — all queries now typed against actual schema
+- Fixed 14 TypeScript errors surfaced by enabling types: `Json` incompatibilities in 5 files, null-safety fixes in `strava.ts` and `reengagement` cron, `unknown` activity field casts in `strava/callback`, nullable `message_type`/`distance_meters` in `coach/respond`
+- Added `npm run typecheck` (tsc --noEmit) and `npm run gen:types` scripts for ongoing use
+**Files changed:** src/lib/supabase.ts, src/lib/database.types.ts (new), src/lib/track.ts, src/lib/strava.ts, src/app/api/auth/strava/callback/route.ts, src/app/api/coach/respond/route.ts, src/app/api/cron/reengagement/route.ts, src/app/api/onboarding/handle/route.ts, src/app/api/webhooks/linq/route.ts, package.json
+
+---
+
 ## 2026-03-06 — Strength, mobility & cross-training in plans
 
 **Type:** Feature

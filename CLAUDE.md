@@ -24,6 +24,16 @@ After completing **any meaningful change** to the codebase, always append a new 
 **Files changed:** (list the key files modified)
 ```
 
+## Database Schema Rule
+
+Whenever a DB migration is needed (new column, table, index, etc.):
+1. Run `npm run gen:types` to regenerate `src/lib/database.types.ts` from the live schema
+2. Run `npm run typecheck` to catch any code that references missing or renamed columns
+
+This prevents runtime failures from schema/code drift. The `reengagement_sent_at` incident (all inbound messages silently failing) was caused by code referencing a column that hadn't been added to the DB yet — types would have caught it at build time.
+
+---
+
 ### Rules:
 1. Always add new entries at the **top** of the changelog, below the `[Unreleased]` header
 2. Use today's date in `YYYY-MM-DD` format
