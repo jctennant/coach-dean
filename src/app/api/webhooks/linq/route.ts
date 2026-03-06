@@ -324,23 +324,32 @@ async function handleInboundMessage(
   console.log("[linq-webhook] debounce: waiting 10s for user", user.id);
   await new Promise((resolve) => setTimeout(resolve, 10_000));
 
-  // After the wait, check if a newer user message has arrived
-  const { data: latestMsg } = await supabase
-    .from("conversations")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("role", "user")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+  // If the conversation insert failed, storedMsg is null — don't silently skip,
+  // just fire the response anyway so the message isn't dropped.
+  if (!storedMsg) {
+    console.warn("[linq-webhook] storedMsg is null — conversation insert may have failed, firing response anyway");
+  } else {
+    // After the wait, check if a newer user message has arrived
+    const { data: latestMsg } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("role", "user")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
 
-  if (!latestMsg || latestMsg.id !== storedMsg?.id) {
-    console.log("[linq-webhook] debounce: newer message arrived, skipping response for", storedMsg?.id);
-    return;
+    if (latestMsg && latestMsg.id !== storedMsg.id) {
+      console.log("[linq-webhook] debounce: newer message arrived, skipping response for", storedMsg.id);
+      return;
+    }
   }
 
+  // Fire coach/respond without awaiting — it's its own Vercel function with its own
+  // timeout. Awaiting it here risks exceeding this function's maxDuration (60s) when
+  // debounce (10s) + coach response (up to 60s) are combined, causing silent drops.
   console.log("[linq-webhook] debounce: firing response for", user.id);
-  await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+  void fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userId: user.id, trigger: "user_message", chatId: resolvedChatId }),

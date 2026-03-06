@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-06 — Fix messages going unanswered due to webhook timeout and debounce bug
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** Multiple users receiving no response to their messages
+**Root cause:** Two issues: (1) The webhook's `after()` handler awaited the `fetch` to `coach/respond`. With debounce (10s) + Claude response (up to 60s), total execution could exceed the function's 60s `maxDuration`, causing Vercel to kill it silently — message received, no reply sent. (2) If the conversations table insert failed for any reason, `storedMsg` was null, making the debounce check (`latestMsg.id !== storedMsg?.id`) always true — every message silently skipped.
+**Fix / Change:** Changed `coach/respond` fetch to fire-and-forget (`void fetch(...)`) — it's its own Vercel function with its own timeout so it runs independently. Added an explicit null check for `storedMsg` that fires the response anyway rather than silently skipping when the insert failed.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`
+
+---
+
 ## 2026-03-05 — Add ultra background onboarding step for 50K+ goals
 
 **Type:** Feature / Bug Fix
