@@ -8,6 +8,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-06 — Fix awaiting_cadence routing set too late, causing cadence preference to be lost
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Catherine's proactive_cadence stuck at weekly_only)
+**Root cause:** `onboarding_step: "awaiting_cadence"` was set at the very end of processCoachRequest, after all plan messages were sent. If the initial_plan response (web search + plan generation + multi-bubble sends with typing delays) approached the 60s limit, this update never ran. Catherine's cadence reply then arrived with onboarding_step null, routed to coach/respond as user_message — Dean acknowledged her preference conversationally but proactive_cadence was never written to the DB.
+**Fix / Change:** Moved the awaiting_cadence update to just before the Claude call, so routing is in place even if the function times out mid-send. Changed from void (fire-and-forget) to await so failures don't go undetected.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-06 — Fix PostHog shutdown timeout in serverless event tracking
 
 **Type:** Bug Fix

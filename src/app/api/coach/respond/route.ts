@@ -158,6 +158,12 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
   const typingStartMs = Date.now();
 
+  // For initial_plan, set awaiting_cadence BEFORE calling Claude so the routing
+  // is in place even if the function times out mid-send. Don't void — this is critical.
+  if (trigger === "initial_plan") {
+    await supabase.from("users").update({ onboarding_step: "awaiting_cadence" }).eq("id", userId);
+  }
+
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 2048,
@@ -241,9 +247,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
-    // Cadence question is now baked into the initial_plan prompt — Claude asks it
-    // as the last line of the plan. Route the next reply to the cadence handler.
-    void supabase.from("users").update({ onboarding_step: "awaiting_cadence" }).eq("id", userId);
 
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
