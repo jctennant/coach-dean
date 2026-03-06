@@ -780,7 +780,7 @@ function getStepQuestion(step: string, data: Record<string, unknown>): string {
       return "Before I build your plan — have you run any ultras before? And what's your current weekly mileage and longest recent long run?";
 
     case "awaiting_anything_else":
-      return "Before I put your plan together — anything else worth knowing? Injuries, target paces, cross-training, that sort of thing.";
+      return "Before I put your plan together — anything else worth knowing? Injuries, current paces, and if you'd like strength and mobility work or cross-training included, just mention it.";
 
     case "awaiting_name":
       return "What's your name?";

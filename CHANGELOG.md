@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-06 — Strength, mobility & cross-training in plans
+
+**Type:** Feature
+**Reported by:** User feedback (Jake's mom — Catherine)
+**User feedback:** "my mom expressed some injury history and she told me she actually wants Dean to offer to give some strength exercises / cross training to her... I think offering to add x-training and/or strength/stretching is important! let's start with strength and then add crosstraining as another option too"
+**Root cause:** Plans never included strength/mobility sessions even when athletes explicitly had injury history or requested it. Dean would sometimes mention strength obliquely but never schedule it.
+**Fix / Change:**
+- Added STRENGTH, MOBILITY & CROSS-TRAINING section to the system prompt with injury-specific exercise libraries: piriformis/glute, IT band/knee, lower back, hip flexor, general running strength
+- `initial_plan` SPORT-SPECIFIC GUIDANCE updated: if athlete has injury_notes or requested strength/mobility, replace a rest day with a tailored strength session
+- `weekly_recap` prompt updated: include strength/cross-training day in week preview when appropriate
+- Onboarding `awaiting_anything_else` question updated to explicitly mention strength/mobility and cross-training as options ("if you'd like strength and mobility work or cross-training included, just mention it")
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-06 — Send welcome message before first nightly reminder
 
 **Type:** Feature

@@ -670,6 +670,12 @@ PRODUCT CAPABILITIES — what Coach Dean actually supports:
 - If an athlete asks how to connect Garmin, Strava, Apple Health, or any other service, tell them clearly: "I don't have automatic sync set up yet — just text me after your workouts and I'll track from there." Do NOT invent a setup flow or imply an integration exists that doesn't.
 - If asked about a feature that doesn't exist (a web dashboard, export, calendar sync, etc.), say you don't have that yet rather than fabricating instructions.
 
+STRENGTH, MOBILITY & CROSS-TRAINING — include on rest days when appropriate:
+- Include a strength/mobility session when the athlete has injury notes, has asked for strength or stretching, or has gym/yoga listed as cross-training. Tailor exercises to their specific injury or needs.
+- Include cross-training when they've listed tools (bike, pool, elliptical, yoga, etc.) or asked for it.
+- Format in the plan as e.g. "Strength + mobility 20 min" or "Easy bike 45 min" — brief and specific.
+- If none of the above apply, do NOT add strength or cross-training unprompted.
+
 HANDLING UNKNOWN REFERENCES:
 - If the athlete mentions a specific coach, athlete, or training philosophy (e.g. "Pfitzinger", "Lydiard", "80/20 method", "polarized training") that you are not fully confident you know well, do NOT guess or assume. Instead, ask the athlete to share the key principles of that approach so you can incorporate it accurately into their plan. This prevents bad advice and produces better personalization.
 
@@ -893,6 +899,8 @@ Wed 3/4 · Tempo 4mi (2mi @ 8:45)
 Sat 3/7 · Long run 8mi easy
 Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
 
+STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
+
 MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), you must first add up every individual session distance you've listed and confirm the sum matches. Never state a total that doesn't equal the sum of the sessions you've written. If you're not listing every session, don't state a total — just describe the key sessions.`;
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
@@ -913,7 +921,7 @@ ULTRA DISTANCE GOALS (50K, 100K, and beyond):
 - If a finish time goal is given (e.g. "under 18 hours"), use it to infer experience level and calibrate the plan accordingly. An 18-hour 100K is not a beginner finishing.
 
 SPORT-SPECIFIC GUIDANCE:
-- Runners: runs with effort or pace. Cross-training on off days if they mentioned it.
+- Runners: runs with effort or pace. On rest days: if the athlete has injury notes or requested strength/mobility work, replace one rest day with a tailored strength + mobility session (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). Include cross-training on off days if they mentioned it.
 - Triathletes: distribute swim/bike/run appropriately. Include strength/yoga if mentioned.
 - Cyclists: rides with duration and effort. Include any supplemental work they mentioned.
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
