@@ -66,7 +66,7 @@ function MarqueeRow({ items, reverse = false }: { items: string[]; reverse?: boo
 
 export function RaceMarquee() {
   return (
-    <section className="border-t py-12">
+    <section className="border-t bg-muted/40 py-12">
       <p className="mb-6 text-center text-sm font-medium uppercase tracking-widest text-muted-foreground">
         Loved by athletes training for
       </p>

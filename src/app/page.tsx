@@ -71,7 +71,7 @@ export default function Home() {
         return (
           <section
             key={i}
-            className={`border-t px-6 py-16 md:py-24 ${i % 2 === 0 ? "bg-muted/40" : ""}`}
+            className={`border-t px-6 py-16 md:py-24 ${i % 2 === 1 ? "bg-muted/40" : ""}`}
           >
             <div
               className={`mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16 ${
@@ -102,7 +102,7 @@ export default function Home() {
       })}
 
       {/* Training philosophy */}
-      <section className="border-t px-6 py-16 md:py-24">
+      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
@@ -145,7 +145,7 @@ export default function Home() {
       </section>
 
       {/* FAQ */}
-      <section className="border-t px-6 py-16 md:py-24 bg-muted/40">
+      <section className="border-t px-6 py-16 md:py-24">
         <div className="mx-auto max-w-2xl">
           <h2 className="mb-10 text-center font-serif text-2xl font-normal md:text-3xl">
             Frequently asked questions
