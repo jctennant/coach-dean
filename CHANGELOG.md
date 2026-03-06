@@ -13,7 +13,7 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Type:** Feature
 **Reported by:** User feedback (Jake's mom unsure she could text Dean with questions)
 **Root cause:** Nothing in the onboarding or early coaching flow told users they could reach out anytime — it felt like a one-way broadcast.
-**Fix / Change:** On a user's first ever nightly reminder, send a warm intro message before the workout reminder: "Before your first session tomorrow — you can text me anytime with questions: how a run felt, pacing, nutrition, something feels off, anything at all." Uses first name if available. Detected via `last_nightly_reminder_date` being null (already tracked for dedup).
+**Fix / Change:** On a user's first ever nightly reminder, fire a `welcome_message` trigger through `coach/respond` before the workout reminder. Claude generates a personalised message using the athlete's full profile — references their specific goal, acknowledges any injury or concern from onboarding, and lets them know they can text anytime. Detected via `last_nightly_reminder_date` being null.
 **Files changed:** `src/app/api/cron/nightly-reminder/route.ts`
 
 ---

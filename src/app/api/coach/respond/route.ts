@@ -7,7 +7,7 @@ import { trackEvent } from "@/lib/track";
 
 export const maxDuration = 60;
 
-type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "workout_image";
+type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "workout_image" | "welcome_message";
 
 interface CoachRequest {
   userId: string;
@@ -869,6 +869,9 @@ function buildUserMessage(
       return `The athlete just completed a workout. Here are the details:\n${JSON.stringify(activityData, null, 2)}\n\nProvide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
+    case "welcome_message":
+      return `Send a short, warm message the evening before this athlete's very first training session. Two goals: (1) wish them luck for tomorrow, and (2) let them know they can text you anytime — not just after runs, but with any question about training, how something feels, pacing, nutrition, cross-training, anything. Make it personal: reference their specific goal, and if they mentioned any injury or concern during onboarding, acknowledge it naturally (e.g. "if the back talks to you at any point, just let me know"). One short message, no more than 2-3 sentences. Warm and human — not a feature announcement.`;
+
     case "nightly_reminder":
       return `Send a short reminder text about tomorrow's workout. Three parts, all on one message:
 

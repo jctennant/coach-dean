@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { sendSMS } from "@/lib/linq";
 
 /**
  * GET /api/cron/nightly-reminder
@@ -18,7 +17,7 @@ export async function GET(request: Request) {
   // training_profiles.proactive_cadence = 'nightly_reminders'
   const { data: profiles, error } = await supabase
     .from("training_profiles")
-    .select("user_id, training_days, last_nightly_reminder_date, users!inner(name, phone_number, timezone, onboarding_step, messaging_opted_out)")
+    .select("user_id, training_days, last_nightly_reminder_date, users!inner(timezone, onboarding_step, messaging_opted_out)")
     .eq("proactive_cadence", "nightly_reminders")
     .is("users.onboarding_step", null)
     .eq("users.messaging_opted_out", false);
@@ -39,7 +38,7 @@ export async function GET(request: Request) {
   let sent = 0;
 
   for (const profile of profiles) {
-    const user = profile.users as unknown as { name: string | null; phone_number: string; timezone: string | null; onboarding_step: string | null };
+    const user = profile.users as unknown as { timezone: string | null; onboarding_step: string | null };
     const tz = user.timezone || "America/New_York";
     const trainingDays = (profile.training_days as string[]) || [];
 
@@ -61,15 +60,15 @@ export async function GET(request: Request) {
     if (!trainingDays.includes(tomorrowDay)) continue;
 
     try {
-      // First reminder ever — send a warm intro before the workout reminder so
-      // the user knows they can reach out anytime with questions.
+      // First reminder ever — send a personalised welcome message before the
+      // workout reminder so the user knows they can reach out anytime.
       const isFirstReminder = !profile.last_nightly_reminder_date;
       if (isFirstReminder) {
-        const firstName = user.name?.split(" ")[0] ?? null;
-        const intro = firstName
-          ? `Hey ${firstName} — before your first session tomorrow, just wanted you to know you can text me anytime with questions: how a run felt, pacing, nutrition, something feels off, anything at all. I'm here.`
-          : `Before your first session tomorrow — just wanted you to know you can text me anytime with questions: how a run felt, pacing, nutrition, something feels off, anything at all. I'm here.`;
-        await sendSMS(user.phone_number, intro);
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: profile.user_id, trigger: "welcome_message" }),
+        });
       }
 
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
