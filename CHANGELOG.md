@@ -8,6 +8,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-06 — Fix PostHog shutdown timeout in serverless event tracking
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (logs)
+**Root cause:** `trackEvent` called `ph.shutdown()` on every event. This closes the HTTP client, so any subsequent event in the same Lambda instance uses a dead client and times out. Since the singleton isn't reset after shutdown, `getPostHogClient()` returns the closed instance on the next call.
+**Fix / Change:** Removed `shutdown()` call. With `flushAt: 1` and `flushInterval: 0`, PostHog sends events immediately on `capture()` — shutdown is unnecessary and destructive in this context.
+**Files changed:** `src/lib/track.ts`
+
+---
+
 ## 2026-03-06 — Add grade-adjusted pace reasoning to coaching system prompt
 
 **Type:** Improvement

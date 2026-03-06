@@ -18,7 +18,9 @@ export async function trackEvent(
         const ph = getPostHogClient();
         if (!ph) return;
         ph.capture({ distinctId: userId, event: eventName, properties });
-        await ph.shutdown();
+        // flushAt: 1 sends immediately on capture — no shutdown needed.
+        // Calling shutdown() here closes the HTTP client and breaks all
+        // subsequent events in the same Lambda instance.
       })(),
     ]);
     if (error) console.error("[track] supabase insert failed:", eventName, error.message);
