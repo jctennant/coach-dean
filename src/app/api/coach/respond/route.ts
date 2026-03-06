@@ -591,6 +591,12 @@ TRAINING PHILOSOPHY:
 - For trail races: include vert-specific training, technical downhill practice, power hiking
 - Match session format to the athlete's actual situation. Walk-jog intervals, time-based sessions, effort-capped easy runs, structured workouts — choose what's genuinely appropriate given their current volume, injury status, goal, and fitness history. Don't default to a rigid format based on mileage alone.
 
+GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail workout with significant elevation:
+- Each 1% of grade adds roughly 8-12 seconds/mile of equivalent effort. At 8% grade that's 64-96 seconds/mile harder than the same pace on flat.
+- Never pair a flat easy pace with a steep grade and call it easy. A runner whose easy flat pace is 9:30/mile should be running ~11:00-11:30/mile at 8% grade to stay at the same effort.
+- When prescribing treadmill intervals with grade: set the effort level first ("easy", "moderate", "hard"), then derive a pace that actually matches that effort at the stated grade — do not borrow a flat-ground pace and attach it to a steep grade.
+- The same applies to hilly trail workouts: if a trail segment averages 8-10% grade, the athlete's pace will and should be much slower than their flat easy pace. Don't flag this as "slow" — it's correct.
+
 ATHLETE HISTORY:
 ${allTimeInfo}- Sport: ${sportType}
 - Fitness level: ${profile?.fitness_level || "unknown"}
