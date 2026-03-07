@@ -46,13 +46,20 @@ export async function POST(request: Request) {
     // Look up user by Strava athlete ID
     const { data: user } = await supabase
       .from("users")
-      .select("id, phone_number")
+      .select("id, phone_number, onboarding_step")
       .eq("strava_athlete_id", owner_id)
       .single();
 
     if (!user) {
       console.warn(`No user found for Strava athlete ${owner_id}`);
       return NextResponse.json({ ok: true });
+    }
+
+    // Don't trigger coaching responses during onboarding — the activity is still
+    // stored so it appears in their history, but we don't interrupt the flow.
+    if (user.onboarding_step !== null) {
+      console.log(`[strava-webhook] user ${user.id} is in onboarding (${user.onboarding_step}), skipping post_run`);
+      // Still store the activity below, just don't fire the coaching response.
     }
 
     try {
@@ -94,16 +101,18 @@ export async function POST(request: Request) {
         { onConflict: "strava_activity_id" }
       );
 
-      // Trigger post-run coaching response
-      await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          trigger: "post_run",
-          activityId: activity.id,
-        }),
-      });
+      // Trigger post-run coaching response (only for users who have completed onboarding)
+      if (user.onboarding_step === null) {
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user.id,
+            trigger: "post_run",
+            activityId: activity.id,
+          }),
+        });
+      }
     } catch (err) {
       console.error("Error processing Strava activity webhook:", err);
     }

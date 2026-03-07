@@ -70,7 +70,7 @@ export async function POST(request: Request) {
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
   // Skip awaiting_anything_else, awaiting_name, awaiting_cadence — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background") {
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background" && step !== "awaiting_strava") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -98,6 +98,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_name":
       result = await handleName(user, message, onboardingData, chatId);
+      break;
+    case "awaiting_strava":
+      result = await handleStrava(user, message, onboardingData);
       break;
     case "awaiting_cadence":
       result = await handleCadence(user, message);
@@ -230,7 +233,7 @@ Rules:
       ? `Love it${name ? `, ${name}` : ""} — building consistent fitness is a great foundation.`
       : `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal.`;
 
-  const question = nextStep ? getStepQuestion(nextStep, mergedData) : "";
+  const question = nextStep ? getStepQuestion(nextStep, mergedData, user.id) : "";
 
   let responseText: string;
   if (immediateAnswer) {
@@ -293,7 +296,41 @@ Rules:
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "race_date", race_date: parsed.race_date });
 
-  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData), nextStep);
+  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData, user.id), nextStep);
+  return NextResponse.json({ ok: true });
+}
+
+/**
+ * awaiting_strava: user replied while waiting for them to click the Strava link.
+ * Any SMS reply here means they're skipping Strava — advance to the next step.
+ */
+async function handleStrava(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  const isSkip = /skip|no strava|don.?t have|no thanks|nope|later|next/i.test(message);
+
+  const mergedData = { ...onboardingData, strava_skipped: true };
+  const nextStep = findNextStep("awaiting_strava", mergedData);
+
+  const updatePayload: Record<string, unknown> = {
+    onboarding_step: nextStep,
+    onboarding_data: mergedData as unknown as Json,
+  };
+  await supabase.from("users").update(updatePayload).eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_strava_skipped", { message_hint: isSkip ? "explicit" : "implicit" });
+
+  if (nextStep) {
+    const reply = isSkip
+      ? `No worries! ${getStepQuestion(nextStep, mergedData, user.id)}`
+      : `Got it — ${getStepQuestion(nextStep, mergedData, user.id)}`;
+    await sendAndStore(user.id, user.phone_number, reply, nextStep);
+  } else {
+    // All remaining steps already satisfied — go straight to plan generation
+    await completeOnboarding(user, mergedData);
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -380,7 +417,7 @@ Rules:
   void trackEvent(user.id, "onboarding_step_completed", { step: "days_per_week", days_per_week: daysPerWeek, training_days: trainingDays });
 
   if (nextStep) {
-    const nextQuestion = getStepQuestion(nextStep, mergedData);
+    const nextQuestion = getStepQuestion(nextStep, mergedData, user.id);
     const completeResponse = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
     await sendAndStore(user.id, user.phone_number, completeResponse, nextStep);
   }
@@ -447,7 +484,7 @@ Rules:
   void trackEvent(user.id, "onboarding_step_completed", { step: "ultra_background", has_ultra_experience: extracted.has_ultra_experience });
 
   if (nextStep) {
-    const question = getStepQuestion(nextStep, merged);
+    const question = getStepQuestion(nextStep, merged, user.id);
     await sendAndStore(user.id, user.phone_number, question, nextStep);
   } else {
     await completeOnboarding(user, merged, chatId);
@@ -508,7 +545,7 @@ async function handleAnythingElse(
     .update({ onboarding_step: nextStep, onboarding_data: merged as unknown as Json })
     .eq("id", user.id);
 
-  const question = getStepQuestion(nextStep, merged);
+  const question = getStepQuestion(nextStep, merged, user.id);
   const responseText = acknowledgment ? `${acknowledgment}\n\n${question}` : question;
   await sendAndStore(user.id, user.phone_number, responseText, nextStep);
   return NextResponse.json({ ok: true });
@@ -722,6 +759,7 @@ function getSportType(goal: string): "running" | "triathlon" | "cycling" | "gene
  */
 const STEP_ORDER = [
   "awaiting_race_date",
+  "awaiting_strava",   // offer Strava connect; satisfied once strava_connected=true or user skips
   "awaiting_schedule",
   "awaiting_ultra_background", // only shown for 50K+ goals
   "awaiting_anything_else",
@@ -736,6 +774,9 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
     case "awaiting_race_date":
       // Satisfied if race_date key exists (even null = "no race")
       return Object.prototype.hasOwnProperty.call(data, "race_date");
+    case "awaiting_strava":
+      // Satisfied once the user has connected Strava OR explicitly skipped
+      return !!(data.strava_connected || data.strava_skipped);
     case "awaiting_schedule":
       return Array.isArray(data.training_days) && (data.training_days as string[]).length > 0;
     case "awaiting_ultra_background":
@@ -769,12 +810,17 @@ function findNextStep(afterStep: string, data: Record<string, unknown>): string 
 }
 
 /** Returns the question to ask for a given step, given current onboarding data. */
-function getStepQuestion(step: string, data: Record<string, unknown>): string {
+function getStepQuestion(step: string, data: Record<string, unknown>, userId?: string): string {
   const sport = (data.sport_type as string) || "running";
   const isTri = sport === "triathlon";
   const isCycling = sport === "cycling";
 
   switch (step) {
+    case "awaiting_strava": {
+      const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${userId || ""}`;
+      return `Before I put your plan together — do you use Strava? If you connect it, I can pull in your training history and build something much sharper from day 1.\n\n${stravaUrl}\n\nNo Strava? Just reply "skip".`;
+    }
+
     case "awaiting_race_date":
       return data.goal === "general_fitness"
         ? "Do you have a target event or date in mind? If not, just say 'no event' and we'll keep the plan open-ended."

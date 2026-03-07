@@ -80,6 +80,16 @@ export async function GET(request: Request) {
     (currentUser?.onboarding_data as Record<string, unknown>) || {};
 
   // Update user with Strava tokens, timezone, and stats
+  const updatedOnboardingData = {
+    ...onboardingData,
+    strava_connected: true,
+    strava_stats: {
+      all_run_totals: stats.all_run_totals,
+      ytd_run_totals: stats.ytd_run_totals,
+      recent_run_totals: stats.recent_run_totals,
+    },
+  };
+
   const { data: user, error } = await supabase
     .from("users")
     .update({
@@ -90,14 +100,7 @@ export async function GET(request: Request) {
       name: athlete.firstname || athlete.username || null,
       onboarding_step: "awaiting_schedule",
       ...(timezone ? { timezone } : {}),
-      onboarding_data: {
-        ...onboardingData,
-        strava_stats: {
-          all_run_totals: stats.all_run_totals,
-          ytd_run_totals: stats.ytd_run_totals,
-          recent_run_totals: stats.recent_run_totals,
-        },
-      } as unknown as Json,
+      onboarding_data: updatedOnboardingData as unknown as Json,
     })
     .eq("id", userId)
     .select("id, phone_number, name")
@@ -118,7 +121,8 @@ export async function GET(request: Request) {
   );
 
   // Send SMS asking about training schedule
-  const scheduleMsg = `Strava connected — nice! Last question: which days of the week work best for running? (e.g., Tue, Thu, Sat, Sun)`;
+  const firstName = user.name ? ` ${user.name}` : "";
+  const scheduleMsg = `Strava connected${firstName} — I can see your training history, this is going to help a lot. A couple more quick questions: which days of the week work best for you? (e.g. Mon, Wed, Fri, Sun)`;
 
   await Promise.all([
     sendSMS(user.phone_number, scheduleMsg),
