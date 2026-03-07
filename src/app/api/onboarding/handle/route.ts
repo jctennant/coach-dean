@@ -832,10 +832,12 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       return "How many days a week do you want to run, and which days work best for you?";
 
     case "awaiting_ultra_background":
-      return "Before I build your plan — have you run any ultras before? And what's your current weekly mileage and longest recent long run?";
+      return data.strava_connected
+        ? "One more thing before I put this together — have you run any ultras before? Any experience with the distance is helpful to know."
+        : "One more thing before I put this together — have you run any ultras before? And what's your current weekly mileage and longest recent long run?";
 
     case "awaiting_anything_else":
-      return "Before I put your plan together — anything else worth knowing? Injuries, current paces, and if you'd like strength and mobility work or cross-training included, just mention it.";
+      return "Almost there — anything else worth knowing before I put this together? Injuries, current paces, strength work, cross-training — mention it now and I'll build it in.";
 
     case "awaiting_name":
       return "What's your name?";
