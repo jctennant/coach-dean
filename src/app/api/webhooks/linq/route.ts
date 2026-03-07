@@ -328,7 +328,7 @@ async function handleInboundMessage(
     if (user.strava_athlete_id) {
       await sendAndStore(user.id, senderPhone, "Your Strava is already connected — I'm syncing your activities automatically.", messageId);
     } else {
-      const stravaUrl = `https://www.strava.com/oauth/authorize?client_id=${process.env.STRAVA_CLIENT_ID}&response_type=code&redirect_uri=${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/callback&approval_prompt=auto&scope=activity:read_all&state=${user.id}`;
+      const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
       await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start pulling in your activities:\n${stravaUrl}`, messageId);
     }
     return;
