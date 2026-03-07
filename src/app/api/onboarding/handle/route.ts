@@ -529,7 +529,7 @@ async function handleName(
 }
 
 async function handleCadence(
-  user: { id: string; phone_number: string },
+  user: { id: string; phone_number: string; name: string | null },
   message: string
 ) {
   const response = await anthropic.messages.create({
@@ -548,14 +548,21 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
 
   const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "nightly";
 
-  // If the message wasn't actually answering the cadence question, re-ask it
+  // If the message wasn't actually answering the cadence question, save it as
+  // a note on their profile and re-ask.
   if (raw.startsWith("unclear")) {
-    await sendAndStore(
-      user.id,
-      user.phone_number,
-      "Got it — I'll make note of that! Before I finalize your plan, just one quick question: would you prefer reminders the morning of your sessions, the evening before, or just a weekly Sunday overview?",
-      "awaiting_cadence"
-    );
+    await Promise.all([
+      supabase
+        .from("training_profiles")
+        .update({ injury_notes: message, updated_at: new Date().toISOString() })
+        .eq("user_id", user.id),
+      sendAndStore(
+        user.id,
+        user.phone_number,
+        "Noted — I'll keep that in mind when putting your plan together. One quick question before I do: would you prefer reminders the morning of your sessions, the evening before, or just a weekly Sunday overview?",
+        "awaiting_cadence"
+      ),
+    ]);
     return NextResponse.json({ ok: true });
   }
 

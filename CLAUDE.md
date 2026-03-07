@@ -32,6 +32,25 @@ Whenever a DB migration is needed (new column, table, index, etc.):
 
 This prevents runtime failures from schema/code drift. The `reengagement_sent_at` incident (all inbound messages silently failing) was caused by code referencing a column that hadn't been added to the DB yet — types would have caught it at build time.
 
+### Backfill Rule for Behavioral Columns
+
+Any time a new column uses `NULL` to mean "this has never happened" (e.g. `last_nightly_reminder_date`, `last_morning_reminder_date`), the migration **must** include a backfill `UPDATE` for existing rows — otherwise every existing user will incorrectly appear as a "first timer."
+
+Example: adding `last_nightly_reminder_date`:
+```sql
+ALTER TABLE training_profiles ADD COLUMN IF NOT EXISTS last_nightly_reminder_date date;
+
+-- Backfill: existing nightly_reminders users have clearly already been set up
+UPDATE training_profiles SET last_nightly_reminder_date = CURRENT_DATE WHERE proactive_cadence = 'nightly_reminders';
+```
+
+### Existing Users Checklist for Proactive Features
+
+Before shipping anything that fires automatically at users (crons, triggers, new message types), ask:
+- What happens to users **already in the system** when this runs for the first time?
+- Does any `NULL` check treat existing users as new users?
+- Would a backfill be needed to set the correct initial state for existing rows?
+
 ---
 
 ### Rules:
