@@ -115,6 +115,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Build system prompt with activity trends
   const activitySummary = buildActivitySummary(recentActivities);
+  const weekMileageSoFar = computeWeekMileage(recentActivities);
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
@@ -128,6 +129,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     state,
     recentMessages,
     activitySummary,
+    weekMileageSoFar,
     stravaStats,
     userTimezone,
     shouldUseWebSearch
@@ -362,6 +364,22 @@ function splitIntoMessages(text: string): string[] {
 }
 
 /**
+ * Sum mileage for activities in the current week (Mon–Sun UTC) from already-fetched activity rows.
+ */
+function computeWeekMileage(activities: ActivityRow[]): number {
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const weekStart = new Date(now);
+  weekStart.setUTCDate(now.getUTCDate() - daysFromMonday);
+  weekStart.setUTCHours(0, 0, 0, 0);
+
+  return activities
+    .filter((a) => new Date(a.start_date) >= weekStart)
+    .reduce((sum, a) => sum + (a.distance_meters || 0) / 1609.34, 0);
+}
+
+/**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
 function buildActivitySummary(activities: ActivityRow[]): string {
@@ -489,6 +507,7 @@ function buildSystemPrompt(
     created_at?: string | null;
   }>,
   activitySummary: string,
+  weekMileageSoFar: number,
   stravaStats?: Record<string, unknown>,
   timezone?: string,
   hasWebSearch?: boolean
@@ -625,7 +644,7 @@ ${activitySummary}
 CURRENT TRAINING STATE:
 - Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${state?.weekly_mileage_target || "TBD"} mi
-- Mileage so far this week: ${state?.week_mileage_so_far || 0} mi
+- Mileage so far this week: ${weekMileageSoFar.toFixed(1)} mi (from activities log)
 - Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
@@ -766,7 +785,7 @@ Extract ONLY explicitly stated NEW information:
   - moving_time_seconds: convert from minutes or hours (null if not stated)
   - average_pace: as "M:SS/mi" for runs (null if not stated or not a run)
   - elevation_gain: in meters, convert from feet÷3.281 (null if not stated)
-  - date_offset: 0 for today, -1 for yesterday (default 0)
+  - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
 
 Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
