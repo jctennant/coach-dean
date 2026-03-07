@@ -668,7 +668,7 @@ ${raceHistory.map((r) => {
 CURRENT TRAINING STATE:
 - Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${state?.weekly_mileage_target || "TBD"} mi
-- Mileage so far this week: ${weekMileageSoFar.toFixed(1)} mi
+- Mileage so far this week: ${weekMileageSoFar.toFixed(1)} mi (Strava-synced only — if the athlete has mentioned any additional runs or miles in conversation that aren't in Strava, add those to this number before computing any weekly totals or projections)
 - Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
