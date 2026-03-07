@@ -537,16 +537,27 @@ async function handleCadence(
     max_tokens: 16,
     system: `The athlete is responding to a question offering three reminder options: morning-of reminders, evening-before reminders, or a weekly Sunday overview only.
 
-Classify their reply. Return only one word: "morning", "nightly", or "weekly".
+Classify their reply. Return only one word: "morning", "nightly", "weekly", or "unclear".
 
 - "morning", "day of", "day-of", "morning of", "same day", "that morning", "am", "wake up", "start of day", any specific morning time like "8am", "7am" → morning
 - "evening", "night before", "nightly", "night of", "the night before", "yes", "yeah", "sure", "please", "sounds good", "reminders", "that works" → nightly
 - "weekly", "sunday", "just weekly", "no", "nope", "no thanks", "just the overview" → weekly
-- Anything ambiguous → nightly`,
+- Anything that isn't clearly answering the reminder question (e.g. sharing an injury, asking a question, talking about something else) → unclear`,
     messages: [{ role: "user", content: message }],
   });
 
-  const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "weekly";
+  const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "nightly";
+
+  // If the message wasn't actually answering the cadence question, re-ask it
+  if (raw.startsWith("unclear")) {
+    await sendAndStore(
+      user.id,
+      user.phone_number,
+      "Got it — I'll make note of that! Before I finalize your plan, just one quick question: would you prefer reminders the morning of your sessions, the evening before, or just a weekly Sunday overview?",
+      "awaiting_cadence"
+    );
+    return NextResponse.json({ ok: true });
+  }
 
   const cadence = raw.startsWith("morning")
     ? "morning_reminders"

@@ -60,17 +60,6 @@ export async function GET(request: Request) {
     if (!trainingDays.includes(tomorrowDay)) continue;
 
     try {
-      // First reminder ever — send a personalised welcome message before the
-      // workout reminder so the user knows they can reach out anytime.
-      const isFirstReminder = !profile.last_nightly_reminder_date;
-      if (isFirstReminder) {
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: profile.user_id, trigger: "welcome_message" }),
-        });
-      }
-
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
