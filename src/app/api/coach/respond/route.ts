@@ -947,8 +947,15 @@ function buildUserMessage(
   switch (trigger) {
     case "morning_plan":
       return "Generate today's workout plan for this athlete. Consider their current training state, recent activity history and trends, and any adjustments needed. Be specific about distances, paces, and effort levels.";
-    case "post_run":
-      return `The athlete just completed a workout. Here are the details:\n${JSON.stringify(activityData, null, 2)}\n\nProvide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
+    case "post_run": {
+      const actStartDate = activityData?.start_date && typeof activityData.start_date === "string"
+        ? new Date(activityData.start_date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+        : null;
+      const dateNote = actStartDate
+        ? `Activity date: ${actStartDate}. This may differ from today if the athlete logged it retroactively — use the activity date, not today's date, when referencing when the run happened.`
+        : "";
+      return `A workout just synced from Strava. ${dateNote}\n\nDetails:\n${JSON.stringify(activityData, null, 2)}\n\nProvide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
+    }
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
     case "morning_reminder":

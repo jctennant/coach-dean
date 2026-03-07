@@ -66,6 +66,16 @@ export async function POST(request: Request) {
       const accessToken = await getValidAccessToken(user.id);
       const activity = await getActivity(accessToken, object_id);
 
+      // Check if we've already processed this activity — Strava sometimes sends
+      // duplicate webhook events for the same activity_id.
+      const { data: existing } = await supabase
+        .from("activities")
+        .select("id")
+        .eq("strava_activity_id", activity.id)
+        .maybeSingle();
+
+      const isNew = !existing;
+
       // Compute average pace (min/mi)
       const distanceMiles = activity.distance / 1609.34;
       const movingTimeMinutes = activity.moving_time / 60;
@@ -75,7 +85,7 @@ export async function POST(request: Request) {
       const paceSec = totalPaceSec % 60;
       const averagePace = `${paceMin}:${paceSec.toString().padStart(2, "0")}/mi`;
 
-      // Store the activity
+      // Store (or update) the activity
       await supabase.from("activities").upsert(
         {
           user_id: user.id,
@@ -101,8 +111,31 @@ export async function POST(request: Request) {
         { onConflict: "strava_activity_id" }
       );
 
-      // Trigger post-run coaching response (only for users who have completed onboarding)
-      if (user.onboarding_step === null) {
+      // Remove any manual/conversation activity for the same user, date, and
+      // similar distance — the Strava record is richer and should take precedence.
+      if (isNew && activity.distance) {
+        const dateStr = activity.start_date.slice(0, 10);
+        const { data: manualDupes } = await supabase
+          .from("activities")
+          .select("id, distance_meters")
+          .eq("user_id", user.id)
+          .in("source", ["manual", "conversation"])
+          .gte("start_date", `${dateStr}T00:00:00Z`)
+          .lte("start_date", `${dateStr}T23:59:59Z`);
+
+        const dupeIds = (manualDupes || [])
+          .filter((row) => row.distance_meters && Math.abs(row.distance_meters - activity.distance) < 500)
+          .map((row) => row.id);
+
+        if (dupeIds.length > 0) {
+          console.log(`[strava-webhook] removing ${dupeIds.length} manual dupe(s) for user ${user.id} on ${dateStr}`);
+          await supabase.from("activities").delete().in("id", dupeIds);
+        }
+      }
+
+      // Only fire coaching response for new activities (not duplicate webhook events)
+      // and only for fully onboarded users.
+      if (isNew && user.onboarding_step === null) {
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -112,6 +145,8 @@ export async function POST(request: Request) {
             activityId: activity.id,
           }),
         });
+      } else if (!isNew) {
+        console.log(`[strava-webhook] duplicate event for activity ${activity.id}, skipping coaching response`);
       }
     } catch (err) {
       console.error("Error processing Strava activity webhook:", err);
