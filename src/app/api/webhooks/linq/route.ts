@@ -206,7 +206,7 @@ async function handleInboundMessage(
 
   const { data: user, error: lookupError } = await supabase
     .from("users")
-    .select("id, onboarding_step, timezone, linq_chat_id, messaging_opted_out, reengagement_sent_at")
+    .select("id, onboarding_step, timezone, linq_chat_id, messaging_opted_out, reengagement_sent_at, strava_athlete_id")
     .eq("phone_number", senderPhone)
     .maybeSingle();
 
@@ -318,6 +318,19 @@ async function handleInboundMessage(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId: user.id, message: messageBody, chatId: resolvedChatId }),
     });
+    return;
+  }
+
+  // Detect "connect strava" / "add strava" intent from fully-onboarded users
+  const isStravaIntent = /\bstrava\b/i.test(body) &&
+    /\b(connect|add|link|attach|setup|sync|integrate)\b/i.test(body);
+  if (isStravaIntent) {
+    if (user.strava_athlete_id) {
+      await sendAndStore(user.id, senderPhone, "Your Strava is already connected — I'm syncing your activities automatically.", messageId);
+    } else {
+      const stravaUrl = `https://www.strava.com/oauth/authorize?client_id=${process.env.STRAVA_CLIENT_ID}&response_type=code&redirect_uri=${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/callback&approval_prompt=auto&scope=activity:read_all&state=${user.id}`;
+      await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start pulling in your activities:\n${stravaUrl}`, messageId);
+    }
     return;
   }
 

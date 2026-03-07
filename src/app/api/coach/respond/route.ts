@@ -63,6 +63,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     stateResult,
     conversationsResult,
     recentActivitiesResult,
+    raceHistoryResult,
   ] = await Promise.all([
     supabase.from("users").select("*").eq("id", userId).single(),
     supabase
@@ -89,6 +90,13 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .eq("user_id", userId)
       .order("start_date", { ascending: false })
       .limit(50),
+    supabase
+      .from("activities")
+      .select("activity_type, distance_meters, average_pace, start_date, workout_type")
+      .eq("user_id", userId)
+      .eq("workout_type", 1)
+      .order("start_date", { ascending: false })
+      .limit(20),
   ]);
 
   const user = userResult.data;
@@ -97,6 +105,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const recentMessages = conversationsResult.data?.reverse() || [];
   const recentActivities =
     (recentActivitiesResult.data as ActivityRow[] | null) || [];
+  const raceHistory =
+    (raceHistoryResult.data as Array<Record<string, unknown>> | null) || [];
 
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -130,6 +140,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     recentMessages,
     activitySummary,
     weekMileageSoFar,
+    raceHistory,
     stravaStats,
     userTimezone,
     shouldUseWebSearch
@@ -508,6 +519,7 @@ function buildSystemPrompt(
   }>,
   activitySummary: string,
   weekMileageSoFar: number,
+  raceHistory: Array<Record<string, unknown>>,
   stravaStats?: Record<string, unknown>,
   timezone?: string,
   hasWebSearch?: boolean
@@ -528,15 +540,20 @@ function buildSystemPrompt(
     })
     .join("\n");
 
-  // All-time stats from Strava
+  // All-time, YTD, and recent stats from Strava
   let allTimeInfo = "";
   if (stravaStats) {
-    const allRun = stravaStats.all_run_totals as {
-      count?: number;
-      distance?: number;
-    } | null;
+    const allRun = stravaStats.all_run_totals as { count?: number; distance?: number } | null;
+    const ytdRun = stravaStats.ytd_run_totals as { count?: number; distance?: number } | null;
+    const recentRun = stravaStats.recent_run_totals as { count?: number; distance?: number } | null;
     if (allRun) {
-      allTimeInfo = `- All-time: ${allRun.count || 0} runs, ${Math.round((allRun.distance || 0) / 1609.34)} miles\n`;
+      allTimeInfo += `- All-time: ${allRun.count || 0} runs, ${Math.round((allRun.distance || 0) / 1609.34)} miles\n`;
+    }
+    if (ytdRun) {
+      allTimeInfo += `- Year-to-date: ${ytdRun.count || 0} runs, ${Math.round((ytdRun.distance || 0) / 1609.34)} miles\n`;
+    }
+    if (recentRun) {
+      allTimeInfo += `- Last 4 weeks: ${recentRun.count || 0} runs, ${Math.round((recentRun.distance || 0) / 1609.34)} miles\n`;
     }
   }
 
@@ -640,7 +657,14 @@ ${allTimeInfo}- Sport: ${sportType}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
 
 ${activitySummary}
-
+${raceHistory.length > 0 ? `
+RACE HISTORY (from Strava, workout_type=race):
+${raceHistory.map((r) => {
+  const date = r.start_date ? (r.start_date as string).slice(0, 10) : "unknown date";
+  const distMiles = Math.round(((r.distance_meters as number) / 1609.34) * 10) / 10;
+  return `- ${date}: ${distMiles} mi @ ${r.average_pace || "unknown pace"}`;
+}).join("\n")}
+` : ""}
 CURRENT TRAINING STATE:
 - Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${state?.weekly_mileage_target || "TBD"} mi
@@ -692,14 +716,15 @@ MEMORY AND DATA LIMITATIONS:
 - When in doubt about a historical fact, omit it or flag uncertainty. Never invent specifics.
 
 PRODUCT CAPABILITIES — what Coach Dean actually supports:
-- Activity tracking: none currently. There is no automatic sync with Strava, Garmin, Apple Watch, Wahoo, or any other platform right now. Athletes report workouts by texting you directly or sharing screenshots of a workout.
+- Activity tracking: Strava only. If an athlete has connected Strava, their activities sync automatically. No Garmin, Apple Watch, Wahoo, or other platform sync.
+- If an athlete asks how to connect Strava, tell them to text "connect strava" and you'll send them the link.
+- If an athlete asks how to connect Garmin, Apple Health, or any other service, tell them clearly: "I only have Strava sync right now — just text me after your workouts and I'll track from there."
 - Communication: SMS only. No app, no web dashboard, no email.
 - Proactive reminders: three options are supported: (1) morning-of reminders, (2) evening-before reminders, (3) weekly Sunday overview only.
 - Morning reminders go out at approximately 6am PT / 7am MT / 8am CT / 9am ET. If an athlete asks what time, give them the appropriate time for their timezone.
 - Evening reminders go out at approximately 6pm PT / 7pm MT / 8pm CT / 9pm ET (the evening before the session).
 - Specific times beyond these (e.g. "8:30am", "noon") are NOT supported — just morning or evening.
 - NEVER promise a reminder at a precise time — say "around 6am" or "evening before", not "at 8am exactly".
-- If an athlete asks how to connect Garmin, Strava, Apple Health, or any other service, tell them clearly: "I don't have automatic sync set up yet — just text me after your workouts and I'll track from there." Do NOT invent a setup flow or imply an integration exists that doesn't.
 - If asked about a feature that doesn't exist (a web dashboard, export, calendar sync, etc.), say you don't have that yet rather than fabricating instructions.
 
 STRENGTH, MOBILITY & CROSS-TRAINING — include on rest days when appropriate:

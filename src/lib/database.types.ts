@@ -35,6 +35,7 @@ export type Database = {
           suffer_score: number | null
           summary: Json | null
           user_id: string
+          workout_type: number | null
         }
         Insert: {
           activity_type?: string | null
@@ -56,6 +57,7 @@ export type Database = {
           suffer_score?: number | null
           summary?: Json | null
           user_id: string
+          workout_type?: number | null
         }
         Update: {
           activity_type?: string | null
@@ -77,6 +79,7 @@ export type Database = {
           suffer_score?: number | null
           summary?: Json | null
           user_id?: string
+          workout_type?: number | null
         }
         Relationships: [
           {
