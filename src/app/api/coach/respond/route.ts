@@ -995,7 +995,7 @@ Second bubble: this week's sessions, one per line:
 Mon 3/2 · Easy 3mi @ easy effort
 Wed 3/4 · Easy 3mi
 Sat 3/7 · Easy 4mi
-Use short day abbreviations and M/D dates. Then on a new line at the end: invite feedback and ask the cadence question together — e.g. "How does this feel? Happy to adjust anything. And — want morning reminders day-of, evening reminders the night before, or just a weekly overview on Sundays?"
+Use short day abbreviations and M/D dates. Then on a new line at the end: invite feedback, ask the cadence question, and let them know they can text anytime — e.g. "How does this feel? Happy to adjust anything. And — want morning reminders day-of, evening reminders the night before, or just a weekly overview on Sundays? Either way, feel free to text me anytime — questions, how a run felt, anything."
 
 ONE QUESTION RULE: The closing line above is the only question in the entire response. Do not ask anything else — no follow-ups about injuries, niggles, schedule, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.`;
 
