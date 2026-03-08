@@ -69,8 +69,8 @@ export async function POST(request: Request) {
 
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
-  // Skip awaiting_anything_else, awaiting_name, awaiting_cadence — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background" && step !== "awaiting_strava") {
+  // Skip awaiting_anything_else, awaiting_name, awaiting_cadence, awaiting_timezone — any response is valid for those.
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background" && step !== "awaiting_strava" && step !== "awaiting_timezone") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -101,6 +101,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_strava":
       result = await handleStrava(user, message, onboardingData);
+      break;
+    case "awaiting_timezone":
+      result = await handleTimezone(user, message, onboardingData);
       break;
     case "awaiting_cadence":
       result = await handleCadence(user, message);
@@ -565,6 +568,63 @@ async function handleName(
   return NextResponse.json({ ok: true });
 }
 
+async function parseTimezoneFromMessage(message: string): Promise<string> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 50,
+    system: `Convert the location in this message to an IANA timezone string. Return ONLY the IANA string (e.g. "America/Denver", "America/Los_Angeles", "America/New_York", "America/Chicago"). If unclear or unrecognized, return "America/New_York".`,
+    messages: [{ role: "user", content: message }],
+  });
+  const raw = response.content[0].type === "text" ? response.content[0].text.trim() : "America/New_York";
+  // Validate it looks like a plausible IANA timezone string
+  return /^[A-Za-z_]+\/[A-Za-z_]+$/.test(raw) ? raw : "America/New_York";
+}
+
+async function handleTimezone(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  const stravaCity = onboardingData.strava_city as string | null;
+  const stravaConnected = !!(onboardingData.strava_connected);
+
+  let newTimezone: string | null = null;
+
+  if (stravaConnected && stravaCity) {
+    // We asked them to confirm their Strava location — detect yes/no
+    const isConfirmation = /\b(yes|yeah|yep|yup|correct|right|accurate|still|good|great|confirmed|that'?s right)\b/i.test(message);
+    if (!isConfirmation) {
+      // They corrected it — parse the new location
+      newTimezone = await parseTimezoneFromMessage(message);
+    }
+    // If confirmed, keep the existing timezone already set from Strava
+  } else {
+    // No Strava city — parse whatever city/location they gave us
+    newTimezone = await parseTimezoneFromMessage(message);
+  }
+
+  const mergedData = { ...onboardingData, timezone_confirmed: true };
+  const nextStep = findNextStep("awaiting_timezone", mergedData);
+
+  const updatePayload: Record<string, unknown> = {
+    onboarding_data: mergedData as unknown as Json,
+    onboarding_step: nextStep,
+  };
+  if (newTimezone) updatePayload.timezone = newTimezone;
+
+  await supabase.from("users").update(updatePayload).eq("id", user.id);
+  void trackEvent(user.id, "onboarding_step_completed", { step: "timezone" });
+
+  if (nextStep) {
+    const question = getStepQuestion(nextStep, mergedData, user.id);
+    await sendAndStore(user.id, user.phone_number, question, nextStep);
+  } else {
+    await completeOnboarding(user, mergedData);
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 async function handleCadence(
   user: { id: string; phone_number: string; name: string | null },
   message: string
@@ -759,9 +819,10 @@ function getSportType(goal: string): "running" | "triathlon" | "cycling" | "gene
  */
 const STEP_ORDER = [
   "awaiting_race_date",
-  "awaiting_strava",   // offer Strava connect; satisfied once strava_connected=true or user skips
+  "awaiting_strava",            // offer Strava connect; satisfied once strava_connected=true or user skips
   "awaiting_schedule",
-  "awaiting_ultra_background", // only shown for 50K+ goals
+  "awaiting_ultra_background",  // only shown for 50K+ goals
+  "awaiting_timezone",          // confirm/set timezone for accurate reminder timing
   "awaiting_anything_else",
 ];
 
@@ -784,6 +845,11 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       if (!ULTRA_GOALS.includes(data.goal as string)) return true;
       // Satisfied if we already have both weekly mileage and some race/experience context.
       return !!(data.weekly_miles) && !!(data.ultra_race_history || data.experience_years != null);
+    case "awaiting_timezone":
+      // Auto-satisfy if Strava is connected but no city available to confirm
+      // (timezone already set from Strava athlete profile, nothing meaningful to ask).
+      if (data.strava_connected && !data.strava_city) return true;
+      return !!(data.timezone_confirmed);
     case "awaiting_anything_else":
       // Skip if the user already shared mileage AND some fitness/pace reference —
       // that's the core of what this question is designed to capture.
@@ -835,6 +901,16 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       return data.strava_connected
         ? "One more thing before I put this together — have you run any ultras before? Any experience with the distance is helpful to know."
         : "One more thing before I put this together — have you run any ultras before? And what's your current weekly mileage and longest recent long run?";
+
+    case "awaiting_timezone": {
+      if (data.strava_connected && data.strava_city) {
+        const location = data.strava_state
+          ? `${data.strava_city}, ${data.strava_state}`
+          : (data.strava_city as string);
+        return `Based on your Strava, looks like you're in ${location} — is that still accurate? Just want to make sure your reminders go out at the right time.`;
+      }
+      return "One quick one — what city are you in? Want to make sure your reminders go out at the right time, not 3am.";
+    }
 
     case "awaiting_anything_else":
       return "Almost there — anything else worth knowing before I put this together? Injuries, current paces, strength work, cross-training — mention it now and I'll build it in.";

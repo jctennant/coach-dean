@@ -80,6 +80,10 @@ export async function GET(request: Request) {
     (currentUser?.onboarding_data as Record<string, unknown>) || {};
   const alreadyOnboarded = currentUser?.onboarding_step === null;
 
+  // Extract city and state from Strava athlete profile for timezone confirmation step
+  const stravaCity = (athlete.city as string | null) || null;
+  const stravaState = (athlete.state as string | null) || null;
+
   // Update user with Strava tokens, timezone, and stats
   const updatedOnboardingData = {
     ...onboardingData,
@@ -89,6 +93,8 @@ export async function GET(request: Request) {
       ytd_run_totals: stats.ytd_run_totals,
       recent_run_totals: stats.recent_run_totals,
     },
+    ...(stravaCity ? { strava_city: stravaCity } : {}),
+    ...(stravaState ? { strava_state: stravaState } : {}),
   };
 
   const { data: user, error } = await supabase

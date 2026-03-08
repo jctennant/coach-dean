@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-08 — Timezone confirmation step in onboarding
+
+**Type:** Feature + Bug Fix
+**Reported by:** User feedback (Jake's friend)
+**User feedback:** "Tomorrow for me is Sunday. A rest day. Your timings are on UTC I think."
+**Root cause:** All US phone numbers defaulted to America/New_York regardless of actual location. Users in Pacific/Mountain timezones received date context 2-3 hours ahead of their local time, causing Dean to reference the wrong day for workouts and reminders.
+**Fix / Change:**
+- Added `awaiting_timezone` step to STEP_ORDER (between `awaiting_ultra_background` and `awaiting_anything_else`).
+- If Strava is connected and city is available: asks for confirmation ("Based on your Strava, looks like you're in Denver, CO — is that still accurate?"). If confirmed, keeps timezone from Strava. If corrected, parses the new location.
+- If Strava is connected but no city on profile: auto-satisfies (timezone already set from Strava athlete data, nothing to confirm).
+- If no Strava: asks "What city are you in?" and parses response via Haiku to IANA timezone string.
+- Strava callback now also captures `athlete.city` and `athlete.state` into `onboarding_data` for use in the confirmation question.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/auth/strava/callback/route.ts
+
+---
+
 ## 2026-03-07 — Fixed post-run date confusion, duplicate messages, and manual/Strava double-counting
 
 **Type:** Bug Fix
