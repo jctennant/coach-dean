@@ -812,8 +812,9 @@ Extract ONLY explicitly stated NEW information:
   - average_pace: as "M:SS/mi" for runs (null if not stated or not a run)
   - elevation_gain: in meters, convert from feet÷3.281 (null if not stated)
   - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
+- Their location or timezone if explicitly mentioned (e.g. "I'm in Denver", "I live in Seattle", "I'm on Pacific time", "I'm in PST") → timezone as IANA string (e.g. "America/Denver", "America/Los_Angeles"). Only set if they are clearly stating where they are, not just mentioning a city in passing.
 
-Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -827,6 +828,7 @@ Return {} if nothing new is present.`,
       recent_race_distance_km?: number | null;
       recent_race_time_minutes?: number | null;
       easy_pace?: string | null;
+      timezone?: string | null;
       workout?: {
         activity_type: string;
         distance_meters: number | null;
@@ -848,9 +850,10 @@ Return {} if nothing new is present.`,
     const hasOtherNotes = !!extracted.other_notes;
     const hasRaceData = !!(extracted.recent_race_distance_km && extracted.recent_race_time_minutes);
     const hasEasyPace = !!extracted.easy_pace;
+    const hasTimezone = !!(extracted.timezone && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(extracted.timezone));
     const hasWorkout = !!extracted.workout;
 
-    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasWorkout) return;
+    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasWorkout) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -930,8 +933,11 @@ Return {} if nothing new is present.`,
       Object.keys(profileUpdate).length > 1
         ? supabase.from("training_profiles").update(profileUpdate).eq("user_id", userId)
         : Promise.resolve(),
-      hasOtherNotes
-        ? supabase.from("users").update({ onboarding_data: updatedOnboardingData as unknown as Json }).eq("id", userId)
+      hasOtherNotes || hasTimezone
+        ? supabase.from("users").update({
+            onboarding_data: updatedOnboardingData as unknown as Json,
+            ...(hasTimezone ? { timezone: extracted.timezone } : {}),
+          }).eq("id", userId)
         : Promise.resolve(),
     ]);
   } catch (err) {
