@@ -24,19 +24,26 @@ export async function GET(request: Request) {
     state: userId,
   });
 
-  const stravaUrl = `https://www.strava.com/oauth/mobile/authorize?${params.toString()}`;
+  const appUrl = `strava://oauth/mobile/authorize?${params.toString()}`;
+  const webUrl = `https://www.strava.com/oauth/mobile/authorize?${params.toString()}`;
 
+  // Try the custom URL scheme first (opens Strava app directly if installed).
+  // After 1.5s, fall back to the web URL for users without the app.
+  // This is more reliable than Universal Links, which don't fire from JS navigations.
   const html = `<!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
     <title>Connecting to Strava…</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <script>window.location.href = ${JSON.stringify(stravaUrl)};</script>
+    <script>
+      window.location.href = ${JSON.stringify(appUrl)};
+      setTimeout(function() { window.location.href = ${JSON.stringify(webUrl)}; }, 1500);
+    </script>
   </head>
   <body style="font-family:sans-serif;text-align:center;padding:40px;color:#333">
     <p>Connecting to Strava…</p>
-    <p><a href="${stravaUrl}">Tap here if you aren't redirected</a></p>
+    <p><a href="${webUrl}">Tap here if you aren't redirected</a></p>
   </body>
 </html>`;
 
