@@ -127,6 +127,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Build system prompt with activity trends
   const activitySummary = buildActivitySummary(recentActivities);
   const weekMileageSoFar = computeWeekMileage(recentActivities);
+  const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities);
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
@@ -144,7 +145,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     raceHistory,
     stravaStats,
     userTimezone,
-    shouldUseWebSearch
+    shouldUseWebSearch,
+    avgWeeklyMileage
   );
 
   // Build user message based on trigger
@@ -384,6 +386,38 @@ function splitIntoMessages(text: string): string[] {
 /**
  * Sum mileage for activities in the current week (Mon–Sun UTC) from already-fetched activity rows.
  */
+/**
+ * Average weekly mileage over the last 6 complete weeks (ignores the current partial week).
+ * Returns null if there's not enough data to form even one complete week.
+ */
+function computeAvgWeeklyMileage(activities: ActivityRow[]): number | null {
+  if (activities.length === 0) return null;
+
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay();
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  // Start of the current (partial) week — we exclude this
+  const currentWeekStart = new Date(now);
+  currentWeekStart.setUTCDate(now.getUTCDate() - daysFromMonday);
+  currentWeekStart.setUTCHours(0, 0, 0, 0);
+
+  // Group completed activities by ISO week key, excluding the current partial week
+  const weeks: Record<string, number> = {};
+  for (const a of activities) {
+    const d = new Date(a.start_date);
+    if (d >= currentWeekStart) continue; // skip current partial week
+    const yr = d.getUTCFullYear();
+    const startOfYear = new Date(Date.UTC(yr, 0, 1));
+    const weekNum = Math.ceil(((d.getTime() - startOfYear.getTime()) / 86400000 + 1) / 7);
+    const key = `${yr}-W${String(weekNum).padStart(2, "0")}`;
+    weeks[key] = (weeks[key] || 0) + (a.distance_meters || 0) / 1609.34;
+  }
+
+  const weekValues = Object.values(weeks).slice(-6); // last 6 complete weeks
+  if (weekValues.length === 0) return null;
+  return weekValues.reduce((s, v) => s + v, 0) / weekValues.length;
+}
+
 function computeWeekMileage(activities: ActivityRow[]): number {
   const now = new Date();
   const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
@@ -529,7 +563,8 @@ function buildSystemPrompt(
   raceHistory: Array<Record<string, unknown>>,
   stravaStats?: Record<string, unknown>,
   timezone?: string,
-  hasWebSearch?: boolean
+  hasWebSearch?: boolean,
+  avgWeeklyMileage?: number | null
 ): string {
   const tz2 = timezone || "America/New_York";
   const msgFormatter = new Intl.DateTimeFormat("en-US", {
@@ -651,15 +686,27 @@ function buildSystemPrompt(
   return `You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness"}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
 
 ${dateContext}
-TRAINING PHILOSOPHY — apply in this priority order:
+CALIBRATE TO ATHLETE'S ACTUAL FITNESS FIRST:
+Before applying any training philosophy, anchor the plan to what the data shows. The athlete's recent weekly mileage, pace distribution, and workout history in RECENT WORKOUTS are ground truth. The philosophy principles below are defaults — they yield to observed fitness. An athlete already running 40+ miles/week with quality sessions in their history does not need to earn intensity; they need a plan that matches where they actually are. Apply conservative defaults only where the data is thin, the athlete is clearly new to consistent training, or injury history warrants it.
+${
+  avgWeeklyMileage == null
+    ? `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.`
+    : avgWeeklyMileage < 10
+    ? `FITNESS TIER: LOW VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This athlete is in early base-building. Prioritize easy aerobic volume and consistency. Hold off on structured quality sessions (tempo, intervals) until they have 4–6 weeks of steady easy running. Protect them from overtraining — it's the most common reason early runners quit or get hurt.`
+    : avgWeeklyMileage < 30
+    ? `FITNESS TIER: MODERATE VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.`
+    : `FITNESS TIER: HIGH VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.`
+}
 
-1. AEROBIC BASE FIRST (Lydiard / Uphill Athlete): Never rush to intensity. Build the aerobic engine patiently before adding quality work. Athletes should feel strong at easy paces for several weeks before harder sessions are introduced. Skipping base-building is the single most common cause of plateaus and injury.
+TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:
 
-2. 80/20 INTENSITY DISTRIBUTION (Fitzgerald / Seiler / Roche): ~80% of all training at genuinely easy, conversational effort. Avoid the moderate "gray zone" — it accumulates fatigue without driving meaningful adaptation. When uncertain, go easier. Easy runs are truly easy. Hard days are genuinely hard.
+1. AEROBIC BASE FIRST (Lydiard / Uphill Athlete): For athletes still building their base, don't rush to intensity — build the aerobic engine patiently before adding quality work. For athletes with an established high-volume history, the base is already there; plan accordingly.
+
+2. 80/20 INTENSITY DISTRIBUTION (Fitzgerald / Seiler / Roche): ~80% of all training at genuinely easy, conversational effort. Avoid the moderate "gray zone" — it accumulates fatigue without driving meaningful adaptation. Easy runs are truly easy. Hard days are genuinely hard.
 
 3. VDOT-CALIBRATED PACING (Jack Daniels): Use the athlete's current fitness (from race times or effort-based estimation) to assign specific training paces: Easy, Marathon, Threshold, Interval. Never assign arbitrary paces. Pace zones should reflect actual current fitness, not aspirational targets.
 
-4. PERIODIZATION (Base → Build → Peak → Taper): Structure training in phases. Introduce quality sessions only after consistent easy volume is established. Progressive overload: increase weekly mileage by no more than 10%/week. Every 4th week is a recovery week (reduce volume 25-30%). Long runs progress ~1 mile/week. Taper 2 weeks before target races.
+4. PERIODIZATION (Base → Build → Peak → Taper): Structure training in phases appropriate to the athlete's tier. Progressive overload: increase weekly mileage by no more than 10%/week. Every 4th week is a recovery week (reduce volume 25-30%). Long runs progress ~1 mile/week. Taper 2 weeks before target races.
 
 5. DURABILITY VIA STRENGTH (Roche / SWAP Running): Runners break down not from mileage but from muscles that can't absorb the load. Prioritize hip stability, glute activation, and single-leg exercises. Recommend 2x/week strength when the athlete has capacity or injury history.
 
@@ -1081,7 +1128,7 @@ GOAL PACE — never compute this yourself:
 - The athlete's goal pace (per mile and per km) is pre-calculated and shown in ATHLETE HISTORY as "goal pace: X:XX/mi". Use exactly that number. Do not recalculate it.
 
 VOLUME AND SAFETY:
-- Be conservative in week 1. Start at or below their stated baseline — do not apply the 10% growth rule yet.
+- Match week 1 volume to the athlete's FITNESS TIER (see top of system prompt). For low-volume athletes, start conservatively at or below their baseline. For high-volume athletes, start at their current level — don't sandbagging them with a beginner week.
 - For athletes coming back from injury, returning after a long break, or with low current mileage: start shorter than you might think. It's easier to add than to walk back an overambitious first week.
 - Address any injury or physical limitation directly in the plan itself — briefly note how the plan accounts for it. Do NOT ask a follow-up question about it.
 
