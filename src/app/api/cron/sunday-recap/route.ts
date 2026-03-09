@@ -12,15 +12,23 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Optional ?userId= param for testing — limits the run to a single user.
+  const { searchParams } = new URL(request.url);
+  const testUserId = searchParams.get("userId");
+
   // Fetch all users who have completed onboarding and haven't opted out.
   // Sunday recap goes to everyone regardless of proactive_cadence — it replaces
   // the nightly reminder for Monday so users get a full weekly overview instead.
-  const { data: users } = await supabase
+  let query = supabase
     .from("users")
     .select("id")
     .is("onboarding_step", null)
     .not("phone_number", "is", null)
     .eq("messaging_opted_out", false);
+
+  if (testUserId) query = query.eq("id", testUserId);
+
+  const { data: users } = await query;
 
   if (!users || users.length === 0) {
     return NextResponse.json({ ok: true, sent: 0 });
