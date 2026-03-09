@@ -15,6 +15,7 @@ export async function GET(request: Request) {
   // Optional ?userId= param for testing — limits the run to a single user.
   const { searchParams } = new URL(request.url);
   const testUserId = searchParams.get("userId");
+  const excludeUserIds = (searchParams.get("excludeUserIds") ?? "").split(",").filter(Boolean);
 
   // Fetch all users who have completed onboarding and haven't opted out.
   // Sunday recap goes to everyone regardless of proactive_cadence — it replaces
@@ -27,6 +28,7 @@ export async function GET(request: Request) {
     .eq("messaging_opted_out", false);
 
   if (testUserId) query = query.eq("id", testUserId);
+  if (excludeUserIds.length > 0) query = query.not("id", "in", `(${excludeUserIds.join(",")})`)
 
   const { data: users } = await query;
 
