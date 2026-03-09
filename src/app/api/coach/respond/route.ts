@@ -17,6 +17,7 @@ interface CoachRequest {
   imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
+  includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder
 }
 
 interface ActivityRow {
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
 }
 
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
-  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId } = body;
+  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin } = body;
 
   // Fetch user context in parallel
   const [
@@ -147,7 +148,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   );
 
   // Build user message based on trigger
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -994,7 +995,8 @@ Return {} if nothing new is present.`,
 function buildUserMessage(
   trigger: TriggerType,
   activityData: Record<string, unknown> | null,
-  imageActivity?: Record<string, unknown>
+  imageActivity?: Record<string, unknown>,
+  includeWorkoutCheckin?: boolean
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -1011,6 +1013,16 @@ function buildUserMessage(
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
     case "morning_reminder":
+      if (includeWorkoutCheckin) {
+        return `Send a short message that does two things: check in on yesterday's workout, then preview today's.
+
+Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
+1. A brief, casual check-in on yesterday — vary the phrasing each time. e.g. "How'd yesterday's run go?" / "Hope yesterday's session felt good —" / "How'd [day]'s workout treat you?" Keep it light, one sentence.
+2. Today's workout: type, distance, and target pace or effort. One or two sentences max.
+3. A short invite to adjust if needed — vary this too. e.g. "Let me know if you want to dial anything back based on how yesterday felt." / "Happy to tweak today if the legs are tired." One sentence.
+
+No markdown. Sound like a real coach texting. Total under 560 characters.`;
+      }
       return `Send a short reminder text about today's workout. Three parts, all on one message:
 
 1. A brief, natural opener — vary it each time. Options: "Today's workout:", "Here's what's on for today:", use their name casually, reference the day, etc.
@@ -1022,6 +1034,16 @@ function buildUserMessage(
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
 
     case "nightly_reminder":
+      if (includeWorkoutCheckin) {
+        return `Send a short message that does two things: check in on today's workout, then preview tomorrow's.
+
+Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
+1. A brief, casual check-in on today — vary the phrasing each time. e.g. "How'd today's run go?" / "Hope today's session felt good —" / "How did [day]'s workout go?" Keep it light, one sentence.
+2. Tomorrow's workout: type, distance, and target pace or effort. One or two sentences max.
+3. A short invite to adjust based on how today felt — vary this. e.g. "Let me know if you want to tweak anything based on how today felt." / "Happy to adjust if you're feeling it." One sentence.
+
+No markdown. Sound like a real coach texting. Total under 560 characters.`;
+      }
       return `Send a short reminder text about tomorrow's workout. Three parts, all on one message:
 
 1. A brief, natural opener — vary it each time so it doesn't feel canned. Options: "Tomorrow's workout:", "Here's what's on for tomorrow:", use their name casually ("Hey [name], tomorrow:"), reference the day ("Wednesday's session:"), etc. Mix it up.
