@@ -172,6 +172,7 @@ export type Database = {
           last_nightly_reminder_date: string | null
           proactive_cadence: string | null
           race_date: string | null
+          skip_dates: string[] | null
           training_days: string[] | null
           updated_at: string | null
           user_id: string
@@ -191,6 +192,7 @@ export type Database = {
           last_nightly_reminder_date?: string | null
           proactive_cadence?: string | null
           race_date?: string | null
+          skip_dates?: string[] | null
           training_days?: string[] | null
           updated_at?: string | null
           user_id: string
@@ -210,6 +212,7 @@ export type Database = {
           last_nightly_reminder_date?: string | null
           proactive_cadence?: string | null
           race_date?: string | null
+          skip_dates?: string[] | null
           training_days?: string[] | null
           updated_at?: string | null
           user_id?: string

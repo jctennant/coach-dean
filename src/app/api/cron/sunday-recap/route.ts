@@ -12,7 +12,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Fetch all users who have completed onboarding and haven't opted out
+  // Fetch all users who have completed onboarding and haven't opted out.
+  // Sunday recap goes to everyone regardless of proactive_cadence — it replaces
+  // the nightly reminder for Monday so users get a full weekly overview instead.
   const { data: users } = await supabase
     .from("users")
     .select("id")

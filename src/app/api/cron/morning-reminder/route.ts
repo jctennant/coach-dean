@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 
   const { data: profiles, error } = await supabase
     .from("training_profiles")
-    .select("user_id, training_days, last_morning_reminder_date, users!inner(timezone, onboarding_step, messaging_opted_out)")
+    .select("user_id, training_days, last_morning_reminder_date, skip_dates, users!inner(timezone, onboarding_step, messaging_opted_out)")
     .eq("proactive_cadence", "morning_reminders")
     .is("users.onboarding_step", null)
     .eq("users.messaging_opted_out", false);
@@ -53,6 +53,14 @@ export async function GET(request: Request) {
 
     // Only send if today is a scheduled training day
     if (!trainingDays.includes(todayDay)) continue;
+
+    // Skip if the user has marked today as a one-off skip
+    const skipDates = (profile.skip_dates as string[]) || [];
+    const todayDateStr = now.toISOString().slice(0, 10);
+    if (skipDates.includes(todayDateStr)) {
+      console.log(`[morning-reminder] skipping ${profile.user_id} — ${todayDateStr} is a one-off skip`);
+      continue;
+    }
 
     try {
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {

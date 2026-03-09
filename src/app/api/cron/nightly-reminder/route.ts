@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   // training_profiles.proactive_cadence = 'nightly_reminders'
   const { data: profiles, error } = await supabase
     .from("training_profiles")
-    .select("user_id, training_days, last_nightly_reminder_date, users!inner(timezone, onboarding_step, messaging_opted_out)")
+    .select("user_id, training_days, last_nightly_reminder_date, skip_dates, users!inner(timezone, onboarding_step, messaging_opted_out)")
     .eq("proactive_cadence", "nightly_reminders")
     .is("users.onboarding_step", null)
     .eq("users.messaging_opted_out", false);
@@ -33,8 +33,17 @@ export async function GET(request: Request) {
 
   // Cron fires at 02:00 UTC (6pm PST). "Tomorrow" in Pacific time is the same
   // calendar day at 02:00 UTC, so just use the current UTC date + 1 day.
+  const now = new Date();
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  const todayUTC = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD" — dedup key
+  const todayUTC = now.toISOString().slice(0, 10); // "YYYY-MM-DD" — dedup key
+
+  // Skip nightly reminders on Sunday — the sunday-recap cron fires instead and
+  // covers the full week including Monday's session.
+  if (now.getUTCDay() === 0) {
+    console.log("[nightly-reminder] Sunday — skipping, sunday-recap handles tonight");
+    return NextResponse.json({ ok: true, sent: 0, skipped: "sunday_recap_day" });
+  }
+
   let sent = 0;
 
   for (const profile of profiles) {
@@ -58,6 +67,14 @@ export async function GET(request: Request) {
 
     // Only send if tomorrow is a scheduled training day
     if (!trainingDays.includes(tomorrowDay)) continue;
+
+    // Skip if the user has marked tomorrow as a one-off skip
+    const skipDates = (profile.skip_dates as string[]) || [];
+    const tomorrowDateStr = tomorrow.toISOString().slice(0, 10);
+    if (skipDates.includes(tomorrowDateStr)) {
+      console.log(`[nightly-reminder] skipping ${profile.user_id} — ${tomorrowDateStr} is a one-off skip`);
+      continue;
+    }
 
     try {
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {

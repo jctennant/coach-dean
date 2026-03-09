@@ -820,8 +820,9 @@ Extract ONLY explicitly stated NEW information:
   - elevation_gain: in meters, convert from feet÷3.281 (null if not stated)
   - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
 - Their location or timezone if explicitly mentioned (e.g. "I'm in Denver", "I live in Seattle", "I'm on Pacific time", "I'm in PST") → timezone as IANA string (e.g. "America/Denver", "America/Los_Angeles"). Only set if they are clearly stating where they are, not just mentioning a city in passing.
+- A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${new Date().toISOString().slice(0, 10)}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
 
-Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -836,6 +837,7 @@ Return {} if nothing new is present.`,
       recent_race_time_minutes?: number | null;
       easy_pace?: string | null;
       timezone?: string | null;
+      skip_date?: string | null;
       workout?: {
         activity_type: string;
         distance_meters: number | null;
@@ -858,9 +860,10 @@ Return {} if nothing new is present.`,
     const hasRaceData = !!(extracted.recent_race_distance_km && extracted.recent_race_time_minutes);
     const hasEasyPace = !!extracted.easy_pace;
     const hasTimezone = !!(extracted.timezone && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(extracted.timezone));
+    const hasSkipDate = !!(extracted.skip_date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.skip_date));
     const hasWorkout = !!extracted.workout;
 
-    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasWorkout) return;
+    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasWorkout) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -882,6 +885,12 @@ Return {} if nothing new is present.`,
     if (hasCrosstraining) {
       const existing = (profile?.crosstraining_tools as string[]) || [];
       profileUpdate.crosstraining_tools = Array.from(new Set([...existing, ...(extracted.new_crosstraining as string[])]));
+    }
+    if (hasSkipDate) {
+      const existing = (profile?.skip_dates as string[]) || [];
+      if (!existing.includes(extracted.skip_date as string)) {
+        profileUpdate.skip_dates = [...existing, extracted.skip_date as string];
+      }
     }
     if (computedPaces) {
       profileUpdate.current_easy_pace = computedPaces.easy;
