@@ -463,7 +463,7 @@ function buildActivitySummary(activities: ActivityRow[]): string {
       weeks[key] = { miles: 0, runs: 0, vert: 0, fastest: 999 };
     weeks[key].miles += miles;
     weeks[key].runs += 1;
-    weeks[key].vert += a.elevation_gain || 0;
+    weeks[key].vert += (a.elevation_gain || 0) * 3.28084; // stored in meters, display in feet
     if (paceMinPerMile < weeks[key].fastest)
       weeks[key].fastest = paceMinPerMile;
   }
@@ -540,7 +540,7 @@ function buildActivitySummary(activities: ActivityRow[]): string {
       a.activity_type || "Workout",
       miles ? `${miles}mi` : null,
       a.average_pace ? `@ ${a.average_pace}` : null,
-      a.elevation_gain ? `${Math.round(a.elevation_gain)}ft vert` : null,
+      a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
     ].filter(Boolean);
     summary += `  ${dateLabel}: ${parts.join(", ")}\n`;
   }
@@ -1055,7 +1055,17 @@ function buildUserMessage(
       const dateNote = actStartDate
         ? `Activity date: ${actStartDate}. This may differ from today if the athlete logged it retroactively — use the activity date, not today's date, when referencing when the run happened.`
         : "";
-      return `A workout just synced from Strava. ${dateNote}\n\nDetails:\n${JSON.stringify(activityData, null, 2)}\n\nProvide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
+      // Convert elevation_gain from meters (how Strava/DB stores it) to feet for Claude
+      const activityForClaude = activityData
+        ? {
+            ...activityData,
+            elevation_gain_feet: activityData.elevation_gain != null
+              ? Math.round((activityData.elevation_gain as number) * 3.28084)
+              : null,
+            elevation_gain: undefined, // remove the raw meters field to avoid confusion
+          }
+        : activityData;
+      return `A workout just synced from Strava. ${dateNote}\n\nDetails:\n${JSON.stringify(activityForClaude, null, 2)}\n\nProvide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
     }
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";

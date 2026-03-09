@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-09 — Fixed elevation displayed as meters instead of feet
+
+**Type:** Bug Fix
+**Reported by:** Jake (wife's activity — Strava showed 344ft, Dean said 105ft)
+**User feedback:** "My wife's Strava says 344 feet and Dean said it was 105 feet"
+**Root cause:** Strava's API returns `total_elevation_gain` in meters. We stored it correctly as meters in the DB, but displayed the raw value with a "ft vert" label in both the weekly mileage summary and the individual workout log, and passed the raw number to Claude for post-run feedback with no unit label. 105 meters = 344 feet.
+**Fix / Change:** Three places converted: (1) weekly mileage summary — multiply by 3.28084 before displaying as "ft vert"; (2) individual RECENT WORKOUTS log — same conversion; (3) post_run trigger — replace `elevation_gain` (meters) with `elevation_gain_feet` (converted) in the JSON passed to Claude so it can't misread the unit.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-09 — Plans now calibrate to athlete's actual fitness tier; conservative defaults no longer override observed data
 
 **Type:** Improvement
