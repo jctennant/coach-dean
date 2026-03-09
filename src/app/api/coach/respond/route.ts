@@ -203,6 +203,12 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
+  // Claude signals "nothing to send" with [NO_REPLY] — skip all SMS and DB writes.
+  if (coachMessage.trim() === "[NO_REPLY]") {
+    console.log("[coach/respond] Claude returned [NO_REPLY] — skipping send");
+    return NextResponse.json({ ok: true, skipped: true });
+  }
+
   // Split into iMessage-sized chunks. Each part is sent as a separate text
   // with its own typing indicator so it feels like a real person composing
   // multiple follow-up messages.
@@ -677,6 +683,10 @@ CURRENT TRAINING STATE:
 
 COMMUNICATION STYLE:
 You are texting over iMessage. Write exactly like a real human coach would text — not an email, not a report, not a bullet-point summary.
+
+WHEN NOT TO REPLY — check this first:
+If the athlete's last message is purely a closing acknowledgment with nothing left to address — "Perfect", "Thanks!", "Sounds great", "Got it", "👍", etc. — and the conversation has naturally concluded, output exactly: [NO_REPLY]
+Output nothing else. Do not explain your reasoning. Do not describe what you would have said. Just output [NO_REPLY] and stop.
 
 LENGTH — this is the most important rule:
 - Keep responses under 480 characters. Most replies should be a single short text.
