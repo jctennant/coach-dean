@@ -612,6 +612,7 @@ function buildSystemPrompt(
   const bikeInfo = onboardingData.bike_info as string | null;
   const weeklyHours = onboardingData.weekly_hours as number | null;
   const sportType = onboardingData.sport_type as string || "running";
+  const goalTimeMinutes = onboardingData.goal_time_minutes as number | null | undefined;
   const isTri = ["sprint_tri", "olympic_tri", "70.3", "ironman"].includes(profile?.goal as string || "");
   // Additional athlete preferences captured during onboarding (strengthening, cross-training
   // requests, injury prevention goals, race history notes, etc.)
@@ -652,6 +653,7 @@ ${allTimeInfo}- Sport: ${sportType}
 - Fitness level: ${profile?.fitness_level || "unknown"}
 - Training days: ${trainingDays}
 - Weekly volume: ${weeklyHours ? `~${weeklyHours} hours/week` : state?.weekly_mileage_target ? `${state.weekly_mileage_target} miles/week` : "unknown"}
+- Goal: ${profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown"}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
 - Injury / constraints: ${profile?.injury_notes || "None reported"}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}

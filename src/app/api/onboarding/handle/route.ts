@@ -69,8 +69,8 @@ export async function POST(request: Request) {
 
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
-  // Skip awaiting_anything_else, awaiting_name, awaiting_cadence, awaiting_timezone — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background" && step !== "awaiting_strava" && step !== "awaiting_timezone") {
+  // Skip awaiting_anything_else, awaiting_name, awaiting_cadence, awaiting_timezone, awaiting_goal_time — any response is valid for those.
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background" && step !== "awaiting_strava" && step !== "awaiting_timezone" && step !== "awaiting_goal_time") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -98,6 +98,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_name":
       result = await handleName(user, message, onboardingData, chatId);
+      break;
+    case "awaiting_goal_time":
+      result = await handleGoalTime(user, message, onboardingData);
       break;
     case "awaiting_strava":
       result = await handleStrava(user, message, onboardingData);
@@ -300,6 +303,55 @@ Rules:
   void trackEvent(user.id, "onboarding_step_completed", { step: "race_date", race_date: parsed.race_date });
 
   if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData, user.id), nextStep);
+  return NextResponse.json({ ok: true });
+}
+
+/**
+ * awaiting_goal_time: ask if athlete has a specific finish time goal.
+ * Parses time expressions like "sub-2", "1:55", "under 4:30", or "just want to finish".
+ * Stores goal_time_minutes (number or null) and advances.
+ */
+async function handleGoalTime(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 50,
+    system: `Extract a race finish time goal from this message. Convert to total minutes.
+Examples: "sub-2 hours" → 120, "1:55" → 115, "under 4:30" → 270, "around 2:15" → 135, "23 minutes" → 23.
+If no specific time goal (e.g. "just finish", "no goal", "build fitness", "not sure") → null.
+Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  let goalTimeMinutes: number | null = null;
+  try {
+    const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+    const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    goalTimeMinutes = typeof parsed.goal_time_minutes === "number" ? parsed.goal_time_minutes : null;
+  } catch {
+    // Parsing failed — treat as no goal
+  }
+
+  const mergedData = { ...onboardingData, goal_time_minutes: goalTimeMinutes };
+  const nextStep = findNextStep("awaiting_goal_time", mergedData);
+
+  await supabase
+    .from("users")
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData as unknown as Json })
+    .eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_step_completed", { step: "goal_time", has_time_goal: goalTimeMinutes !== null });
+
+  if (nextStep) {
+    const question = getStepQuestion(nextStep, mergedData, user.id);
+    await sendAndStore(user.id, user.phone_number, question, nextStep);
+  } else {
+    await completeOnboarding(user, mergedData);
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -819,6 +871,7 @@ function getSportType(goal: string): "running" | "triathlon" | "cycling" | "gene
  */
 const STEP_ORDER = [
   "awaiting_race_date",
+  "awaiting_goal_time",         // only shown for race goals (not general fitness or ultras)
   "awaiting_strava",            // offer Strava connect; satisfied once strava_connected=true or user skips
   "awaiting_schedule",
   "awaiting_ultra_background",  // only shown for 50K+ goals
@@ -835,6 +888,11 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
     case "awaiting_race_date":
       // Satisfied if race_date key exists (even null = "no race")
       return Object.prototype.hasOwnProperty.call(data, "race_date");
+    case "awaiting_goal_time":
+      // Skip for general fitness (no race) and ultras (cutoffs matter more than finish times)
+      if (data.goal === "general_fitness" || ULTRA_GOALS.includes(data.goal as string)) return true;
+      // Satisfied once goal_time_minutes key exists (even null = "no specific goal")
+      return Object.prototype.hasOwnProperty.call(data, "goal_time_minutes");
     case "awaiting_strava":
       // Satisfied once the user has connected Strava OR explicitly skipped
       return !!(data.strava_connected || data.strava_skipped);
@@ -882,6 +940,9 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
   const isCycling = sport === "cycling";
 
   switch (step) {
+    case "awaiting_goal_time":
+      return `Do you have a time goal for the race, or is it more about finishing strong and building your base? Either's totally valid — just helps me dial in the right pacing.`;
+
     case "awaiting_strava": {
       const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${userId || ""}`;
       return `Before I put your plan together — do you use Strava? If you connect it, I can pull in your training history and build something much sharper from day 1.\n\n${stravaUrl}\n\nNo Strava? Just reply "skip".`;
@@ -899,8 +960,8 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
 
     case "awaiting_ultra_background":
       return data.strava_connected
-        ? "One more thing before I put this together — have you run any ultras before? Any experience with the distance is helpful to know."
-        : "One more thing before I put this together — have you run any ultras before? And what's your current weekly mileage and longest recent long run?";
+        ? "An ultra — love it. Have you run any before? Any experience with the distance is helpful to know."
+        : "An ultra — love it. Have you run any before? And what's your current weekly mileage and longest recent long run?";
 
     case "awaiting_timezone": {
       if (data.strava_connected && data.strava_city) {
