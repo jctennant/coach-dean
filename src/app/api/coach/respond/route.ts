@@ -620,6 +620,26 @@ function buildSystemPrompt(
   const sportType = onboardingData.sport_type as string || "running";
   const goalTimeMinutes = onboardingData.goal_time_minutes as number | null | undefined;
   const isTri = ["sprint_tri", "olympic_tri", "70.3", "ironman"].includes(profile?.goal as string || "");
+
+  // Pre-compute goal pace so Claude never has to do the arithmetic (it gets it wrong).
+  // Only computed for single-sport running goals where a race distance is known.
+  const runGoalDistancesMiles: Record<string, number> = {
+    "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
+    "30k": 18.641, "50k": 31.069, "100k": 62.137,
+  };
+  let goalPaceStr = "";
+  if (goalTimeMinutes != null && profile?.goal) {
+    const distMiles = runGoalDistancesMiles[profile.goal as string];
+    if (distMiles) {
+      const paceMinsPerMile = goalTimeMinutes / distMiles;
+      const paceMin = Math.floor(paceMinsPerMile);
+      const paceSec = Math.round((paceMinsPerMile - paceMin) * 60);
+      const pacePerKm = goalTimeMinutes / (distMiles * 1.60934);
+      const paceKmMin = Math.floor(pacePerKm);
+      const paceKmSec = Math.round((pacePerKm - paceKmMin) * 60);
+      goalPaceStr = ` — goal pace: ${paceMin}:${String(paceSec).padStart(2, "0")}/mi (${paceKmMin}:${String(paceKmSec).padStart(2, "0")}/km)`;
+    }
+  }
   // Additional athlete preferences captured during onboarding (strengthening, cross-training
   // requests, injury prevention goals, race history notes, etc.)
   const otherNotes = onboardingData.other_notes as string | null;
@@ -659,7 +679,7 @@ ${allTimeInfo}- Sport: ${sportType}
 - Fitness level: ${profile?.fitness_level || "unknown"}
 - Training days: ${trainingDays}
 - Weekly volume: ${weeklyHours ? `~${weeklyHours} hours/week` : state?.weekly_mileage_target ? `${state.weekly_mileage_target} miles/week` : "unknown"}
-- Goal: ${profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown"}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
+- Goal: ${profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown"}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
 - Injury / constraints: ${profile?.injury_notes || "None reported"}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
@@ -1029,10 +1049,25 @@ MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), you m
     case "initial_plan":
       return `This athlete just finished onboarding. Send them an initial week plan — framed as a starting point, not a finished prescription. The goal is to get something in front of them quickly and invite them to shape it.
 
+USE STRAVA DATA — this is critical:
+- Look at WEEKLY MILEAGE, PACE ANALYSIS, and RECENT WORKOUTS before writing a single word of the plan.
+- If Strava data exists, reference it specifically: "I can see you've been running X miles/week with some efforts down to Y pace" — this tells the athlete you actually looked at their history.
+- Set all training paces based on observed fitness from Strava, not just the goal time. If their recent fast efforts are faster than goal pace, acknowledge that — it tells you they have the speed and the plan should focus on execution and sharpening, not building fitness from scratch.
+- If no Strava data exists, proceed without it — but don't pretend to have data you don't have.
+
+GOAL PACE — never compute this yourself:
+- The athlete's goal pace (per mile and per km) is pre-calculated and shown in ATHLETE HISTORY as "goal pace: X:XX/mi". Use exactly that number. Do not recalculate it.
+
 VOLUME AND SAFETY:
 - Be conservative in week 1. Start at or below their stated baseline — do not apply the 10% growth rule yet.
 - For athletes coming back from injury, returning after a long break, or with low current mileage: start shorter than you might think. It's easier to add than to walk back an overambitious first week.
 - Address any injury or physical limitation directly in the plan itself — briefly note how the plan accounts for it. Do NOT ask a follow-up question about it.
+
+FOCUSED WORKOUT FORMAT — use this instead of a day-by-day schedule when the athlete has indicated they want specific workout prescriptions rather than a complete plan. Look for signals in the recent conversation: phrases like "I don't need a full plan", "just help me with workouts", "I already have a base", "just need the key sessions", "help designing specific workouts", or any variation of wanting workout guidance rather than a complete schedule. Race proximity and Strava history are supporting signals but not required — the athlete's stated preference is the primary trigger.
+- Skip the day-by-day schedule format entirely.
+- Instead: one bubble acknowledging their context (Strava fitness if available, race timeline, stated base) + a weekly mileage target. One bubble with 2-3 specific quality sessions — describe each session's structure, distance, and exact paces. Frame these as the key sessions for the week; easy miles fill the rest.
+- Example quality sessions: "Tue or Wed: 2mi easy, 3mi @ [threshold pace], 1mi easy" / "Fri: 6x800m @ [interval pace] w/400m jog recovery" / "Sun: long run Xmi, last Y easy @ [goal pace]"
+- Be specific about paces. For goal-pace-based training: threshold ~10-15 sec/mi faster than goal pace, interval ~25-35 sec/mi faster than goal pace. Cross-check against observed Strava paces — if their fast efforts already exceed goal pace, note that and calibrate accordingly.
 
 ULTRA DISTANCE GOALS (50K, 100K, and beyond):
 - Do NOT apply beginner conservatism. Anyone training for an ultra is already running meaningful volume — calibrate to their stated mileage, not a cautious floor.
@@ -1049,6 +1084,7 @@ SPORT-SPECIFIC GUIDANCE:
 
 MILEAGE ACCURACY: Never state a weekly total unless you've verified it equals the sum of every session listed.
 
+DEFAULT FORMAT (for athletes not matching the EXPERIENCED RUNNER CLOSE TO RACE criteria above):
 Write as 2 short iMessage texts separated by a blank line. Each under 480 characters.
 
 First bubble: 2-3 sentences max. Lead with the most important constraint or context (injury, mileage baseline, race timeline, etc.). Then add one sentence explaining the training rationale behind the plan — why you've structured it this way. Keep it specific and grounded: "Starting with all easy miles to build your aerobic base before introducing quality work" or "Keeping volume conservative given the hip — easier to add than to walk back a flare-up." This is what makes the plan feel like coaching, not a random schedule. Do NOT open with "Got it" or any generic acknowledgment phrase. Do NOT restate their goal back to them.
