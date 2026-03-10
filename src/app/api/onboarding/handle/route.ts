@@ -213,13 +213,16 @@ Rules:
     generateRaceAcknowledgment(message),
   ]);
   const sportType = getSportType(parsed.goal);
-  // If the web search found the race date, pre-fill it so we skip asking the user.
+  // Pre-fill race_date if:
+  // - web search found a specific date, or
+  // - athlete explicitly said no event (no_event=true) → null satisfies awaiting_race_date and skips the question
   const mergedData = {
     ...onboardingData,
     goal: parsed.goal,
     sport_type: sportType,
     ...extra,
     ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
+    ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null } : {}),
   };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
@@ -279,7 +282,7 @@ async function handleRaceDate(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  const [parseResponse, extra] = await Promise.all([
+  const [parseResponse, extra, acknowledgment] = await Promise.all([
     anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 64,
@@ -295,6 +298,7 @@ Rules:
       messages: [{ role: "user", content: message }],
     }),
     extractAdditionalFields(message),
+    acknowledgeSharedInfo(message),
   ]);
 
   const parseText =
@@ -318,7 +322,11 @@ Rules:
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "race_date", race_date: parsed.race_date });
 
-  if (nextStep) await sendAndStore(user.id, user.phone_number, getStepQuestion(nextStep, mergedData, user.id), nextStep);
+  if (nextStep) {
+    const nextQuestion = getStepQuestion(nextStep, mergedData, user.id);
+    const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    await sendAndStore(user.id, user.phone_number, reply, nextStep);
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -332,15 +340,18 @@ async function handleGoalTime(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 50,
-    system: `Extract a race finish time goal from this message. Convert to total minutes.
+  const [response, acknowledgment] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 50,
+      system: `Extract a race finish time goal from this message. Convert to total minutes.
 Examples: "sub-2 hours" → 120, "1:55" → 115, "under 4:30" → 270, "around 2:15" → 135, "23 minutes" → 23.
 If no specific time goal (e.g. "just finish", "no goal", "build fitness", "not sure") → null.
 Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
-    messages: [{ role: "user", content: message }],
-  });
+      messages: [{ role: "user", content: message }],
+    }),
+    acknowledgeSharedInfo(message),
+  ]);
 
   let goalTimeMinutes: number | null = null;
   try {
@@ -362,8 +373,9 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
   void trackEvent(user.id, "onboarding_step_completed", { step: "goal_time", has_time_goal: goalTimeMinutes !== null });
 
   if (nextStep) {
-    const question = getStepQuestion(nextStep, mergedData, user.id);
-    await sendAndStore(user.id, user.phone_number, question, nextStep);
+    const nextQuestion = getStepQuestion(nextStep, mergedData, user.id);
+    const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    await sendAndStore(user.id, user.phone_number, reply, nextStep);
   } else {
     await completeOnboarding(user, mergedData);
   }
@@ -394,9 +406,17 @@ async function handleStrava(
   void trackEvent(user.id, "onboarding_strava_skipped", { message_hint: isSkip ? "explicit" : "implicit" });
 
   if (nextStep) {
-    const reply = isSkip
-      ? `No worries! ${getStepQuestion(nextStep, mergedData, user.id)}`
-      : `Got it — ${getStepQuestion(nextStep, mergedData, user.id)}`;
+    const [nextQuestion, acknowledgment] = await Promise.all([
+      Promise.resolve(getStepQuestion(nextStep, mergedData, user.id)),
+      acknowledgeSharedInfo(message),
+    ]);
+    // Use a warm acknowledgment if the user said something substantive,
+    // otherwise fall back to a simple "No worries" / "Got it" prefix.
+    const reply = acknowledgment
+      ? `${acknowledgment}\n\n${nextQuestion}`
+      : isSkip
+        ? `No worries! ${nextQuestion}`
+        : `Got it — ${nextQuestion}`;
     await sendAndStore(user.id, user.phone_number, reply, nextStep);
   } else {
     // All remaining steps already satisfied — go straight to plan generation
@@ -410,7 +430,7 @@ async function handleSchedule(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  const [parseResponse, extra, acknowledgment] = await Promise.all([
+  const [parseResponse, extra] = await Promise.all([
     anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 200,
@@ -433,7 +453,6 @@ Rules:
       messages: [{ role: "user", content: message }],
     }),
     extractAdditionalFields(message),
-    acknowledgeSharedInfo(message),
   ]);
 
   const parseText =
@@ -460,6 +479,7 @@ Rules:
       if (extra.name) updatePayload.name = extra.name;
       void supabase.from("users").update(updatePayload).eq("id", user.id);
     }
+    const acknowledgment = await acknowledgeSharedInfo(message);
     const followUp =
       parsed.follow_up ||
       "Which specific days of the week work best for you?";
@@ -488,8 +508,13 @@ Rules:
   void trackEvent(user.id, "onboarding_step_completed", { step: "days_per_week", days_per_week: daysPerWeek, training_days: trainingDays });
 
   if (nextStep) {
-    const nextQuestion = getStepQuestion(nextStep, mergedData, user.id);
-    const completeResponse = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    // Use a schedule-specific acknowledgment that always references the confirmed days
+    // and naturally handles any flexibility caveats the user mentioned.
+    const [scheduleAck, nextQuestion] = await Promise.all([
+      acknowledgeSchedule(message, trainingDays),
+      Promise.resolve(getStepQuestion(nextStep, mergedData, user.id)),
+    ]);
+    const completeResponse = `${scheduleAck}\n\n${nextQuestion}`;
     await sendAndStore(user.id, user.phone_number, completeResponse, nextStep);
   }
   return NextResponse.json({ ok: true });
@@ -501,10 +526,11 @@ async function handleUltraBackground(
   onboardingData: Record<string, unknown>,
   chatId?: string | null
 ) {
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 200,
-    system: `Extract ultra running background from this message. Respond with ONLY valid JSON.
+  const [parseResponse, acknowledgment] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      system: `Extract ultra running background from this message. Respond with ONLY valid JSON.
 
 Output format:
 {
@@ -521,10 +547,12 @@ Rules:
 - weekly_miles: total current weekly mileage. If stated as per-day average (e.g. "50 miles a week", "~10 miles a day"), compute the weekly total. Convert km × 0.621.
 - current_long_run_miles: their current typical longest run in miles. Convert km × 0.621.
 - experience_years: infer from context. First ultra → 1. Multiple ultras over several years → 3+. Western States or similar prestigious finish → 5+.`,
-    messages: [{ role: "user", content: message }],
-  });
+      messages: [{ role: "user", content: message }],
+    }),
+    acknowledgeSharedInfo(message),
+  ]);
 
-  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+  const text = parseResponse.content[0].type === "text" ? parseResponse.content[0].text.trim() : "{}";
   let extracted: {
     has_ultra_experience?: boolean;
     ultra_race_history?: string | null;
@@ -555,8 +583,9 @@ Rules:
   void trackEvent(user.id, "onboarding_step_completed", { step: "ultra_background", has_ultra_experience: extracted.has_ultra_experience });
 
   if (nextStep) {
-    const question = getStepQuestion(nextStep, merged, user.id);
-    await sendAndStore(user.id, user.phone_number, question, nextStep);
+    const nextQuestion = getStepQuestion(nextStep, merged, user.id);
+    const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    await sendAndStore(user.id, user.phone_number, reply, nextStep);
   } else {
     await completeOnboarding(user, merged, chatId);
   }
@@ -684,8 +713,12 @@ async function handleTimezone(
   void trackEvent(user.id, "onboarding_step_completed", { step: "timezone" });
 
   if (nextStep) {
-    const question = getStepQuestion(nextStep, mergedData, user.id);
-    await sendAndStore(user.id, user.phone_number, question, nextStep);
+    const [nextQuestion, acknowledgment] = await Promise.all([
+      Promise.resolve(getStepQuestion(nextStep, mergedData, user.id)),
+      acknowledgeSharedInfo(message),
+    ]);
+    const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    await sendAndStore(user.id, user.phone_number, reply, nextStep);
   } else {
     await completeOnboarding(user, mergedData);
   }
@@ -919,6 +952,8 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
     case "awaiting_ultra_background":
       // Only relevant for ultra goals — skip entirely for everything else.
       if (!ULTRA_GOALS.includes(data.goal as string)) return true;
+      // If Strava is connected, we can infer training background from activity history — skip the question.
+      if (data.strava_connected) return true;
       // Satisfied if we already have both weekly mileage and some race/experience context.
       return !!(data.weekly_miles) && !!(data.ultra_race_history || data.experience_years != null);
     case "awaiting_timezone":
@@ -1216,9 +1251,18 @@ async function acknowledgeSharedInfo(message: string): Promise<string | null> {
     max_tokens: 150,
     system: `You are Coach Dean, a friendly endurance coach onboarding a new athlete via SMS.
 
-The athlete just shared something during the onboarding process. If they shared anything substantive — personal context, lifestyle constraints, logistical details, cross-training, injuries, race history, goals, or anything worth acknowledging — respond with ONE short, warm, specific sentence that shows you actually heard them. Be concrete: reference what they actually said. Don't be generic.
+The athlete just shared something during the onboarding process. If they shared anything substantive, respond with ONE short, warm, specific sentence that shows you heard them. Be concrete — reference what they actually said.
 
-If they said only a bare answer with nothing personal or extra (e.g. just "2 days", "Monday and Thursday", "nope", "no", "I'm good"), return only the word: null
+Count these as substantive:
+- Personal context, emotions, goals, backstory ("I've been dreaming about this for years", "this is my first marathon")
+- Training data they share (weekly miles, pace, recent races) — acknowledge it as a useful baseline
+- Lifestyle constraints (work schedule, travel, family)
+- Scheduling flexibility ("I may switch those around")
+- Alternative tools (Garmin, Apple Watch) — acknowledge and note you can work with them
+- Privacy concerns or hesitation, even while complying ("I'll skip — I'm a privacy person") — acknowledge and respect the choice
+- Any question or concern worth noting
+
+Return only the word: null if the message is a truly bare answer with no extra context — e.g. just a date, a number, "nope", "no", "I'm good", "Skip", "Yes", "Yeah that's right".
 
 Plain text only — no markdown, no asterisks.`,
     messages: [{ role: "user", content: message }],
@@ -1226,6 +1270,33 @@ Plain text only — no markdown, no asterisks.`,
   const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
   if (!text || text.toLowerCase() === "null") return null;
   return text;
+}
+
+/**
+ * Generates a schedule-specific acknowledgment that always references the parsed days
+ * and handles any flexibility/caveat the user added (e.g. "may switch those around").
+ */
+async function acknowledgeSchedule(message: string, trainingDays: string[]): Promise<string> {
+  const dayList = trainingDays.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(", ");
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 100,
+    system: `You are Coach Dean, a friendly endurance coach onboarding a new athlete via SMS.
+
+The athlete just confirmed their training schedule. Write ONE short, warm sentence (max 15 words) acknowledging the schedule. Their training days are: ${dayList}.
+
+If they mentioned any flexibility or that they might swap days around, acknowledge that the plan can flex.
+If they gave a plain answer with no caveats, just confirm you've got the days locked in.
+
+Examples:
+- Plain: "Perfect — I've got you down for ${dayList}."
+- Flexibility caveat: "Works for me — we can always shuffle things around as life gets in the way."
+
+Plain text only — no markdown.`,
+    messages: [{ role: "user", content: message }],
+  });
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+  return text || `Perfect — I've got you down for ${dayList}.`;
 }
 
 /** Strip null/undefined values from an object so pre-existing data isn't overwritten. */

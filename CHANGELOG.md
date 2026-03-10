@@ -8,6 +8,30 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Acknowledgment at every onboarding step; Dean responds to what users actually say
+
+**Type:** Improvement
+**Reported by:** Jake (live testing)
+**User feedback:** "I may switch those around depending on life" → Dean responded "An ultra — love it." with no acknowledgment. More broadly, Dean was blindly jumping to the next question at most steps without engaging with what the user shared.
+**Root cause:** Four step handlers (handleRaceDate, handleGoalTime, handleUltraBackground, handleTimezone) had zero acknowledgment — they simply fired the next question. handleStrava used canned "No worries!" / "Got it —" regardless of what was said. The acknowledgeSharedInfo prompt was too narrow (didn't classify training data, privacy concerns, or alternative app mentions as "substantive").
+**Fix / Change:**
+- Added `acknowledgeSharedInfo()` in parallel to handleRaceDate, handleGoalTime, handleUltraBackground, handleTimezone, handleStrava
+- Added `acknowledgeSchedule()` (schedule-specific, always fires) for handleSchedule success path
+- Rewrote acknowledgeSharedInfo prompt to explicitly classify: training data, scheduling flexibility, privacy concerns, alternative app mentions (Garmin etc.), and direct questions as all "substantive" and worth acknowledging
+- 38/38 test cases passing: substantive messages get warm specific acknowledgments; bare answers correctly return null
+**Files changed:** src/app/api/onboarding/handle/route.ts, scripts/test-onboarding-acknowledgments.mjs (new)
+
+## 2026-03-10 — Schedule acknowledgment always bridges to next onboarding question
+
+**Type:** Bug Fix
+**Reported by:** Jake (live testing)
+**User feedback:** "I may switch those around depending on life" → Dean responded "An ultra — love it." with no acknowledgment of what the user said
+**Root cause:** `handleSchedule` used the generic `acknowledgeSharedInfo` which returned `null` for schedule flexibility caveats (treating "I may switch those around" as too bare to warrant acknowledgment). This left the raw next-step question with no transition.
+**Fix / Change:** Added `acknowledgeSchedule(message, trainingDays)` — a schedule-specific acknowledgment that always fires on successful schedule parse, always references the actual confirmed days, and explicitly handles flexibility caveats (e.g. "Works for me — we can always shuffle things around as life gets in the way."). Also updated `acknowledgeSharedInfo` prompt to explicitly classify scheduling flexibility as substantive for the incomplete-schedule path.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-10 — Broader onboarding: injury recovery persona + personalized second message
 
 **Type:** Feature
