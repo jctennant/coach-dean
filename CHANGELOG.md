@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Proactive coaching signals: cadence, ramp rate, shoe mileage, fueling
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Dean was only coaching on what the athlete explicitly brought up. Key performance and injury-prevention signals were being ignored — cadence data was in the DB schema but not even being fetched; week-over-week ramp rate, total tracked mileage, and long effort flags weren't computed at all.
+**Fix / Change:** Added `computeCoachingSignals()` function that computes 4 signals from existing activity data: (1) avg cadence across recent runs — flagged if <170 spm with instruction to suggest stride cadence cues, (2) week-over-week mileage ramp between the two most recently completed weeks — flagged if >10% with remark about tendon/bone adaptation lag, (3) total tracked miles as a shoe mileage proxy — flagged at 400+ miles to prompt a shoe check, (4) recent long effort (≥10 mi or ≥75 min in last 14 days) — triggers a fueling/hydration check-in. Results are injected as a `COACHING SIGNALS` block in the system prompt. Also extended the activities select query to fetch `average_cadence` and `gear_name` (both in schema but previously unused).
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-10 — Proactive injury follow-up in post-run feedback and reminders
 
 **Type:** Feature

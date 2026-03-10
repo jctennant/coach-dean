@@ -28,6 +28,16 @@ interface ActivityRow {
   elevation_gain: number | null;
   average_pace: string;
   start_date: string;
+  average_cadence: number | null;
+  gear_name: string | null;
+}
+
+interface CoachingSignals {
+  avgCadenceSpm: number | null;          // avg spm across recent runs; flag if < 170
+  weekOverWeekRampPct: number | null;    // % change between last two complete weeks
+  totalTrackedMiles: number;             // proxy for shoe mileage
+  hasRecentLongEffort: boolean;          // run ≥ 10 mi or ≥ 75 min in last 14 days
+  dominantGear: string | null;           // most-used shoe name if available
 }
 
 /**
@@ -86,7 +96,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     supabase
       .from("activities")
       .select(
-        "activity_type, distance_meters, moving_time_seconds, average_heartrate, elevation_gain, average_pace, start_date"
+        "activity_type, distance_meters, moving_time_seconds, average_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name"
       )
       .eq("user_id", userId)
       .order("start_date", { ascending: false })
@@ -129,6 +139,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const activitySummary = buildActivitySummary(recentActivities, userTimezone);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone);
+  const coachingSignals = computeCoachingSignals(recentActivities, userTimezone);
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
@@ -146,7 +157,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     stravaStats,
     userTimezone,
     shouldUseWebSearch,
-    avgWeeklyMileage
+    avgWeeklyMileage,
+    coachingSignals
   );
 
   // Build user message based on trigger
@@ -490,6 +502,62 @@ function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): n
 }
 
 /**
+ * Compute proactive coaching signals from recent activity data.
+ * These are surfaced in the system prompt so Dean can bring them up at natural moments.
+ */
+function computeCoachingSignals(activities: ActivityRow[], timezone: string): CoachingSignals {
+  const runTypes = new Set(["Run", "TrailRun", "VirtualRun"]);
+
+  // Average cadence from the 10 most recent runs with cadence data
+  const runsWithCadence = activities
+    .filter(a => runTypes.has(a.activity_type) && a.average_cadence && a.average_cadence > 100)
+    .slice(0, 10);
+  const avgCadenceSpm = runsWithCadence.length >= 3
+    ? runsWithCadence.reduce((s, a) => s + (a.average_cadence ?? 0), 0) / runsWithCadence.length
+    : null;
+
+  // Week-over-week ramp: compare the two most recently completed weeks (not current partial week)
+  const thisMonday = localWeekMonday(new Date(), timezone);
+  const weeklyMiles: Record<string, number> = {};
+  for (const a of activities) {
+    const key = localWeekMonday(new Date(a.start_date), timezone);
+    if (key >= thisMonday) continue; // skip current partial week
+    weeklyMiles[key] = (weeklyMiles[key] || 0) + (a.distance_meters || 0) / 1609.34;
+  }
+  const sortedCompleteWeeks = Object.keys(weeklyMiles).sort().reverse();
+  let weekOverWeekRampPct: number | null = null;
+  if (sortedCompleteWeeks.length >= 2) {
+    const lastWeek = weeklyMiles[sortedCompleteWeeks[0]];
+    const prevWeek = weeklyMiles[sortedCompleteWeeks[1]];
+    if (prevWeek > 0) {
+      weekOverWeekRampPct = ((lastWeek - prevWeek) / prevWeek) * 100;
+    }
+  }
+
+  // Total tracked miles — rough shoe mileage proxy
+  const totalTrackedMiles = activities.reduce((s, a) => s + (a.distance_meters || 0) / 1609.34, 0);
+
+  // Recent long effort: any run ≥ 10 miles or ≥ 75 min in the last 14 days
+  const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const hasRecentLongEffort = activities.some(a => {
+    if (!runTypes.has(a.activity_type)) return false;
+    if (new Date(a.start_date) < cutoff) return false;
+    const miles = (a.distance_meters || 0) / 1609.34;
+    const minutes = (a.moving_time_seconds || 0) / 60;
+    return miles >= 10 || minutes >= 75;
+  });
+
+  // Most-used shoe from recent activities
+  const gearCounts: Record<string, number> = {};
+  for (const a of activities) {
+    if (a.gear_name) gearCounts[a.gear_name] = (gearCounts[a.gear_name] || 0) + 1;
+  }
+  const dominantGear = Object.entries(gearCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  return { avgCadenceSpm, weekOverWeekRampPct, totalTrackedMiles, hasRecentLongEffort, dominantGear };
+}
+
+/**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
 function buildActivitySummary(activities: ActivityRow[], timezone: string): string {
@@ -598,6 +666,33 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
   return summary;
 }
 
+function buildCoachingSignalsBlock(signals: CoachingSignals): string {
+  const lines: string[] = [];
+
+  if (signals.avgCadenceSpm !== null && signals.avgCadenceSpm < 170) {
+    lines.push(`- Cadence: avg ${Math.round(signals.avgCadenceSpm)} spm (below the ~170-180 spm target for efficient running). Low cadence usually means overstriding — the foot lands ahead of the center of mass, increasing braking forces and injury risk. Bring this up naturally in post-run feedback or the weekly recap — one casual observation is enough. Suggested cue: "try for a slightly quicker, shorter stride" rather than a technical lecture.`);
+  }
+
+  if (signals.weekOverWeekRampPct !== null && signals.weekOverWeekRampPct > 10) {
+    lines.push(`- Mileage ramp: +${Math.round(signals.weekOverWeekRampPct)}% from the prior week (above the 10% guideline). Mention this in the weekly recap — bones and tendons adapt slower than cardiovascular fitness, so big jumps are where overuse injuries originate. Keep the tone matter-of-fact, not alarming.`);
+  }
+
+  if (signals.totalTrackedMiles > 400) {
+    const gear = signals.dominantGear ? ` in their ${signals.dominantGear}` : "";
+    lines.push(`- Shoe mileage proxy: ~${Math.round(signals.totalTrackedMiles)} miles tracked since connecting${gear}. Most running shoes last 300–500 miles. Work a shoe check question into a natural moment (post-long-run, weekly recap) — e.g. "How are your shoes holding up? Most have about 400-500 miles in them before the cushioning breaks down."`);
+  }
+
+  if (signals.hasRecentLongEffort) {
+    lines.push(`- Long effort in the last 14 days (≥10 miles or ≥75 min). For these sessions, check in on fueling and hydration in your post-run feedback if the athlete hasn't mentioned it — e.g. "Did you fuel on that one? Anything over an hour starts to matter for recovery." One casual question only.`);
+  }
+
+  if (lines.length === 0) return "";
+  return `COACHING SIGNALS — bring these up proactively at natural moments (not all at once):
+${lines.join("\n")}
+
+`;
+}
+
 function buildSystemPrompt(
   user: Record<string, unknown>,
   profile: Record<string, unknown> | null,
@@ -614,7 +709,8 @@ function buildSystemPrompt(
   stravaStats?: Record<string, unknown>,
   timezone?: string,
   hasWebSearch?: boolean,
-  avgWeeklyMileage?: number | null
+  avgWeeklyMileage?: number | null,
+  coachingSignals?: CoachingSignals
 ): string {
   const tz2 = timezone || "America/New_York";
   const msgFormatter = new Intl.DateTimeFormat("en-US", {
@@ -877,6 +973,7 @@ If the athlete has injury notes or reported physical concerns (see "Injury / con
 - Weekly recap: note whether the injury/concern appears to be trending based on recent training load or any athlete-reported context. If they haven't mentioned it recently, check in.
 - A good coach tracks these proactively. Never silently skip injury notes just because the athlete didn't bring them up.
 
+${coachingSignals ? buildCoachingSignalsBlock(coachingSignals) : ""}
 ATHLETE-STATED PHILOSOPHIES — when an athlete mentions a coach, book, or training system they follow:
 1. Recognize it — acknowledge naturally, not robotically
 2. Surface the overlap — point out where it aligns with Dean's defaults (most do)
