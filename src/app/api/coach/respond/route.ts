@@ -125,13 +125,13 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
 
   // Build system prompt with activity trends
-  const activitySummary = buildActivitySummary(recentActivities);
-  const weekMileageSoFar = computeWeekMileage(recentActivities);
-  const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities);
+  const userTimezone = (user.timezone as string) || "America/New_York";
+  const activitySummary = buildActivitySummary(recentActivities, userTimezone);
+  const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
+  const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone);
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
-  const userTimezone = (user.timezone as string) || "America/New_York";
 
   const shouldUseWebSearch = trigger === "user_message" || trigger === "initial_plan";
 
@@ -197,12 +197,12 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Web search splits Claude's response across multiple text blocks: text generated
   // before each search call, and text generated after. Joining them all reconstructs
   // the full response. (Without search, there's only one text block — join is a no-op.)
-  const coachMessage = stripMarkdown(
+  const coachMessage = correctMileageTotal(stripMarkdown(
     response.content
       .filter(b => b.type === "text")
       .map(b => b.type === "text" ? b.text : "")
       .join("")
-  );
+  ));
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -318,6 +318,62 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
  * Strip markdown formatting that Claude occasionally generates despite instructions.
  * SMS renders all characters literally — asterisks, hashes, etc. appear as-is.
  */
+/**
+ * Post-processing guard: if the message contains a session list and a stated
+ * weekly mileage total, verify the total matches the sum of running sessions
+ * and correct it if not. Strength, mobility, and cross-training lines are skipped.
+ *
+ * Only activates when both a session list (lines matching our format) and a
+ * stated total are found — otherwise it's a no-op.
+ */
+function correctMileageTotal(message: string): string {
+  // Non-running keywords — lines containing these don't contribute mileage
+  const nonRunningRe = /strength|mobility|yoga|bike|swim|elliptical|cross.train|rest day|hike/i;
+
+  // Session lines: "Mon 3/2 · ..." or "Tue 3/10 · ..."
+  const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d+\/\d+\s+·\s+(.+)$/gm;
+
+  let computedMiles = 0;
+  let hasSessionList = false;
+  let m: RegExpExecArray | null;
+
+  while ((m = sessionLineRe.exec(message)) !== null) {
+    hasSessionList = true;
+    const desc = m[2];
+    if (nonRunningRe.test(desc)) continue;
+    // First mileage figure in the description is the session total (e.g. "Tempo 6mi (2mi @ 8:45)" → 6)
+    const miMatch = desc.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    if (miMatch) computedMiles += parseFloat(miMatch[1]);
+  }
+
+  if (!hasSessionList || computedMiles === 0) return message;
+
+  const rounded = Math.round(computedMiles * 10) / 10;
+
+  // Patterns that state a weekly total — replace the number if wrong
+  // Handles: "10 miles total", "Total: 10mi", "stays at 10 miles", "~10mi total", etc.
+  const totalPatterns: RegExp[] = [
+    /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\s*(?:total|this week|for the week))/gi,
+    /(stays?\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(staying\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+  ];
+
+  let corrected = message;
+  for (const pattern of totalPatterns) {
+    corrected = corrected.replace(pattern, (full, pre, num, post) => {
+      const stated = parseFloat(num);
+      if (Math.abs(stated - rounded) > 0.4) {
+        console.warn(`[correctMileageTotal] stated ${stated}mi but sessions sum to ${rounded}mi — correcting`);
+        return `${pre}${rounded}${post}`;
+      }
+      return full;
+    });
+  }
+
+  return corrected;
+}
+
 function stripMarkdown(text: string): string {
   return text
     .replace(/\*\*([^*\n]+)\*\*/g, "$1") // **bold** → bold
@@ -384,60 +440,61 @@ function splitIntoMessages(text: string): string[] {
 }
 
 /**
- * Sum mileage for activities in the current week (Mon–Sun UTC) from already-fetched activity rows.
+ * Returns the "YYYY-MM-DD" of the Monday that starts the week containing `date`,
+ * computed in the user's local timezone. All week calculations use this so that
+ * week boundaries are consistent and timezone-aware (no UTC bleeding into Sun/Mon).
  */
+function localWeekMonday(date: Date, timezone: string): string {
+  const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(date);
+  const [yr, mo, dy] = localDate.split("-").map(Number);
+  const d = new Date(Date.UTC(yr, mo - 1, dy));
+  const dow = d.getUTCDay(); // 0=Sun, 1=Mon…
+  const daysFromMon = dow === 0 ? 6 : dow - 1;
+  const monday = new Date(Date.UTC(yr, mo - 1, dy - daysFromMon));
+  return monday.toISOString().slice(0, 10);
+}
+
+/**
+ * Sum mileage for activities in the current Mon–Sun week in the user's local timezone.
+ */
+function computeWeekMileage(activities: ActivityRow[], timezone: string): number {
+  const thisMonday = localWeekMonday(new Date(), timezone);
+  return activities
+    .filter((a) => {
+      const activityDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(a.start_date));
+      return activityDate >= thisMonday;
+    })
+    .reduce((sum, a) => sum + (a.distance_meters || 0) / 1609.34, 0);
+}
+
 /**
  * Average weekly mileage over the last 6 complete weeks (ignores the current partial week).
  * Returns null if there's not enough data to form even one complete week.
  */
-function computeAvgWeeklyMileage(activities: ActivityRow[]): number | null {
+function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): number | null {
   if (activities.length === 0) return null;
 
-  const now = new Date();
-  const dayOfWeek = now.getUTCDay();
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  // Start of the current (partial) week — we exclude this
-  const currentWeekStart = new Date(now);
-  currentWeekStart.setUTCDate(now.getUTCDate() - daysFromMonday);
-  currentWeekStart.setUTCHours(0, 0, 0, 0);
+  const thisMonday = localWeekMonday(new Date(), timezone);
 
-  // Group completed activities by ISO week key, excluding the current partial week
   const weeks: Record<string, number> = {};
   for (const a of activities) {
-    const d = new Date(a.start_date);
-    if (d >= currentWeekStart) continue; // skip current partial week
-    const yr = d.getUTCFullYear();
-    const startOfYear = new Date(Date.UTC(yr, 0, 1));
-    const weekNum = Math.ceil(((d.getTime() - startOfYear.getTime()) / 86400000 + 1) / 7);
-    const key = `${yr}-W${String(weekNum).padStart(2, "0")}`;
-    weeks[key] = (weeks[key] || 0) + (a.distance_meters || 0) / 1609.34;
+    const mondayKey = localWeekMonday(new Date(a.start_date), timezone);
+    if (mondayKey >= thisMonday) continue; // skip current partial week
+    weeks[mondayKey] = (weeks[mondayKey] || 0) + (a.distance_meters || 0) / 1609.34;
   }
 
-  const weekValues = Object.values(weeks).slice(-6); // last 6 complete weeks
+  const weekValues = Object.values(weeks).slice(-6);
   if (weekValues.length === 0) return null;
   return weekValues.reduce((s, v) => s + v, 0) / weekValues.length;
-}
-
-function computeWeekMileage(activities: ActivityRow[]): number {
-  const now = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const weekStart = new Date(now);
-  weekStart.setUTCDate(now.getUTCDate() - daysFromMonday);
-  weekStart.setUTCHours(0, 0, 0, 0);
-
-  return activities
-    .filter((a) => new Date(a.start_date) >= weekStart)
-    .reduce((sum, a) => sum + (a.distance_meters || 0) / 1609.34, 0);
 }
 
 /**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
-function buildActivitySummary(activities: ActivityRow[]): string {
+function buildActivitySummary(activities: ActivityRow[], timezone: string): string {
   if (activities.length === 0) return "No activity history available.";
 
-  // Group by ISO week
+  // Group by Mon–Sun week in the user's local timezone (key = "YYYY-MM-DD" of that Monday)
   const weeks: Record<
     string,
     { miles: number; runs: number; vert: number; fastest: number }
@@ -445,15 +502,7 @@ function buildActivitySummary(activities: ActivityRow[]): string {
 
   for (const a of activities) {
     const d = new Date(a.start_date);
-    const yr = d.getFullYear();
-    // Approximate ISO week
-    const startOfYear = new Date(yr, 0, 1);
-    const dayOfYear =
-      Math.floor(
-        (d.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000)
-      ) + 1;
-    const weekNum = Math.ceil(dayOfYear / 7);
-    const key = `${yr}-W${String(weekNum).padStart(2, "0")}`;
+    const key = localWeekMonday(d, timezone); // consistent with computeWeekMileage
 
     const miles = a.distance_meters / 1609.34;
     const paceMinPerMile =
@@ -771,6 +820,7 @@ TONE:
 FORMATTING:
 - NEVER use asterisks, markdown bold/italic, bullet points, or dashes as list markers — SMS does not render markdown and they appear as raw characters.
 - If the athlete uses metric (km, min/km), respond in metric. If imperial (miles, min/mi), respond in imperial. Match consistently.
+- COUNTING RULE: Never state a count and then list items that don't match. If you write "4 training days left (Tue, Wed, Thu, Sat)" count the items in the parentheses first — that's 4, which is fine. "4 training days left (Tue, Wed, Thu, Sat, Sun)" is 5, not 4 — fix the number before sending. Same rule applies to any enumerated list followed by a stated count.
 - WHEN LISTING MULTIPLE SESSIONS (week plan, schedule, multi-day preview): always use this compact one-per-line format with NO blank lines between sessions:
   Mon 3/9 · Easy 5mi @ 9:30/mi
   Tue 3/10 · Strength + mobility 20 min
@@ -1172,7 +1222,7 @@ Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. N
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
 
-MILEAGE ACCURACY: If you state a weekly total (e.g. "28 miles this week"), you must first add up every individual session distance you've listed and confirm the sum matches. Never state a total that doesn't equal the sum of the sessions you've written. If you're not listing every session, don't state a total — just describe the key sessions.`;
+MILEAGE ACCURACY: If you state a weekly mileage total, you must verify it by enumerating every running session distance and summing them before writing the number — e.g. "3 + 4 = 7 miles." Strength, mobility, and cross-training sessions contribute zero miles and must not be included in the sum. If the sum doesn't match your intended total, correct either the sessions or the stated number. If you're not listing every session, omit the total entirely — just describe the key sessions.`;
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
 
@@ -1212,7 +1262,7 @@ SPORT-SPECIFIC GUIDANCE:
 - Cyclists: rides with duration and effort. Include any supplemental work they mentioned.
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
 
-MILEAGE ACCURACY: Never state a weekly total unless you've verified it equals the sum of every session listed.
+MILEAGE ACCURACY: If you state a weekly mileage total, you must verify it by enumerating every running session distance and summing them before writing the number — e.g. "3 + 4 = 7 miles." Strength, mobility, and cross-training sessions contribute zero miles and must not be included in the sum. If the sum doesn't match your intended total, correct either the sessions or the stated number. If you're not listing every session, omit the total entirely — just describe the key sessions.
 
 DEFAULT FORMAT (for athletes not matching the EXPERIENCED RUNNER CLOSE TO RACE criteria above):
 Write as 2 short iMessage texts separated by a blank line. Each under 480 characters.

@@ -8,6 +8,39 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-09 — Fixed week boundary timezone bug causing wrong mileage totals; added counting rule
+
+**Type:** Bug Fix
+**Reported by:** Jake (post-run message said "3 today + yesterday's 3 = 6 miles" when yesterday was 10.6 miles; also "4 training days left" with 5 days listed)
+**User feedback:** "Dean seems to be having Sunday be the start of the week, but it should be Monday-Sunday"
+**Root cause:** Two separate bugs. (1) `computeWeekMileage` and `buildActivitySummary` both used UTC midnight as the week boundary. For a Pacific time user, Monday starts at 8am UTC, meaning Sunday evening runs (after 4pm PST = midnight UTC) were counted as the new week. More critically, `buildActivitySummary` used a broken `ceil(dayOfYear/7)` formula unrelated to Monday-based weeks, causing it to group weeks differently than `computeWeekMileage` — Claude saw inconsistent totals and tried to reconcile them. (2) No prompt rule about counting a list of items and matching the stated count.
+**Fix / Change:** Added `localWeekMonday(date, timezone)` helper that converts a date to the user's local timezone and returns the YYYY-MM-DD of that week's Monday. All three functions (`computeWeekMileage`, `computeAvgWeeklyMileage`, `buildActivitySummary`) now use this helper, so week groupings are consistent and timezone-aware. Added COUNTING RULE to the FORMATTING section: never state a count (e.g. "4 training days") and list items that don't match — count the items in the list first and fix the number before sending.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
+## 2026-03-09 — Programmatic mileage total correction as a post-processing safety net
+
+**Type:** Bug Fix
+**Reported by:** Ian's weekly plan ("10 miles total" when sessions only summed to 7)
+**User feedback:** N/A
+**Root cause:** Prompt-level mileage accuracy rules aren't reliable enough on their own — LLMs can miscalculate even when instructed to verify.
+**Fix / Change:** Added `correctMileageTotal()` function that runs on every coach message before sending. Parses session list lines matching the `Mon 3/2 · ...` format, sums distances from running sessions (skipping strength/mobility/cross-training/bike/swim lines), then finds any stated weekly total (handles "Total: Xmi", "X miles total", "stays at X miles", etc.) and replaces the number if it doesn't match the computed sum. Logs a warning when a correction is made. Applied as a wrapper around `stripMarkdown` so it runs on every response.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
+## 2026-03-09 — Strengthened mileage accuracy rule to prevent stated totals mismatching plan
+
+**Type:** Bug Fix
+**Reported by:** Ian's weekly plan
+**User feedback:** Message said "10 miles total" but sessions only added up to 7 miles (3mi Thu + 4mi Sun)
+**Root cause:** The existing MILEAGE ACCURACY rule said to verify the sum but didn't force Claude to enumerate terms explicitly. Claude either dropped a session without updating the total, or made a basic addition error (3+4=10). LLMs are significantly more reliable at arithmetic when required to show terms before stating a result.
+**Fix / Change:** Rewrote the MILEAGE ACCURACY rule in both the weekly_recap and initial_plan prompts to (1) require enumerating each running session distance and summing them before writing the total (e.g. "3 + 4 = 7 miles"), (2) explicitly state that strength/mobility/cross-training sessions contribute zero miles and must not be counted, (3) instruct Claude to omit the total entirely rather than guess if not all sessions are listed.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-09 — Session lists now sorted chronologically, not grouped by type
 
 **Type:** Bug Fix
