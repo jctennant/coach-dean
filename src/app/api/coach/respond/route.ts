@@ -4,6 +4,7 @@ import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
+import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
@@ -145,6 +146,18 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
 
+  // Fetch weather for triggers where upcoming conditions matter
+  // (skip post_run and user_message where it's rarely relevant)
+  const weatherTriggers = new Set<TriggerType>(["weekly_recap", "morning_reminder", "nightly_reminder", "initial_plan", "morning_plan"]);
+  const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
+  const stravaCity = onboardingData.strava_city as string | null;
+  const stravaState = onboardingData.strava_state as string | null;
+  let weatherBlock = "";
+  if (weatherTriggers.has(trigger) && stravaCity && stravaState) {
+    const forecast = await fetchWeekWeather(stravaCity, stravaState, userTimezone).catch(() => null);
+    if (forecast) weatherBlock = buildWeatherBlock(forecast, userTimezone);
+  }
+
   const shouldUseWebSearch = trigger === "user_message" || trigger === "initial_plan";
 
   const systemPrompt = buildSystemPrompt(
@@ -159,7 +172,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     userTimezone,
     shouldUseWebSearch,
     avgWeeklyMileage,
-    coachingSignals
+    coachingSignals,
+    weatherBlock
   );
 
   // Build user message based on trigger
@@ -732,7 +746,8 @@ function buildSystemPrompt(
   timezone?: string,
   hasWebSearch?: boolean,
   avgWeeklyMileage?: number | null,
-  coachingSignals?: CoachingSignals
+  coachingSignals?: CoachingSignals,
+  weatherBlock?: string
 ): string {
   const tz2 = timezone || "America/New_York";
   const msgFormatter = new Intl.DateTimeFormat("en-US", {
@@ -995,7 +1010,7 @@ If the athlete has injury notes or reported physical concerns (see "Injury / con
 - Weekly recap: note whether the injury/concern appears to be trending based on recent training load or any athlete-reported context. If they haven't mentioned it recently, check in.
 - A good coach tracks these proactively. Never silently skip injury notes just because the athlete didn't bring them up.
 
-${coachingSignals ? buildCoachingSignalsBlock(coachingSignals) : ""}
+${weatherBlock || ""}${coachingSignals ? buildCoachingSignalsBlock(coachingSignals) : ""}
 ATHLETE-STATED PHILOSOPHIES — when an athlete mentions a coach, book, or training system they follow:
 1. Recognize it — acknowledge naturally, not robotically
 2. Surface the overlap — point out where it aligns with Dean's defaults (most do)

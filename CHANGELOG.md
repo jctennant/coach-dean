@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Weather-aware coaching via Open-Meteo forecast
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Dean had no awareness of upcoming weather conditions, so he'd prescribe outdoor tempo runs into thunderstorms or hard sessions on 95°F days without any adjustment.
+**Fix / Change:** Created `src/lib/weather.ts` using Open-Meteo's free geocoding + forecast APIs (no API key required). Fetches 7-day daily forecast (max/min temp °F, precipitation mm, WMO weather code, max wind mph) for the athlete's city/state (already stored from Strava OAuth as `strava_city`/`strava_state` in `onboarding_data`). Notable days — extreme cold (<20°F), freezing, cold, warm (70°F+), hot (80°F+), extreme heat (90°F+), thunderstorms, heavy snow/rain, strong wind (20+mph) — are surfaced as a `WEATHER FORECAST` block in the system prompt with specific coaching implications per condition. Ideal days (45–75°F, dry, calm) are silently omitted to avoid noise. Weather is fetched only for triggers where upcoming conditions matter: `weekly_recap`, `morning_reminder`, `nightly_reminder`, `initial_plan`, `morning_plan`. Fetch errors are non-fatal (caught and ignored).
+**Files changed:** src/lib/weather.ts (new), src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-10 — Race proximity signals and race strategy coaching framework
 
 **Type:** Feature
