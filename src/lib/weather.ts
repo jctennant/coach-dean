@@ -21,17 +21,23 @@ export interface WeatherForecast {
 }
 
 /**
- * Geocode a city + state to lat/lon using Open-Meteo's free geocoding API.
+ * Geocode a city to lat/lon using Open-Meteo's free geocoding API.
+ * Fetches top 5 US results and prefers the one whose timezone matches the
+ * athlete's stored timezone — handles common city name collisions (e.g. "Denver, PA" vs "Denver, CO").
  */
-async function geocode(city: string, state: string): Promise<{ lat: number; lon: number } | null> {
-  const query = `${city}, ${state}`;
-  const url = `${GEOCODING_URL}?name=${encodeURIComponent(query)}&count=1&language=en&format=json`;
+async function geocode(city: string, timezone: string): Promise<{ lat: number; lon: number } | null> {
+  const url = `${GEOCODING_URL}?name=${encodeURIComponent(city)}&count=5&language=en&format=json`;
   const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) return null;
-  const data = await res.json() as { results?: Array<{ latitude: number; longitude: number }> };
-  const result = data.results?.[0];
-  if (!result) return null;
-  return { lat: result.latitude, lon: result.longitude };
+  const data = await res.json() as {
+    results?: Array<{ latitude: number; longitude: number; country_code: string; timezone: string }>;
+  };
+  const results = data.results ?? [];
+  const usResults = results.filter(r => r.country_code === "US");
+  if (usResults.length === 0) return null;
+  // Prefer timezone match, fall back to first US result
+  const match = usResults.find(r => r.timezone === timezone) ?? usResults[0];
+  return { lat: match.latitude, lon: match.longitude };
 }
 
 /**
@@ -93,11 +99,12 @@ export async function fetchWeekWeather(
   timezone: string
 ): Promise<WeatherForecast | null> {
   try {
-    const coords = await geocode(city, state);
+    const coords = await geocode(city, timezone);
     if (!coords) return null;
     const days = await fetchForecast(coords.lat, coords.lon, timezone);
     if (days.length === 0) return null;
-    return { location: `${city}, ${state}`, days };
+    const location = state ? `${city}, ${state}` : city;
+    return { location, days };
   } catch {
     return null;
   }
@@ -204,9 +211,10 @@ export function buildWeatherBlock(forecast: WeatherForecast, timezone: string): 
 
   if (notable.length === 0) return "";
 
-  const lines = notable.map(d =>
-    `${d.label}: ${d.conditions.join(", ")}. ${d.coachingNotes.join(" ")}`
-  );
+  const lines = notable.map(d => {
+    const notes = d.coachingNotes.join(" ");
+    return notes ? `${d.label}: ${d.conditions.join(", ")}. ${notes}` : `${d.label}: ${d.conditions.join(", ")}.`;
+  });
 
   return `WEATHER FORECAST — ${forecast.location} (next 7 days, notable days only):
 ${lines.join("\n")}

@@ -1126,6 +1126,7 @@ function formatGoalLabel(goal: string): string {
     "70.3": "a 70.3 Half Ironman",
     ironman: "a Full Ironman",
     cycling: "a cycling event",
+    injury_recovery: "injury recovery and return to running",
   };
   return labels[goal] || goal;
 }

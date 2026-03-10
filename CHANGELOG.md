@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Broader onboarding: injury recovery persona + personalized second message
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Onboarding was too narrowly framed around race training. The welcome message only mentioned race distances, and the second message was a generic "Love it — a half marathon is a great goal" with no explanation of what Dean actually does. Athletes recovering from injury, newer runners, or those wanting general coaching had no clear fit.
+**Fix / Change:** (1) Rewrote welcome message to mention three use cases: race training, injury recovery, and general coaching. (2) Added `injury_recovery` as a recognized goal type in the classifier with appropriate keywords (IT band, stress fracture, shin splints, return to running, etc.). (3) Made the acknowledgment (second message) situationally specific: injury recovery gets "I'll build a return-to-run plan around your recovery, not a generic schedule", newer runners get a "manageable plan to the start line" framing, experienced racers get the Strava/tracking pitch. (4) Step routing skips `awaiting_race_date` and `awaiting_goal_time` for injury recovery (no race planned). (5) `awaiting_anything_else` for injury recovery asks specifically about the injury — what it is, when it happened, current recovery status, and whether they can run at all. (6) Updated `getSportType`, `formatGoalInline`, and `formatGoalLabel` to handle `injury_recovery`.
+**Files changed:** src/app/api/signup/route.ts, src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-10 — Weather-aware coaching via Open-Meteo forecast
 
 **Type:** Feature

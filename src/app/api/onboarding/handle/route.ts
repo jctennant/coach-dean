@@ -137,7 +137,7 @@ async function handleGoal(
       max_tokens: 128,
       system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|null}
+Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"injury_recovery"|null}
 
 Rules:
 - complete: true only if a clear training goal is identifiable
@@ -152,6 +152,7 @@ Rules:
 - "ironman", "full ironman", "140.6" → "ironman"
 - "cycling", "gravel race", "gran fondo", "bike race" → "cycling"
 - "just getting in shape", "get fit", "lose weight", "general" → "general_fitness"
+- "recovering from injury", "coming back from injury", "injured", "IT band", "stress fracture", "shin splints", "return to running", "rebuilding after injury" → "injury_recovery"
 - When complete is false, goal must be null`,
       messages: [{ role: "user", content: message }],
     }),
@@ -231,13 +232,26 @@ Rules:
 
   const name = extra.name as string | undefined;
   const goalLabel = formatGoalInline(parsed.goal);
-  // If we found a specific named race via web search, lead with real course details.
-  // Otherwise fall back to the generic goal acknowledgment.
-  const acknowledgment = raceInfo.ack
-    ? `Love it${name ? `, ${name}` : ""} — ${raceInfo.ack}`
-    : parsed.goal === "general_fitness"
-      ? `Love it${name ? `, ${name}` : ""} — building consistent fitness is a great foundation.`
-      : `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal.`;
+
+  // Build a personalized acknowledgment that reflects the athlete's specific situation
+  // and explains concretely what Dean will do for them.
+  let acknowledgment: string;
+  if (raceInfo.ack) {
+    // Specific named race found — lead with real course facts
+    const whatDeanDoes = "I'll build your week-by-week plan, track your training via Strava, and check in after your key sessions.";
+    acknowledgment = `Love it${name ? `, ${name}` : ""} — ${raceInfo.ack} ${whatDeanDoes}`;
+  } else if (parsed.goal === "injury_recovery") {
+    acknowledgment = `Got it${name ? `, ${name}` : ""} — coming back from injury safely is exactly what I'm here for. I'll build a return-to-run plan around your recovery, not a generic training schedule.`;
+  } else if (parsed.goal === "general_fitness") {
+    acknowledgment = `Love it${name ? `, ${name}` : ""} — building a consistent habit is a great foundation. I'll put together a plan that builds properly and adapts to your schedule.`;
+  } else {
+    // Race goal — vary the "what Dean does" slightly based on whether they seem newer or experienced
+    const isNewer = (extra.experience_years as number | null) != null && (extra.experience_years as number) < 1;
+    const whatDeanDoes = isNewer
+      ? `I'll keep the plan manageable and build up at a pace that gets you to the start line healthy.`
+      : `I'll put together a tailored plan, track your training via Strava, and adjust things as your fitness builds.`;
+    acknowledgment = `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal. ${whatDeanDoes}`;
+  }
 
   const question = nextStep ? getStepQuestion(nextStep, mergedData, user.id) : "";
 
@@ -245,9 +259,11 @@ Rules:
   if (immediateAnswer) {
     // Bridge from the coaching answer back to the onboarding flow naturally
     const bridge =
-      parsed.goal === "general_fitness"
-        ? "Would you like me to put together a training plan around your goals? I have just a few quick questions."
-        : `Would you like me to build you a proper ${goalLabel} training plan? I just have a few quick questions.`;
+      parsed.goal === "injury_recovery"
+        ? "Want me to put together a return-to-run plan? A few quick questions first."
+        : parsed.goal === "general_fitness"
+          ? "Would you like me to put together a training plan around your goals? I have just a few quick questions."
+          : `Would you like me to build you a proper ${goalLabel} training plan? I just have a few quick questions.`;
     responseText = `${immediateAnswer}\n\n${bridge}${question ? `\n\n${question}` : ""}`.trim();
   } else {
     responseText = `${acknowledgment}${question ? ` ${question}` : ""}`.trim();
@@ -861,7 +877,7 @@ const CYCLING_GOALS = ["cycling"];
 function getSportType(goal: string): "running" | "triathlon" | "cycling" | "general" {
   if (TRIATHLON_GOALS.includes(goal)) return "triathlon";
   if (CYCLING_GOALS.includes(goal)) return "cycling";
-  if (goal === "general_fitness") return "general";
+  if (goal === "general_fitness" || goal === "injury_recovery") return "general";
   return "running";
 }
 
@@ -886,11 +902,13 @@ const STEP_ORDER = [
 function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
   switch (step) {
     case "awaiting_race_date":
+      // Skip entirely for injury recovery — no race date needed
+      if (data.goal === "injury_recovery") return true;
       // Satisfied if race_date key exists (even null = "no race")
       return Object.prototype.hasOwnProperty.call(data, "race_date");
     case "awaiting_goal_time":
-      // Skip for general fitness (no race) and ultras (cutoffs matter more than finish times)
-      if (data.goal === "general_fitness" || ULTRA_GOALS.includes(data.goal as string)) return true;
+      // Skip for general fitness, injury recovery, and ultras (cutoffs matter more than finish times)
+      if (data.goal === "general_fitness" || data.goal === "injury_recovery" || ULTRA_GOALS.includes(data.goal as string)) return true;
       // Satisfied once goal_time_minutes key exists (even null = "no specific goal")
       return Object.prototype.hasOwnProperty.call(data, "goal_time_minutes");
     case "awaiting_strava":
@@ -974,6 +992,9 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
     }
 
     case "awaiting_anything_else":
+      if (data.goal === "injury_recovery") {
+        return "Tell me more about the injury — what is it, how long ago did it happen, and where are you in recovery? Are you able to run at all right now, or fully off it?";
+      }
       return "Almost there — anything else worth knowing before I put this together? Injuries, current paces, strength work, cross-training — mention it now and I'll build it in.";
 
     case "awaiting_name":
@@ -1365,6 +1386,7 @@ function formatGoalInline(goal: string): string {
     ironman: "Full Ironman",
     cycling: "cycling event",
     general_fitness: "general fitness",
+    injury_recovery: "injury recovery",
   };
   return labels[goal] || goal;
 }
