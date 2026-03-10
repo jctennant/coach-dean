@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-09 — Session lists now sorted chronologically, not grouped by type
+
+**Type:** Bug Fix
+**Reported by:** Ian's weekly plan (strength on Tue listed after runs on Thu/Sun)
+**User feedback:** Runs listed sequentially first, then strength separately — out of date order
+**Root cause:** Formatting instructions for session lists didn't specify chronological ordering, so Claude defaulted to grouping by workout type (all runs, then strength/cross-training).
+**Fix / Change:** Added explicit "always sort sessions in chronological order by date — never group by workout type" instruction to the session list format rules in three places: the main FORMATTING section of the system prompt, the weekly_recap prompt, and the initial_plan prompt. Updated the example session lists in all three to include a mid-week strength day to reinforce the expected order.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-09 — Fixed split/lap unit conversions; switched to imperial splits; explained splits vs laps to Claude
 
 **Type:** Bug Fix / Improvement

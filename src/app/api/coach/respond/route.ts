@@ -773,9 +773,10 @@ FORMATTING:
 - If the athlete uses metric (km, min/km), respond in metric. If imperial (miles, min/mi), respond in imperial. Match consistently.
 - WHEN LISTING MULTIPLE SESSIONS (week plan, schedule, multi-day preview): always use this compact one-per-line format with NO blank lines between sessions:
   Mon 3/9 · Easy 5mi @ 9:30/mi
+  Tue 3/10 · Strength + mobility 20 min
   Wed 3/11 · Tempo 4mi (2mi @ 8:45)
   Sat 3/14 · Long run 8mi easy
-  Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun), M/D dates, and · as the separator. Never use full day names ("Monday, March 9"), colons, or dashes as separators for session lists. Blank lines split into separate SMS bubbles — keep the session list as one unbroken block.
+  Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun), M/D dates, and · as the separator. Never use full day names ("Monday, March 9"), colons, or dashes as separators for session lists. Blank lines split into separate SMS bubbles — keep the session list as one unbroken block. Always sort sessions in chronological order by date — never group by workout type (e.g. runs first, then strength). A strength session on Tuesday belongs before a run on Thursday.
 
 TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
 - Lead with genuine excitement — celebrate the effort and the fitness it reflects
@@ -1162,8 +1163,9 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
     case "weekly_recap":
       return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — week 4 is a recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
-For the sessions text, put each session on its own line using this compact format:
+For the sessions text, put each session on its own line using this compact format, sorted chronologically by date — never group by type:
 Mon 3/2 · Easy 5mi @ 9:30/mi
+Tue 3/3 · Strength + mobility 20 min
 Wed 3/4 · Tempo 4mi (2mi @ 8:45)
 Sat 3/7 · Long run 8mi easy
 Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
@@ -1217,9 +1219,9 @@ Write as 2 short iMessage texts separated by a blank line. Each under 480 charac
 
 First bubble: 2-3 sentences max. Lead with the most important constraint or context (injury, mileage baseline, race timeline, etc.). Then add one sentence explaining the training rationale behind the plan — why you've structured it this way. Keep it specific and grounded: "Starting with all easy miles to build your aerobic base before introducing quality work" or "Keeping volume conservative given the hip — easier to add than to walk back a flare-up." This is what makes the plan feel like coaching, not a random schedule. Do NOT open with "Got it" or any generic acknowledgment phrase. Do NOT restate their goal back to them.
 
-Second bubble: this week's sessions, one per line:
+Second bubble: this week's sessions, one per line, sorted chronologically by date — never group by type (runs first, then strength):
 Mon 3/2 · Easy 3mi @ easy effort
-Wed 3/4 · Easy 3mi
+Tue 3/3 · Strength + mobility 20 min
 Sat 3/7 · Easy 4mi
 Use short day abbreviations and M/D dates. Then close with three short lines on a new line, each as its own sentence:
 1. Invite feedback on the plan — e.g. "How does this look? Happy to adjust anything."
