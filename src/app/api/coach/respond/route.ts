@@ -38,6 +38,7 @@ interface CoachingSignals {
   totalTrackedMiles: number;             // proxy for shoe mileage
   hasRecentLongEffort: boolean;          // run ≥ 10 mi or ≥ 75 min in last 14 days
   dominantGear: string | null;           // most-used shoe name if available
+  daysUntilRace: number | null;          // null if no race date or race has passed
 }
 
 /**
@@ -139,7 +140,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const activitySummary = buildActivitySummary(recentActivities, userTimezone);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone);
-  const coachingSignals = computeCoachingSignals(recentActivities, userTimezone);
+  const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null);
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
@@ -505,7 +506,7 @@ function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): n
  * Compute proactive coaching signals from recent activity data.
  * These are surfaced in the system prompt so Dean can bring them up at natural moments.
  */
-function computeCoachingSignals(activities: ActivityRow[], timezone: string): CoachingSignals {
+function computeCoachingSignals(activities: ActivityRow[], timezone: string, raceDate?: string | null): CoachingSignals {
   const runTypes = new Set(["Run", "TrailRun", "VirtualRun"]);
 
   // Average cadence from the 10 most recent runs with cadence data
@@ -554,7 +555,15 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string): Co
   }
   const dominantGear = Object.entries(gearCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
-  return { avgCadenceSpm, weekOverWeekRampPct, totalTrackedMiles, hasRecentLongEffort, dominantGear };
+  // Days until race
+  let daysUntilRace: number | null = null;
+  if (raceDate) {
+    const race = new Date(raceDate + "T00:00:00");
+    const days = Math.ceil((race.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    if (days >= 0) daysUntilRace = days;
+  }
+
+  return { avgCadenceSpm, weekOverWeekRampPct, totalTrackedMiles, hasRecentLongEffort, dominantGear, daysUntilRace };
 }
 
 /**
@@ -684,6 +693,19 @@ function buildCoachingSignalsBlock(signals: CoachingSignals): string {
 
   if (signals.hasRecentLongEffort) {
     lines.push(`- Long effort in the last 14 days (≥10 miles or ≥75 min). For these sessions, check in on fueling and hydration in your post-run feedback if the athlete hasn't mentioned it — e.g. "Did you fuel on that one? Anything over an hour starts to matter for recovery." One casual question only.`);
+  }
+
+  if (signals.daysUntilRace !== null) {
+    const d = signals.daysUntilRace;
+    if (d <= 1) {
+      lines.push(`- RACE IS TOMORROW (or today). Send an encouraging, focused message: confirm the plan is locked, remind them nothing new on race day (gear, nutrition, pacing), and wish them well. Keep it short and energizing — not a data dump.`);
+    } else if (d <= 7) {
+      lines.push(`- RACE WEEK (${d} days out). Proactively cover: final gear check (nothing new on race day — shoes, socks, kit all tested), race morning routine (wake time, breakfast timing ~2-3 hrs before, warmup plan), mental strategy (break the race into segments, know your A/B/C goals), and what to do if things go sideways (went out too fast, cramping, heat). Weave these across the week's messages — don't dump it all at once.`);
+    } else if (d <= 14) {
+      lines.push(`- FINAL BUILD / TAPER START (${d} days out). Confirm the race strategy in detail this week: target pacing (even split vs. slight negative split), mile-by-mile nutrition plan (carbs every 45-60 min for anything over 75 min), hydration (drink to thirst + electrolytes for efforts >90 min), and gear decisions locked in. Address taper anxiety if it comes up — feeling sluggish or antsy is normal and expected.`);
+    } else if (d <= 21) {
+      lines.push(`- 3 WEEKS OUT (${d} days). Start introducing race strategy topics naturally — don't wait for the athlete to ask. Topics to weave in over the next few weeks: target pacing strategy and splits, race-day nutrition plan, gear/shoe decisions, course-specific considerations (hills, heat, terrain). One topic at a time; don't overwhelm.`);
+    }
   }
 
   if (lines.length === 0) return "";
@@ -992,6 +1014,47 @@ Reference:
 - "Polarized / Seiler / 90-10" → Reduce moderate work further; make quality sessions sharper. Suitable for experienced athletes.
 - "Born to Run / natural running" → Lean into form focus and joy; may resist structured pacing — use feel-based cues.
 - Unknown philosophy → Ask the athlete to share the key principles so you can incorporate it accurately. Never guess or invent details about a methodology you don't know.
+
+${hasWebSearch ? `WEB SEARCH:
+You have access to web search. Use it proactively when:
+- The athlete mentions a specific race, event, or trail by name — search for course details, elevation profile, terrain, cutoff times
+- The athlete asks about something requiring current or specific information you're not fully confident about (race logistics, course records, a specific training methodology)
+- You need factual details about a route, venue, or event to give accurate training advice
+Do NOT search for general training concepts, coaching methodology, or things you already know well.
+` : ""}RACE PREPARATION & STRATEGY — what comprehensive race coaching covers:
+When the athlete asks about race strategy, race day, or you're proactively bringing it up (see COACHING SIGNALS), cover these topics — one at a time, spread across conversations, not all at once:
+
+Pacing:
+- Even split vs. slight negative split (going slightly faster in the second half) is almost always optimal. Positive splits (going out too fast) are the most common race mistake.
+- For most athletes: run the first half feeling easier than goal pace. The second half is where the race happens.
+- Course-specific: if there are hills early, go by effort not pace on the uphills and bank nothing — you'll need those reserves.
+- Have an A goal (dream), B goal (solid execution), C goal (finish strong) so a rough patch doesn't become a spiral.
+
+Nutrition (racing):
+- Anything over ~60-75 min requires exogenous carbs. Target 30-60g of carbs per hour for half marathon and shorter; 60-90g/hr for marathon and longer (with practice).
+- Start fueling early — by mile 4-5 for a marathon, not when you feel depleted. By the time you feel it, you're already behind.
+- Practice the exact race-day nutrition in training. Never try a new gel, chew, or drink on race day.
+- Liquid calories at aid stations count — if taking sports drink, adjust gel frequency.
+
+Hydration:
+- Drink to thirst for most conditions. Don't over-drink (hyponatremia is a real risk for slower runners drinking heavily).
+- For efforts over 90 min or in heat: sodium matters. Electrolytes, not just water.
+- Know the aid station locations on the course so you're not caught dry or forced to drink at a hard effort.
+
+Gear (race day):
+- Nothing new on race day — shoes, socks, shorts, top, watch all need to be tested in training.
+- Race-day kit laid out the night before. Know your watch settings in advance.
+- Body Glide or anti-chafe anywhere that rubs on long runs.
+
+Mental strategy:
+- Break the race into segments. Don't think about mile 20 at mile 3.
+- Have a mantra or two ready for when it gets hard — something simple and personal.
+- Expect a rough patch. Every race has one. The plan is to stay calm, hold form, keep fueling, and let it pass.
+
+Contingency planning:
+- If you go out too fast: don't panic, ease back 10-15 sec/mile, refuel aggressively.
+- If it's hotter than expected: adjust goal pace 20-30 sec/mile per 10°F above ideal racing temps (~50-55°F).
+- If something hurts: distinguish between discomfort (normal) and pain (stop).
 
 ${hasWebSearch ? `WEB SEARCH:
 You have access to web search. Use it proactively when:

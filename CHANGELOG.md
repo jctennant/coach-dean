@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Race proximity signals and race strategy coaching framework
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Dean had no awareness of how close a race was beyond a generic "X days away" note in the system prompt, and no structured guidance on what comprehensive race strategy coaching should cover. Athletes approaching a race weren't getting proactive prep conversations.
+**Fix / Change:** Added `daysUntilRace` to `CoachingSignals` (computed from `profile.race_date`). Added four race proximity tiers to `buildCoachingSignalsBlock` with specific action instructions: 3 weeks out (start introducing strategy topics), final build/taper start (confirm pacing and nutrition plan), race week (gear, morning routine, mental strategy, contingency plans), and race day eve (lock in the plan, encourage). Also added a `RACE PREPARATION & STRATEGY` block to the system prompt covering pacing, race nutrition (carb timing, 30-90g/hr), hydration, gear, mental strategy, and contingency planning — so Dean handles both reactive questions and proactive prep well.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-10 — Proactive coaching signals: cadence, ramp rate, shoe mileage, fueling
 
 **Type:** Feature
