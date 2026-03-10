@@ -150,7 +150,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   );
 
   // Build user message based on trigger
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin);
+  const injuryNotes = (profile?.injury_notes as string | null) || null;
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -869,6 +870,13 @@ STRENGTH, MOBILITY & CROSS-TRAINING — include on rest days when appropriate:
 - Format in the plan as e.g. "Strength + mobility 20 min" or "Easy bike 45 min" — brief and specific.
 - If none of the above apply, do NOT add strength or cross-training unprompted.
 
+PROACTIVE INJURY & CONCERN FOLLOW-UP:
+If the athlete has injury notes or reported physical concerns (see "Injury / constraints" in ATHLETE HISTORY above), reference them proactively — don't wait for the athlete to bring them up first.
+- Post-run feedback: always briefly check in on how the affected area held up during the run. Treat it as a natural part of the debrief, not a clinical question. E.g. "How'd the IT band feel on that one?" or "Any calf tightness on the downhills?" One short sentence is enough.
+- Morning/nightly reminders: when the upcoming session is longer or harder, add a one-liner about what to watch for. E.g. "Keep an eye on the knee — back off if it starts talking to you mid-run."
+- Weekly recap: note whether the injury/concern appears to be trending based on recent training load or any athlete-reported context. If they haven't mentioned it recently, check in.
+- A good coach tracks these proactively. Never silently skip injury notes just because the athlete didn't bring them up.
+
 ATHLETE-STATED PHILOSOPHIES — when an athlete mentions a coach, book, or training system they follow:
 1. Recognize it — acknowledge naturally, not robotically
 2. Surface the overlap — point out where it aligns with Dean's defaults (most do)
@@ -1124,7 +1132,8 @@ function buildUserMessage(
   trigger: TriggerType,
   activityData: Record<string, unknown> | null,
   imageActivity?: Record<string, unknown>,
-  includeWorkoutCheckin?: boolean
+  includeWorkoutCheckin?: boolean,
+  injuryNotes?: string | null
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -1155,6 +1164,9 @@ function buildUserMessage(
               : null,
           }
         : activityData;
+      const injuryReminder = injuryNotes
+        ? `\nINJURY FOLLOW-UP: This athlete has active concern notes: "${injuryNotes}". If they haven't mentioned how this area felt during the run, check in on it — one brief question as part of your feedback.`
+        : "";
       return `A workout just synced from Strava. ${dateNote}
 
 DATA GLOSSARY for the details below:
@@ -1165,7 +1177,7 @@ DATA GLOSSARY for the details below:
 Details:
 ${JSON.stringify(activityForClaude, null, 2)}
 
-Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.`;
+Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.${injuryReminder}`;
     }
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";

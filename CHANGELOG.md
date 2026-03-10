@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Proactive injury follow-up in post-run feedback and reminders
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Injury notes were being stored and shown in the system prompt context, but Dean had no explicit instruction to surface them proactively. He would only address injuries if the athlete brought them up first — a missed coaching opportunity, especially after runs that might have stressed an injured area.
+**Fix / Change:** Added a `PROACTIVE INJURY & CONCERN FOLLOW-UP` rule to the system prompt covering all trigger types (post-run, reminders, weekly recap). For `post_run` specifically, also inject an explicit INJURY FOLLOW-UP note into the user message when `injury_notes` is non-empty, so Dean actively checks in on the affected area after every run — even if the athlete didn't mention it.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-09 — Fixed week boundary timezone bug causing wrong mileage totals; added counting rule
 
 **Type:** Bug Fix
