@@ -57,6 +57,11 @@ export async function GET(request: Request) {
     timezone = tzMatch ? tzMatch[1] : athlete.timezone;
   }
 
+  // Strava reports the athlete's display preference as "feet" (imperial) or "meters" (metric).
+  // Store this so all subsequent coaching messages use consistent units without guessing.
+  const preferredUnits: "imperial" | "metric" =
+    (athlete.measurement_preference as string) === "meters" ? "metric" : "imperial";
+
   // Fetch athlete stats synchronously — this is a fast single API call
   // We need this data available before the user answers the schedule question
   let stats: Record<string, unknown> = {};
@@ -121,7 +126,13 @@ export async function GET(request: Request) {
     );
   }
 
-  console.log("[strava-callback] user updated:", user.id, "tz:", timezone);
+  console.log("[strava-callback] user updated:", user.id, "tz:", timezone, "units:", preferredUnits);
+
+  // Persist preferred_units to training_profiles (upsert in case row doesn't exist yet).
+  // This is fire-and-forget — a failure here doesn't block the flow.
+  void supabase
+    .from("training_profiles")
+    .upsert({ user_id: user.id, preferred_units: preferredUnits, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
 
   // Fire-and-forget activity import (slow, paginated) — don't block redirect
   importStravaActivities(user.id, access_token).catch((err) =>

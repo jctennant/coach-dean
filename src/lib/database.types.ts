@@ -166,10 +166,12 @@ export type Database = {
           days_per_week: number | null
           fitness_level: string | null
           goal: string | null
+          goal_time_minutes: number | null
           id: string
           injury_notes: string | null
           last_morning_reminder_date: string | null
           last_nightly_reminder_date: string | null
+          preferred_units: string
           proactive_cadence: string | null
           race_date: string | null
           skip_dates: string[] | null
@@ -186,10 +188,12 @@ export type Database = {
           days_per_week?: number | null
           fitness_level?: string | null
           goal?: string | null
+          goal_time_minutes?: number | null
           id?: string
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
@@ -206,10 +210,12 @@ export type Database = {
           days_per_week?: number | null
           fitness_level?: string | null
           goal?: string | null
+          goal_time_minutes?: number | null
           id?: string
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null

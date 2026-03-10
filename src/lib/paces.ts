@@ -41,16 +41,19 @@ function paceAtVDOTPct(vdot: number, pct: number): string {
 }
 
 /**
- * Convert a stored exact easy pace (e.g. "7:44/mi") into a display range.
- * Rounds to nearest 5 seconds, then adds 30s for the upper bound.
- * e.g. "7:44/mi" → "7:45–8:15/mi"
+ * Convert a stored exact easy pace (always stored as min/mile, e.g. "7:44/mi")
+ * into a display range. Rounds to nearest 5 seconds, adds 30s for the upper bound.
+ * e.g. "7:44/mi" → "7:45–8:15/mi" (imperial) or "4:47–5:03/km" (metric)
  */
-export function easyPaceRange(paceStr: string | null): string | null {
+export function easyPaceRange(paceStr: string | null, useMetric = false): string | null {
   if (!paceStr) return null;
   const match = paceStr.match(/(\d+):(\d+)/);
   if (!match) return paceStr;
 
-  const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+  let totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+  // Paces are always stored as min/mile. Convert to min/km if needed.
+  if (useMetric) totalSec = Math.round(totalSec / 1.60934);
+
   const rounded = Math.round(totalSec / 5) * 5;
   const upper = rounded + 30;
 
@@ -60,7 +63,7 @@ export function easyPaceRange(paceStr: string | null): string | null {
     return `${min}:${String(sec).padStart(2, "0")}`;
   };
 
-  return `${fmt(rounded)}–${fmt(upper)}/mi`;
+  return `${fmt(rounded)}–${fmt(upper)}${useMetric ? "/km" : "/mi"}`;
 }
 
 /**

@@ -326,13 +326,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }
   }
 
-  // Update training state if post_run
+  // Update training state if post_run.
+  // Note: week_mileage_so_far is NOT updated here — it drifted indefinitely because it
+  // was never reset on Mondays. The system prompt uses computeWeekMileage() (live Strava
+  // query) as the authoritative source, so we only persist last_activity_summary.
   if (trigger === "post_run" && activityData) {
     const distanceMiles = (activityData.distance_meters ?? 0) / 1609.34;
     await supabase
       .from("training_state")
       .update({
-        week_mileage_so_far: (state?.week_mileage_so_far || 0) + distanceMiles,
         last_activity_date: activityData.start_date,
         last_activity_summary: {
           type: activityData.activity_type,
@@ -1014,18 +1016,33 @@ ${raceHistory.map((r) => {
 }).join("\n")}
 ` : ""}
 CURRENT TRAINING STATE:
-- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
-- Weekly mileage target: ${state?.weekly_mileage_target || "TBD"} mi
-- Mileage so far this week: ${weekMileageSoFar.toFixed(1)} mi (Strava-synced; this is the authoritative number — do NOT add runs from conversation history or previous weeks to this figure)
-- Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
-- Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
-- Active adjustments: ${state?.plan_adjustments || "None"}
 ${(() => {
-  const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
-  if (!sessions || sessions.length === 0) return "";
-  const list = sessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-  return `- THIS WEEK'S PLANNED SESSIONS (authoritative — use these exact sessions and distances in all messages; do not recalculate or change them unless the athlete explicitly asks to adjust):
-${list}`;
+  const useMetric = profile?.preferred_units === "metric";
+  const mi = (miles: number) => useMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
+  const targetMiles = (state?.weekly_mileage_target as number) || 0;
+  const sessionRows = (() => {
+    const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
+    if (!sessions || sessions.length === 0) return "";
+    // Filter out stale sessions (all dates before today means plan is from last week)
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const activeSessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      const sessionDate = new Date(currentYear, m - 1, d);
+      // Keep if date is today or in the future, or if we can't parse the date
+      return isNaN(sessionDate.getTime()) || sessionDate >= new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    });
+    if (activeSessions.length === 0) return "";
+    const list = activeSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+    return `\n- THIS WEEK'S PLANNED SESSIONS (authoritative — use these exact sessions and distances; do not recalculate or change them unless the athlete explicitly asks to adjust):\n${list}`;
+  })();
+  return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
+- Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
+- Mileage so far this week: ${mi(weekMileageSoFar)} (Strava-synced; authoritative — do NOT add runs from conversation history or previous weeks to this figure)
+- Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
+- Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
+- Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
+- Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}`;
 })()}
 
 COMMUNICATION STYLE:
@@ -1260,8 +1277,10 @@ Extract ONLY explicitly stated NEW information:
   - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
 - Their location or timezone if explicitly mentioned (e.g. "I'm in Denver", "I live in Seattle", "I'm on Pacific time", "I'm in PST") → timezone as IANA string (e.g. "America/Denver", "America/Los_Angeles"). Only set if they are clearly stating where they are, not just mentioning a city in passing.
 - A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${new Date().toISOString().slice(0, 10)}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
+- A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th") → race_date as "YYYY-MM-DD". Only set when athlete clearly states a specific race date. If month only, use first day of that month. Today is ${new Date().toISOString().slice(0, 10)}.
+- A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 
-Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -1277,6 +1296,8 @@ Return {} if nothing new is present.`,
       easy_pace?: string | null;
       timezone?: string | null;
       skip_date?: string | null;
+      race_date?: string | null;
+      goal_time_minutes?: number | null;
       workout?: {
         activity_type: string;
         distance_meters: number | null;
@@ -1300,9 +1321,11 @@ Return {} if nothing new is present.`,
     const hasEasyPace = !!extracted.easy_pace;
     const hasTimezone = !!(extracted.timezone && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(extracted.timezone));
     const hasSkipDate = !!(extracted.skip_date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.skip_date));
+    const hasRaceDate = !!(extracted.race_date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.race_date));
+    const hasGoalTime = typeof extracted.goal_time_minutes === "number" && extracted.goal_time_minutes > 0;
     const hasWorkout = !!extracted.workout;
 
-    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasWorkout) return;
+    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -1336,6 +1359,8 @@ Return {} if nothing new is present.`,
       if (computedPaces.tempo) profileUpdate.current_tempo_pace = computedPaces.tempo;
       if (computedPaces.interval) profileUpdate.current_interval_pace = computedPaces.interval;
     }
+    if (hasRaceDate) profileUpdate.race_date = extracted.race_date;
+    if (hasGoalTime) profileUpdate.goal_time_minutes = extracted.goal_time_minutes;
 
     // Build onboarding_data update
     const updatedOnboardingData = { ...onboardingData };
