@@ -104,7 +104,7 @@ export async function POST(request: Request) {
           gear_name: activity.gear?.name || null,
           start_date: activity.start_date,
           summary: {
-            splits: activity.splits_metric,
+            splits: activity.splits_imperial,
             laps: activity.laps,
           },
         },
