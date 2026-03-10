@@ -300,14 +300,18 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
-
+    // Extract and store the specific planned sessions so all subsequent messages
+    // (post_run, reminders) use the exact same distances — not independently recalculated.
+    void extractAndStorePlanSessions(userId, coachMessage);
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
+    void extractAndStorePlanSessions(userId, coachMessage);
   }
 
   // For user_message, background-extract any profile updates (injuries, new cross-training,
   // preferences) and write them back to training_profiles / onboarding_data so future
   // responses and plans automatically reflect what the athlete shared.
+  // Also check if the exchange resulted in any plan changes and update weekly_plan_sessions.
   if (trigger === "user_message") {
     const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
     if (latestUserMsg) {
@@ -317,6 +321,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         profile,
         (user.onboarding_data as Record<string, unknown>) || {}
       );
+      const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
+      void maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage);
     }
   }
 
@@ -729,6 +735,89 @@ ${lines.join("\n")}
 `;
 }
 
+/**
+ * After generating an initial_plan or weekly_recap, extract the specific planned
+ * sessions as structured JSON and store them in training_state.weekly_plan_sessions.
+ * This gives every subsequent message (post_run, reminders) a single authoritative
+ * source for session distances — Claude cannot contradict itself if it reads from here.
+ */
+async function extractAndStorePlanSessions(userId: string, planText: string): Promise<void> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 400,
+    system: `Extract the list of planned training sessions from this coaching message.
+Return ONLY valid JSON array, nothing else.
+Each session object: {"day": "Mon"|"Tue"|"Wed"|"Thu"|"Fri"|"Sat"|"Sun", "date": "M/D" (e.g. "3/10"), "label": "the full session description as written"}
+Example: [{"day":"Tue","date":"3/10","label":"Easy 6.5 km"},{"day":"Thu","date":"3/12","label":"Easy 6.5 km"},{"day":"Sat","date":"3/14","label":"Easy 8 km"}]
+If no session list is found, return [].`,
+    messages: [{ role: "user", content: planText }],
+  });
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "[]";
+  let sessions: Array<{ day: string; date: string; label: string }> = [];
+  try {
+    const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] || "[]");
+    if (Array.isArray(parsed)) sessions = parsed;
+  } catch {
+    // leave empty — no sessions to store
+  }
+  await supabase
+    .from("training_state")
+    .update({ weekly_plan_sessions: sessions as unknown as Json })
+    .eq("user_id", userId);
+}
+
+/**
+ * After a user_message exchange, check if the conversation resulted in any plan
+ * changes (day swaps, distance changes, cancelled sessions). If so, merge the
+ * changes into the stored weekly_plan_sessions so reminders and post-run messages
+ * stay consistent with what Dean just agreed to.
+ *
+ * Only writes to the DB if changes are actually detected — no-ops on normal chat.
+ */
+async function maybeUpdatePlanSessions(
+  userId: string,
+  currentSessions: Array<{ day: string; date: string; label: string }>,
+  userMessage: string,
+  coachResponse: string
+): Promise<void> {
+  if (currentSessions.length === 0) return; // no plan stored yet — nothing to update
+
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 400,
+    system: `You are checking whether a conversation exchange changed any planned training sessions for the week.
+
+Current planned sessions (JSON):
+${JSON.stringify(currentSessions)}
+
+The athlete sent a message and the coach responded. Determine if any sessions were changed (different day, different distance, cancelled, added, or replaced).
+
+If NO changes were made, return exactly: {"changed": false}
+If changes WERE made, return the full updated sessions list reflecting the agreed changes:
+{"changed": true, "sessions": [{"day": "Mon"|"Tue"|..., "date": "M/D", "label": "..."}]}
+
+Rules:
+- Only mark changed=true if the coach explicitly agreed to a change
+- Preserve all unchanged sessions exactly as-is
+- If a session was cancelled with no replacement, omit it from the list
+- Return ONLY valid JSON, no other text`,
+    messages: [{ role: "user", content: `Athlete: ${userMessage}\n\nCoach: ${coachResponse}` }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+  try {
+    const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    if (parsed.changed && Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+      await supabase
+        .from("training_state")
+        .update({ weekly_plan_sessions: parsed.sessions as unknown as Json })
+        .eq("user_id", userId);
+    }
+  } catch {
+    // parse failed — leave sessions unchanged
+  }
+}
+
 function buildSystemPrompt(
   user: Record<string, unknown>,
   profile: Record<string, unknown> | null,
@@ -927,10 +1016,17 @@ ${raceHistory.map((r) => {
 CURRENT TRAINING STATE:
 - Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${state?.weekly_mileage_target || "TBD"} mi
-- Mileage so far this week: ${weekMileageSoFar.toFixed(1)} mi (Strava-synced only — if the athlete has mentioned any additional runs or miles in conversation that aren't in Strava, add those to this number before computing any weekly totals or projections)
+- Mileage so far this week: ${weekMileageSoFar.toFixed(1)} mi (Strava-synced; this is the authoritative number — do NOT add runs from conversation history or previous weeks to this figure)
 - Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
+${(() => {
+  const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
+  if (!sessions || sessions.length === 0) return "";
+  const list = sessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+  return `- THIS WEEK'S PLANNED SESSIONS (authoritative — use these exact sessions and distances in all messages; do not recalculate or change them unless the athlete explicitly asks to adjust):
+${list}`;
+})()}
 
 COMMUNICATION STYLE:
 You are texting over iMessage. Write exactly like a real human coach would text — not an email, not a report, not a bullet-point summary.
@@ -1353,7 +1449,12 @@ DATA GLOSSARY for the details below:
 Details:
 ${JSON.stringify(activityForClaude, null, 2)}
 
-Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.${injuryReminder}`;
+Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.
+
+PLAN CONSISTENCY RULES — follow these exactly:
+- Week-to-date mileage: use the "Mileage so far this week" figure from CURRENT TRAINING STATE. Do not manually sum runs from conversation history or include runs from previous weeks.
+- Upcoming sessions: if THIS WEEK'S PLANNED SESSIONS is present in CURRENT TRAINING STATE, use those exact sessions and distances. Do not recalculate, substitute, or invent different numbers. Only omit sessions that have already been completed (i.e. activity date falls on or before today's date).
+- If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
     case "user_message":
       return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
@@ -1363,7 +1464,7 @@ Provide post-run feedback analyzing their performance, noting what went well, an
 
 Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
 1. A brief, casual check-in on yesterday — vary the phrasing each time. e.g. "How'd yesterday's run go?" / "Hope yesterday's session felt good —" / "How'd [day]'s workout treat you?" Keep it light, one sentence.
-2. Today's workout: type, distance, and target pace or effort. One or two sentences max.
+2. Today's workout: type, distance, and target pace or effort. One or two sentences max. Use THIS WEEK'S PLANNED SESSIONS from CURRENT TRAINING STATE for the exact distance — do not invent a different number.
 3. A short invite to adjust if needed — vary this too. e.g. "Let me know if you want to dial anything back based on how yesterday felt." / "Happy to tweak today if the legs are tired." One sentence.
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
@@ -1372,7 +1473,7 @@ No markdown. Sound like a real coach texting. Total under 560 characters.`;
 
 1. A brief, natural opener — vary it each time. Options: "Today's workout:", "Here's what's on for today:", use their name casually, reference the day, etc.
 
-2. The workout — type, distance, and target pace or effort. One or two sentences max.
+2. The workout — type, distance, and target pace or effort. Use THIS WEEK'S PLANNED SESSIONS from CURRENT TRAINING STATE for the exact distance — do not invent a different number. One or two sentences max.
 
 3. A short, energizing closer — vary this too. "Go get it.", "Have a great one.", "Enjoy the run.", "You've got this.", etc. One short phrase.
 
@@ -1384,7 +1485,7 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
 
 Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
 1. A brief, casual check-in on today — vary the phrasing each time. e.g. "How'd today's run go?" / "Hope today's session felt good —" / "How did [day]'s workout go?" Keep it light, one sentence.
-2. Tomorrow's workout: type, distance, and target pace or effort. One or two sentences max.
+2. Tomorrow's workout: type, distance, and target pace or effort. Use THIS WEEK'S PLANNED SESSIONS from CURRENT TRAINING STATE for the exact distance — do not invent a different number. One or two sentences max.
 3. A short invite to adjust based on how today felt — vary this. e.g. "Let me know if you want to tweak anything based on how today felt." / "Happy to adjust if you're feeling it." One sentence.
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
@@ -1393,7 +1494,7 @@ No markdown. Sound like a real coach texting. Total under 560 characters.`;
 
 1. A brief, natural opener — vary it each time so it doesn't feel canned. Options: "Tomorrow's workout:", "Here's what's on for tomorrow:", use their name casually ("Hey [name], tomorrow:"), reference the day ("Wednesday's session:"), etc. Mix it up.
 
-2. The workout — type, distance, and target pace or effort. One or two sentences max.
+2. The workout — type, distance, and target pace or effort. Use THIS WEEK'S PLANNED SESSIONS from CURRENT TRAINING STATE for the exact distance — do not invent a different number. One or two sentences max.
 
 3. A short, warm closer — vary this too. Rotate through things like "Good luck!", "Let me know how it goes.", "Have fun out there.", "You've got this.", "Enjoy the run.", etc. One short phrase, nothing more.
 
