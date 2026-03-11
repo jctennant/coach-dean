@@ -140,6 +140,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const userTimezone = (user.timezone as string) || "America/New_York";
   const activitySummary = buildActivitySummary(recentActivities, userTimezone);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
+  const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone);
   const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null);
   const stravaStats = (
@@ -167,6 +168,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     recentMessages,
     activitySummary,
     weekMileageSoFar,
+    weekRunCount,
     raceHistory,
     stravaStats,
     userTimezone,
@@ -493,6 +495,18 @@ function localWeekMonday(date: Date, timezone: string): string {
 const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
 
 /**
+ * Count run sessions in the current Mon–Sun week in the user's local timezone.
+ */
+function computeWeekRunCount(activities: ActivityRow[], timezone: string): number {
+  const thisMonday = localWeekMonday(new Date(), timezone);
+  return activities.filter((a) => {
+    if (!RUN_TYPES.has(a.activity_type)) return false;
+    const activityDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(a.start_date));
+    return activityDate >= thisMonday;
+  }).length;
+}
+
+/**
  * Sum running mileage for the current Mon–Sun week in the user's local timezone.
  * Excludes non-run activity types (bikes, swims, etc.).
  */
@@ -624,11 +638,17 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
       weeks[key].fastest = paceMinPerMile;
   }
 
+  // Exclude the current partial week from this table — it's already shown in
+  // CURRENT TRAINING STATE as the authoritative "Mileage so far this week" figure.
+  // Including it here too (with different framing) causes Dean to confuse past
+  // weeks with the current one.
+  const thisWeekKey = localWeekMonday(new Date(), timezone);
   const sortedWeeks = Object.entries(weeks)
+    .filter(([week]) => week < thisWeekKey)
     .sort(([a], [b]) => b.localeCompare(a))
     .slice(0, 8);
 
-  let summary = "WEEKLY MILEAGE (recent):\n";
+  let summary = "WEEKLY MILEAGE (completed weeks, most recent first):\n";
   for (const [week, data] of sortedWeeks) {
     const totalSec = Math.round(data.fastest * 60);
     const fMin = Math.floor(totalSec / 60);
@@ -839,6 +859,7 @@ function buildSystemPrompt(
   }>,
   activitySummary: string,
   weekMileageSoFar: number,
+  weekRunCount: number,
   raceHistory: Array<Record<string, unknown>>,
   stravaStats?: Record<string, unknown>,
   timezone?: string,
@@ -876,7 +897,7 @@ function buildSystemPrompt(
       allTimeInfo += `- Year-to-date: ${ytdRun.count || 0} runs, ${Math.round((ytdRun.distance || 0) / 1609.34)} miles\n`;
     }
     if (recentRun) {
-      allTimeInfo += `- Last 4 weeks: ${recentRun.count || 0} runs, ${Math.round((recentRun.distance || 0) / 1609.34)} miles\n`;
+      allTimeInfo += `- Last 4 weeks (aggregate across all 4 weeks, NOT this week): ${recentRun.count || 0} runs, ${Math.round((recentRun.distance || 0) / 1609.34)} miles total\n`;
     }
   }
 
@@ -1052,7 +1073,7 @@ ${(() => {
   })();
   return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
-- Mileage so far this week: ${mi(weekMileageSoFar)} (Strava-synced; authoritative — do NOT add runs from conversation history or previous weeks to this figure)
+- Mileage so far this week: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} (Strava-synced; authoritative — use ONLY these figures for session count and weekly mileage, do NOT use "Last 4 weeks" totals from ATHLETE HISTORY)
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
