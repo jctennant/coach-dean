@@ -240,9 +240,9 @@ Rules:
   // and explains concretely what Dean will do for them.
   let acknowledgment: string;
   if (raceInfo.ack) {
-    // Specific named race found — lead with real course facts
-    const whatDeanDoes = "I'll build your week-by-week plan, track your training via Strava, and check in after your key sessions.";
-    acknowledgment = `Love it${name ? `, ${name}` : ""} — ${raceInfo.ack} ${whatDeanDoes}`;
+    // Specific named race found — use the conversational acknowledgment directly.
+    // The generated text already handles tone; no scripted prefix needed.
+    acknowledgment = raceInfo.ack;
   } else if (parsed.goal === "injury_recovery") {
     acknowledgment = `Got it${name ? `, ${name}` : ""} — coming back from injury safely is exactly what I'm here for. I'll build a return-to-run plan around your recovery, not a generic training schedule.`;
   } else if (parsed.goal === "general_fitness") {
@@ -1061,15 +1061,23 @@ async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
     const today = new Date().toISOString().split("T")[0];
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 300,
+      max_tokens: 400,
       tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
-      system: `You help a running coach identify a specific race from an athlete's message. Today is ${today}.
+      system: `You help a running coach respond warmly to an athlete who just shared their goal. Today is ${today}.
 
-If the message mentions a specific named race or event, search for it, then output a JSON object:
-- "ack": ONE plain-text sentence with the verified facts: exact distance (in km and miles), total elevation gain, terrain. Start with the race name. Under 150 chars. No markdown, no asterisks.
+If the message mentions a specific named race or event, search for it to get accurate course facts.
+
+Then write a conversational 1-3 sentence acknowledgment ("ack") that:
+- Mentions the race naturally with real course facts (distance, elevation, terrain) — not like a Wikipedia entry, more like "Behind the Rocks looks like a great one — 18 miles of slickrock with ~1,800ft of climbing"
+- If the race is within 8 weeks of today, acknowledge the timeline naturally ("not a ton of runway, but totally doable" / "only X weeks out, so we'll keep it focused")
+- If the athlete mentioned any secondary goals (e.g. "plus a 100K this summer"), briefly acknowledge them ("and we can keep that 100K in mind as we build")
+- Tone: warm, direct, like a coach texting — no "Love it!" opener, no asterisks, no markdown
+- 2-3 sentences max, under 280 chars
+
+Also output:
 - "date": The confirmed date of the upcoming or current-year edition as "YYYY-MM-DD", or null if not found.
 
-Example: {"ack": "Broken Arrow 46K is a technical Sierra Nevada skyrace with 10,200ft of elevation gain.", "date": "2026-06-20"}
+Output format: {"ack": "...", "date": "YYYY-MM-DD" | null}
 
 CRITICAL RULES:
 - Do NOT narrate your search process. Output nothing until you have the final JSON answer.
