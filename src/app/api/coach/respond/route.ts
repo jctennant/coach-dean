@@ -490,13 +490,17 @@ function localWeekMonday(date: Date, timezone: string): string {
   return monday.toISOString().slice(0, 10);
 }
 
+const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
+
 /**
- * Sum mileage for activities in the current Mon–Sun week in the user's local timezone.
+ * Sum running mileage for the current Mon–Sun week in the user's local timezone.
+ * Excludes non-run activity types (bikes, swims, etc.).
  */
 function computeWeekMileage(activities: ActivityRow[], timezone: string): number {
   const thisMonday = localWeekMonday(new Date(), timezone);
   return activities
     .filter((a) => {
+      if (!RUN_TYPES.has(a.activity_type)) return false;
       const activityDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(a.start_date));
       return activityDate >= thisMonday;
     })
@@ -504,7 +508,7 @@ function computeWeekMileage(activities: ActivityRow[], timezone: string): number
 }
 
 /**
- * Average weekly mileage over the last 6 complete weeks (ignores the current partial week).
+ * Average weekly running mileage over the last 6 complete weeks (ignores the current partial week).
  * Returns null if there's not enough data to form even one complete week.
  */
 function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): number | null {
@@ -514,6 +518,7 @@ function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): n
 
   const weeks: Record<string, number> = {};
   for (const a of activities) {
+    if (!RUN_TYPES.has(a.activity_type)) continue;
     const mondayKey = localWeekMonday(new Date(a.start_date), timezone);
     if (mondayKey >= thisMonday) continue; // skip current partial week
     weeks[mondayKey] = (weeks[mondayKey] || 0) + (a.distance_meters || 0) / 1609.34;
@@ -543,6 +548,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
   const thisMonday = localWeekMonday(new Date(), timezone);
   const weeklyMiles: Record<string, number> = {};
   for (const a of activities) {
+    if (!RUN_TYPES.has(a.activity_type)) continue;
     const key = localWeekMonday(new Date(a.start_date), timezone);
     if (key >= thisMonday) continue; // skip current partial week
     weeklyMiles[key] = (weeklyMiles[key] || 0) + (a.distance_meters || 0) / 1609.34;
@@ -601,6 +607,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
   > = {};
 
   for (const a of activities) {
+    if (!RUN_TYPES.has(a.activity_type)) continue;
     const d = new Date(a.start_date);
     const key = localWeekMonday(d, timezone); // consistent with computeWeekMileage
 

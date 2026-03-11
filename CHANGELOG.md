@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Fixed weekly mileage counting non-run activities
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth
+**User feedback:** "Wait are you counting my bike miles in my weekly miles?" / "No I'm not. This week started with Monday. So I am at 3 miles"
+**Root cause:** The Strava webhook stores ALL activity types (Run, Ride, Swim, etc.) in the `activities` table. `computeWeekMileage`, `computeAvgWeeklyMileage`, `computeCoachingSignals` (week-over-week ramp), and `buildActivitySummary` were all iterating activities without filtering by type — so bike miles were added to running totals. Gwyneth had a 5.5 mi bike ride that day, inflating her week total from 3.0 to 8.5 miles.
+**Fix / Change:** Added a shared `RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun"])` constant. Added `if (!RUN_TYPES.has(a.activity_type)) continue` filter to all four weekly mileage loops. Non-run activities are still stored (for cross-training context) but are now excluded from all running mileage calculations.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-10 — Plan consistency: store sessions after generation so post-run/reminders use exact distances
 
 **Type:** Bug Fix
