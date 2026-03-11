@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import { getAllActivities, getAthleteStats } from "@/lib/strava";
@@ -141,10 +141,20 @@ export async function GET(request: Request) {
     console.error("[strava-callback] recent activity import error:", err)
   );
 
-  // Fire-and-forget full history import (slow, paginated) — don't block redirect
-  importStravaActivities(user.id, access_token).catch((err) =>
-    console.error("[strava-callback] activity import error:", err)
-  );
+  // Background imports run in after() so Vercel keeps the process alive after
+  // the redirect response is sent. Plain fire-and-forget gets killed on response.
+  after(async () => {
+    try {
+      // ~6 months of general activity history (1 page × 200) — enough for weekly
+      // analytics (8-week lookback is the deepest we use).
+      await importStravaActivities(user.id, access_token);
+      // Races from the past 2 years — separate pass so Dean knows about older PRs
+      // and races even if they fall outside the 6-month general window.
+      await importRaceHistory(user.id, access_token);
+    } catch (err) {
+      console.error("[strava-callback] activity import error:", err);
+    }
+  });
 
   const firstName = user.name ? ` ${user.name}` : "";
   const smsMsg = alreadyOnboarded
@@ -218,12 +228,27 @@ async function importRecentActivities(userId: string, accessToken: string) {
 }
 
 /**
- * Background import of up to 2 years of activity history.
- * Slow — paginated across up to 3 pages × 200 activities.
+ * Background import of ~6 months of general activity history (1 page × 200).
+ * Covers the 8-week lookback used for weekly analytics and fitness tier.
  */
 async function importStravaActivities(userId: string, accessToken: string) {
+  const sixMonthsAgo = Math.floor(Date.now() / 1000) - 180 * 24 * 60 * 60;
+  const activities = await getAllActivities(accessToken, { after: sixMonthsAgo, maxPages: 1 });
+  const count = await upsertActivities(userId, activities as Array<Record<string, unknown>>);
+  console.log(`[strava-callback] imported ${count} recent activities for user ${userId}`);
+}
+
+/**
+ * Import races (workout_type === 1) from the past 2 years.
+ * Fetches up to 3 pages but only saves race-flagged activities, so DB impact
+ * is minimal (most athletes race 4–12 times/year → ~8–24 rows).
+ */
+async function importRaceHistory(userId: string, accessToken: string) {
   const twoYearsAgo = Math.floor(Date.now() / 1000) - 2 * 365 * 24 * 60 * 60;
   const activities = await getAllActivities(accessToken, { after: twoYearsAgo, maxPages: 3 });
-  const count = await upsertActivities(userId, activities as Array<Record<string, unknown>>);
-  console.log(`[strava-callback] imported ${count} activities for user ${userId}`);
+  const races = (activities as Array<Record<string, unknown>>).filter(
+    (a) => (a.workout_type as number | null) === 1
+  );
+  const count = await upsertActivities(userId, races);
+  console.log(`[strava-callback] imported ${count} races for user ${userId}`);
 }
