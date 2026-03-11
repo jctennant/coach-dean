@@ -8,6 +8,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-10 — Fixed internal reasoning leaking into coach responses
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing onboarding)
+**User feedback:** Dean responded with what looked like an internal Claude conversation — "Got it — I'm looking at Jake's Strava now to build week 1. I can see from the search that Behind the Rocks 30K is on March 28... Let me correct that... Looking at Jake's Strava data: 88 miles over the last 4 weeks..." — all of which was internal reasoning, not meant to be sent to the user.
+**Root cause:** When web search is enabled, Claude emits multiple text blocks: one before each tool call (internal narration/reasoning) and one final block with the actual response. The code was joining ALL text blocks together, which prepended the reasoning narration to the intended message. This matched the same bug already fixed in `generateRaceAcknowledgment` (where only the last text block is used).
+**Fix / Change:** Changed response extraction in `coach/respond` to use only the last text block instead of concatenating all blocks. Without web search there is only one text block so behavior is unchanged.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-03-10 — More conversational goal acknowledgment with race context
+
+**Type:** Improvement
+**Reported by:** Jake (testing onboarding)
+**User feedback:** "It feels a bit robotic still, and I'd like him to engage a bit more conversationally" — Dean said "Love it, Jake — Behind the Rocks 30K is an 18-mile Moab trail race... I'll build your week-by-week plan, track your training via Strava, and check in after your key sessions."
+**Root cause:** `generateRaceAcknowledgment` was prompted to return "ONE plain-text sentence with verified facts" — inherently dry. The wrapping template added the scripted "Love it, Jake —" opener and generic "what Dean does" boilerplate, with no awareness of race timeline or secondary goals mentioned.
+**Fix / Change:** Updated `generateRaceAcknowledgment` prompt to return a 1-3 sentence warm, conversational acknowledgment that includes timeline context (if race is within 8 weeks) and any secondary goals mentioned. Removed the rigid "Love it, name —" prefix and boilerplate closer from the template.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-10 — Fixed weekly mileage counting non-run activities
 
 **Type:** Bug Fix

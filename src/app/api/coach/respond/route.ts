@@ -222,15 +222,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Stop the typing refresh loop — generation is done, message is about to send.
   keepTypingAlive = false;
 
-  // Web search splits Claude's response across multiple text blocks: text generated
-  // before each search call, and text generated after. Joining them all reconstructs
-  // the full response. (Without search, there's only one text block — join is a no-op.)
-  const coachMessage = correctMileageTotal(stripMarkdown(
-    response.content
-      .filter(b => b.type === "text")
-      .map(b => b.type === "text" ? b.text : "")
-      .join("")
-  ));
+  // When web search is used, Claude emits text blocks BEFORE each tool call (narration/
+  // reasoning) and then a final text block with the actual response. Only the last text
+  // block is the intended output — concatenating all blocks leaks internal reasoning.
+  // Without search there is only one text block, so last === only.
+  const textBlocks = response.content.filter(b => b.type === "text");
+  const rawText = textBlocks.length > 0
+    ? (textBlocks[textBlocks.length - 1] as { type: "text"; text: string }).text
+    : "";
+  const coachMessage = correctMileageTotal(stripMarkdown(rawText));
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
