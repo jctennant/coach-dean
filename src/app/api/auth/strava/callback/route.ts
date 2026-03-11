@@ -134,7 +134,14 @@ export async function GET(request: Request) {
     .from("training_profiles")
     .upsert({ user_id: user.id, preferred_units: preferredUnits, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
 
-  // Fire-and-forget activity import (slow, paginated) — don't block redirect
+  // Synchronously import the last 14 days so week mileage is available immediately
+  // when initial_plan fires (which can happen within seconds of onboarding completing).
+  // The full 2-year history import runs in the background.
+  await importRecentActivities(user.id, access_token).catch((err) =>
+    console.error("[strava-callback] recent activity import error:", err)
+  );
+
+  // Fire-and-forget full history import (slow, paginated) — don't block redirect
   importStravaActivities(user.id, access_token).catch((err) =>
     console.error("[strava-callback] activity import error:", err)
   );
@@ -160,60 +167,63 @@ export async function GET(request: Request) {
   );
 }
 
-/**
- * Import recent activities (last 6 months) from Strava into the DB.
- * This is the slow part — paginated API calls + individual upserts.
- */
-async function importStravaActivities(userId: string, accessToken: string) {
-  // Go back 2 years — captures full training history including races.
-  // 3 pages × 200 = 600 activities, covers 2 years for all but the highest-volume athletes.
-  const twoYearsAgo = Math.floor(Date.now() / 1000) - 2 * 365 * 24 * 60 * 60;
+/** Build a DB row from a raw Strava activity object. */
+function buildActivityRow(userId: string, activity: Record<string, unknown>) {
+  const distanceMeters = activity.distance as number;
+  const movingTimeSeconds = activity.moving_time as number;
+  const distanceMiles = distanceMeters / 1609.34;
+  const movingTimeMinutes = movingTimeSeconds / 60;
+  const avgPaceMinutes = distanceMiles > 0 ? movingTimeMinutes / distanceMiles : 0;
+  const totalPaceSec = Math.round(avgPaceMinutes * 60);
+  const paceMin = Math.floor(totalPaceSec / 60);
+  const paceSec = totalPaceSec % 60;
 
-  const activities = await getAllActivities(accessToken, {
-    after: twoYearsAgo,
-    maxPages: 3,
-  });
+  return {
+    user_id: userId,
+    strava_activity_id: activity.id as number,
+    activity_type: activity.type as string,
+    distance_meters: distanceMeters,
+    moving_time_seconds: movingTimeSeconds,
+    elapsed_time_seconds: activity.elapsed_time as number,
+    average_heartrate: (activity.average_heartrate as number | null) || null,
+    max_heartrate: (activity.max_heartrate as number | null) || null,
+    average_cadence: (activity.average_cadence as number | null) || null,
+    average_pace: `${paceMin}:${paceSec.toString().padStart(2, "0")}/mi`,
+    elevation_gain: activity.total_elevation_gain as number | null,
+    suffer_score: (activity.suffer_score as number | null) || null,
+    workout_type: (activity.workout_type as number | null) ?? null,
+    start_date: activity.start_date as string,
+  };
+}
 
-  const typedActivities = activities as Array<Record<string, unknown>>;
-  const runActivities = typedActivities.filter((a) =>
-    ["Run", "TrailRun", "VirtualRun"].includes(a.type as string)
-  );
-
-  // Build all rows first, then batch upsert in chunks of 50
-  const rows = runActivities.map((activity) => {
-    const distanceMeters = activity.distance as number;
-    const movingTimeSeconds = activity.moving_time as number;
-    const distanceMiles = distanceMeters / 1609.34;
-    const movingTimeMinutes = movingTimeSeconds / 60;
-    const avgPaceMinutes = distanceMiles > 0 ? movingTimeMinutes / distanceMiles : 0;
-    const totalPaceSec = Math.round(avgPaceMinutes * 60);
-    const paceMin = Math.floor(totalPaceSec / 60);
-    const paceSec = totalPaceSec % 60;
-
-    return {
-      user_id: userId,
-      strava_activity_id: activity.id as number,
-      activity_type: activity.type as string,
-      distance_meters: distanceMeters,
-      moving_time_seconds: movingTimeSeconds,
-      elapsed_time_seconds: activity.elapsed_time as number,
-      average_heartrate: (activity.average_heartrate as number | null) || null,
-      max_heartrate: (activity.max_heartrate as number | null) || null,
-      average_cadence: (activity.average_cadence as number | null) || null,
-      average_pace: `${paceMin}:${paceSec.toString().padStart(2, "0")}/mi`,
-      elevation_gain: activity.total_elevation_gain as number | null,
-      suffer_score: (activity.suffer_score as number | null) || null,
-      workout_type: (activity.workout_type as number | null) ?? null,
-      start_date: activity.start_date as string,
-    };
-  });
-
-  // Upsert in chunks of 50 to avoid request size limits
+/** Upsert a list of raw Strava activities into the DB in chunks of 50. */
+async function upsertActivities(userId: string, activities: Array<Record<string, unknown>>) {
+  const rows = activities.map((a) => buildActivityRow(userId, a));
   const chunkSize = 50;
   for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-    await supabase.from("activities").upsert(chunk, { onConflict: "strava_activity_id" });
+    await supabase.from("activities").upsert(rows.slice(i, i + chunkSize), { onConflict: "strava_activity_id" });
   }
+  return rows.length;
+}
 
-  console.log(`[strava-callback] imported ${rows.length} activities for user ${userId}`);
+/**
+ * Synchronously import the last 14 days of activities so that week mileage
+ * is available immediately when initial_plan fires. Fast — typically 1 API page.
+ */
+async function importRecentActivities(userId: string, accessToken: string) {
+  const fourteenDaysAgo = Math.floor(Date.now() / 1000) - 14 * 24 * 60 * 60;
+  const activities = await getAllActivities(accessToken, { after: fourteenDaysAgo, maxPages: 1 });
+  const count = await upsertActivities(userId, activities as Array<Record<string, unknown>>);
+  console.log(`[strava-callback] synced ${count} recent activities for user ${userId}`);
+}
+
+/**
+ * Background import of up to 2 years of activity history.
+ * Slow — paginated across up to 3 pages × 200 activities.
+ */
+async function importStravaActivities(userId: string, accessToken: string) {
+  const twoYearsAgo = Math.floor(Date.now() / 1000) - 2 * 365 * 24 * 60 * 60;
+  const activities = await getAllActivities(accessToken, { after: twoYearsAgo, maxPages: 3 });
+  const count = await upsertActivities(userId, activities as Array<Record<string, unknown>>);
+  console.log(`[strava-callback] imported ${count} activities for user ${userId}`);
 }
