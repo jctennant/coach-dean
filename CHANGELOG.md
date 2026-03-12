@@ -8,6 +8,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-12 — Fixed 4 onboarding bugs: named races, name persistence, intro, question answering
+
+**Type:** Bug Fix
+**Reported by:** User feedback (testing onboarding flow)
+**User feedback:** "1) I would like Dean to respond if he's asked a question in the first message, and also ask his question back 2) I'm curious why his first response back wasn't the 'I'm an AI endurance coach...' 3) seems he didn't get my name from the first message 4) seems he didn't get my race from the second message"
+**Root cause:**
+1. (Bug 1) `detectAndAnswerImmediate` was only called when a goal was detected — questions in goal-less first messages went unanswered.
+2. (Bug 2) `handleGoal` sent "Hey Jake! What are you training for?" (no intro) when name was already known. No mechanism to know if the intro had been sent by signup vs. handleGoal.
+3. (Bug 3) `existingName` only read `onboarding_data.name`, not `users.name`; the name DB save used `void` (fire-and-forget), allowing race conditions or silent failures.
+4. (Bug 4) Goal classifier had no rule for named race events — "Behind the Rocks trail race" returned `complete: false` because no explicit distance was provided.
+**Fix / Change:**
+1. Added `detectAndAnswerImmediate` call in the no-goal path when message contains "?"; answer prepended to response.
+2. Signup API now sets `onboarding_data: { intro_sent: true }` on user creation. `handleGoal` checks `onboarding_data.intro_sent` to decide whether to include the intro (personalized with name if known).
+3. `existingName` now falls back to `user.name` (column). Name save changed from `void` to `await`.
+4. Named race classifier: named specific race/event → `complete: true` so onboarding advances. Classifier uses any explicit distance cues; falls back to "50k" placeholder for ambiguous trail races. `generateRaceAcknowledgment` now returns `distance_options` when web search finds a multi-distance event (e.g. Behind the Rocks has 10K/30K/50K/50mi) — handleGoal intercepts this and asks "Which distance are you targeting?" before advancing, rather than assuming.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/signup/route.ts`
+
+---
+
 ## 2026-03-10 — Fixed internal reasoning leaking into coach responses
 
 **Type:** Bug Fix

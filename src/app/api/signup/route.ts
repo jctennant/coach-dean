@@ -34,6 +34,7 @@ export async function POST(request: Request) {
     .insert({
       phone_number: phone,
       onboarding_step: "awaiting_goal",
+      onboarding_data: { intro_sent: true },
     })
     .select("id")
     .single();

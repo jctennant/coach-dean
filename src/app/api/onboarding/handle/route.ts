@@ -124,7 +124,7 @@ export async function POST(request: Request) {
 // ---------------------------------------------------------------------------
 
 async function handleGoal(
-  user: { id: string; phone_number: string },
+  user: { id: string; phone_number: string; name?: string | null },
   message: string,
   onboardingData: Record<string, unknown>,
   chatId?: string | null
@@ -143,6 +143,7 @@ Rules:
 - complete: true only if a clear training goal is identifiable
 - no_event: true if the athlete explicitly says they have no race or event planned right now ("nothing on the calendar", "no race yet", "not signed up for anything", "no events planned") — regardless of whether complete is true or false
 - Pure greetings with no goal context → complete: false, no_event: false, goal: null
+- Named specific race or event (e.g. "Behind the Rocks trail race", "Wasatch 100", "Boston Marathon", "local 5K next spring") → complete: true. Use any explicit distance cues in the message: "Wasatch 100" → "100k"; "Boston Marathon" → "marathon"; "local half" → "half_marathon". If the name contains no distance info (e.g. just "Behind the Rocks trail race"), use "50k" as a placeholder — the web search step will clarify if needed.
 - "half marathon" or "half" → "half_marathon"
 - "full marathon" or "marathon" → "marathon"
 - "ultra" without distance → "50k"
@@ -175,30 +176,48 @@ Rules:
     // If we extracted a name, save it and send a personalized follow-up.
     // Otherwise send the full welcome message.
     const nameFromMessage = extra.name as string | null;
-    const existingName = onboardingData.name as string | null;
+    // Bug fix: also fall back to user.name (may be set from signup form or prior partial test)
+    const existingName = (onboardingData.name as string | null) ?? (user.name ?? null);
     const name = nameFromMessage || existingName;
 
     if (nameFromMessage && !existingName) {
-      void supabase
+      await supabase
         .from("users")
         .update({ name: nameFromMessage, onboarding_data: { ...onboardingData, name: nameFromMessage } })
         .eq("id", user.id);
     }
+
+    // Detect if the user asked a question we should answer before asking ours
+    let questionAnswer: string | null = null;
+    if (message.includes("?")) {
+      questionAnswer = await detectAndAnswerImmediate(message, "general fitness");
+    }
+
+    // intro_sent flag is set by the signup API. If not present, this is a first-contact
+    // path where the welcome hasn't been sent yet (e.g., texting directly).
+    const introAlreadySent = !!onboardingData.intro_sent;
 
     let responseText: string;
     if (parsed.no_event) {
       // They explicitly said no race on the calendar — don't force a goal, coax a direction
       const namePrefix = name ? `No worries, ${name}` : "No worries";
       responseText = `${namePrefix} — having a direction still helps even without a date locked in. What kind of event are you drawn to — a 5K, half marathon, something longer, or more just general fitness?`;
+    } else if (!introAlreadySent) {
+      // Intro not yet sent — include it now, personalized with name if known
+      responseText = name
+        ? `Hey ${name}! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat are you training for?`
+        : `Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?`;
     } else if (name) {
-      // We know their name — skip the intro, just ask what they're training for
+      // Intro already sent, name known — just ask the question
       responseText = `Hey ${name}! What are you training for — a race, general fitness, something else?`;
-    } else if (!existingName && Object.keys(onboardingData).length === 0) {
-      // True first contact, no data at all — send the full welcome
-      responseText = "Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?";
     } else {
       // They've already seen the welcome but we still couldn't catch their name — ask directly
       responseText = "Sorry, didn't quite catch your name — what should I call you?";
+    }
+
+    // Prepend any immediate question answer (Bug 1 fix)
+    if (questionAnswer) {
+      responseText = `${questionAnswer}\n\n${responseText}`;
     }
 
     const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText, "awaiting_goal");
@@ -212,6 +231,18 @@ Rules:
     detectAndAnswerImmediate(message, parsed.goal),
     generateRaceAcknowledgment(message),
   ]);
+
+  // Multi-distance race: web search found several options and athlete didn't specify which.
+  // Ask for clarification and stay on awaiting_goal so the next message can resolve it.
+  if (raceInfo.distanceOptions && raceInfo.distanceOptions.length > 1) {
+    const namePrefix = (extra.name as string | null) ? `${extra.name as string}, ` : "";
+    const options = raceInfo.distanceOptions.join(", ");
+    const ackPart = raceInfo.ack ? `${raceInfo.ack}\n\n` : "";
+    const clarificationMsg = `${ackPart}${namePrefix}Which distance are you targeting — ${options}?`;
+    await sendAndStore(user.id, user.phone_number, clarificationMsg, "awaiting_goal");
+    return NextResponse.json({ ok: true });
+  }
+
   const sportType = getSportType(parsed.goal);
   // Pre-fill race_date if:
   // - web search found a specific date, or
@@ -1053,10 +1084,12 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
 interface RaceInfo {
   ack: string | null;
   raceDate: string | null;
+  /** Non-null when the race offers multiple distances and the athlete hasn't specified which one */
+  distanceOptions: string[] | null;
 }
 
 async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
-  const empty: RaceInfo = { ack: null, raceDate: null };
+  const empty: RaceInfo = { ack: null, raceDate: null, distanceOptions: null };
   try {
     const today = new Date().toISOString().split("T")[0];
     const response = await anthropic.messages.create({
@@ -1067,17 +1100,19 @@ async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
 
 If the message mentions a specific named race or event, search for it to get accurate course facts.
 
-Then write a conversational 1-3 sentence acknowledgment ("ack") that:
+IMPORTANT — Multi-distance races:
+If the race offers multiple distance options (e.g. 10K, 30K, 50K, 50 miles) AND the athlete hasn't specified which distance they're doing, do NOT guess. Instead output:
+{"ack": "<1-2 sentence acknowledgment of the race without assuming distance>", "date": "YYYY-MM-DD" | null, "distance_options": ["10K", "30K", "50K", "50 miles"]}
+The "ack" in this case should mention the race name and terrain/character but NOT a specific distance.
+
+If the race has only one distance, or the athlete clearly stated their distance:
+Write a conversational 1-3 sentence acknowledgment ("ack") that:
 - Mentions the race naturally with real course facts (distance, elevation, terrain) — not like a Wikipedia entry, more like "Behind the Rocks looks like a great one — 18 miles of slickrock with ~1,800ft of climbing"
 - If the race is within 8 weeks of today, acknowledge the timeline naturally ("not a ton of runway, but totally doable" / "only X weeks out, so we'll keep it focused")
 - If the athlete mentioned any secondary goals (e.g. "plus a 100K this summer"), briefly acknowledge them ("and we can keep that 100K in mind as we build")
 - Tone: warm, direct, like a coach texting — no "Love it!" opener, no asterisks, no markdown
 - 2-3 sentences max, under 280 chars
-
-Also output:
-- "date": The confirmed date of the upcoming or current-year edition as "YYYY-MM-DD", or null if not found.
-
-Output format: {"ack": "...", "date": "YYYY-MM-DD" | null}
+Output: {"ack": "...", "date": "YYYY-MM-DD" | null, "distance_options": null}
 
 CRITICAL RULES:
 - Do NOT narrate your search process. Output nothing until you have the final JSON answer.
@@ -1098,10 +1133,13 @@ CRITICAL RULES:
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-      return { ack: parsed?.ack ?? null, raceDate: parsed?.date ?? null };
+      const distanceOptions = Array.isArray(parsed?.distance_options) && parsed.distance_options.length > 1
+        ? parsed.distance_options as string[]
+        : null;
+      return { ack: parsed?.ack ?? null, raceDate: parsed?.date ?? null, distanceOptions };
     } catch {
       // Fallback: treat as plain-text ack if JSON parse fails
-      return { ack: text, raceDate: null };
+      return { ack: text, raceDate: null, distanceOptions: null };
     }
   } catch {
     return empty;
