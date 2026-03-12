@@ -1410,9 +1410,10 @@ function removeNulls(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * Detects whether the user's first message contains an immediate coaching question
- * (e.g. race-day prep, pacing advice, route suggestions) and returns a brief answer.
- * Returns null if no immediate question is present.
+ * Detects whether the user's first message contains an immediate question — either a
+ * coaching question (pacing, race-day tactics, training advice) or a capability/service
+ * question ("do you work with cyclists?", "can you help with triathlon?") — and returns
+ * a brief answer. Returns null if no question is present.
  */
 async function detectAndAnswerImmediate(
   message: string,
@@ -1421,14 +1422,14 @@ async function detectAndAnswerImmediate(
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 250,
-    system: `You are Coach Dean, a friendly AI endurance coach. A new athlete training for a ${goal} just sent their first message. It may contain immediate coaching questions alongside background info about themselves.
+    system: `You are Coach Dean, a friendly AI endurance coach. A new athlete training for ${goal} just sent their first message. It may contain a question alongside background info about themselves.
 
-If the message contains a genuine immediate question (race prep, pacing advice, route suggestions, race-day tactics, etc.):
-- Answer it briefly and helpfully in 2-3 sentences. Be specific and practical.
-- Plain text only — no markdown, no bullet points, no asterisks.
-- Return only your answer.
+If the message contains a genuine question of any of these types:
+- Coaching questions: race prep, pacing advice, training volume, race-day tactics, nutrition, gear
+- Capability/service questions: whether Dean works with a certain type of athlete or sport ("do you work with cyclists?", "can you help with triathlon?", "do you coach beginners?")
+Answer it briefly and helpfully in 1-2 sentences. Be warm and specific. Plain text only — no markdown, no bullet points, no asterisks. Return only your answer.
 
-If there is no immediate question — just goal-setting or background info — return only: {"no_question": true}`,
+If there is no question — just goal-setting or background info — return only: {"no_question": true}`,
     messages: [{ role: "user", content: message }],
   });
 

@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-12 — Capability questions in first message no longer silently dropped
+
+**Type:** Bug Fix
+**Reported by:** Onboarding simulation (Athlete 8 — Chris)
+**User feedback:** "do you work with people who also do cycling? I want to train for a half marathon but also race some crits" — Dean ignored the cycling question entirely and jumped to the goal acknowledgment.
+**Root cause:** `detectAndAnswerImmediate` only looked for coaching questions (pace, race-day tactics, route suggestions). Capability/service questions ("do you work with cyclists?", "do you coach beginners?") fell through as `{"no_question": true}`.
+**Fix / Change:** Broadened `detectAndAnswerImmediate` prompt to explicitly cover capability and service questions alongside coaching questions. Dean now answers both types before the goal acknowledgment.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-12 — Natural responses to off-topic messages and meta-questions in all onboarding steps
 
 **Type:** Bug Fix / Improvement
