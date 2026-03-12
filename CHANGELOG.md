@@ -8,6 +8,34 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-12 — Natural responses to off-topic messages and meta-questions in all onboarding steps
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback
+**User feedback:** "what will happen if someone says something like 'how many more questions do you have?' in one of these awaiting_cadence or awaiting_timezone steps?"
+**Root cause:** `awaiting_cadence` and `awaiting_timezone` were excluded from `checkOffTopic`. Meta-questions in `awaiting_cadence` hit the Haiku "unclear" fallback which responded with "Noted — I'll keep that in mind" (wrong) and saved the message as `injury_notes` (wrong). In `awaiting_timezone`, the message was silently parsed as a city name, defaulting to America/New_York.
+**Fix / Change:**
+- Added `awaiting_cadence` and `awaiting_timezone` to `checkOffTopic`'s stepContext; removed from exclusion list.
+- Added "meta-questions about the onboarding process" to the off-topic examples in `checkOffTopic` prompt so "how many more questions?" / "are we almost done?" are caught and answered briefly before re-asking.
+- Fixed `handleCadence` unclear fallback: removed wrong "Noted — I'll keep that in mind" prefix and removed incorrect `injury_notes` DB save. Now just re-asks cleanly.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
+## 2026-03-12 — Natural conversational responses in awaiting_anything_else and other onboarding steps
+
+**Type:** Feature / Improvement
+**Reported by:** User feedback
+**User feedback:** "what if the user says 'Can you build me an initial plan for my race 7 weeks away first, and then do a new plan for a race this summer?' in the awaiting_anything_else response? Then I want Dean to actually respond naturally... this could also happen in some of the other steps"
+**Root cause:** `awaiting_anything_else` used a one-liner `acknowledgeSharedInfo` that wasn't even sent on the normal completion path. `awaiting_ultra_background` and `awaiting_goal_time` were excluded from `checkOffTopic`, so questions there went unanswered.
+**Fix / Change:**
+- New `generateAnythingElseResponse` (Sonnet): responds naturally to questions (answers + re-asks "anything else?"), acknowledges shared info + re-asks, or returns `isDone: true` for "nope/nothing/all good". Athlete stays on `awaiting_anything_else` until they signal done.
+- `handleAnythingElse` rewritten to use it: training data extraction still runs in parallel so info embedded in questions is captured.
+- Added `awaiting_goal_time` and `awaiting_ultra_background` to `checkOffTopic`'s stepContext — questions in those steps now get answered naturally and the original question is re-asked.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-12 — Fixed 4 onboarding bugs: named races, name persistence, intro, question answering
 
 **Type:** Bug Fix

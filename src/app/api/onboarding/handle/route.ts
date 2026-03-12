@@ -70,7 +70,7 @@ export async function POST(request: Request) {
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
   // Skip awaiting_anything_else, awaiting_name, awaiting_cadence, awaiting_timezone, awaiting_goal_time — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_cadence" && step !== "awaiting_ultra_background" && step !== "awaiting_strava" && step !== "awaiting_timezone" && step !== "awaiting_goal_time") {
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -630,11 +630,12 @@ async function handleAnythingElse(
   onboardingData: Record<string, unknown>,
   chatId?: string | null
 ) {
-  // Run extraction and acknowledgment in parallel — both are Haiku calls and
-  // neither depends on the other's result.
-  const [extracted, acknowledgment] = await Promise.all([
+  // Run extraction and conversational response in parallel.
+  // extractAnythingElse captures training data even from question messages.
+  // generateAnythingElseResponse decides whether we're done or need to respond + re-ask.
+  const [extracted, conversational] = await Promise.all([
     extractAnythingElse(message),
-    acknowledgeSharedInfo(message),
+    generateAnythingElseResponse(message, onboardingData),
   ]);
 
   // Merge: strip nulls from extracted so pre-existing data isn't overwritten
@@ -657,15 +658,26 @@ async function handleAnythingElse(
     merged.interval_pace = paces.interval ?? merged.interval_pace;
   }
 
+  // If the athlete asked a question or shared something that needs a reply,
+  // respond naturally and stay on this step so they can say "that's all" next.
+  if (!conversational.isDone && conversational.response) {
+    // Still save any training data extracted from this message
+    void supabase
+      .from("users")
+      .update({ onboarding_data: merged as unknown as Json })
+      .eq("id", user.id);
+    await sendAndStore(user.id, user.phone_number, conversational.response, "awaiting_anything_else");
+    return NextResponse.json({ ok: true });
+  }
+
   const nextStep = findNextStep("awaiting_anything_else", merged);
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "anything_else" });
 
   if (!nextStep) {
-    // Name was already captured in an earlier message — complete onboarding now.
-    // Do NOT send the acknowledgment here — the initial_plan message opens with
-    // a natural reference to what was just shared, so a separate "Got it" first
-    // produces an awkward double-acknowledgment.
+    // Athlete is done — complete onboarding.
+    // Don't send an extra ack here; the initial_plan message opens with natural
+    // context so a separate "Got it" would produce an awkward double-acknowledgment.
     await completeOnboarding(user, merged, chatId);
     return NextResponse.json({ ok: true });
   }
@@ -677,8 +689,7 @@ async function handleAnythingElse(
     .eq("id", user.id);
 
   const question = getStepQuestion(nextStep, merged, user.id);
-  const responseText = acknowledgment ? `${acknowledgment}\n\n${question}` : question;
-  await sendAndStore(user.id, user.phone_number, responseText, nextStep);
+  await sendAndStore(user.id, user.phone_number, question, nextStep);
   return NextResponse.json({ ok: true });
 }
 
@@ -777,21 +788,16 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
 
   const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "nightly";
 
-  // If the message wasn't actually answering the cadence question, save it as
-  // a note on their profile and re-ask.
+  // If the message wasn't actually answering the cadence question, re-ask naturally.
+  // (checkOffTopic handles most off-topic cases before we get here; this is a
+  // safety net for ambiguous messages that slipped through.)
   if (raw.startsWith("unclear")) {
-    await Promise.all([
-      supabase
-        .from("training_profiles")
-        .update({ injury_notes: message, updated_at: new Date().toISOString() })
-        .eq("user_id", user.id),
-      sendAndStore(
-        user.id,
-        user.phone_number,
-        "Noted — I'll keep that in mind when putting your plan together. One quick question before I do: would you prefer reminders the morning of your sessions, the evening before, or just a weekly Sunday overview?",
-        "awaiting_cadence"
-      ),
-    ]);
+    await sendAndStore(
+      user.id,
+      user.phone_number,
+      "Just one last thing before your plan: would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?",
+      "awaiting_cadence"
+    );
     return NextResponse.json({ ok: true });
   }
 
@@ -1319,6 +1325,53 @@ Plain text only — no markdown, no asterisks.`,
 }
 
 /**
+ * Responds naturally to whatever the athlete said in the "anything else?" step.
+ * - Questions → answer + re-ask "Anything else?"
+ * - Substantive info → acknowledge + re-ask "Anything else?"
+ * - "Nope / nothing / all good" → { response: null, isDone: true }
+ *
+ * Returns isDone: true when the athlete is finished and onboarding should complete.
+ */
+async function generateAnythingElseResponse(
+  message: string,
+  onboardingData: Record<string, unknown>
+): Promise<{ response: string | null; isDone: boolean }> {
+  const goal = onboardingData.goal as string | null;
+  const raceDate = onboardingData.race_date as string | null;
+  const context = goal
+    ? `The athlete is training for a ${goal}${raceDate ? ` on ${raceDate}` : ""}.`
+    : "The athlete is in the process of setting up their training plan.";
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 200,
+    system: `You are Coach Dean, an AI endurance coach. ${context} You just asked: "Before I put your plan together, anything else I should know?"
+
+The athlete replied. Respond appropriately:
+
+- If they said "no", "nope", "nothing", "all good", "nah", "I'm good", or anything that clearly means they're done → return: {"response": null, "done": true}
+- If they asked a question → answer it warmly in 1-2 sentences, then end with a natural re-ask like "Anything else I should know?" Return: {"response": "...", "done": false}
+- If they shared info (injury, schedule constraints, secondary goal, training history, preferences) → briefly acknowledge it in 1 sentence, then end with "Anything else?" Return: {"response": "...", "done": false}
+
+Rules:
+- Tone: warm, direct, like a coach texting — no "Love it!" opener, no markdown, no asterisks
+- 1-3 sentences max
+- Output only valid JSON`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+  try {
+    const parsed = JSON.parse(extractJSON(text));
+    if (parsed.done === true) return { response: null, isDone: true };
+    return { response: parsed.response ?? null, isDone: false };
+  } catch {
+    // Fallback: if parse fails, treat as a response that needs re-asking
+    return { response: text.length > 5 ? text : null, isDone: false };
+  }
+}
+
+/**
  * Generates a schedule-specific acknowledgment that always references the parsed days
  * and handles any flexibility/caveat the user added (e.g. "may switch those around").
  */
@@ -1408,6 +1461,10 @@ async function checkOffTopic(
   const stepContext: Record<string, { topic: string }> = {
     awaiting_race_date: { topic: "their race date or target event" },
     awaiting_schedule: { topic: "their weekly training schedule and availability" },
+    awaiting_goal_time: { topic: "their finish time goal for the race (or whether they have one)" },
+    awaiting_ultra_background: { topic: "their ultra running background and previous race experience" },
+    awaiting_timezone: { topic: "what city or timezone they're in" },
+    awaiting_cadence: { topic: "whether they want morning-of reminders, evening-before reminders, or a weekly Sunday overview" },
   };
 
   const ctx = stepContext[step];
@@ -1428,6 +1485,8 @@ On-topic — return only this JSON: {"on_topic": true}
 
 Off-topic — write a plain text response as Coach Dean:
 - Questions about Dean's services or capabilities (e.g. "do you coach cycling?")
+- Meta-questions about the onboarding process ("how many more questions?", "how long does this take?", "are we almost done?") — answer briefly (e.g. "Just this one!") then re-ask
+- Advice-seeking questions about the topic rather than answering it ("What is a realistic finish time for a 30K?", "How many days a week should I train?") — answer briefly, then re-ask whether they have a personal answer
 - Random chit-chat with no relation to the topic
 - Completely unrelated statements or questions
 If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. No markdown, no asterisks.`,
