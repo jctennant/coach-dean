@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-13 — Fixed "." phantom messages and truncated responses from web search multi-block bug
+
+**Type:** Bug Fix
+**Reported by:** User (Jake's wife)
+**User feedback:** "Coach Dean both wasn't answering her questions and sending just a single . or cutoff text" — e.g. Dean sent "." to "Why do side cramps happen?" and ", or slow to a walk and focus on deep breathing." to "How can I prevent side cramps?" (clearly a fragment missing its first half).
+**Root cause:**
+When Claude uses the `web_search_20250305` tool, it sometimes emits the **main answer** in a text block *before* calling the tool, then a continuation in a second text block *after* the search results. The code was taking only the **last text block** (assumed to be the full response), throwing away the first block entirely. So the athlete received ", or slow to a walk..." with no explanation, and "." when the trailing text block was empty.
+Root comment in code ("concatenating all blocks leaks internal reasoning") was wrong for this case — Claude's "internal reasoning" text blocks with the built-in tool are rare; the real risk was the opposite: losing the substantive answer.
+**Fix / Change:**
+1. Concatenate all non-empty text blocks with `\n\n`, instead of taking only the last. This preserves the full answer even when Claude splits it across a tool call.
+2. Added empty `coachMessage` guard (empty string now treated same as `[NO_REPLY]` — skip send). This was the fallback path that actually sent the empty body to Linq, which Linq delivered as ".".
+3. Updated `user_message` trigger to handle multi-segment SMS: "If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION, treat them together as one thought."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-12 — Fixed wrong day name in post-run coaching messages for non-UTC users
 
 **Type:** Bug Fix

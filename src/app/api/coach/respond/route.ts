@@ -224,21 +224,26 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Stop the typing refresh loop — generation is done, message is about to send.
   keepTypingAlive = false;
 
-  // When web search is used, Claude emits text blocks BEFORE each tool call (narration/
-  // reasoning) and then a final text block with the actual response. Only the last text
-  // block is the intended output — concatenating all blocks leaks internal reasoning.
-  // Without search there is only one text block, so last === only.
-  const textBlocks = response.content.filter(b => b.type === "text");
-  const rawText = textBlocks.length > 0
-    ? (textBlocks[textBlocks.length - 1] as { type: "text"; text: string }).text
-    : "";
+  // When web search is used, Claude can emit the main answer in a text block BEFORE the
+  // tool call, then append a continuation after the search results. Taking only the last
+  // text block throws away the first (main) block and sends just a trailing fragment like
+  // ", or slow to a walk and focus on deep breathing." or an empty string that becomes ".".
+  // Fix: concatenate all non-empty text blocks. Brief narration ("Let me check that.") is
+  // rare with web_search_20250305 and acceptable if it appears — losing the answer is not.
+  const textBlocks = response.content
+    .filter(b => b.type === "text")
+    .map(b => (b as { type: "text"; text: string }).text.trim())
+    .filter(t => t.length > 0);
+  const rawText = textBlocks.join("\n\n");
   const coachMessage = correctMileageTotal(stripMarkdown(rawText));
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
   // Claude signals "nothing to send" with [NO_REPLY] — skip all SMS and DB writes.
-  if (coachMessage.trim() === "[NO_REPLY]") {
-    console.log("[coach/respond] Claude returned [NO_REPLY] — skipping send");
+  // Also skip if the response is empty (can happen if web search returns no final text block,
+  // or Claude times out mid-generation) — sending an empty body causes Linq to deliver a ".".
+  if (!coachMessage.trim() || coachMessage.trim() === "[NO_REPLY]") {
+    console.log("[coach/respond] Claude returned empty or [NO_REPLY] — skipping send");
     return NextResponse.json({ ok: true, skipped: true });
   }
 
@@ -1518,7 +1523,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
     case "user_message":
-      return "The athlete just sent you a message (see the most recent message in RECENT CONVERSATION above). Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
+      return "The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
     case "morning_reminder":
       if (includeWorkoutCheckin) {
         return `Send a short message that does two things: check in on yesterday's workout, then preview today's.
