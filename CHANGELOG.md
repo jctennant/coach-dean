@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-12 — Fixed wrong day name in post-run coaching messages for non-UTC users
+
+**Type:** Bug Fix
+**Reported by:** User (Jake)
+**User feedback:** "Dean just told me good job on my Friday run, although today is Thursday."
+**Root cause:** `buildActivitySummary` and `buildUserMessage` (post_run case) both called `toLocaleDateString("en-US", { weekday: "long", ... })` without a `timeZone` option. On Vercel (UTC server), this formats dates in UTC regardless of the athlete's timezone. Jake ran Thursday evening in Hawaii (HST = UTC−10); Strava stored the `start_date` as Friday 5am UTC. The server formatted it as "Friday." His stored timezone (`America/Denver`) was fetched but never passed into the date formatting calls.
+**Fix / Change:** Added `timeZone: timezone` to both `buildActivitySummary` date formatting and the `post_run` case in `buildUserMessage`. Also added `timezone` as a parameter to `buildUserMessage` (defaulting to `"America/New_York"`) and updated the call site to pass `userTimezone`.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-12 — Capability questions in first message no longer silently dropped
 
 **Type:** Bug Fix

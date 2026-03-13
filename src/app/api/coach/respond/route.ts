@@ -180,7 +180,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -710,7 +710,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
   summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
   for (const a of recent) {
     const d = new Date(a.start_date);
-    const dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    const dateLabel = d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
     const miles = a.distance_meters ? (a.distance_meters / 1609.34).toFixed(1) : null;
     const parts = [
       a.activity_type || "Workout",
@@ -1465,14 +1465,15 @@ function buildUserMessage(
   activityData: Record<string, unknown> | null,
   imageActivity?: Record<string, unknown>,
   includeWorkoutCheckin?: boolean,
-  injuryNotes?: string | null
+  injuryNotes?: string | null,
+  timezone = "America/New_York"
 ): string {
   switch (trigger) {
     case "morning_plan":
       return "Generate today's workout plan for this athlete. Consider their current training state, recent activity history and trends, and any adjustments needed. Be specific about distances, paces, and effort levels.";
     case "post_run": {
       const actStartDate = activityData?.start_date && typeof activityData.start_date === "string"
-        ? new Date(activityData.start_date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+        ? new Date(activityData.start_date).toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "short", day: "numeric" })
         : null;
       const dateNote = actStartDate
         ? `Activity date: ${actStartDate}. This may differ from today if the athlete logged it retroactively — use the activity date, not today's date, when referencing when the run happened.`
