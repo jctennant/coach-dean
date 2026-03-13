@@ -49,7 +49,11 @@ function extractNewApproach(content) {
     .filter(b => b.type === "text")
     .map(b => b.text.trim())
     .filter(t => t.length > 0);
-  return textBlocks.join("\n\n");
+  return textBlocks.reduce((acc, block) => {
+    if (!acc) return block;
+    if (/\s$/.test(acc) || /^[,;:.!?)\]}]/.test(block)) return acc + block;
+    return acc + " " + block;
+  }, "");
 }
 
 function stripMarkdown(text) {
@@ -123,6 +127,15 @@ async function runTest(label, userMessage, useWebSearch) {
     console.log(`  ⚠️  Still starts with punctuation: "${newMessage.trim().slice(0, 120)}"`);
   } else {
     console.log(`  ✅ "${newMessage.trim().slice(0, 200)}${newMessage.length > 200 ? "..." : ""}"`);
+  }
+
+  // Show what the final SMS message would look like
+  console.log(`\n--- Final SMS message (new approach, after stripMarkdown) ---`);
+  if (newMessage.trim()) {
+    const parts = newMessage.trim().split(/\n{2,}/);
+    parts.forEach((part, i) => {
+      console.log(`  Bubble ${i + 1}: "${part.trim()}"`);
+    });
   }
 
   // Check for internal reasoning leak in new approach

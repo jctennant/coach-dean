@@ -230,11 +230,23 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // ", or slow to a walk and focus on deep breathing." or an empty string that becomes ".".
   // Fix: concatenate all non-empty text blocks. Brief narration ("Let me check that.") is
   // rare with web_search_20250305 and acceptable if it appears — losing the answer is not.
+  // Claude streams the response as many small fragments when using web search
+  // (individual sentences, clause continuations, even standalone commas/periods).
+  // Join them at block boundaries: append punctuation-starting blocks directly to the
+  // previous block; add a single space when two word-boundary blocks meet. This preserves
+  // any embedded paragraph breaks (\n\n inside blocks) without introducing spurious ones.
   const textBlocks = response.content
     .filter(b => b.type === "text")
     .map(b => (b as { type: "text"; text: string }).text.trim())
     .filter(t => t.length > 0);
-  const rawText = textBlocks.join("\n\n");
+  const rawText = textBlocks.reduce((acc, block) => {
+    if (!acc) return block;
+    // If boundary already has whitespace, or block starts with punctuation that
+    // attaches to the preceding word (comma, period, colon, etc.), append directly.
+    if (/\s$/.test(acc) || /^[,;:.!?)}\]]/.test(block)) return acc + block;
+    // Otherwise two non-space character boundaries meet — insert a single space.
+    return acc + " " + block;
+  }, "");
   const coachMessage = correctMileageTotal(stripMarkdown(rawText));
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
