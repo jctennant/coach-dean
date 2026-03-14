@@ -999,6 +999,7 @@ function buildSystemPrompt(
   // Additional athlete preferences captured during onboarding (strengthening, cross-training
   // requests, injury prevention goals, race history notes, etc.)
   const otherNotes = onboardingData.other_notes as string | null;
+  const secondaryGoal = onboardingData.secondary_goal as string | null;
   const crosstrainingTools = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean);
 
   // TODO: Once Strava API app is approved, update "Activity tracking" in PRODUCT CAPABILITIES below to:
@@ -1055,7 +1056,7 @@ ${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}
 - Weekly volume: ${weeklyHours ? `~${weeklyHours} hours/week` : state?.weekly_mileage_target ? `${state.weekly_mileage_target} miles/week` : "unknown"}
 - Goal: ${profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown"}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
-- Injury / constraints: ${profile?.injury_notes || "None reported"}
+${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
 

@@ -30,6 +30,8 @@ function extractJSON(text: string): string {
  *   awaiting_goal              ← intro + asks name + goal in one message
  *   → awaiting_race_date
  *   → awaiting_schedule
+ *   → awaiting_ultra_background   ← only for 50K+ goals
+ *   → awaiting_injury_background  ← only for injury_recovery goals
  *   → awaiting_anything_else   ← "Before I put your plan together, anything else?"
  *   → null (complete → initial_plan fires)
  *
@@ -92,6 +94,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_ultra_background":
       result = await handleUltraBackground(user, message, onboardingData, chatId);
+      break;
+    case "awaiting_injury_background":
+      result = await handleInjuryBackground(user, message, onboardingData, chatId);
       break;
     case "awaiting_anything_else":
       result = await handleAnythingElse(user, message, onboardingData, chatId);
@@ -254,7 +259,9 @@ Rules:
     ...extra,
     ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
     ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null } : {}),
-    ...(raceInfo.secondaryGoal ? { secondary_goal: raceInfo.secondaryGoal } : {}),
+    ...(raceInfo.secondaryGoal || extra.secondary_goal
+      ? { secondary_goal: raceInfo.secondaryGoal ?? extra.secondary_goal }
+      : {}),
   };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
@@ -625,6 +632,67 @@ Rules:
   return NextResponse.json({ ok: true });
 }
 
+async function handleInjuryBackground(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>,
+  chatId?: string | null
+) {
+  const [parseResponse, acknowledgment] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      system: `Extract injury and return-to-run context from this message. Respond with ONLY valid JSON.
+
+Output format:
+{
+  "injury_notes": string | null,
+  "weekly_miles": number | null,
+  "can_run_now": boolean | null
+}
+
+Rules:
+- injury_notes: brief description of injury type, duration, and recovery status (e.g. "stress fracture, 6 weeks ago, cleared to walk but not run yet"). null if unclear.
+- weekly_miles: current weekly mileage if mentioned. null if not stated.
+- can_run_now: true if they say they can run, false if fully off running, null if unclear.`,
+      messages: [{ role: "user", content: message }],
+    }),
+    acknowledgeSharedInfo(message),
+  ]);
+
+  const text = parseResponse.content[0].type === "text" ? parseResponse.content[0].text.trim() : "{}";
+  let extracted: {
+    injury_notes?: string | null;
+    weekly_miles?: number | null;
+    can_run_now?: boolean | null;
+  } = {};
+  try {
+    extracted = JSON.parse(extractJSON(text));
+  } catch {
+    extracted = {};
+  }
+
+  const merged: Record<string, unknown> = { ...onboardingData };
+  if (extracted.injury_notes) merged.injury_notes = extracted.injury_notes;
+  if (extracted.weekly_miles != null) merged.weekly_miles = extracted.weekly_miles;
+  if (extracted.can_run_now != null) merged.can_run_now = extracted.can_run_now;
+
+  const nextStep = findNextStep("awaiting_injury_background", merged);
+  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: merged as unknown as Json }).eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_step_completed", { step: "injury_background", can_run_now: extracted.can_run_now });
+
+  if (nextStep) {
+    const nextQuestion = getStepQuestion(nextStep, merged, user.id);
+    const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    await sendAndStore(user.id, user.phone_number, reply, nextStep);
+  } else {
+    await completeOnboarding(user, merged, chatId);
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 async function handleAnythingElse(
   user: { id: string; phone_number: string },
   message: string,
@@ -958,11 +1026,12 @@ function getSportType(goal: string): "running" | "triathlon" | "cycling" | "gene
  */
 const STEP_ORDER = [
   "awaiting_race_date",
-  "awaiting_goal_time",         // only shown for race goals (not general fitness or ultras)
-  "awaiting_strava",            // offer Strava connect; satisfied once strava_connected=true or user skips
+  "awaiting_goal_time",           // only shown for race goals (not general fitness or ultras)
+  "awaiting_strava",              // offer Strava connect; satisfied once strava_connected=true or user skips
   "awaiting_schedule",
-  "awaiting_ultra_background",  // only shown for 50K+ goals
-  "awaiting_timezone",          // confirm/set timezone for accurate reminder timing
+  "awaiting_ultra_background",    // only shown for 50K+ goals
+  "awaiting_injury_background",   // only shown for injury_recovery goals
+  "awaiting_timezone",            // confirm/set timezone for accurate reminder timing
   "awaiting_anything_else",
 ];
 
@@ -994,6 +1063,11 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       if (data.strava_connected) return true;
       // Satisfied if we already have both weekly mileage and some race/experience context.
       return !!(data.weekly_miles) && !!(data.ultra_race_history || data.experience_years != null);
+    case "awaiting_injury_background":
+      // Only relevant for injury_recovery goals — skip entirely for everything else.
+      if (data.goal !== "injury_recovery") return true;
+      // Satisfied once we have injury notes captured.
+      return !!(data.injury_notes);
     case "awaiting_timezone":
       // Auto-satisfy if Strava is connected but no city available to confirm
       // (timezone already set from Strava athlete profile, nothing meaningful to ask).
@@ -1054,6 +1128,9 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
         ? "An ultra — love it. Have you run any before? Any experience with the distance is helpful to know."
         : "An ultra — love it. Have you run any before? And what's your current weekly mileage and longest recent long run?";
 
+    case "awaiting_injury_background":
+      return "Tell me more about the injury — what is it, how long ago did it happen, and where are you in recovery? Are you able to run at all right now, or fully off it?";
+
     case "awaiting_timezone": {
       if (data.strava_connected && data.strava_city) {
         const location = data.strava_state
@@ -1065,10 +1142,7 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
     }
 
     case "awaiting_anything_else":
-      if (data.goal === "injury_recovery") {
-        return "Tell me more about the injury — what is it, how long ago did it happen, and where are you in recovery? Are you able to run at all right now, or fully off it?";
-      }
-      return "Almost there — anything else before I put this together? Injuries, target paces, cross-training, strength work — mention it now and I'll build it in. If not, just say nope!";
+      return "Almost there — anything else before I put this together? Target paces, cross-training, strength work — mention it now and I'll build it in. If not, just say nope!";
 
     case "awaiting_name":
       return "What's your name?";
@@ -1167,7 +1241,7 @@ async function extractAdditionalFields(
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null}
+{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null}
 
 Rules:
 - name: Extract if the athlete introduces themselves. Be generous — people introduce themselves in many ways:
@@ -1186,6 +1260,7 @@ Rules:
 - injury_notes: brief description of injury type, severity, and recovery status if an injury is mentioned (e.g. "IT band syndrome, recovering, avoiding back-to-back days"). null if no injury.
 - crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
 - other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, etc. null if nothing else.
+- secondary_goal: if the athlete mentions a second distinct race or goal beyond the primary one (e.g. "and then a marathon in the fall", "plus Boston next year", "also want to do a crit series"). Short plain-text description. null if only one goal is mentioned.
 - Return {} if nothing is present.`,
     messages: [{ role: "user", content: message }],
   });

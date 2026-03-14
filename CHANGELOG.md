@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-13 — Added dedicated injury background step in onboarding
+
+**Type:** Improvement
+**Reported by:** Internal observation / roadmap item
+**User feedback:** N/A
+**Root cause:** `awaiting_anything_else` was doing double duty for injury_recovery athletes: asking for injury details AND then re-prompting "anything else?" after they answered. This felt mechanical — a focused injury Q&A immediately followed by a generic catch-all.
+**Fix / Change:** Added `awaiting_injury_background` step (parallel to `awaiting_ultra_background`). Injury athletes now get a dedicated focused question ("Tell me more about the injury...") as its own step, with extraction into `injury_notes` and `can_run_now`. `awaiting_anything_else` then fires as a true catch-all for cross-training, paces, etc. — without re-asking about the injury.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-13 — Secondary race goal now stored; race date hallucination fixed
 
 **Type:** Bug Fix

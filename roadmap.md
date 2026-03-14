@@ -4,17 +4,6 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 
 ---
 
-## MEDIUM Priority
-
-
-### Injury recovery "anything else" step is awkward double-ask
-**Symptom:** The `awaiting_anything_else` step question already says "Tell me more about the injury…" — but after the athlete gives a detailed answer, `generateAnythingElseResponse` re-asks "Anything else I should know?" This feels mechanical right after a specific Q&A.
-**Fix:** Add a dedicated `awaiting_injury_background` step (parallel to `awaiting_ultra_background`) so injury context is collected in a focused step, leaving "anything else" as a true catch-all.
-**File:** `src/app/api/onboarding/handle/route.ts`
-
-
----
-
 ## LOW Priority
 
 ### Month-only race date not pre-filled when asking awaiting_race_date
