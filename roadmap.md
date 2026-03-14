@@ -16,11 +16,10 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 
 ## MEDIUM Priority
 
-### Capitalization bug in multi-distance clarification message
+### [DONE] Capitalization bug in multi-distance clarification message
 **Symptom:** "Jake, Which distance are you targeting" — capital W mid-sentence.
-**Root cause:** Template string: `` `${ackPart}${namePrefix}Which distance…` `` — "Which" is always capitalized regardless of what precedes it.
-**Fix:** Change `Which` to `which` in the clarification template.
-**File:** `src/app/api/onboarding/handle/route.ts` (multi-distance branch in `handleGoal`)
+**Fix:** Changed `Which` → `which` in the clarification template.
+**File:** `src/app/api/onboarding/handle/route.ts`
 
 ### Secondary race goal not stored in onboarding_data
 **Symptom:** Athlete mentions "Behind the Rocks 30K and then a 100K this summer" — the 100K is acknowledged in the ack text but never written to `onboarding_data`. After the distance clarification exchange, it's lost unless the athlete re-mentions it in "anything else."
@@ -37,10 +36,10 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 **Fix:** Either (a) don't reference the race date by name in `generateAnythingElseResponse` context, or (b) if passed, instruct the model to quote it verbatim or omit it.
 **File:** `src/app/api/onboarding/handle/route.ts` (`generateAnythingElseResponse` system prompt)
 
-### "Anything else" requires extra round-trip for comprehensive answerers
-**Symptom:** 5 of 10 simulated athletes who shared substantive info in one message (training data, injuries, cross-training) got a re-ask — even though they'd given a complete answer.
-**Fix:** Update the step question to more explicitly invite a "done" signal: "Injuries, cross-training, target paces — anything else? If not, just say nope!"
-**File:** `src/app/api/onboarding/handle/route.ts` (`getStepQuestion` for `awaiting_anything_else`)
+### [DONE] "Anything else" requires extra round-trip for comprehensive answerers
+**Symptom:** 5 of 10 simulated athletes got a re-ask even after giving a complete answer.
+**Fix:** Step question now ends "If not, just say nope!" Re-ask in `generateAnythingElseResponse` also ends "Anything else? If not, just say nope!"
+**File:** `src/app/api/onboarding/handle/route.ts`
 
 ---
 

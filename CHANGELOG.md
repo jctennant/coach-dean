@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-13 — Fixed capitalization bug + reduced "anything else" re-ask round-trips
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Onboarding simulation (roadmap.md MEDIUM items)
+**User feedback:** N/A (simulation-identified)
+**Root cause:**
+1. Template `\`${ackPart}${namePrefix}Which distance…\`` always capitalized "Which" regardless of what preceded it. When an ack was present, this produced "Jake, Which distance…" mid-sentence.
+2. The `awaiting_anything_else` step question had no explicit "done" signal, causing 5/10 simulated athletes who gave complete answers to receive an unnecessary re-ask. `generateAnythingElseResponse` re-ask also omitted the done signal.
+**Fix / Change:**
+1. Changed `Which` → `which` in the multi-distance clarification template.
+2. Updated `awaiting_anything_else` step question to end with "If not, just say nope!" — makes it clear in the first ask that one-shot answers are fine.
+3. Updated `generateAnythingElseResponse` re-asks (both question-answer and info-share paths) to end with "Anything else? If not, just say nope!" so subsequent rounds also signal how to finish.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-13 — Fixed Dean reporting only planned sessions as weekly total (ignoring completed miles)
 
 **Type:** Bug Fix

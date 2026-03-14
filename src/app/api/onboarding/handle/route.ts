@@ -238,7 +238,7 @@ Rules:
     const namePrefix = (extra.name as string | null) ? `${extra.name as string}, ` : "";
     const options = raceInfo.distanceOptions.join(", ");
     const ackPart = raceInfo.ack ? `${raceInfo.ack}\n\n` : "";
-    const clarificationMsg = `${ackPart}${namePrefix}Which distance are you targeting — ${options}?`;
+    const clarificationMsg = `${ackPart}${namePrefix}which distance are you targeting — ${options}?`;
     await sendAndStore(user.id, user.phone_number, clarificationMsg, "awaiting_goal");
     return NextResponse.json({ ok: true });
   }
@@ -1067,7 +1067,7 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       if (data.goal === "injury_recovery") {
         return "Tell me more about the injury — what is it, how long ago did it happen, and where are you in recovery? Are you able to run at all right now, or fully off it?";
       }
-      return "Almost there — anything else worth knowing before I put this together? Injuries, current paces, strength work, cross-training — mention it now and I'll build it in.";
+      return "Almost there — anything else before I put this together? Injuries, target paces, cross-training, strength work — mention it now and I'll build it in. If not, just say nope!";
 
     case "awaiting_name":
       return "What's your name?";
@@ -1350,8 +1350,8 @@ async function generateAnythingElseResponse(
 The athlete replied. Respond appropriately:
 
 - If they said "no", "nope", "nothing", "all good", "nah", "I'm good", or anything that clearly means they're done → return: {"response": null, "done": true}
-- If they asked a question → answer it warmly in 1-2 sentences, then end with a natural re-ask like "Anything else I should know?" Return: {"response": "...", "done": false}
-- If they shared info (injury, schedule constraints, secondary goal, training history, preferences) → briefly acknowledge it in 1 sentence, then end with "Anything else?" Return: {"response": "...", "done": false}
+- If they asked a question → answer it warmly in 1-2 sentences, then end with a natural re-ask like "Anything else? If not, just say nope!" Return: {"response": "...", "done": false}
+- If they shared info (injury, schedule constraints, secondary goal, training history, preferences) → briefly acknowledge it in 1 sentence, then end with "Anything else? If not, just say nope!" Return: {"response": "...", "done": false}
 
 Rules:
 - Tone: warm, direct, like a coach texting — no "Love it!" opener, no markdown, no asterisks
