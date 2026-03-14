@@ -338,7 +338,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         userId,
         latestUserMsg.content,
         profile,
-        (user.onboarding_data as Record<string, unknown>) || {}
+        (user.onboarding_data as Record<string, unknown>) || {},
+        userTimezone
       );
       const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
       void maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage);
@@ -1075,14 +1076,15 @@ ${(() => {
   const sessionRows = (() => {
     const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
     if (!sessions || sessions.length === 0) return "";
-    // Filter out stale sessions (all dates before today means plan is from last week)
-    const today = new Date();
-    const currentYear = today.getFullYear();
+    // Filter out stale sessions (all dates before today means plan is from last week).
+    // Use ty/tm/td (user's local today, computed above) so Hawaii users at 3pm Friday
+    // don't see Saturday as "today" because Vercel runs in UTC.
+    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
     const activeSessions = sessions.filter(s => {
       const [m, d] = s.date.split("/").map(Number);
-      const sessionDate = new Date(currentYear, m - 1, d);
-      // Keep if date is today or in the future, or if we can't parse the date
-      return isNaN(sessionDate.getTime()) || sessionDate >= new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      if (isNaN(m) || isNaN(d)) return true; // keep if can't parse
+      const sessionDate = new Date(Date.UTC(ty, m - 1, d));
+      return sessionDate >= localTodayUTC;
     });
     if (activeSessions.length === 0) return "";
     const list = activeSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
@@ -1305,10 +1307,14 @@ async function extractAndPersistProfileUpdates(
   userId: string,
   message: string,
   profile: Record<string, unknown> | null,
-  onboardingData: Record<string, unknown>
+  onboardingData: Record<string, unknown>,
+  timezone?: string
 ): Promise<void> {
   try {
-    const todayName = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date());
+    const tz = timezone || "America/New_York";
+    const now = new Date();
+    const todayName = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: tz }).format(now);
+    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 400,
@@ -1328,8 +1334,8 @@ Extract ONLY explicitly stated NEW information:
   - elevation_gain: in meters, convert from feet÷3.281 (null if not stated)
   - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
 - Their location or timezone if explicitly mentioned (e.g. "I'm in Denver", "I live in Seattle", "I'm on Pacific time", "I'm in PST") → timezone as IANA string (e.g. "America/Denver", "America/Los_Angeles"). Only set if they are clearly stating where they are, not just mentioning a city in passing.
-- A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${new Date().toISOString().slice(0, 10)}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
-- A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th") → race_date as "YYYY-MM-DD". Only set when athlete clearly states a specific race date. If month only, use first day of that month. Today is ${new Date().toISOString().slice(0, 10)}.
+- A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${todayDateStr}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
+- A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th") → race_date as "YYYY-MM-DD". Only set when athlete clearly states a specific race date. If month only, use first day of that month. Today is ${todayDateStr}.
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 
 Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}

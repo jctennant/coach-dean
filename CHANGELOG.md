@@ -8,6 +8,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-13 — Fixed calendar sessions showing tomorrow's workout instead of today's for non-UTC users
+
+**Type:** Bug Fix
+**Reported by:** Jake (Hawaii, HST = UTC−10)
+**User feedback:** "What's on the calendar for today?" — Dean responded "Sat 3/14 · Long run 10mi easy" when it was actually Friday 3/13 at 3:48pm in Hawaii (1:48am Saturday UTC).
+**Root cause:** The `activeSessions` filter inside `buildSystemPrompt` used `new Date()` (UTC on Vercel) to determine "today" when filtering out past sessions from the weekly plan. For a Hawaii user at 3:48pm Friday, `new Date()` returned Saturday UTC, so Saturday's session was treated as the earliest "today or future" session. The already-computed `ty/tm/td` variables (user's local date, correctly derived from their timezone) were not being used in this filter.
+**Fix / Change:**
+1. `activeSessions` filter now uses `new Date(Date.UTC(ty, tm - 1, td))` — the user's local today computed from their timezone — instead of `new Date()` (UTC).
+2. Also fixed `extractAndPersistProfileUpdates`: added `timezone` parameter and used it for `todayName` (weekday name in extraction prompt) and `todayDateStr` (replaces `new Date().toISOString().slice(0, 10)` used for skip_date and race_date prompts). These were showing Saturday for Hawaii users when it was still Friday.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-13 — Fixed "." phantom messages and truncated responses from web search multi-block bug
 
 **Type:** Bug Fix
