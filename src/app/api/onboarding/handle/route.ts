@@ -254,6 +254,7 @@ Rules:
     ...extra,
     ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
     ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null } : {}),
+    ...(raceInfo.secondaryGoal ? { secondary_goal: raceInfo.secondaryGoal } : {}),
   };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
@@ -1092,10 +1093,12 @@ interface RaceInfo {
   raceDate: string | null;
   /** Non-null when the race offers multiple distances and the athlete hasn't specified which one */
   distanceOptions: string[] | null;
+  /** Secondary goal mentioned alongside the primary (e.g. "100K this summer") */
+  secondaryGoal: string | null;
 }
 
 async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
-  const empty: RaceInfo = { ack: null, raceDate: null, distanceOptions: null };
+  const empty: RaceInfo = { ack: null, raceDate: null, distanceOptions: null, secondaryGoal: null };
   try {
     const today = new Date().toISOString().split("T")[0];
     const response = await anthropic.messages.create({
@@ -1118,7 +1121,8 @@ Write a conversational 1-3 sentence acknowledgment ("ack") that:
 - If the athlete mentioned any secondary goals (e.g. "plus a 100K this summer"), briefly acknowledge them ("and we can keep that 100K in mind as we build")
 - Tone: warm, direct, like a coach texting — no "Love it!" opener, no asterisks, no markdown
 - 2-3 sentences max, under 280 chars
-Output: {"ack": "...", "date": "YYYY-MM-DD" | null, "distance_options": null}
+Output: {"ack": "...", "date": "YYYY-MM-DD" | null, "distance_options": null, "secondary_goal": "brief description" | null}
+- secondary_goal: if the athlete clearly mentions a second race/event/goal beyond the primary one (e.g. "and then a 100K this summer", "plus Boston next year"), capture it as a short plain-text description. null if none.
 
 CRITICAL RULES:
 - Do NOT narrate your search process. Output nothing until you have the final JSON answer.
@@ -1142,10 +1146,11 @@ CRITICAL RULES:
       const distanceOptions = Array.isArray(parsed?.distance_options) && parsed.distance_options.length > 1
         ? parsed.distance_options as string[]
         : null;
-      return { ack: parsed?.ack ?? null, raceDate: parsed?.date ?? null, distanceOptions };
+      const secondaryGoal = (typeof parsed?.secondary_goal === "string" && parsed.secondary_goal) ? parsed.secondary_goal : null;
+      return { ack: parsed?.ack ?? null, raceDate: parsed?.date ?? null, distanceOptions, secondaryGoal };
     } catch {
       // Fallback: treat as plain-text ack if JSON parse fails
-      return { ack: text, raceDate: null, distanceOptions: null };
+      return { ack: text, raceDate: null, distanceOptions: null, secondaryGoal: null };
     }
   } catch {
     return empty;
@@ -1337,9 +1342,10 @@ async function generateAnythingElseResponse(
   onboardingData: Record<string, unknown>
 ): Promise<{ response: string | null; isDone: boolean }> {
   const goal = onboardingData.goal as string | null;
-  const raceDate = onboardingData.race_date as string | null;
+  // Intentionally omit the raw race_date — passing "2025-10-19" caused Dean to hallucinate
+  // a wrong date ("October 1st") in conversational responses. Goal label is enough context.
   const context = goal
-    ? `The athlete is training for a ${goal}${raceDate ? ` on ${raceDate}` : ""}.`
+    ? `The athlete is training for a ${goal}.`
     : "The athlete is in the process of setting up their training plan.";
 
   const response = await anthropic.messages.create({

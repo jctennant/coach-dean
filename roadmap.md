@@ -4,42 +4,14 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 
 ---
 
-## HIGH Priority
-
-### [DONE] Capability questions in first message are silently dropped
-**Affected:** Multi-sport athletes who ask "do you work with cyclists?" or "can you help with triathlon?" alongside their goal in the first message.
-**Root cause:** `detectAndAnswerImmediate` only looked for coaching questions (pace, race-day tactics) — not capability/service questions. Returned null for "do you work with people who also do cycling?" so the question was silently dropped and Dean jumped straight to the goal acknowledgment.
-**Fix:** Broadened `detectAndAnswerImmediate` to also cover capability and service questions. When a goal is detected alongside a capability question, Dean now answers the question before the acknowledgment.
-**File:** `src/app/api/onboarding/handle/route.ts`
-
----
-
 ## MEDIUM Priority
 
-### [DONE] Capitalization bug in multi-distance clarification message
-**Symptom:** "Jake, Which distance are you targeting" — capital W mid-sentence.
-**Fix:** Changed `Which` → `which` in the clarification template.
-**File:** `src/app/api/onboarding/handle/route.ts`
-
-### Secondary race goal not stored in onboarding_data
-**Symptom:** Athlete mentions "Behind the Rocks 30K and then a 100K this summer" — the 100K is acknowledged in the ack text but never written to `onboarding_data`. After the distance clarification exchange, it's lost unless the athlete re-mentions it in "anything else."
-**Fix:** When `generateRaceAcknowledgment` detects a secondary goal mention, extract and store it in `onboarding_data.other_notes` or a dedicated `secondary_goal` field.
-**File:** `src/app/api/onboarding/handle/route.ts`
 
 ### Injury recovery "anything else" step is awkward double-ask
 **Symptom:** The `awaiting_anything_else` step question already says "Tell me more about the injury…" — but after the athlete gives a detailed answer, `generateAnythingElseResponse` re-asks "Anything else I should know?" This feels mechanical right after a specific Q&A.
 **Fix:** Add a dedicated `awaiting_injury_background` step (parallel to `awaiting_ultra_background`) so injury context is collected in a focused step, leaving "anything else" as a true catch-all.
 **File:** `src/app/api/onboarding/handle/route.ts`
 
-### Dean hallucinated race date in generateAnythingElseResponse
-**Symptom:** Race date was 2025-10-19 in context, but Dean said "October 1st" in a conversational response.
-**Fix:** Either (a) don't reference the race date by name in `generateAnythingElseResponse` context, or (b) if passed, instruct the model to quote it verbatim or omit it.
-**File:** `src/app/api/onboarding/handle/route.ts` (`generateAnythingElseResponse` system prompt)
-
-### [DONE] "Anything else" requires extra round-trip for comprehensive answerers
-**Symptom:** 5 of 10 simulated athletes got a re-ask even after giving a complete answer.
-**Fix:** Step question now ends "If not, just say nope!" Re-ask in `generateAnythingElseResponse` also ends "Anything else? If not, just say nope!"
-**File:** `src/app/api/onboarding/handle/route.ts`
 
 ---
 
@@ -71,4 +43,3 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 - Ultra path (`awaiting_ultra_background`) correctly auto-skips "anything else" when background data captures what's needed
 - `no_event: true` and `injury_recovery` paths route correctly
 - Multi-distance race detection (Behind the Rocks) worked perfectly
-- Capitalization bug aside, the multi-distance clarification message was well-formed and natural

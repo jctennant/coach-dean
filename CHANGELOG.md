@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-13 — Secondary race goal now stored; race date hallucination fixed
+
+**Type:** Bug Fix
+**Reported by:** Onboarding simulation (roadmap.md MEDIUM items)
+**User feedback:** N/A (simulation-identified)
+**Root cause:**
+1. `generateRaceAcknowledgment` acknowledged secondary goals ("and we can keep that 100K in mind") in the ack text, but the `RaceInfo` type had no `secondaryGoal` field — so it was never extracted or stored. After the goal step, the secondary goal was lost unless the athlete repeated it in "anything else."
+2. `generateAnythingElseResponse` passed `race_date` as a raw ISO string (`"2025-10-19"`) in its context string. Claude hallucinated "October 1st" from this, presumably rounding or misreading the date.
+**Fix / Change:**
+1. Added `secondaryGoal: string | null` to `RaceInfo`. Updated `generateRaceAcknowledgment` prompt to output `"secondary_goal"` field. Parsed and returned in `RaceInfo`. Stored to `onboarding_data.secondary_goal` in `handleGoal` when present.
+2. Removed `race_date` from the context string in `generateAnythingElseResponse`. The goal label (e.g. "marathon") is sufficient for conversational Q&A — no specific date needed there.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-13 — Fixed capitalization bug + reduced "anything else" re-ask round-trips
 
 **Type:** Bug Fix / Improvement
