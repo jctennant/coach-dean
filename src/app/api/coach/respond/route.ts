@@ -1092,7 +1092,7 @@ ${(() => {
   })();
   return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
-- Mileage so far this week: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} (Strava-synced; authoritative — use ONLY these figures for session count and weekly mileage, do NOT use "Last 4 weeks" totals from ATHLETE HISTORY)
+- Mileage so far this week: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} (Strava-synced; authoritative — use ONLY these figures for session count and weekly mileage, do NOT use "Last 4 weeks" totals from ATHLETE HISTORY; when projecting end-of-week totals, always ADD this to any remaining planned sessions — never report just the planned sessions as the week total; e.g. if this is 8 mi and Saturday has 4 mi planned, the projected total is 12 mi)
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}

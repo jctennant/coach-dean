@@ -8,6 +8,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-13 — Fixed Dean reporting only planned sessions as weekly total (ignoring completed miles)
+
+**Type:** Bug Fix
+**Reported by:** Jake (wife's account)
+**User feedback:** "Dean Erroneously Said that my wife will only be at 4 miles for the week after her Saturday run tomorrow, which itself is 4 miles" — she already had 8 miles completed (Mon 3mi + Thu 5mi), so the projected total should have been 12 miles.
+**Root cause:** The general system prompt's CURRENT TRAINING STATE shows two "authoritative" fields:
+1. "Mileage so far this week: 8.0 mi" (Strava-synced)
+2. "THIS WEEK'S PLANNED SESSIONS (authoritative): Sat 3/14 · Easy 4mi"
+With no explicit instruction to ADD them when projecting end-of-week totals, Dean treated the planned sessions alone (4 miles) as the projected week total. An explicit "add weekMileageSoFar to remaining planned sessions" instruction existed only in the `initial_plan` user message (line 1643) but not in the general system prompt, so it didn't apply to `user_message` trigger queries like "how's my week looking?"
+**Fix / Change:** Extended the "Mileage so far this week" description in CURRENT TRAINING STATE to include: "when projecting end-of-week totals, always ADD this to any remaining planned sessions — never report just the planned sessions as the week total; e.g. if this is 8 mi and Saturday has 4 mi planned, the projected total is 12 mi."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-13 — Fixed calendar sessions showing tomorrow's workout instead of today's for non-UTC users
 
 **Type:** Bug Fix
