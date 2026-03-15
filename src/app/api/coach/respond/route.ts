@@ -113,7 +113,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   ]);
 
   const user = userResult.data;
-  const profile = profileResult.data;
+  let profile = profileResult.data;
   const state = stateResult.data;
   const recentMessages = conversationsResult.data?.reverse() || [];
   const recentActivities =
@@ -160,6 +160,29 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
 
   const shouldUseWebSearch = trigger === "user_message" || trigger === "initial_plan";
+
+  // For user_message: extract race/pace data BEFORE building the system prompt so the
+  // coach responds with accurate paces immediately (not one message later).
+  let pendingExtracted: Awaited<ReturnType<typeof extractProfileData>> | null = null;
+  const originalProfile = profile; // preserve for crosstraining merge in persistence
+  if (trigger === "user_message") {
+    const latestMsg = [...recentMessages].reverse().find(m => m.role === "user");
+    if (latestMsg) {
+      pendingExtracted = await extractProfileData(latestMsg.content, userTimezone);
+      const hasRaceData = !!(pendingExtracted?.recent_race_distance_km && pendingExtracted?.recent_race_time_minutes);
+      const hasEasyPace = !!pendingExtracted?.easy_pace;
+      if (hasRaceData) {
+        const paces = calculateVDOTPaces(
+          pendingExtracted!.recent_race_distance_km!,
+          pendingExtracted!.recent_race_time_minutes!
+        );
+        profile = { ...profile, current_easy_pace: paces.easy, current_tempo_pace: paces.tempo, current_interval_pace: paces.interval } as typeof profile;
+      } else if (hasEasyPace) {
+        const p = estimatePacesFromEasyPace(pendingExtracted!.easy_pace!);
+        if (p.easy) profile = { ...profile, current_easy_pace: p.easy, ...(p.tempo ? { current_tempo_pace: p.tempo } : {}), ...(p.interval ? { current_interval_pace: p.interval } : {}) } as typeof profile;
+      }
+    }
+  }
 
   const systemPrompt = buildSystemPrompt(
     user,
@@ -327,20 +350,21 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     void extractAndStorePlanSessions(userId, coachMessage);
   }
 
-  // For user_message, background-extract any profile updates (injuries, new cross-training,
-  // preferences) and write them back to training_profiles / onboarding_data so future
-  // responses and plans automatically reflect what the athlete shared.
-  // Also check if the exchange resulted in any plan changes and update weekly_plan_sessions.
+  // For user_message, persist any profile updates extracted above (injuries, cross-training,
+  // race data, preferences) and check for plan changes. We already extracted in-memory
+  // before building the system prompt; now just persist to DB fire-and-forget.
   if (trigger === "user_message") {
     const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
     if (latestUserMsg) {
-      void extractAndPersistProfileUpdates(
-        userId,
-        latestUserMsg.content,
-        profile,
-        (user.onboarding_data as Record<string, unknown>) || {},
-        userTimezone
-      );
+      if (pendingExtracted) {
+        void persistProfileUpdates(
+          userId,
+          pendingExtracted,
+          originalProfile,
+          (user.onboarding_data as Record<string, unknown>) || {},
+          userTimezone
+        );
+      }
       const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
       void maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage);
     }
@@ -1300,23 +1324,38 @@ function formatGoalLabel(goal: string): string {
   return labels[goal] || goal;
 }
 
+type ExtractedProfileData = {
+  injury_notes?: string | null;
+  new_crosstraining?: string[] | null;
+  other_notes?: string | null;
+  recent_race_distance_km?: number | null;
+  recent_race_time_minutes?: number | null;
+  easy_pace?: string | null;
+  timezone?: string | null;
+  skip_date?: string | null;
+  race_date?: string | null;
+  goal_time_minutes?: number | null;
+  workout?: {
+    activity_type: string;
+    distance_meters: number | null;
+    moving_time_seconds: number | null;
+    average_pace: string | null;
+    elevation_gain: number | null;
+    date_offset: number;
+  } | null;
+};
+
 /**
- * Background function: extracts any new injury notes, cross-training tools, or preference
- * changes from the athlete's message and persists them to training_profiles and onboarding_data.
- * Called fire-and-forget for user_message triggers so future responses reflect current context.
+ * Calls Haiku to extract structured profile data from an athlete message.
+ * Returns parsed data only — no DB writes. Used to update paces before building
+ * the system prompt, so the coach responds with accurate paces immediately.
  */
-async function extractAndPersistProfileUpdates(
-  userId: string,
-  message: string,
-  profile: Record<string, unknown> | null,
-  onboardingData: Record<string, unknown>,
-  timezone?: string
-): Promise<void> {
+async function extractProfileData(message: string, timezone?: string): Promise<ExtractedProfileData> {
+  const tz = timezone || "America/New_York";
+  const now = new Date();
+  const todayName = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: tz }).format(now);
+  const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
   try {
-    const tz = timezone || "America/New_York";
-    const now = new Date();
-    const todayName = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: tz }).format(now);
-    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 400,
@@ -1347,33 +1386,26 @@ Return {} if nothing new is present.`,
     });
 
     const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
-    let extracted: {
-      injury_notes?: string | null;
-      new_crosstraining?: string[] | null;
-      other_notes?: string | null;
-      recent_race_distance_km?: number | null;
-      recent_race_time_minutes?: number | null;
-      easy_pace?: string | null;
-      timezone?: string | null;
-      skip_date?: string | null;
-      race_date?: string | null;
-      goal_time_minutes?: number | null;
-      workout?: {
-        activity_type: string;
-        distance_meters: number | null;
-        moving_time_seconds: number | null;
-        average_pace: string | null;
-        elevation_gain: number | null;
-        date_offset: number;
-      } | null;
-    } = {};
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      extracted = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
-    } catch {
-      return;
-    }
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    return jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+  } catch {
+    return {};
+  }
+}
 
+/**
+ * Persists extracted profile data to training_profiles and onboarding_data.
+ * Called fire-and-forget after the coaching response is sent.
+ */
+async function persistProfileUpdates(
+  userId: string,
+  extracted: ExtractedProfileData,
+  profile: Record<string, unknown> | null,
+  onboardingData: Record<string, unknown>,
+  timezone?: string
+): Promise<void> {
+  void timezone; // received but not used in persistence logic
+  try {
     const hasInjury = !!extracted.injury_notes;
     const hasCrosstraining = Array.isArray(extracted.new_crosstraining) && extracted.new_crosstraining.length > 0;
     const hasOtherNotes = !!extracted.other_notes;
@@ -1481,7 +1513,7 @@ Return {} if nothing new is present.`,
         : Promise.resolve(),
     ]);
   } catch (err) {
-    console.error("[coach/respond] extractAndPersistProfileUpdates failed:", err);
+    console.error("[coach/respond] persistProfileUpdates failed:", err);
   }
 }
 

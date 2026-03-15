@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-14 — Fix: coach responds with stale paces when athlete shares PR mid-conversation
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "Hey, just confirming 9:30 to 10-minute should be my target easy pace. I think I told you before but my fastest 5K is 17:23 so I just want to make sure that we've got the right paces dialed in." — Coach Dean responded with VDOT 54-55 and 8:45-9:30 easy, both wrong. Correct VDOT is 58.65 → easy ~7:41/mi (~7:40-8:10 display range).
+**Root cause:** `extractAndPersistProfileUpdates` ran fire-and-forget AFTER the coaching response was generated. So when the athlete shared a PR, the system prompt still contained the old stored paces and Claude had to calculate VDOT itself — getting it wrong (54-55 vs 58.65, and even that wrong VDOT produced incorrect easy pace ranges).
+**Fix / Change:** Refactored into `extractProfileData` (Haiku call + parse, returns data only) and `persistProfileUpdates` (DB writes only). For `user_message` triggers, `extractProfileData` is now awaited BEFORE `buildSystemPrompt`. If race data or an easy pace is found, the in-memory `profile` is updated with freshly computed VDOT paces. The coaching response then sees correct paces. DB persistence still happens fire-and-forget after the response (no extra Haiku call — same extraction result is reused).
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-14 — Fixed elevation unit bug in laps and wrong week comparison for mileage ramp
 
 **Type:** Bug Fix
