@@ -6,7 +6,14 @@
  * Run: node scripts/test-elevation-and-ramp.mjs
  */
 
-// ── Mirror of transformSplitForClaude ─────────────────────────────────────────
+// ── Helpers mirroring source code ─────────────────────────────────────────────
+
+function fmtPace(minsPerMile, unit = "mi") {
+  const totalSec = Math.round(minsPerMile * 60);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}/${unit}`;
+}
 
 function transformSplitForClaude(split) {
   const speed = typeof split.average_speed === "number" ? split.average_speed : null;
@@ -15,12 +22,7 @@ function transformSplitForClaude(split) {
   const distMeters = typeof split.distance === "number" ? split.distance : null;
 
   const pace = speed && speed > 0
-    ? (() => {
-        const paceMinPerMile = 1609.34 / speed / 60;
-        const paceMin = Math.floor(paceMinPerMile);
-        const paceSec = Math.round((paceMinPerMile - paceMin) * 60);
-        return `${paceMin}:${String(paceSec).padStart(2, "0")}/mi`;
-      })()
+    ? fmtPace(1609.34 / speed / 60, "mi")
     : null;
 
   const result = { ...split };
@@ -236,6 +238,43 @@ console.log(`Ramp: ${result6?.rampPct?.toFixed(1)}% — correct because it uses 
 const pass6 = Math.abs((result6?.rampPct ?? 0) - 36.2) < 1;
 if (!pass6) allPass = false;
 console.log(`${pass6 ? "✅" : "❌"} Ramp correctly computed from actual DB data (36% when DB has 23mi) — data completeness is a separate issue`);
+
+// ── TEST 7: Pace formatter — no :60 rollover ──────────────────────────────────
+
+console.log("\n" + "=".repeat(60));
+console.log("TEST 7: fmtPace — no :60 rollover");
+console.log("=".repeat(60));
+
+// The old buggy pattern: Math.round((7.9999... - 7) * 60) = Math.round(59.999...) = 60 → "7:60/mi"
+// speed = 3.354 m/s → paceMinPerMile = 1609.34 / 3.354 / 60 = exactly 8.0/mi (should be 8:00/mi)
+const speed800 = 1609.34 / (8 * 60); // exactly 8:00/mi
+const pace800 = fmtPace(1609.34 / speed800 / 60);
+console.log(`8:00/mi speed → "${pace800}"`);
+const p1 = pace800 === "8:00/mi";
+if (!p1) allPass = false;
+console.log(`${p1 ? "✅" : "❌"} 8:00/mi renders correctly (not 7:60/mi)`);
+
+// Edge case that triggered the bug: speed slightly above 8:00/mi boundary
+const speedSlightlyFaster = 1609.34 / (7.9999 * 60);
+const paceFaster = fmtPace(1609.34 / speedSlightlyFaster / 60);
+console.log(`Slightly faster than 8:00 → "${paceFaster}"`);
+const p2 = !paceFaster.includes(":60");
+if (!p2) allPass = false;
+console.log(`${p2 ? "✅" : "❌"} No :60 in pace string`);
+
+// Normal cases
+const cases = [
+  [7.5, "7:30/mi"],
+  [9.0, "9:00/mi"],
+  [10.25, "10:15/mi"],
+  [36.25, "36:15/mi"],
+];
+for (const [input, expected] of cases) {
+  const result = fmtPace(input);
+  const pass = result === expected;
+  if (!pass) allPass = false;
+  console.log(`${pass ? "✅" : "❌"} fmtPace(${input}) = "${result}" (expected "${expected}")`);
+}
 
 // ── SUMMARY ────────────────────────────────────────────────────────────────────
 

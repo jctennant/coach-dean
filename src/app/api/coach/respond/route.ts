@@ -512,6 +512,14 @@ function localWeekMonday(date: Date, timezone: string): string {
 
 const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
 
+/** Format a fractional minutes-per-mile value as "M:SS/mi". Safe against :60 rollover. */
+function fmtPace(minsPerMile: number, unit: "mi" | "km" = "mi"): string {
+  const totalSec = Math.round(minsPerMile * 60);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}/${unit}`;
+}
+
 /**
  * Count run sessions in the current Mon–Sun week in the user's local timezone.
  */
@@ -986,12 +994,8 @@ function buildSystemPrompt(
     const distMiles = runGoalDistancesMiles[profile.goal as string];
     if (distMiles) {
       const paceMinsPerMile = goalTimeMinutes / distMiles;
-      const paceMin = Math.floor(paceMinsPerMile);
-      const paceSec = Math.round((paceMinsPerMile - paceMin) * 60);
       const pacePerKm = goalTimeMinutes / (distMiles * 1.60934);
-      const paceKmMin = Math.floor(pacePerKm);
-      const paceKmSec = Math.round((pacePerKm - paceKmMin) * 60);
-      goalPaceStr = ` — goal pace: ${paceMin}:${String(paceSec).padStart(2, "0")}/mi (${paceKmMin}:${String(paceKmSec).padStart(2, "0")}/km)`;
+      goalPaceStr = ` — goal pace: ${fmtPace(paceMinsPerMile, "mi")} (${fmtPace(pacePerKm, "km")})`;
     }
   }
   // Additional athlete preferences captured during onboarding (strengthening, cross-training
@@ -1260,12 +1264,7 @@ function transformSplitForClaude(split: Record<string, unknown>): Record<string,
   const distMeters = typeof split.distance === "number" ? split.distance : null;
 
   const pace = speed && speed > 0
-    ? (() => {
-        const paceMinPerMile = 1609.34 / speed / 60;
-        const paceMin = Math.floor(paceMinPerMile);
-        const paceSec = Math.round((paceMinPerMile - paceMin) * 60);
-        return `${paceMin}:${String(paceSec).padStart(2, "0")}/mi`;
-      })()
+    ? fmtPace(1609.34 / speed / 60, "mi")
     : null;
 
   const result: Record<string, unknown> = { ...split };
