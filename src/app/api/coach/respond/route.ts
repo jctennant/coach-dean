@@ -164,6 +164,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // For user_message: extract race/pace data BEFORE building the system prompt so the
   // coach responds with accurate paces immediately (not one message later).
   let pendingExtracted: Awaited<ReturnType<typeof extractProfileData>> | null = null;
+  let computedVdot: number | null = null;
   const originalProfile = profile; // preserve for crosstraining merge in persistence
   if (trigger === "user_message") {
     const latestMsg = [...recentMessages].reverse().find(m => m.role === "user");
@@ -176,6 +177,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           pendingExtracted!.recent_race_distance_km!,
           pendingExtracted!.recent_race_time_minutes!
         );
+        computedVdot = paces.vdot;
         profile = { ...profile, current_easy_pace: paces.easy, current_tempo_pace: paces.tempo, current_interval_pace: paces.interval } as typeof profile;
       } else if (hasEasyPace) {
         const p = estimatePacesFromEasyPace(pendingExtracted!.easy_pace!);
@@ -198,7 +200,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     shouldUseWebSearch,
     avgWeeklyMileage,
     coachingSignals,
-    weatherBlock
+    weatherBlock,
+    computedVdot
   );
 
   // Build user message based on trigger
@@ -247,18 +250,23 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Stop the typing refresh loop — generation is done, message is about to send.
   keepTypingAlive = false;
 
-  // When web search is used, Claude can emit the main answer in a text block BEFORE the
-  // tool call, then append a continuation after the search results. Taking only the last
-  // text block throws away the first (main) block and sends just a trailing fragment like
-  // ", or slow to a walk and focus on deep breathing." or an empty string that becomes ".".
-  // Fix: concatenate all non-empty text blocks. Brief narration ("Let me check that.") is
-  // rare with web_search_20250305 and acceptable if it appears — losing the answer is not.
+  // When web search is used, Claude emits text blocks both BEFORE the tool_use block
+  // (internal reasoning like "Let me check that.") and AFTER it (the actual response).
+  // We must discard pre-search text — it's reasoning, not a coach message — and only
+  // keep text blocks that follow the last tool_use block.
+  // When no tool is used, all text blocks are part of the answer and are concatenated.
+  //
   // Claude streams the response as many small fragments when using web search
   // (individual sentences, clause continuations, even standalone commas/periods).
   // Join them at block boundaries: append punctuation-starting blocks directly to the
   // previous block; add a single space when two word-boundary blocks meet. This preserves
   // any embedded paragraph breaks (\n\n inside blocks) without introducing spurious ones.
+  const lastToolIdx = response.content.reduce(
+    (idx, b, i) => (b.type === "tool_use" ? i : idx),
+    -1
+  );
   const textBlocks = response.content
+    .slice(lastToolIdx + 1) // if no tool_use, lastToolIdx === -1 → slice(0) = all blocks
     .filter(b => b.type === "text")
     .map(b => (b as { type: "text"; text: string }).text.trim())
     .filter(t => t.length > 0);
@@ -914,7 +922,8 @@ function buildSystemPrompt(
   hasWebSearch?: boolean,
   avgWeeklyMileage?: number | null,
   coachingSignals?: CoachingSignals,
-  weatherBlock?: string
+  weatherBlock?: string,
+  freshVdot?: number | null
 ): string {
   const tz2 = timezone || "America/New_York";
   const msgFormatter = new Intl.DateTimeFormat("en-US", {
@@ -1039,6 +1048,9 @@ Your response is sent directly to the athlete as an SMS text message. Never incl
 - Meta-commentary about the plan ("I need to be smart here", "Given his history...")
 Do all reasoning silently before writing your final response. Output only the message the athlete should receive.
 
+CRITICAL — TRAINING PACES:
+The athlete's VDOT and training paces are pre-computed by our system (Jack Daniels' formula) and shown in CURRENT TRAINING STATE. These are the correct authoritative values. Do NOT calculate VDOT yourself. Do NOT use web search to look up VDOT tables or verify paces — external tables and your own calculations are often wrong. If asked about their paces, just confirm the stored values. The stored easy pace is always correct for this athlete.
+
 ${dateContext}
 CALIBRATE TO ATHLETE'S ACTUAL FITNESS FIRST:
 Before applying any training philosophy, anchor the plan to what the data shows. The athlete's recent weekly mileage, pace distribution, and workout history in RECENT WORKOUTS are ground truth. The philosophy principles below are defaults — they yield to observed fitness. An athlete already running 40+ miles/week with quality sessions in their history does not need to earn intensity; they need a plan that matches where they actually are. Apply conservative defaults only where the data is thin, the athlete is clearly new to consistent training, or injury history warrants it.
@@ -1058,7 +1070,7 @@ TRAINING PHILOSOPHY — apply in this priority order, within the context of the 
 
 2. 80/20 INTENSITY DISTRIBUTION (Fitzgerald / Seiler / Roche): ~80% of all training at genuinely easy, conversational effort. Avoid the moderate "gray zone" — it accumulates fatigue without driving meaningful adaptation. Easy runs are truly easy. Hard days are genuinely hard.
 
-3. VDOT-CALIBRATED PACING (Jack Daniels): Use the athlete's current fitness (from race times or effort-based estimation) to assign specific training paces: Easy, Marathon, Threshold, Interval. Never assign arbitrary paces. Pace zones should reflect actual current fitness, not aspirational targets.
+3. VDOT-CALIBRATED PACING (Jack Daniels): Use the stored training paces from CURRENT TRAINING STATE — these are pre-computed from the athlete's race times using Jack Daniels' formula. Never calculate or look up VDOT yourself. Never assign arbitrary paces. Pace zones should reflect the stored values, not aspirational targets.
 
 4. PERIODIZATION (Base → Build → Peak → Taper): Structure training in phases appropriate to the athlete's tier. Progressive overload: increase weekly mileage by no more than 10%/week. Every 4th week is a recovery week (reduce volume 25-30%). Long runs progress ~1 mile/week. Taper 2 weeks before target races.
 
@@ -1121,7 +1133,10 @@ ${(() => {
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
 - Mileage so far this week: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} (Strava-synced; authoritative — use ONLY these figures for session count and weekly mileage, do NOT use "Last 4 weeks" totals from ATHLETE HISTORY; when projecting end-of-week totals, always ADD this to any remaining planned sessions — never report just the planned sessions as the week total; e.g. if this is 8 mi and Saturday has 4 mi planned, the projected total is 12 mi)
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
-- Current paces: Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
+- Athlete VDOT: ${freshVdot != null ? freshVdot : "unknown (no race data on file)"}
+- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
+- RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
+- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}`;
 })()}

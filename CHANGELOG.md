@@ -8,6 +8,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-14 — Fix: coach recalculating wrong VDOT via web search despite stored paces
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** Even after paces were updated to 7:41/mi in the system prompt, coach responded "For a 17:23 5K (VDOT ~54-55), your easy pace should be 8:45-9:30/mi" — still wrong.
+**Root cause:** Three compounding issues: (1) `calculateVDOTPaces` didn't return the VDOT value so it couldn't be surfaced in the system prompt. (2) Training philosophy rule #3 said "use race times to assign paces" which actively invited Claude to recalculate. (3) The no-recalculate rule was a parenthetical in the paces line, not a prominent rule. Claude used web search, found incorrect VDOT tables showing 54-55, and trusted them over the system prompt.
+**Fix / Change:** (1) `calculateVDOTPaces` now returns `vdot` alongside the paces. (2) The computed VDOT is passed through `buildSystemPrompt` and shown explicitly as "Athlete VDOT: X.X" in CURRENT TRAINING STATE. (3) Added a `CRITICAL — TRAINING PACES` block right after the output rules (high in the prompt) explicitly forbidding VDOT recalculation and web search for paces. (4) Fixed rule #3 to say "use the stored paces from CURRENT TRAINING STATE". After these changes, dry_run test confirmed correct response: "VDOT 58.7... Easy: 7:40-8:10/mi".
+**Files changed:** src/lib/paces.ts, src/app/api/coach/respond/route.ts
+
+---
+
+## 2026-03-14 — Fix: web search pre-tool reasoning leaking into SMS + VDOT recalculation guard
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** Coach Dean response started with "Looking at the VDOT tables, I need to verify the easy pace calculation for Jake's 17:23 5K time. A 17:23 5K gives a VDOT of approximately 54-55..." — internal reasoning visible in the SMS, plus wrong VDOT (should be 58.65).
+**Root cause:** With `web_search_20250305`, Claude emits text blocks both before the `tool_use` block (internal reasoning) and after it (actual response). The code was concatenating ALL text blocks, so pre-search reasoning leaked into the final message.
+**Fix / Change:** Find the index of the last `tool_use` block in response.content; only include text blocks that come after it. When no tool is used, `lastToolIdx === -1` so `slice(0)` keeps all blocks — no behavior change for non-search responses. Also added a system prompt note on the paces line telling the coach NOT to recalculate VDOT itself.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-14 — Fix: coach responds with stale paces when athlete shares PR mid-conversation
 
 **Type:** Bug Fix

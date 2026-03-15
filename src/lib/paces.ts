@@ -10,7 +10,7 @@
 export function calculateVDOTPaces(
   distanceKm: number,
   timeMinutes: number
-): { easy: string; tempo: string; interval: string } {
+): { easy: string; tempo: string; interval: string; vdot: number } {
   const v = (distanceKm * 1000) / timeMinutes; // meters per minute
 
   const pctVO2 =
@@ -25,6 +25,7 @@ export function calculateVDOTPaces(
     easy: paceAtVDOTPct(vdot, 0.65),
     tempo: paceAtVDOTPct(vdot, 0.86),
     interval: paceAtVDOTPct(vdot, 0.98),
+    vdot: Math.round(vdot * 10) / 10,
   };
 }
 
