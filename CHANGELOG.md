@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-14 — Fixed elevation unit bug in laps and wrong week comparison for mileage ramp
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "I think a few things are off. That's a huge day — 11.5 miles with 1247ft of climbing. [...] Mile 11 tells the real story though — 36:15/mi pace with 333ft of gain. [...] The first thing is that it was more than 333 ft of elevation gain - I think we should check to confirm this isn't done in meters, since the elevation gain I think was actually around 1k ft for that mile. [...] I actually went over 30 mi last week too, so 31 miles isn't a 36% jump"
+**Root cause (elevation):** `transformSplitForClaude` was only converting `elevation_difference` (used in Strava splits), but Strava laps use `total_elevation_gain` — a different field that was never converted. Claude saw the raw meter value and, per the glossary that says "elevation in feet", reported it as feet (333m shown as 333ft instead of 1093ft). Also switched `splits_imperial` → `splits_metric` in the webhook, since splits_metric guarantees meters for all fields (splits_imperial elevation_difference unit is ambiguous across Strava clients).
+**Root cause (weekly ramp):** `weekOverWeekRampPct` was comparing the last two *completed* weeks (e.g., March 2-8 vs Feb 23-Mar 1), but Dean was misapplying it to "this week vs last week." Fixed to compare the current week's mileage (already computed as `weekMileageSoFar`) vs the last completed week — which is the comparison athletes and coaches actually care about.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/webhooks/strava/route.ts`
+
+---
+
 ## 2026-03-13 — Added dedicated injury background step in onboarding
 
 **Type:** Improvement

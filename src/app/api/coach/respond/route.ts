@@ -142,7 +142,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
   const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone);
-  const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null);
+  const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null, weekMileageSoFar);
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
@@ -565,7 +565,7 @@ function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): n
  * Compute proactive coaching signals from recent activity data.
  * These are surfaced in the system prompt so Dean can bring them up at natural moments.
  */
-function computeCoachingSignals(activities: ActivityRow[], timezone: string, raceDate?: string | null): CoachingSignals {
+function computeCoachingSignals(activities: ActivityRow[], timezone: string, raceDate?: string | null, currentWeekMiles?: number): CoachingSignals {
   const runTypes = new Set(["Run", "TrailRun", "VirtualRun"]);
 
   // Average cadence from the 10 most recent runs with cadence data
@@ -576,23 +576,21 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
     ? runsWithCadence.reduce((s, a) => s + (a.average_cadence ?? 0), 0) / runsWithCadence.length
     : null;
 
-  // Week-over-week ramp: compare the two most recently completed weeks (not current partial week)
+  // Week-over-week ramp: compare current week's mileage (so far) vs last completed week.
+  // Using current vs last-completed is what athletes and coaches actually track for overuse risk.
   const thisMonday = localWeekMonday(new Date(), timezone);
   const weeklyMiles: Record<string, number> = {};
   for (const a of activities) {
     if (!RUN_TYPES.has(a.activity_type)) continue;
     const key = localWeekMonday(new Date(a.start_date), timezone);
-    if (key >= thisMonday) continue; // skip current partial week
+    if (key >= thisMonday) continue; // skip current partial week — we use currentWeekMiles instead
     weeklyMiles[key] = (weeklyMiles[key] || 0) + (a.distance_meters || 0) / 1609.34;
   }
   const sortedCompleteWeeks = Object.keys(weeklyMiles).sort().reverse();
   let weekOverWeekRampPct: number | null = null;
-  if (sortedCompleteWeeks.length >= 2) {
-    const lastWeek = weeklyMiles[sortedCompleteWeeks[0]];
-    const prevWeek = weeklyMiles[sortedCompleteWeeks[1]];
-    if (prevWeek > 0) {
-      weekOverWeekRampPct = ((lastWeek - prevWeek) / prevWeek) * 100;
-    }
+  const lastCompletedWeekMiles = sortedCompleteWeeks.length > 0 ? weeklyMiles[sortedCompleteWeeks[0]] : null;
+  if (currentWeekMiles != null && lastCompletedWeekMiles != null && lastCompletedWeekMiles > 0) {
+    weekOverWeekRampPct = ((currentWeekMiles - lastCompletedWeekMiles) / lastCompletedWeekMiles) * 100;
   }
 
   // Total tracked miles — rough shoe mileage proxy
@@ -750,7 +748,7 @@ function buildCoachingSignalsBlock(signals: CoachingSignals): string {
   }
 
   if (signals.weekOverWeekRampPct !== null && signals.weekOverWeekRampPct > 10) {
-    lines.push(`- Mileage ramp: +${Math.round(signals.weekOverWeekRampPct)}% from the prior week (above the 10% guideline). Mention this in the weekly recap — bones and tendons adapt slower than cardiovascular fitness, so big jumps are where overuse injuries originate. Keep the tone matter-of-fact, not alarming.`);
+    lines.push(`- Mileage ramp: current week is +${Math.round(signals.weekOverWeekRampPct)}% above last completed week (above the 10% guideline). This compares the current week's mileage so far vs the prior full week — not the week before that. Mention this naturally in post-run feedback or the weekly recap — bones and tendons adapt slower than cardiovascular fitness, so big jumps are where overuse injuries originate. Keep the tone matter-of-fact, not alarming.`);
   }
 
   if (signals.totalTrackedMiles > 400) {
@@ -1256,7 +1254,9 @@ ${conversationHistory || "No previous messages."}`;
  */
 function transformSplitForClaude(split: Record<string, unknown>): Record<string, unknown> {
   const speed = typeof split.average_speed === "number" ? split.average_speed : null;
+  // splits_metric uses elevation_difference (meters); laps use total_elevation_gain (meters)
   const elevDiff = typeof split.elevation_difference === "number" ? split.elevation_difference : null;
+  const elevGain = typeof split.total_elevation_gain === "number" ? split.total_elevation_gain : null;
   const distMeters = typeof split.distance === "number" ? split.distance : null;
 
   const pace = speed && speed > 0
@@ -1271,11 +1271,13 @@ function transformSplitForClaude(split: Record<string, unknown>): Record<string,
   const result: Record<string, unknown> = { ...split };
   if (distMeters != null) result.distance_miles = Math.round((distMeters / 1609.34) * 100) / 100;
   if (pace) result.pace = pace;
+  // Convert elevation from meters to feet; replace raw fields so Claude can't misread units
   if (elevDiff != null) result.elevation_difference_feet = Math.round(elevDiff * 3.28084);
-  // Remove the raw Strava fields so Claude doesn't misread the units
+  if (elevGain != null) result.total_elevation_gain_feet = Math.round(elevGain * 3.28084);
   delete result.distance;
   delete result.average_speed;
   delete result.elevation_difference;
+  delete result.total_elevation_gain;
   return result;
 }
 

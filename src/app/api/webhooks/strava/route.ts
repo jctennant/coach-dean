@@ -104,7 +104,10 @@ export async function POST(request: Request) {
           gear_name: activity.gear?.name || null,
           start_date: activity.start_date,
           summary: {
-            splits: activity.splits_imperial,
+            // Use splits_metric — distance in meters, elevation in meters, guaranteed consistent units.
+            // splits_imperial uses miles as split boundary but elevation_difference unit is ambiguous
+            // (some Strava clients return feet, others meters). splits_metric is always meters.
+            splits: activity.splits_metric,
             laps: activity.laps,
           },
         },
