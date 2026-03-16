@@ -8,6 +8,75 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-15 — Weekly plan consistency: persist schedule changes, constrain weekly_recap to training days
+
+**Type:** Bug Fix
+**Reported by:** Ian (user conversation)
+**User feedback:** "I think I'm doing Tuesday or Wednesday + Thursday + Sunday as per your previous guidance (might have 2 chats going?). Saturday will likely be spin class + pickleball again." — Sunday morning said rest/hike, Sunday evening recap generated Thu/Sat/Sun instead of honoring the confirmed Tue+Thu+Sun schedule.
+**Root cause:** Two issues: (1) When an athlete changes their recurring schedule mid-conversation ("I'm switching to Tue/Thu/Sun"), `training_days` in `training_profiles` was not updated — only `weekly_plan_sessions` for the current week. The next weekly_recap fired without knowing the new schedule. (2) The `weekly_recap` prompt had no explicit constraint requiring it to use stored `training_days`, so Claude would sometimes generate sessions on wrong days.
+**Fix / Change:** Added `updated_training_days` field to `ExtractedProfileData` and the Haiku extraction prompt. When detected, `persistProfileUpdates` now updates `training_days` in `training_profiles`. Added `SCHEDULE CONSTRAINT` block to both `weekly_recap` and `initial_plan` prompts: "Only schedule sessions on the athlete's confirmed training days listed under 'Training days' in ATHLETE HISTORY."
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-03-15 — Onboarding improvements (LOW priority batch)
+
+**Type:** Improvement
+**Reported by:** Onboarding simulation (10 athletes, 2026-03-12)
+**User feedback:** N/A (simulation findings)
+**Root cause:** Four onboarding gaps identified: (1) month-only race date caused cold re-ask, (2) returning runners classified as general_fitness losing their fitness context, (3) stale PRs used without a staleness warning, (4) race date question felt formal for vague beginners.
+**Fix / Change:**
+- Added `race_month` field to `extractAdditionalFields`. If a month is mentioned but no specific date, `getStepQuestion("awaiting_race_date")` now pre-fills: "You mentioned [Month] — do you have a specific date in mind?"
+- Added `return_to_running` goal type to classifier, `getSportType`, `formatGoalInline`, `isStepSatisfied` (skips race_date and goal_time steps), and acknowledgment text.
+- Added `pr_year` extraction in `extractAdditionalFields`. If PR year is ≥2 years old, coaching system prompt flags: "PR data is from [year] — X years ago. Treat as a starting estimate."
+- Softened `awaiting_race_date` question for beginners (experience_years < 0.5): "Do you have a specific date in mind, or is it more like 'sometime this summer'?"
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
+## 2026-03-15 — Rules-based taper protocol
+
+**Type:** Feature
+**Reported by:** Conversation analysis (users 55babb83, 455af698, b1b308cf)
+**User feedback:** Same timeframe before race, three users received completely different taper logic — one got a tempo run 9 days out, another got easy miles, a third got 30-35mi at 2 weeks out.
+**Root cause:** Taper plans were generated entirely by the LLM from vague system prompt guidelines. No concrete volume targets existed, so output was inconsistent across users.
+**Fix / Change:** Added a code-computed taper block in `buildSystemPrompt`. When `daysUntilRace <= 21` and average weekly mileage is known, a `TAPER PROTOCOL` section is injected with specific week-by-week mileage targets (computed as percentages of peak volume, varying by race distance: marathon, half, ultra, shorter). The LLM personalizes language but must use these numbers. Race week is always easy-only.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-03-15 — Strava data hallucination guard
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user 455af698)
+**User feedback:** "It was a rainy trail run in Hawaii where we got lost and went farther than we thought we wanted to!!" — suggested Dean described a run that didn't match reality
+**Root cause:** When `post_run` triggered with limited Strava data (no splits, no HR, no laps), Claude would infer or fabricate specific lap paces, HR values, and mile splits — presenting them as fact.
+**Fix / Change:** Added `DATA AVAILABILITY GUARD` block in the `post_run` user message. For each data type (splits, laps, HR), if the data is absent in `activityData`, an explicit instruction is injected: "No [type] data was synced from Strava. Do NOT quote specific values." Claude can only reference data that's actually present.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-03-15 — Injury escalation protocol
+
+**Type:** Feature
+**Reported by:** Conversation analysis (multiple users)
+**User feedback:** "Right knee and ankles felt very tight this session." / "Still some soreness in my right glute... sitting in airports a lot... seems to aggravate the glute as well"
+**Root cause:** Dean had no mechanism to detect or escalate recurring injuries — it continued coaching normally even when the same body part was flagged session after session.
+**Fix / Change:** Added `injury_body_parts text[]` column to `training_profiles`. Haiku extraction now identifies the primary body part (knee, glute, shin, etc.) from any injury mention and accumulates it in the DB. If a body part is already in `injury_body_parts` when mentioned again, the system prompt injects a RECURRING INJURY ALERT instructing Dean to (1) acknowledge the recurrence, (2) recommend rest or reduced intensity, (3) refer to a PT/sports doc.
+**Files changed:** migrations/016_injury_body_parts.sql, supabase/migrations/016_injury_body_parts.sql, src/app/api/coach/respond/route.ts, src/lib/database.types.ts
+
+## 2026-03-15 — Weekly mileage math error correction
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user 455af698)
+**User feedback:** "Wait this is 25 miles not 16 fyi"
+**Root cause:** Claude was summing weekly session distances itself — a task LLMs are unreliable at. Errors of 10+ miles were possible.
+**Fix / Change:** Added `correctMileageTotal()` post-processing function that parses session lines from the generated message, sums running miles in code, and replaces any stated weekly total that differs by more than 0.4 miles. Also added a `MILEAGE ACCURACY` instruction in the system prompt requiring Claude to verify the total before writing it.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-03-15 — VDOT and pace zones persisted to DB
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user 455af698)
+**User feedback:** Three different easy pace ranges in one conversation — "9:30-10:00/mi", "8:45-9:30/mi", "7:40–8:10/mi"
+**Root cause:** VDOT was being recalculated by Claude from scratch each message, with Claude using web search to look up its own (inaccurate) VDOT tables. No persistent ground truth existed.
+**Fix / Change:** Added `current_vdot numeric` column to `training_profiles`. Haiku extraction now fires before `buildSystemPrompt` for user messages — if a PR is mentioned, VDOT + paces are computed in code (Jack Daniels formula) and injected into the system prompt immediately. VDOT and paces are also persisted to the DB for all future sessions. System prompt includes a CRITICAL block forbidding web search or recalculation of paces.
+**Files changed:** migrations/015_current_vdot.sql, supabase/migrations/015_current_vdot.sql, src/app/api/coach/respond/route.ts, src/lib/paces.ts, src/lib/database.types.ts
+
+---
+
 ## 2026-03-14 — Fix: coach recalculating wrong VDOT via web search despite stored paces
 
 **Type:** Bug Fix

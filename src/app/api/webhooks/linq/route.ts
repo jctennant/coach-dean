@@ -166,8 +166,13 @@ async function handleInboundMessage(
   // real DB error (e.g. missing column) without falling into the insert path.
   // Check for opt-out before anything else — even before creating a new user.
   const normalizedBody = body.trim().toUpperCase();
-  const isHardStop = normalizedBody === "STOP" || normalizedBody === "STOPALL" || normalizedBody === "UNSUBSCRIBE" || normalizedBody === "CANCEL" || normalizedBody === "QUIT";
-  const isSoftStop = !isHardStop && /don['']?t (want|send|text)|no more (messages|texts)|stop (texting|messaging|sending)|opt.?out|unsubscribe/i.test(body);
+  // Hard stop: exact TCPA keywords, or "STOP" as the first word with nothing meaningful after
+  // (e.g. "STOP MESSAGES", "STOP TEXTING ME", "STOP ALL"). Limit to ≤30 chars to avoid
+  // catching conversational mentions like "stop sending me so many plans".
+  const isHardStop = normalizedBody === "STOP" || normalizedBody === "STOPALL" ||
+    normalizedBody === "UNSUBSCRIBE" || normalizedBody === "CANCEL" || normalizedBody === "QUIT" ||
+    (normalizedBody.length <= 30 && /^STOP\b/.test(normalizedBody));
+  const isSoftStop = !isHardStop && /don['']?t (want|send|text)|no more (messages|texts)|stop (texting|messaging|sending|messages?)|opt.?out|unsubscribe/i.test(body);
 
   const isRestart = normalizedBody === "START" || normalizedBody === "UNSTOP" || normalizedBody === "RESUME" || normalizedBody === "YES";
 

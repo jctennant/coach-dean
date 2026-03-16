@@ -163,11 +163,13 @@ export type Database = {
           current_easy_pace: string | null
           current_interval_pace: string | null
           current_tempo_pace: string | null
+          current_vdot: number | null
           days_per_week: number | null
           fitness_level: string | null
           goal: string | null
           goal_time_minutes: number | null
           id: string
+          injury_body_parts: string[] | null
           injury_notes: string | null
           last_morning_reminder_date: string | null
           last_nightly_reminder_date: string | null
@@ -185,11 +187,13 @@ export type Database = {
           current_easy_pace?: string | null
           current_interval_pace?: string | null
           current_tempo_pace?: string | null
+          current_vdot?: number | null
           days_per_week?: number | null
           fitness_level?: string | null
           goal?: string | null
           goal_time_minutes?: number | null
           id?: string
+          injury_body_parts?: string[] | null
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
@@ -207,11 +211,13 @@ export type Database = {
           current_easy_pace?: string | null
           current_interval_pace?: string | null
           current_tempo_pace?: string | null
+          current_vdot?: number | null
           days_per_week?: number | null
           fitness_level?: string | null
           goal?: string | null
           goal_time_minutes?: number | null
           id?: string
+          injury_body_parts?: string[] | null
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null

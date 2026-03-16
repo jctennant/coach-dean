@@ -278,7 +278,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     // Otherwise two non-space character boundaries meet — insert a single space.
     return acc + " " + block;
   }, "");
-  const coachMessage = correctMileageTotal(stripMarkdown(rawText));
+  // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
+  // further processing. These should never reach the athlete's SMS.
+  const strippedRaw = rawText.replace(/\[NO_REPLY\]/gi, "").trim();
+  const coachMessage = correctMileageTotal(stripMarkdown(strippedRaw));
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -1006,6 +1009,34 @@ function buildSystemPrompt(
     const weeksUntil = Math.round(daysUntil / 7);
     dateContext += `- Race date: ${profile.race_date} (${daysUntil} days / ~${weeksUntil} weeks away)\n`;
     dateContext += `- Plan backwards from race date: allocate taper (2 weeks), peak (2-3 weeks), build, and base phases\n`;
+
+    // Inject a code-computed taper plan when 21 days or fewer remain
+    if (daysUntil > 0 && daysUntil <= 21 && avgWeeklyMileage && avgWeeklyMileage > 0) {
+      const peak = Math.round(avgWeeklyMileage * 10) / 10;
+      const goal = profile?.goal as string | null;
+      const isUltra = ["50k","100k","50mi","100mi"].includes(goal ?? "");
+      const isMarathon = goal === "marathon";
+      const isHalf = goal === "half_marathon";
+
+      // Volume percentages by race type and taper stage
+      let w3Pct = 0.88, w2Pct = 0.72, w1Pct = 0.45;
+      if (isUltra)    { w3Pct = 0.78; w2Pct = 0.62; w1Pct = 0.40; }
+      else if (isMarathon) { w3Pct = 0.88; w2Pct = 0.72; w1Pct = 0.45; }
+      else if (isHalf)     { w3Pct = 0.90; w2Pct = 0.75; w1Pct = 0.50; }
+      else               { w3Pct = 0.90; w2Pct = 0.78; w1Pct = 0.55; } // 5K/10K
+
+      const w3 = Math.round(peak * w3Pct);
+      const w2 = Math.round(peak * w2Pct);
+      const w1 = Math.round(peak * w1Pct);
+
+      if (daysUntil > 14) {
+        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. This week (3 weeks out): ${w3}mi total. Next week (2 weeks out): ${w2}mi total. Race week: ${w1}mi total. No quality sessions in race week — easy miles only. One short race-pace tune-up (2-3mi @ goal pace) allowed 10-12 days out.\n`;
+      } else if (daysUntil > 7) {
+        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. This week (2 weeks out): ${w2}mi total. Race week: ${w1}mi total. No quality sessions in race week — easy miles only. One short race-pace tune-up (2-3mi @ goal pace) is acceptable this week.\n`;
+      } else {
+        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. Race week: ${w1}mi total. Easy miles only — no hard workouts. Shakeout run (15-30 min easy) the day before is optional.\n`;
+      }
+    }
   }
 
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
@@ -1094,7 +1125,7 @@ ${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}
 - Weekly volume: ${weeklyHours ? `~${weeklyHours} hours/week` : state?.weekly_mileage_target ? `${state.weekly_mileage_target} miles/week` : "unknown"}
 - Goal: ${profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown"}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
-${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}
+${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
 
@@ -1133,8 +1164,8 @@ ${(() => {
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
 - Mileage so far this week: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} (Strava-synced; authoritative — use ONLY these figures for session count and weekly mileage, do NOT use "Last 4 weeks" totals from ATHLETE HISTORY; when projecting end-of-week totals, always ADD this to any remaining planned sessions — never report just the planned sessions as the week total; e.g. if this is 8 mi and Saturday has 4 mi planned, the projected total is 12 mi)
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
-- Athlete VDOT: ${freshVdot != null ? freshVdot : "unknown (no race data on file)"}
-- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}
+- Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
+- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
 - RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
 - RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
@@ -1326,6 +1357,7 @@ function formatGoalLabel(goal: string): string {
     half_marathon: "a half marathon",
     marathon: "a marathon",
     general_fitness: "general fitness",
+    return_to_running: "returning to running",
     "30k": "a 30K trail race",
     "50k": "a 50K ultra",
     "100k": "a 100K ultra",
@@ -1341,6 +1373,7 @@ function formatGoalLabel(goal: string): string {
 
 type ExtractedProfileData = {
   injury_notes?: string | null;
+  injury_body_part?: string | null;
   new_crosstraining?: string[] | null;
   other_notes?: string | null;
   recent_race_distance_km?: number | null;
@@ -1350,6 +1383,7 @@ type ExtractedProfileData = {
   skip_date?: string | null;
   race_date?: string | null;
   goal_time_minutes?: number | null;
+  updated_training_days?: string[] | null;
   workout?: {
     activity_type: string;
     distance_meters: number | null;
@@ -1377,7 +1411,7 @@ async function extractProfileData(message: string, timezone?: string): Promise<E
       system: `Today is ${todayName}. Extract structured data from an athlete's message to their coach.
 
 Extract ONLY explicitly stated NEW information:
-- A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week")
+- A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week") AND injury_body_part (the primary body part: one normalized lowercase term, e.g. "knee", "ankle", "shin", "glute", "hamstring", "calf", "foot", "hip", "back", "it_band"). Only set injury_body_part if the pain/soreness is clearly related to running (not e.g. a cold).
 - New cross-training activities or equipment access mentioned (pool, bike, gym, yoga, etc.) → new_crosstraining (array of normalized strings)
 - New training preferences, goals, or constraints (e.g. "I want more hill work", "please add strength training", "I can't run Tuesdays anymore") → other_notes
 - A PR or recent race time → recent_race_distance_km + recent_race_time_minutes. Distances: 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If given as a pace (e.g. "5K PR pace is 5:40/mi"), compute total time: pace_sec/mile × distance_in_miles / 60 (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
@@ -1393,8 +1427,9 @@ Extract ONLY explicitly stated NEW information:
 - A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${todayDateStr}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
 - A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th") → race_date as "YYYY-MM-DD". Only set when athlete clearly states a specific race date. If month only, use first day of that month. Today is ${todayDateStr}.
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
+- A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip or swap.
 
-Output: {"injury_notes": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -1432,12 +1467,14 @@ async function persistProfileUpdates(
     const hasGoalTime = typeof extracted.goal_time_minutes === "number" && extracted.goal_time_minutes > 0;
     const hasWorkout = !!extracted.workout;
 
-    if (!hasInjury && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout) return;
+    const hasInjuryBodyPart = !!extracted.injury_body_part;
+    const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
+    if (!hasInjury && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
     // Compute VDOT paces if race data provided, otherwise use easy pace estimate
-    let computedPaces: { easy: string; tempo: string; interval: string } | null = null;
+    let computedPaces: { easy: string; tempo: string; interval: string; vdot?: number } | null = null;
     if (hasRaceData) {
       computedPaces = calculateVDOTPaces(
         extracted.recent_race_distance_km as number,
@@ -1451,6 +1488,12 @@ async function persistProfileUpdates(
     // Build profile update
     const profileUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (hasInjury) profileUpdate.injury_notes = extracted.injury_notes;
+    if (hasInjuryBodyPart) {
+      const existingParts = (profile?.injury_body_parts as string[]) || [];
+      if (!existingParts.includes(extracted.injury_body_part as string)) {
+        profileUpdate.injury_body_parts = [...existingParts, extracted.injury_body_part as string];
+      }
+    }
     if (hasCrosstraining) {
       const existing = (profile?.crosstraining_tools as string[]) || [];
       profileUpdate.crosstraining_tools = Array.from(new Set([...existing, ...(extracted.new_crosstraining as string[])]));
@@ -1465,9 +1508,11 @@ async function persistProfileUpdates(
       profileUpdate.current_easy_pace = computedPaces.easy;
       if (computedPaces.tempo) profileUpdate.current_tempo_pace = computedPaces.tempo;
       if (computedPaces.interval) profileUpdate.current_interval_pace = computedPaces.interval;
+      if (computedPaces.vdot) profileUpdate.current_vdot = computedPaces.vdot;
     }
     if (hasRaceDate) profileUpdate.race_date = extracted.race_date;
     if (hasGoalTime) profileUpdate.goal_time_minutes = extracted.goal_time_minutes;
+    if (hasTrainingDays) profileUpdate.training_days = extracted.updated_training_days;
 
     // Build onboarding_data update
     const updatedOnboardingData = { ...onboardingData };
@@ -1572,12 +1617,25 @@ function buildUserMessage(
       const injuryReminder = injuryNotes
         ? `\nINJURY FOLLOW-UP: This athlete has active concern notes: "${injuryNotes}". If they haven't mentioned how this area felt during the run, check in on it — one brief question as part of your feedback.`
         : "";
+
+      // Build data availability guards to prevent Claude from hallucinating specific values
+      const hasSplits = !!(rawSummary?.splits && (rawSummary.splits as unknown[]).length > 0);
+      const hasLaps = !!(rawSummary?.laps && (rawSummary.laps as unknown[]).length > 0);
+      const hasHR = !!(activityData?.average_heartrate != null);
+      const dataGuards: string[] = [];
+      if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
+      if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT invent or estimate lap paces or lap-by-lap effort.");
+      if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference specific HR values.");
+      const dataGuardBlock = dataGuards.length > 0
+        ? `\nDATA AVAILABILITY GUARD — the following data is NOT present; do not fabricate it:\n${dataGuards.map(g => `- ${g}`).join("\n")}`
+        : "";
+
       return `A workout just synced from Strava. ${dateNote}
 
 DATA GLOSSARY for the details below:
 - summary.splits: auto-generated by Strava, one entry per mile. Shows pace for each mile of the run.
 - summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown.
-- All paces are min/mile. Elevation in feet. Distances in miles.
+- All paces are min/mile. Elevation in feet. Distances in miles.${dataGuardBlock}
 
 Details:
 ${JSON.stringify(activityForClaude, null, 2)}
@@ -1635,6 +1693,8 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
     case "weekly_recap":
       return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — week 4 is a recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
+SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
+
 For the sessions text, put each session on its own line using this compact format, sorted chronologically by date — never group by type:
 Mon 3/2 · Easy 5mi @ 9:30/mi
 Tue 3/3 · Strength + mobility 20 min
@@ -1685,6 +1745,8 @@ SPORT-SPECIFIC GUIDANCE:
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
 
 MILEAGE ACCURACY: Before writing any weekly mileage total, silently sum every running session distance to verify it. Strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match, correct the sessions or the stated total before writing — never show the calculation in your response. If you're not listing every session, omit the total entirely.
+
+SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days if the athlete has requested them.
 
 DATES AND DAY LABELS:
 - CRITICAL: Use the day names from DATE CONTEXT above — do not compute weekdays yourself. DATE CONTEXT lists tomorrow and the next 7 days with correct day names. Copy them directly. "Wed, Mar 11" → use "Wed 3/11". Getting these wrong destroys trust.

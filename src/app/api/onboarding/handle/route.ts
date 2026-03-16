@@ -142,7 +142,7 @@ async function handleGoal(
       max_tokens: 128,
       system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"injury_recovery"|null}
+Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery"|null}
 
 Rules:
 - complete: true only if a clear training goal is identifiable
@@ -158,7 +158,8 @@ Rules:
 - "ironman", "full ironman", "140.6" → "ironman"
 - "cycling", "gravel race", "gran fondo", "bike race" → "cycling"
 - "just getting in shape", "get fit", "lose weight", "general" → "general_fitness"
-- "recovering from injury", "coming back from injury", "injured", "IT band", "stress fracture", "shin splints", "return to running", "rebuilding after injury" → "injury_recovery"
+- "ran in college/high school and returning", "returning to running after X years off", "getting back into running", "haven't run in years", "rebuilding my base" (without injury context) → "return_to_running"
+- "recovering from injury", "coming back from injury", "injured", "IT band", "stress fracture", "shin splints", "rebuilding after injury" → "injury_recovery"
 - When complete is false, goal must be null`,
       messages: [{ role: "user", content: message }],
     }),
@@ -284,6 +285,8 @@ Rules:
     acknowledgment = raceInfo.ack;
   } else if (parsed.goal === "injury_recovery") {
     acknowledgment = `Got it${name ? `, ${name}` : ""} — coming back from injury safely is exactly what I'm here for. I'll build a return-to-run plan around your recovery, not a generic training schedule.`;
+  } else if (parsed.goal === "return_to_running") {
+    acknowledgment = `Perfect${name ? `, ${name}` : ""} — getting back into it after a break is a unique challenge. I'll build something that respects where you are now while taking advantage of your fitness base. We'll ramp carefully so you don't get hurt coming back.`;
   } else if (parsed.goal === "general_fitness") {
     acknowledgment = `Love it${name ? `, ${name}` : ""} — building a consistent habit is a great foundation. I'll put together a plan that builds properly and adapts to your schedule.`;
   } else {
@@ -303,7 +306,7 @@ Rules:
     const bridge =
       parsed.goal === "injury_recovery"
         ? "Want me to put together a return-to-run plan? A few quick questions first."
-        : parsed.goal === "general_fitness"
+        : (parsed.goal === "general_fitness" || parsed.goal === "return_to_running")
           ? "Would you like me to put together a training plan around your goals? I have just a few quick questions."
           : `Would you like me to build you a proper ${goalLabel} training plan? I just have a few quick questions.`;
     responseText = `${immediateAnswer}\n\n${bridge}${question ? `\n\n${question}` : ""}`.trim();
@@ -1016,7 +1019,7 @@ const CYCLING_GOALS = ["cycling"];
 function getSportType(goal: string): "running" | "triathlon" | "cycling" | "general" {
   if (TRIATHLON_GOALS.includes(goal)) return "triathlon";
   if (CYCLING_GOALS.includes(goal)) return "cycling";
-  if (goal === "general_fitness" || goal === "injury_recovery") return "general";
+  if (goal === "general_fitness" || goal === "return_to_running" || goal === "injury_recovery") return "general";
   return "running";
 }
 
@@ -1042,13 +1045,13 @@ const STEP_ORDER = [
 function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
   switch (step) {
     case "awaiting_race_date":
-      // Skip entirely for injury recovery — no race date needed
-      if (data.goal === "injury_recovery") return true;
+      // Skip for injury recovery and return_to_running — no race date needed
+      if (data.goal === "injury_recovery" || data.goal === "return_to_running") return true;
       // Satisfied if race_date key exists (even null = "no race")
       return Object.prototype.hasOwnProperty.call(data, "race_date");
     case "awaiting_goal_time":
-      // Skip for general fitness, injury recovery, and ultras (cutoffs matter more than finish times)
-      if (data.goal === "general_fitness" || data.goal === "injury_recovery" || ULTRA_GOALS.includes(data.goal as string)) return true;
+      // Skip for general fitness, return_to_running, injury recovery, and ultras (cutoffs matter more than finish times)
+      if (data.goal === "general_fitness" || data.goal === "return_to_running" || data.goal === "injury_recovery" || ULTRA_GOALS.includes(data.goal as string)) return true;
       // Satisfied once goal_time_minutes key exists (even null = "no specific goal")
       return Object.prototype.hasOwnProperty.call(data, "goal_time_minutes");
     case "awaiting_strava":
@@ -1113,10 +1116,22 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       return `Before I put your plan together — do you use Strava? If you connect it, I can pull in your training history and build something much sharper from day 1.\n\n${stravaUrl}\n\nNo Strava? Just reply "skip".`;
     }
 
-    case "awaiting_race_date":
-      return data.goal === "general_fitness"
-        ? "Do you have a target event or date in mind? If not, just say 'no event' and we'll keep the plan open-ended."
-        : "What's the date of your event? If you don't have one locked in yet, give me your best target and we can adjust later.";
+    case "awaiting_race_date": {
+      if (data.goal === "general_fitness") {
+        return "Do you have a target event or date in mind? If not, just say 'no event' and we'll keep the plan open-ended.";
+      }
+      // Pre-fill if a month was mentioned but no specific date captured yet
+      const raceMonth = data.race_month as string | null;
+      if (raceMonth) {
+        return `You mentioned ${raceMonth} — do you have a specific date in mind, or is it more like "sometime in ${raceMonth}"? A rough date is totally fine.`;
+      }
+      // Softer tone for beginners with vague timelines
+      const experienceYears = (data.experience_years as number) ?? null;
+      if (experienceYears !== null && experienceYears < 0.5) {
+        return "Do you have a specific date in mind, or is it more like 'sometime this summer'? Either's fine — we can lock it in later.";
+      }
+      return "What's the date of your event? If you don't have one locked in yet, give me your best target and we can adjust later.";
+    }
 
     case "awaiting_schedule":
       if (isTri) return "How many days a week are you training total? And do you have any days that work better for longer sessions?";
@@ -1241,7 +1256,7 @@ async function extractAdditionalFields(
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null}
+{"race_date": "YYYY-MM-DD" | null, "race_month": "Month" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "pr_year": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null}
 
 Rules:
 - name: Extract if the athlete introduces themselves. Be generous — people introduce themselves in many ways:
@@ -1251,11 +1266,13 @@ Rules:
   With "here": "[Name] here" (e.g. "Mark here", "Hey, Mark here")
   NEVER extract from greetings directed at Coach Dean like "Hey Dean!" or "Hi Coach!" — those address the coach, not the athlete. Return null if genuinely ambiguous.
 - race_date: if a specific target race date is mentioned. Today is ${today}.
+- race_month: if a month is mentioned as a rough race timing but no specific date is given (e.g. "in October", "sometime this spring", "around June"). Use the month name (e.g. "October", "June"). Set race_date instead if a specific date is known. null if a full date is extracted or nothing mentioned.
 - experience_years: infer from any experience signal. "new runner" or "just started" → 0. "fairly inexperienced" → 0.2. "completed an 8 week plan" with no prior context → 0.15. "a year" → 1. "5+ years" → 5.
 - weekly_miles: total weekly running mileage. If stated as a per-day or per-weekday average (e.g. "I run 5-6 miles a day", "5-6 miles weekdays"), multiply by the number of days implied (weekdays = 5, "every day" = 7) to get a weekly total. Convert km to miles (×0.621).
 - easy_pace: ONLY a stated comfortable, easy, or conversational running pace. Do NOT extract race pace, PR pace, or anything described as a PR, best time, or race effort. Format as M:SS per mile. "8:30/m" → "8:30". "5:00/km" → "8:03".
 - recent_race_distance_km: if a PR or recent race is mentioned. 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If the athlete gives a pace rather than a time (e.g. "5K PR pace is 5:40/mi"), compute the total time: pace_per_mile × distance_in_miles (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
 - recent_race_time_minutes: total race time in minutes for the PR/race above. If given as a pace, compute time = pace_sec/mile × distance_in_miles / 60.
+- pr_year: the year the PR was run if mentioned (e.g. "my 1:42 half from 2019", "ran a 3:45 marathon last year"). Use the actual year number. null if not mentioned.
 - injury_mentioned: true if any injury or physical limitation is mentioned.
 - injury_notes: brief description of injury type, severity, and recovery status if an injury is mentioned (e.g. "IT band syndrome, recovering, avoiding back-to-back days"). null if no injury.
 - crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
@@ -1270,11 +1287,13 @@ Rules:
     const parsed = JSON.parse(extractJSON(text));
     const result: Record<string, unknown> = {};
     if (parsed.race_date != null) result.race_date = parsed.race_date;
+    if (parsed.race_month != null) result.race_month = parsed.race_month;
     if (parsed.experience_years != null) result.experience_years = parsed.experience_years;
     if (parsed.weekly_miles != null) result.weekly_miles = parsed.weekly_miles;
     if (parsed.easy_pace != null) result.easy_pace = parsed.easy_pace;
     if (parsed.recent_race_distance_km != null) result.recent_race_distance_km = parsed.recent_race_distance_km;
     if (parsed.recent_race_time_minutes != null) result.recent_race_time_minutes = parsed.recent_race_time_minutes;
+    if (parsed.pr_year != null) result.pr_year = parsed.pr_year;
     if (parsed.injury_mentioned === true) result.injury_mentioned = true;
     if (parsed.injury_notes != null) result.injury_notes = parsed.injury_notes;
     if (Array.isArray(parsed.crosstraining_tools) && parsed.crosstraining_tools.length > 0) result.crosstraining_tools = parsed.crosstraining_tools;
@@ -1644,6 +1663,7 @@ function formatGoalInline(goal: string): string {
     ironman: "Full Ironman",
     cycling: "cycling event",
     general_fitness: "general fitness",
+    return_to_running: "return to running",
     injury_recovery: "injury recovery",
   };
   return labels[goal] || goal;
