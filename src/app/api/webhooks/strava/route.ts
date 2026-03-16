@@ -75,6 +75,7 @@ export async function POST(request: Request) {
         .maybeSingle();
 
       const isNew = !existing;
+      let suppressCoaching = false;
 
       // Compute average pace (min/mi)
       const distanceMiles = activity.distance / 1609.34;
@@ -136,9 +137,55 @@ export async function POST(request: Request) {
         }
       }
 
+      // Detect near-duplicate Strava activities — same run stored twice with different
+      // activity IDs (e.g. watch auto-sync + manual GPX upload). Start times within
+      // ±2 min and distance within 15% of each other = treat as the same run.
+      if (isNew && activity.distance) {
+        const startMs = new Date(activity.start_date).getTime();
+        const startLow = new Date(startMs - 120_000).toISOString();
+        const startHigh = new Date(startMs + 120_000).toISOString();
+
+        const { data: nearDupes } = await supabase
+          .from("activities")
+          .select("id, strava_activity_id, distance_meters, average_heartrate, summary")
+          .eq("user_id", user.id)
+          .neq("strava_activity_id", activity.id)
+          .gte("start_date", startLow)
+          .lte("start_date", startHigh);
+
+        const stravaNearDupe = (nearDupes || []).find((dupe) => {
+          if (!dupe.distance_meters || !activity.distance) return false;
+          const larger = Math.max(dupe.distance_meters, activity.distance);
+          return Math.abs(dupe.distance_meters - activity.distance) / larger < 0.15;
+        });
+
+        if (stravaNearDupe) {
+          // Determine which record is richer (has HR or lap data)
+          const newIsRicher =
+            activity.average_heartrate != null &&
+            stravaNearDupe.average_heartrate == null;
+
+          if (newIsRicher) {
+            // Keep the new (richer) record, delete the old weaker one
+            console.log(
+              `[strava-webhook] near-dupe: deleting weaker existing activity ${stravaNearDupe.strava_activity_id} in favour of richer ${activity.id}`
+            );
+            await supabase.from("activities").delete().eq("id", stravaNearDupe.id);
+          } else {
+            // Keep the existing record, delete the new duplicate
+            console.log(
+              `[strava-webhook] near-dupe: new activity ${activity.id} is a duplicate of ${stravaNearDupe.strava_activity_id}, deleting new`
+            );
+            await supabase.from("activities").delete().eq("strava_activity_id", activity.id);
+          }
+          // Coaching already fired for the first-seen activity — suppress a second trigger
+          suppressCoaching = true;
+        }
+      }
+
       // Only fire coaching response for new activities (not duplicate webhook events)
       // and only for fully onboarded users.
-      if (isNew && user.onboarding_step === null) {
+      if (isNew && !suppressCoaching && user.onboarding_step === null) {
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -148,7 +195,7 @@ export async function POST(request: Request) {
             activityId: activity.id,
           }),
         });
-      } else if (!isNew) {
+      } else if (!isNew || suppressCoaching) {
         console.log(`[strava-webhook] duplicate event for activity ${activity.id}, skipping coaching response`);
       }
     } catch (err) {

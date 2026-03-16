@@ -8,6 +8,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-15 — Deduplicate near-identical Strava activities inflating mileage totals
+
+**Type:** Bug Fix
+**Reported by:** Luke (user feedback)
+**User feedback:** "he says he's at 58 miles this week, but this is the message he got from Dean [65.6 miles last week]"
+**Root cause:** Strava can create two separate activities with different activity IDs for the same physical run (e.g. watch auto-sync + manual GPX upload, start times 5 seconds apart). The webhook deduplicated same-ID events but had no guard against different-ID near-duplicates. Luke had 9 activities in the DB for a week where he ran 7 times; one duplicate (7.0mi) inflated his week total from ~58mi to ~65.6mi.
+**Fix / Change:**
+1. **Webhook ingestion** (`/api/webhooks/strava`): after storing a new activity, query for existing Strava activities from the same user with start times within ±2 minutes and distance within 15%. If found, keep the richer record (has HR wins); delete the weaker duplicate. Suppress the second coaching trigger regardless of which record survives.
+2. **`deduplicateActivities()` helper** in `coach/respond`: strips near-duplicates from the `recentActivities` list before it's passed to `computeWeekMileage`, `buildActivitySummary`, etc. This fixes existing dupes already in the DB without requiring a backfill migration.
+**Files changed:** `src/app/api/webhooks/strava/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-15 — Weekly plan consistency: persist schedule changes, constrain weekly_recap to training days
 
 **Type:** Bug Fix

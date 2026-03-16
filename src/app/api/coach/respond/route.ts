@@ -116,8 +116,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   let profile = profileResult.data;
   const state = stateResult.data;
   const recentMessages = conversationsResult.data?.reverse() || [];
-  const recentActivities =
-    (recentActivitiesResult.data as ActivityRow[] | null) || [];
+  const recentActivities = deduplicateActivities(
+    (recentActivitiesResult.data as ActivityRow[] | null) || []
+  );
   const raceHistory =
     (raceHistoryResult.data as Array<Record<string, unknown>> | null) || [];
 
@@ -565,6 +566,36 @@ function computeWeekRunCount(activities: ActivityRow[], timezone: string): numbe
     const activityDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(a.start_date));
     return activityDate >= thisMonday;
   }).length;
+}
+
+/**
+ * Remove near-duplicate activities (same run stored twice with different strava_activity_ids,
+ * e.g. watch auto-sync + manual GPX upload). Two activities are considered duplicates when:
+ *   - Start times are within 2 minutes of each other
+ *   - Distance is within 15% of each other
+ * When duplicates are found, the richer record (has HR data) is kept; otherwise the
+ * later-created one is dropped.
+ */
+function deduplicateActivities(activities: ActivityRow[]): ActivityRow[] {
+  const kept: ActivityRow[] = [];
+  for (const a of activities) {
+    const aMs = new Date(a.start_date).getTime();
+    const dupeIndex = kept.findIndex((k) => {
+      const kMs = new Date(k.start_date).getTime();
+      if (Math.abs(aMs - kMs) > 120_000) return false;
+      const larger = Math.max(k.distance_meters || 0, a.distance_meters || 0);
+      if (larger === 0) return false;
+      return Math.abs((k.distance_meters || 0) - (a.distance_meters || 0)) / larger < 0.15;
+    });
+    if (dupeIndex === -1) {
+      kept.push(a);
+    } else if (a.average_heartrate != null && kept[dupeIndex].average_heartrate == null) {
+      // Incoming activity is richer — replace the existing weaker one
+      kept[dupeIndex] = a;
+    }
+    // else: existing is richer or equivalent — discard incoming
+  }
+  return kept;
 }
 
 /**
