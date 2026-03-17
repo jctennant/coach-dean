@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-16 — Daily conversation analysis digest email
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** No automated way to catch coaching errors, hallucinations, or user complaints between manual review sessions.
+**Fix / Change:** Added `/api/cron/analyze-conversations` — runs daily at 9am UTC. Fetches all conversations from the prior day, groups by user, and sends full transcripts to Claude Opus for analysis. Claude looks for coaching errors, data hallucinations, user corrections/complaints, onboarding friction, and positive patterns worth preserving. Results are emailed as an HTML digest via Resend to `ANALYSIS_EMAIL_TO`. Uses `RESEND_API_KEY` env var. Schedule skips if there were zero conversations.
+**Files changed:** `src/app/api/cron/analyze-conversations/route.ts`, `vercel.json`, `.env.local.example`, `package.json`
+
+---
+
 ## 2026-03-15 — Deduplicate near-identical Strava activities inflating mileage totals
 
 **Type:** Bug Fix
