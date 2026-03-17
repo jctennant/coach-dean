@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-16 — Fix mileage total correction for complex interval sessions
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis (User 455af698)
+**User feedback:** "Wait this is 25 miles not 16 fyi" / "You're right — my math was way off… That's 26 miles, not 16."
+**Root cause:** `correctMileageTotal()` extracted the first mileage figure from each session line, which for complex interval sessions (e.g. "Intervals 2mi easy, 3×1mi @ 6:45, 1mi cooldown ≈7mi") grabbed "2" instead of the intended total "7". This caused the computed sum to be significantly lower than the actual planned mileage, so when Claude stated the wrong total (16 vs 26), the post-processing guard also computed ~16 and left it uncorrected.
+**Fix / Change:** Updated session mileage extraction to prefer explicit total markers (`≈Xmi`, `~Xmi`, `(Xmi total)`) before falling back to the first mileage figure. Also added two more total-phrase patterns to the regex so phrasing like "weekly total: X" and "puts you at X miles" get caught and corrected.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-16 — Daily conversation analysis digest email
 
 **Type:** Feature

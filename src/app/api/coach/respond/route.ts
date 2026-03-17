@@ -433,8 +433,13 @@ function correctMileageTotal(message: string): string {
     hasSessionList = true;
     const desc = m[2];
     if (nonRunningRe.test(desc)) continue;
-    // First mileage figure in the description is the session total (e.g. "Tempo 6mi (2mi @ 8:45)" → 6)
-    const miMatch = desc.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    // For complex sessions (intervals etc.), prefer an explicit total marker at the end:
+    //   "≈7mi", "~7mi", "(7mi total)", "= 7mi" — these are intentionally placed totals.
+    // Fall back to the first mileage figure for simple sessions ("Easy 5mi @ 9:30/mi" → 5).
+    const explicitTotal = desc.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
+      || desc.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
+    const firstMi = desc.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    const miMatch = explicitTotal || firstMi;
     if (miMatch) computedMiles += parseFloat(miMatch[1]);
   }
 
@@ -447,8 +452,10 @@ function correctMileageTotal(message: string): string {
   const totalPatterns: RegExp[] = [
     /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
     /(~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\s*(?:total|this week|for the week))/gi,
+    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
     /(stays?\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
     /(staying\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
   ];
 
   let corrected = message;
