@@ -2,7 +2,7 @@ import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/lib/paces";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS, sendMessageWithEffect, startTyping, typingDurationMs } from "@/lib/linq";
+import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import type { Json } from "@/lib/database.types";
@@ -19,7 +19,6 @@ interface CoachRequest {
   dry_run?: boolean;
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder
-  force_confetti?: boolean; // Admin/testing only — bypass the mileage goal check and always fire confetti
 }
 
 interface ActivityRow {
@@ -68,7 +67,7 @@ export async function POST(request: Request) {
 }
 
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
-  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin, force_confetti } = body;
+  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin } = body;
 
   // Fetch user context in parallel
   const [
@@ -322,16 +321,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
               ? "weekly_recap"
               : "coach_response";
 
-  // Confetti on weekly recap when the athlete hit ≥90% of their mileage target.
-  // Strategy: if chatId is already known (stored in DB), apply confetti to the first
-  // bubble (the celebratory recap). If chatId isn't known yet, send all parts normally
-  // so we can learn it, then fire a brief confetti follow-up after.
   const targetMiles = (state?.weekly_mileage_target as number | null) ?? 0;
-  const shouldConfetti =
-    trigger === "weekly_recap" &&
-    (force_confetti || (targetMiles > 0 && weekMileageSoFar >= targetMiles * 0.9));
-  const confettiChatIdKnown = shouldConfetti && !!chatId;
-
   let learnedChatId: string | null = null;
 
   for (let i = 0; i < parts.length; i++) {
@@ -351,14 +341,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       await new Promise((r) => setTimeout(r, composeMs));
     }
 
-    if (confettiChatIdKnown && i === 0) {
-      // chatId was known upfront — apply confetti to the first (celebratory recap) bubble.
-      await sendMessageWithEffect(chatId!, part, { type: "screen", name: "confetti" });
-      console.log("[coach/respond] confetti on first bubble — week:", weekMileageSoFar.toFixed(1), "/ target:", targetMiles);
-    } else {
-      const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
-      if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
-    }
+    const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
+    if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
 
     await supabase.from("conversations").insert({
       user_id: userId,
@@ -367,18 +351,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       message_type: msgType,
       strava_activity_id: activityId || null,
     });
-  }
-
-  // If confetti is warranted but chatId wasn't known until after the sends, fire it
-  // now as a brief follow-up bubble using the learned chatId. This covers the rare
-  // case where linq_chat_id wasn't stored yet (e.g. user's very first weekly recap).
-  if (shouldConfetti && !confettiChatIdKnown) {
-    const fallbackChatId = learnedChatId;
-    if (fallbackChatId) {
-      await new Promise((r) => setTimeout(r, 800));
-      await sendMessageWithEffect(fallbackChatId, "🎊", { type: "screen", name: "confetti" });
-      console.log("[coach/respond] confetti fallback bubble sent — chatId learned mid-send");
-    }
   }
 
   // Persist chatId if we learned it for the first time
