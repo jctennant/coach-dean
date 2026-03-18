@@ -44,6 +44,24 @@ export async function GET(request: Request) {
       continue;
     }
 
+    // Skip Monday morning reminder if a weekly recap was sent last night (Sunday) —
+    // the recap already covered Monday's session and closed with a check-in invite.
+    const todayWeekdayCheck = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now);
+    if (todayWeekdayCheck === "Monday") {
+      const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString();
+      const { data: recentRecap } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", profile.user_id)
+        .eq("message_type", "weekly_recap")
+        .gte("created_at", eighteenHoursAgo)
+        .limit(1);
+      if (recentRecap && recentRecap.length > 0) {
+        console.log(`[morning-reminder] skipping ${profile.user_id} — weekly recap sent last night covers Monday`);
+        continue;
+      }
+    }
+
     // Find today's day name in the user's timezone
     const todayWeekday = new Intl.DateTimeFormat("en-US", {
       timeZone: tz,

@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-17 — Avoid redundant cron messages when Dean already covered the plan
+
+**Type:** Improvement
+**Reported by:** Jake (internal observation)
+**User feedback:** "wondering if we should skip the cron if dean already mentioned what to do for tomorrow in earlier conversation"
+**Root cause:** Nightly and morning reminder crons fired unconditionally even if Dean had already explicitly addressed tomorrow's/today's workout in a prior conversation that day (e.g. post-run exchange where Dean said to skip the next day due to illness). Sunday weekly recap also didn't close with Monday coverage, causing a redundant Monday morning reminder.
+**Fix / Change:** (1) Added CONTEXT CHECK instruction to both `nightly_reminder` and `morning_reminder` prompts — Dean now scans recent conversation and sends a brief 1-sentence confirmation instead of a full re-plan if tomorrow/today was already addressed. (2) Updated `weekly_recap` prompt to include Monday's session clearly and close naturally with an invitation to check in after Monday. (3) Added Monday morning reminder cron skip if a `weekly_recap` was sent in the last 18 hours.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/cron/morning-reminder/route.ts`
+
+---
+
 ## 2026-03-17 — Fix weekly mileage history on initial Strava connect
 
 **Type:** Bug Fix

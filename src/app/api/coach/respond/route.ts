@@ -1695,7 +1695,9 @@ PLAN CONSISTENCY RULES — follow these exactly:
       return "The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.";
     case "morning_reminder":
       if (includeWorkoutCheckin) {
-        return `Send a short message that does two things: check in on yesterday's workout, then preview today's.
+        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do today (or to skip/rest today) in a recent message, don't repeat the full plan — just send a brief, natural 1-sentence check-in, e.g. "Good morning — rest day today as we talked about. Let me know how you're feeling." Keep it under 160 characters and human.
+
+If today hasn't been covered yet, send a short message that does two things: check in on yesterday's workout, then preview today's.
 
 Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
 1. A brief, casual check-in on yesterday — vary the phrasing each time. e.g. "How'd yesterday's run go?" / "Hope yesterday's session felt good —" / "How'd [day]'s workout treat you?" Keep it light, one sentence.
@@ -1704,7 +1706,9 @@ Structure (all in one message unless it runs long — split into two bubbles wit
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
-      return `Send a short reminder text about today's workout. Three parts, all on one message:
+      return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do today (or to skip/rest today) in a recent message, don't repeat the full plan — just send a brief, natural 1-sentence check-in, e.g. "Good morning — rest day today as we discussed last night. Let me know how you're feeling." Keep it under 160 characters and human.
+
+If today hasn't been covered yet, send a short reminder text about today's workout. Three parts, all in one message:
 
 1. A brief, natural opener — vary it each time. Options: "Today's workout:", "Here's what's on for today:", use their name casually, reference the day, etc.
 
@@ -1716,7 +1720,9 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
 
     case "nightly_reminder":
       if (includeWorkoutCheckin) {
-        return `Send a short message that does two things: check in on today's workout, then preview tomorrow's.
+        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do tomorrow (or to skip/rest tomorrow) in a message sent today, don't repeat the full plan — just send a brief, natural 1-sentence confirmation, e.g. "Just a heads up for tomorrow — rest day as we talked about. Hope you're feeling better!" Keep it under 160 characters and human.
+
+If tomorrow hasn't been covered yet, send a short message that does two things: check in on today's workout, then preview tomorrow's.
 
 Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
 1. A brief, casual check-in on today — vary the phrasing each time. e.g. "How'd today's run go?" / "Hope today's session felt good —" / "How did [day]'s workout go?" Keep it light, one sentence.
@@ -1725,7 +1731,9 @@ Structure (all in one message unless it runs long — split into two bubbles wit
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
-      return `Send a short reminder text about tomorrow's workout. Three parts, all on one message:
+      return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do tomorrow (or to skip/rest tomorrow) in a message sent today, don't repeat the full plan — just send a brief, natural 1-sentence confirmation, e.g. "Wednesday reminder — rest day tomorrow as we discussed. You're doing the right thing." Keep it under 160 characters and human.
+
+If tomorrow hasn't been covered yet, send a short reminder text about tomorrow's workout. Three parts, all in one message:
 
 1. A brief, natural opener — vary it each time so it doesn't feel canned. Options: "Tomorrow's workout:", "Here's what's on for tomorrow:", use their name casually ("Hey [name], tomorrow:"), reference the day ("Wednesday's session:"), etc. Mix it up.
 
@@ -1736,6 +1744,8 @@ No markdown. Sound like a real coach texting. Total under 560 characters.`;
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
     case "weekly_recap":
       return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — week 4 is a recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+
+MONDAY: Make sure Monday's session is clearly included in the sessions list. Close the final bubble with a natural, warm invitation to check in after Monday — vary the phrasing so it doesn't feel templated. Something like "Excited to hear how Monday goes." or "Hit me up after Monday's run." or "Let me know how the week kicks off." One short sentence, feels like a real coach signing off for the weekend.
 
 SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
 
