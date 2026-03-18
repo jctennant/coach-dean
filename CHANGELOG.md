@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — Fix post_run week-mileage reporting (multi-iteration)
+
+**Type:** Bug Fix
+**Reported by:** Jake (observed on Ian's account)
+**User feedback:** "Dean got confused and thought he had already done 9 this week, and will be hitting 15 total — he had only run three"
+**Root cause:** Multiple compounding issues: (1) `correctMileageTotal` was rewriting correct week-to-date figures to the projected total; (2) the current activity appeared in both RECENT WORKOUTS and the user message, causing double-counting; (3) even with tags, Claude was summing run distances from different weeks; (4) `admin/trigger` wasn't forwarding `activityId` so exclusion logic never fired in tests.
+**Fix / Change:** Suppressed RECENT WORKOUTS listing for post_run triggers (current activity shown in user message; history in weekly summary table is sufficient); injected week-to-date mileage as `⚠️ WEEK-TO-DATE: X mi` directly into the post_run user message so it can't be ignored; skipped `correctMileageTotal` post-processing for post_run/user_message triggers; fixed admin/trigger to forward activityId.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/admin/trigger/route.ts`
+
 ## 2026-03-18 — Fix cross-week mileage summing ("9.2 miles this week" when only 3 were run)
 
 **Type:** Bug Fix
