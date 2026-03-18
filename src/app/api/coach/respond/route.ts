@@ -1747,7 +1747,7 @@ ${JSON.stringify(activityForClaude, null, 2)}
 
 Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.
 
-MILEAGE ACCURACY — CRITICAL: Before writing any mileage figure, read the ⚠️ AUTHORITATIVE WEEKLY MILEAGE line in CURRENT TRAINING STATE. That is the only number to use for this week's total. Do not sum activities yourself, do not use YTD or all-time totals, do not use any figure from ATHLETE HISTORY. If you find yourself about to cite a weekly mileage that differs from the authoritative figure, stop and use the authoritative figure.
+MILEAGE ACCURACY — CRITICAL: Before writing any mileage figure, read the ⚠️ AUTHORITATIVE WEEKLY MILEAGE line in CURRENT TRAINING STATE. That is the only number to use for this week's total. It already includes the activity shown above — do NOT add the activity's distance to it again. Do not sum activities yourself, do not use YTD or all-time totals, do not use any figure from ATHLETE HISTORY. If you find yourself about to cite a weekly mileage that differs from the authoritative figure, stop and use the authoritative figure.
 
 PLAN CONSISTENCY RULES — follow these exactly:
 - Week-to-date mileage: use the ⚠️ AUTHORITATIVE WEEKLY MILEAGE figure from CURRENT TRAINING STATE. Do not manually sum runs from conversation history or include runs from previous weeks.
