@@ -323,13 +323,14 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
               : "coach_response";
 
   // Confetti on weekly recap when the athlete hit ≥90% of their mileage target.
-  // Only fires on the last message part and only when we have a chatId to use the
-  // /messages endpoint (which the effect API requires). Gracefully falls back to a
-  // regular send if chatId is unavailable.
+  // Strategy: if chatId is already known (stored in DB), apply confetti to the first
+  // bubble (the celebratory recap). If chatId isn't known yet, send all parts normally
+  // so we can learn it, then fire a brief confetti follow-up after.
   const targetMiles = (state?.weekly_mileage_target as number | null) ?? 0;
   const shouldConfetti =
     trigger === "weekly_recap" &&
     (force_confetti || (targetMiles > 0 && weekMileageSoFar >= targetMiles * 0.9));
+  const confettiChatIdKnown = shouldConfetti && !!chatId;
 
   let learnedChatId: string | null = null;
 
@@ -350,12 +351,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       await new Promise((r) => setTimeout(r, composeMs));
     }
 
-    const isFirstPart = i === 0;
-    const effectChatId = chatId ?? learnedChatId;
-
-    if (shouldConfetti && isFirstPart && effectChatId) {
-      await sendMessageWithEffect(effectChatId, part, { type: "screen", name: "confetti" });
-      console.log("[coach/respond] confetti sent on weekly_recap — week:", weekMileageSoFar.toFixed(1), "/ target:", targetMiles);
+    if (confettiChatIdKnown && i === 0) {
+      // chatId was known upfront — apply confetti to the first (celebratory recap) bubble.
+      await sendMessageWithEffect(chatId!, part, { type: "screen", name: "confetti" });
+      console.log("[coach/respond] confetti on first bubble — week:", weekMileageSoFar.toFixed(1), "/ target:", targetMiles);
     } else {
       const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
       if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
@@ -368,6 +367,18 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       message_type: msgType,
       strava_activity_id: activityId || null,
     });
+  }
+
+  // If confetti is warranted but chatId wasn't known until after the sends, fire it
+  // now as a brief follow-up bubble using the learned chatId. This covers the rare
+  // case where linq_chat_id wasn't stored yet (e.g. user's very first weekly recap).
+  if (shouldConfetti && !confettiChatIdKnown) {
+    const fallbackChatId = learnedChatId;
+    if (fallbackChatId) {
+      await new Promise((r) => setTimeout(r, 800));
+      await sendMessageWithEffect(fallbackChatId, "🎊", { type: "screen", name: "confetti" });
+      console.log("[coach/respond] confetti fallback bubble sent — chatId learned mid-send");
+    }
   }
 
   // Persist chatId if we learned it for the first time
