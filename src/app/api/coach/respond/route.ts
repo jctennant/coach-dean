@@ -861,8 +861,10 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
     summary += `\nHEART RATE: avg ${Math.round(avgHR)} bpm across runs, highest avg ${maxHR} bpm\n`;
   }
 
-  // Individual workout log — chronological (oldest first) so Claude can list them in order
+  // Individual workout log — chronological (oldest first) so Claude can list them in order.
+  // Each entry is tagged [THIS WEEK] or [PREV WEEK n] so Claude never sums across weeks.
   const recent = [...activities].reverse().slice(-20);
+  const currentWeekKey = localWeekMonday(new Date(), timezone);
   summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
   for (const a of recent) {
     const d = new Date(a.start_date);
@@ -874,7 +876,12 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
       a.average_pace ? `@ ${a.average_pace}` : null,
       a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
     ].filter(Boolean);
-    summary += `  ${dateLabel}: ${parts.join(", ")}\n`;
+    const actWeekKey = localWeekMonday(d, timezone);
+    const weekDiff = Math.round(
+      (new Date(currentWeekKey).getTime() - new Date(actWeekKey).getTime()) / (7 * 24 * 60 * 60 * 1000)
+    );
+    const weekTag = weekDiff === 0 ? "[THIS WEEK]" : `[${weekDiff}wk ago]`;
+    summary += `  ${weekTag} ${dateLabel}: ${parts.join(", ")}\n`;
   }
 
   return summary;
