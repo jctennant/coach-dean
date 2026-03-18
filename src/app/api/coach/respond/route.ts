@@ -139,7 +139,12 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Build system prompt with activity trends
   const userTimezone = (user.timezone as string) || "America/New_York";
-  const activitySummary = buildActivitySummary(recentActivities, userTimezone);
+  // For post_run, exclude the current activity from RECENT WORKOUTS — it's already shown
+  // in the user message activity details, and duplicating it causes week-mileage double-counting.
+  const excludeFromSummary = trigger === "post_run" && activityData?.start_date
+    ? String(activityData.start_date)
+    : undefined;
+  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
   const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
   // Fall back to the onboarding-stated mileage baseline for non-Strava users until
@@ -743,7 +748,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
 /**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
-function buildActivitySummary(activities: ActivityRow[], timezone: string): string {
+function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartDate?: string): string {
   if (activities.length === 0) return "No activity history available.";
 
   // Group by Mon–Sun week in the user's local timezone (key = "YYYY-MM-DD" of that Monday)
@@ -840,7 +845,12 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
 
   // Individual workout log — chronological (oldest first) so Claude can list them in order.
   // Each entry is tagged [THIS WEEK] or [PREV WEEK n] so Claude never sums across weeks.
-  const recent = [...activities].reverse().slice(-20);
+  // Exclude the current activity (post_run) — it's shown in full in the user message and
+  // showing it here too causes Claude to double-count it against the week total.
+  const recentRaw = [...activities].reverse().slice(-20);
+  const recent = excludeStartDate
+    ? recentRaw.filter(a => a.start_date !== excludeStartDate)
+    : recentRaw;
   const currentWeekKey = localWeekMonday(new Date(), timezone);
   summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
   for (const a of recent) {
