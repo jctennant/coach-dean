@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — Fix cross-week mileage summing ("9.2 miles this week" when only 3 were run)
+
+**Type:** Bug Fix
+**Reported by:** Jake (observed on Ian's account)
+**User feedback:** "Dean got confused and thought he had already done 9 this week, and will be hitting 15 total — he had only run three"
+**Root cause:** `RECENT WORKOUTS` section in `buildActivitySummary` listed all runs chronologically with no week labels. Ian had 3 runs: Mar 5 (3.0mi), Mar 12 (3.0mi), Mar 18 (3.2mi). Claude summed all three = 9.2 miles and reported that as "this week's" mileage, ignoring the ⚠️ AUTHORITATIVE WEEKLY MILEAGE figure (3.3 mi) in the system prompt.
+**Fix / Change:** Each entry in `RECENT WORKOUTS` now includes a `[THIS WEEK]` or `[Nwk ago]` tag. Also added a guard that marks remaining plan sessions as "optional/bonus miles — do NOT add to week total" when `weekMileageSoFar >= weekly_mileage_target`, preventing downstream projection errors.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-03-18 — Confetti effect on weekly recap when athlete hits their mileage goal
 
 **Type:** Feature
