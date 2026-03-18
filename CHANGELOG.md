@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — System prompt cleanup: remove extraneous/stale fields, gate race prep
+
+**Type:** Improvement
+**Reported by:** Internal review
+**User feedback:** N/A
+**Root cause:** System prompt contained several fields that were either stale, redundant, or present for all users regardless of relevance — adding noise and potential for confusion.
+**Fix / Change:**
+- `ytd_run_totals` re-added with freshness label ("as of Mar 16" vs "as of Strava connect") and now refreshed weekly via the sunday-recap cron. Weekly refresh also stores `all_run_totals`. Future use: YTD milestone callouts in weekly recap ("you've hit 500 miles this year!").
+- `- Fitness level:` removed from ATHLETE HISTORY — redundant with and potentially contradicting the live-computed FITNESS TIER above it.
+- `- Weekly volume:` removed from ATHLETE HISTORY — duplicated `Weekly mileage target` in CURRENT TRAINING STATE.
+- RACE PREPARATION & STRATEGY block (~35 lines) now gated to within 84 days of race date. For non-racers or athletes many months out, this block was prompt bloat shown on every single message.
+- `weekly_recap` prompt updated to call out YTD milestones (100, 250, 500mi etc.) when the athlete crosses one, woven naturally into the recap.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/cron/sunday-recap/route.ts`
+
+---
+
 ## 2026-03-18 — Fix weekly mileage hallucination from stale Strava stats aggregate
 
 **Type:** Bug Fix

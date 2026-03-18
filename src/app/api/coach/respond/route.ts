@@ -998,7 +998,11 @@ function buildSystemPrompt(
       allTimeInfo += `- All-time: ${allRun.count || 0} runs, ${Math.round((allRun.distance || 0) / 1609.34)} miles\n`;
     }
     if (ytdRun) {
-      allTimeInfo += `- Year-to-date: ${ytdRun.count || 0} runs, ${Math.round((ytdRun.distance || 0) / 1609.34)} miles\n`;
+      const refreshedAt = stravaStats.refreshed_at as string | null;
+      const freshnessNote = refreshedAt
+        ? ` (as of ${new Date(refreshedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })})`
+        : " (as of Strava connect — may be slightly outdated)";
+      allTimeInfo += `- Year-to-date${freshnessNote}: ${ytdRun.count || 0} runs, ${Math.round((ytdRun.distance || 0) / 1609.34)} miles\n`;
     }
     // recent_run_totals (last 4 weeks from Strava) intentionally omitted — it's a stale
     // snapshot from connect time and has caused hallucinations where the model confuses
@@ -1166,9 +1170,7 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 
 ATHLETE HISTORY:
 ${allTimeInfo}- Sport: ${sportType}
-- Fitness level: ${profile?.fitness_level || "unknown"}
 - Training days: ${trainingDays}
-- Weekly volume: ${weeklyHours ? `~${weeklyHours} hours/week` : state?.weekly_mileage_target ? `${state.weekly_mileage_target} miles/week` : "unknown"}
 - Goal: ${profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown"}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
 ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
@@ -1321,7 +1323,12 @@ You have access to web search. Use it proactively when:
 - The athlete asks about something requiring current or specific information you're not fully confident about (race logistics, course records, a specific training methodology)
 - You need factual details about a route, venue, or event to give accurate training advice
 Do NOT search for general training concepts, coaching methodology, or things you already know well.
-` : ""}RACE PREPARATION & STRATEGY — what comprehensive race coaching covers:
+` : ""}${(() => {
+  if (!profile?.race_date) return "";
+  const rd = new Date((profile.race_date as string) + "T00:00:00");
+  const daysToRace = Math.ceil((rd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  if (daysToRace > 84) return ""; // only surface within 12 weeks of race day
+  return `RACE PREPARATION & STRATEGY — what comprehensive race coaching covers:
 When the athlete asks about race strategy, race day, or you're proactively bringing it up (see COACHING SIGNALS), cover these topics — one at a time, spread across conversations, not all at once:
 
 Pacing:
@@ -1354,7 +1361,8 @@ Mental strategy:
 Contingency planning:
 - If you go out too fast: don't panic, ease back 10-15 sec/mile, refuel aggressively.
 - If it's hotter than expected: adjust goal pace 20-30 sec/mile per 10°F above ideal racing temps (~50-55°F).
-- If something hurts: distinguish between discomfort (normal) and pain (stop).
+- If something hurts: distinguish between discomfort (normal) and pain (stop).`;
+})()}
 
 ${hasWebSearch ? `WEB SEARCH:
 You have access to web search. Use it proactively when:
@@ -1751,6 +1759,8 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — week 4 is a recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
 MONDAY: Make sure Monday's session is clearly included in the sessions list. Close the final bubble with a natural, warm invitation to check in after Monday — vary the phrasing so it doesn't feel templated. Something like "Excited to hear how Monday goes." or "Hit me up after Monday's run." or "Let me know how the week kicks off." One short sentence, feels like a real coach signing off for the weekend.
+
+YTD MILESTONES: Check "Year-to-date" in ATHLETE HISTORY. If the athlete has crossed a round-number milestone this week (100, 200, 250, 300, 500, 1000 miles) or is within striking distance of one in the coming week, call it out naturally — one short sentence woven into the recap, not a separate announcement. e.g. "You also just crossed 500 miles on the year — that's a real number." Keep it earned, not forced. Skip it if the number isn't notable.
 
 SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
 
