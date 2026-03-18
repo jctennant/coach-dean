@@ -79,6 +79,35 @@ export async function sendSMS(
 }
 
 /**
+ * Send an iMessage with a screen or bubble effect (e.g. confetti, fireworks).
+ * Requires an existing chatId — falls back to regular sendSMS if not available.
+ * Uses the /messages sub-resource rather than the top-level /chats endpoint.
+ */
+export async function sendMessageWithEffect(
+  chatId: string,
+  body: string,
+  effect: { type: "screen" | "bubble"; name: string }
+): Promise<void> {
+  const { apiKey } = getConfig();
+  const res = await fetch(`${LINQ_CHATS_URL}/${chatId}/messages`, {
+    method: "POST",
+    headers: authHeaders(apiKey),
+    body: JSON.stringify({
+      message: {
+        parts: [{ type: "text", value: body }],
+        effect,
+      },
+    }),
+  });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error("[linq] sendMessageWithEffect error:", res.status, errorText);
+    throw new Error(`Linq messages API error: ${res.status}`);
+  }
+  console.log("[linq] sendMessageWithEffect ok chatId:", chatId, "effect:", effect.name);
+}
+
+/**
  * Show a typing indicator in the user's iMessage thread.
  * Call this before starting to generate a response.
  * The indicator is automatically cleared when a message is sent.

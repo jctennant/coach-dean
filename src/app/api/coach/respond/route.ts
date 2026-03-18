@@ -2,7 +2,7 @@ import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/lib/paces";
 import { anthropic } from "@/lib/anthropic";
-import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
+import { sendSMS, sendMessageWithEffect, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import type { Json } from "@/lib/database.types";
@@ -19,6 +19,7 @@ interface CoachRequest {
   dry_run?: boolean;
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder
+  force_confetti?: boolean; // Admin/testing only — bypass the mileage goal check and always fire confetti
 }
 
 interface ActivityRow {
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
 }
 
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
-  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin } = body;
+  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin, force_confetti } = body;
 
   // Fetch user context in parallel
   const [
@@ -321,6 +322,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
               ? "weekly_recap"
               : "coach_response";
 
+  // Confetti on weekly recap when the athlete hit ≥90% of their mileage target.
+  // Only fires on the last message part and only when we have a chatId to use the
+  // /messages endpoint (which the effect API requires). Gracefully falls back to a
+  // regular send if chatId is unavailable.
+  const targetMiles = (state?.weekly_mileage_target as number | null) ?? 0;
+  const shouldConfetti =
+    trigger === "weekly_recap" &&
+    (force_confetti || (targetMiles > 0 && weekMileageSoFar >= targetMiles * 0.9));
+
   let learnedChatId: string | null = null;
 
   for (let i = 0; i < parts.length; i++) {
@@ -340,8 +350,16 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       await new Promise((r) => setTimeout(r, composeMs));
     }
 
-    const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
-    if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
+    const isFirstPart = i === 0;
+    const effectChatId = chatId ?? learnedChatId;
+
+    if (shouldConfetti && isFirstPart && effectChatId) {
+      await sendMessageWithEffect(effectChatId, part, { type: "screen", name: "confetti" });
+      console.log("[coach/respond] confetti sent on weekly_recap — week:", weekMileageSoFar.toFixed(1), "/ target:", targetMiles);
+    } else {
+      const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
+      if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
+    }
 
     await supabase.from("conversations").insert({
       user_id: userId,

@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — Confetti effect on weekly recap when athlete hits their mileage goal
+
+**Type:** Feature
+**Reported by:** Internal / product idea
+**User feedback:** N/A
+**Root cause:** N/A — new feature
+**Fix / Change:** When a Sunday weekly recap fires and the athlete completed ≥90% of their weekly mileage target, the final message bubble is sent with an iMessage confetti screen effect via the Linq `/chats/{chatId}/messages` endpoint. Uses `sendMessageWithEffect()` (new helper in `linq.ts`) which POSTs to the messages sub-resource with `"effect": { "type": "screen", "name": "confetti" }`. Gracefully falls back to a regular `sendSMS` send if no `chatId` is available. Effect is scoped to `weekly_recap` only — no other triggers — to avoid overuse.
+**Files changed:** src/lib/linq.ts, src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-18 — Improve non-Strava user path: mileage baseline + text-tracking habit
 
 **Type:** Feature / Improvement
