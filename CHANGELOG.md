@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-17 — Avoid double post-run response when athlete texted before Strava synced
+
+**Type:** Improvement
+**Reported by:** Jake (internal observation)
+**User feedback:** N/A
+**Root cause:** If an athlete texted Dean about their workout before Strava synced, Dean responded to the user_message. When the webhook fired minutes later, `isNew = true` so `post_run` triggered a full second response — same workout, potentially redundant or contradicting.
+**Fix / Change:** Added CONTEXT CHECK to the `post_run` prompt. If the recent conversation already includes an exchange about this workout, Dean sends 1-2 sentences adding only what's new from Strava data (pace, HR, splits) rather than a full re-analysis.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-17 — Avoid redundant cron messages when Dean already covered the plan
 
 **Type:** Improvement
