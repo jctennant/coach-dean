@@ -216,7 +216,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
   const hasStrava = !!(user.strava_athlete_id as number | null);
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -1718,7 +1718,9 @@ function buildUserMessage(
   includeWorkoutCheckin?: boolean,
   injuryNotes?: string | null,
   timezone = "America/New_York",
-  hasStrava = true
+  hasStrava = true,
+  weekMileageSoFar = 0,
+  weekRunCount = 0
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -1765,7 +1767,10 @@ function buildUserMessage(
         ? `\nDATA AVAILABILITY GUARD — the following data is NOT present; do not fabricate it:\n${dataGuards.map(g => `- ${g}`).join("\n")}`
         : "";
 
-      return `A workout just synced from Strava. ${dateNote}
+      const weekMilesStr = weekMileageSoFar.toFixed(1);
+      const weekMileageContext = `\n⚠️ WEEK-TO-DATE (this run included): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.\n`;
+
+      return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
 
 CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If the athlete already texted you about this workout and you already responded, do NOT give full post-run feedback again. Instead, send 1-2 sentences that acknowledge the sync and add only what's new from the Strava data — specific pace, HR, splits, or elevation that wasn't in the conversation. e.g. "Saw it come through — 8:12/mi avg, HR held steady at 148, and you negative split the back half. Nice." Skip anything already covered.
 
