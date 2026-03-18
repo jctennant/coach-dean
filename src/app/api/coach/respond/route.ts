@@ -1248,32 +1248,48 @@ ${(() => {
   const useMetric = profile?.preferred_units === "metric";
   const mi = (miles: number) => useMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
   const targetMiles = (state?.weekly_mileage_target as number) || 0;
-  const sessionRows = (() => {
+  // Parse remaining session miles from the label text so we can compute the projected total.
+  const nonRunSessionRe = /strength|mobility|yoga|swim|bike|ride|rest|cross/i;
+  const { sessionRows, projectedWeekMiles } = (() => {
     const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
-    if (!sessions || sessions.length === 0) return "";
-    // Filter out stale sessions (all dates before today means plan is from last week).
-    // Use ty/tm/td (user's local today, computed above) so Hawaii users at 3pm Friday
-    // don't see Saturday as "today" because Vercel runs in UTC.
+    if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: null };
     const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
     const activeSessions = sessions.filter(s => {
       const [m, d] = s.date.split("/").map(Number);
-      if (isNaN(m) || isNaN(d)) return true; // keep if can't parse
+      if (isNaN(m) || isNaN(d)) return true;
       const sessionDate = new Date(Date.UTC(ty, m - 1, d));
       return sessionDate >= localTodayUTC;
     });
-    if (activeSessions.length === 0) return "";
+    if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar };
+    // Sum remaining session miles for projection
+    let remainingSessionMiles = 0;
+    for (const s of activeSessions) {
+      if (nonRunSessionRe.test(s.label)) continue;
+      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
+      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
+      const mMatch = explicitTotal || firstMi;
+      if (mMatch) remainingSessionMiles += parseFloat(mMatch[1]);
+    }
     const list = activeSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-    // If the weekly target is already met, flag remaining sessions as optional so
-    // Claude doesn't project them into the week total.
     const targetAlreadyMet = targetMiles > 0 && weekMileageSoFar >= targetMiles;
     const sessionHeader = targetAlreadyMet
-      ? `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only; do NOT add them to the week total):\n`
-      : `\n- THIS WEEK'S PLANNED SESSIONS (authoritative — use these exact sessions and distances; do not recalculate or change them unless the athlete explicitly asks to adjust):\n`;
-    return `${sessionHeader}${list}`;
+      ? `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n`
+      : `\n- UPCOMING SESSIONS THIS WEEK:\n`;
+    return {
+      sessionRows: `${sessionHeader}${list}`,
+      projectedWeekMiles: weekMileageSoFar + remainingSessionMiles,
+    };
+  })();
+  const mileageLine = (() => {
+    const done = `${mi(weekMileageSoFar)} done so far this week (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`;
+    if (projectedWeekMiles !== null && projectedWeekMiles > weekMileageSoFar) {
+      return `${done} | Projected week total (done + upcoming sessions): ${mi(projectedWeekMiles)}`;
+    }
+    return done;
   })();
   return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
-⚠️ AUTHORITATIVE WEEK-TO-DATE MILEAGE (already completed runs only): ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} this week. This is what the athlete has DONE so far — not a projection. Do NOT add planned sessions to this figure when stating current mileage. If projecting an end-of-week total, always frame it separately: "on track for ~X mi by end of week" — never say "you're at X mi" when X includes unrun sessions. ${targetMiles > 0 ? (weekMileageSoFar >= targetMiles ? `⚠️ WEEKLY TARGET ALREADY MET: the athlete has completed ${mi(weekMileageSoFar)} which meets or exceeds the ${mi(targetMiles)} target.` : `Projected week total if remaining sessions completed: ${mi(weekMileageSoFar + Math.max(0, targetMiles - weekMileageSoFar))} (${mi(weekMileageSoFar)} done + ${mi(Math.max(0, targetMiles - weekMileageSoFar))} remaining to target).`) : ""}
+⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${mileageLine}. The "done so far" figure is the ONLY number that reflects completed runs. Never say the athlete "is at" the projected total — they haven't run those sessions yet. When discussing current mileage use the "done" figure; when discussing the week plan use the "projected" figure.
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
