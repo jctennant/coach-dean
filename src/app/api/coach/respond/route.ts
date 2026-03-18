@@ -142,7 +142,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // For post_run, exclude the current activity from RECENT WORKOUTS — it's already shown
   // in the user message activity details, and duplicating it causes week-mileage double-counting.
   const excludeFromSummary = trigger === "post_run" && activityData?.start_date
-    ? String(activityData.start_date)
+    ? new Date(activityData.start_date as string).getTime()
     : undefined;
   const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
@@ -748,7 +748,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
 /**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
-function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartDate?: string): string {
+function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number): string {
   if (activities.length === 0) return "No activity history available.";
 
   // Group by Mon–Sun week in the user's local timezone (key = "YYYY-MM-DD" of that Monday)
@@ -848,8 +848,8 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
   // Exclude the current activity (post_run) — it's shown in full in the user message and
   // showing it here too causes Claude to double-count it against the week total.
   const recentRaw = [...activities].reverse().slice(-20);
-  const recent = excludeStartDate
-    ? recentRaw.filter(a => a.start_date !== excludeStartDate)
+  const recent = excludeStartMs !== undefined
+    ? recentRaw.filter(a => new Date(a.start_date).getTime() !== excludeStartMs)
     : recentRaw;
   const currentWeekKey = localWeekMonday(new Date(), timezone);
   summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
