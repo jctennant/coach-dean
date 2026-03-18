@@ -142,7 +142,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const activitySummary = buildActivitySummary(recentActivities, userTimezone);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
   const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
-  const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone);
+  // Fall back to the onboarding-stated mileage baseline for non-Strava users until
+  // enough activity history accumulates for a real 6-week average.
+  const weeklyMilesBaseline = ((user.onboarding_data as Record<string, unknown> | null)?.weekly_miles as number | null) ?? null;
+  const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone) ?? weeklyMilesBaseline;
   const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null, weekMileageSoFar);
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
@@ -207,7 +210,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone);
+  const hasStrava = !!(user.strava_athlete_id as number | null);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -1667,7 +1671,8 @@ function buildUserMessage(
   imageActivity?: Record<string, unknown>,
   includeWorkoutCheckin?: boolean,
   injuryNotes?: string | null,
-  timezone = "America/New_York"
+  timezone = "America/New_York",
+  hasStrava = true
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -1868,7 +1873,9 @@ Use short day abbreviations and M/D dates (cross-referenced against DATE CONTEXT
 3. Open line — e.g. "And this number's always open — how a run felt, questions, if something's off. That's what I'm here for."
 Vary the phrasing each time — these are the ideas, not a script.
 
-ONE QUESTION RULE: The closing line above is the only question in the entire response. Do not ask anything else — no follow-ups about injuries, niggles, schedule, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.`;
+ONE QUESTION RULE: The closing line above is the only question in the entire response. Do not ask anything else — no follow-ups about injuries, niggles, schedule, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.
+${!hasStrava ? `
+NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so there's no automatic activity sync. Weave a natural, low-key line into the closing of the plan that tells them to text you after each run. Make it feel like a coach thing, not a system requirement. Examples: "Since you're not on Strava, just shoot me a text after each run — even a quick 'done, 5 miles' — and I'll track from there." or "No Strava sync here, so just drop me a message after each workout and I'll keep tabs on your progress." Vary the phrasing. One sentence only — don't dwell on it.` : ""}`;
 
   }
 }

@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — Improve non-Strava user path: mileage baseline + text-tracking habit
+
+**Type:** Feature / Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Non-Strava users received no mileage question during onboarding — `computeAvgWeeklyMileage` returned null, so the system defaulted to the "No activity data" fitness tier and treated every Strava-skipping runner as a beginner regardless of their actual fitness. The initial plan also gave no guidance on how to log workouts without Strava.
+**Fix / Change:**
+- New `awaiting_mileage_baseline` onboarding step (inserted after `awaiting_schedule`, before `awaiting_ultra_background`): fires only for non-Strava users who haven't already mentioned their weekly mileage. Asks "Roughly how many miles a week are you running right now?" Uses Claude Haiku to parse the number and stores it as `onboarding_data.weekly_miles`.
+- `computeAvgWeeklyMileage` now falls back to `onboarding_data.weekly_miles` when the 6-week Strava average is null. This means an experienced runner who skips Strava immediately gets the correct fitness tier (MODERATE / HIGH VOLUME) from day 1 instead of beginner defaults.
+- Updated `awaiting_ultra_background` question: no longer re-asks for weekly mileage when `awaiting_mileage_baseline` already captured it.
+- `initial_plan` prompt: when `hasStrava = false`, instructs Dean to add a natural closing line setting the expectation that the athlete should text after each run ("Since you're not on Strava, just shoot me a text after each run — even a quick 'done' — and I'll track from there."). Sets the text-tracking habit from the very first message.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-18 — Fix bike activities polluting run mileage, double onboarding message, and range typo
 
 **Type:** Bug Fix (3 issues)

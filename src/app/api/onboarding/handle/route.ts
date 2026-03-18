@@ -110,6 +110,9 @@ export async function POST(request: Request) {
     case "awaiting_strava":
       result = await handleStrava(user, message, onboardingData);
       break;
+    case "awaiting_mileage_baseline":
+      result = await handleMileageBaseline(user, message, onboardingData);
+      break;
     case "awaiting_timezone":
       result = await handleTimezone(user, message, onboardingData);
       break;
@@ -779,6 +782,57 @@ async function handleName(
   return NextResponse.json({ ok: true });
 }
 
+/**
+ * awaiting_mileage_baseline: ask non-Strava users for their current weekly mileage
+ * so the initial plan is calibrated to their actual fitness, not a beginner default.
+ */
+async function handleMileageBaseline(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  // Extract weekly mileage from their answer
+  let weeklyMiles: number | null = null;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const resp = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 50,
+      system: `Extract weekly running mileage from this message. Return ONLY: {"weekly_miles": number | null}. Convert km × 0.621. If a range is given (e.g. "30-35"), use the midpoint. Today: ${today}.`,
+      messages: [{ role: "user", content: message }],
+    });
+    const text = resp.content[0].type === "text" ? resp.content[0].text.trim() : "{}";
+    const parsed = JSON.parse(extractJSON(text));
+    weeklyMiles = typeof parsed.weekly_miles === "number" ? parsed.weekly_miles : null;
+  } catch {
+    // best-effort — null means completeOnboarding falls back to 15mi default
+  }
+
+  const merged: Record<string, unknown> = { ...onboardingData };
+  if (weeklyMiles != null) merged.weekly_miles = weeklyMiles;
+
+  const nextStep = findNextStep("awaiting_mileage_baseline", merged);
+
+  void trackEvent(user.id, "onboarding_step_completed", { step: "mileage_baseline", weekly_miles: weeklyMiles });
+
+  await supabase
+    .from("users")
+    .update({ onboarding_step: nextStep, onboarding_data: merged as unknown as Json })
+    .eq("id", user.id);
+
+  if (nextStep) {
+    const ack = weeklyMiles != null
+      ? `Got it — ${Math.round(weeklyMiles)} miles a week.`
+      : "Got it.";
+    const nextQuestion = getStepQuestion(nextStep, merged, user.id);
+    await sendAndStore(user.id, user.phone_number, `${ack}\n\n${nextQuestion}`, nextStep);
+  } else {
+    await completeOnboarding(user, merged, null);
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 async function parseTimezoneFromMessage(message: string): Promise<string> {
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
@@ -1032,6 +1086,7 @@ const STEP_ORDER = [
   "awaiting_goal_time",           // only shown for race goals (not general fitness or ultras)
   "awaiting_strava",              // offer Strava connect; satisfied once strava_connected=true or user skips
   "awaiting_schedule",
+  "awaiting_mileage_baseline",    // only for non-Strava users who haven't mentioned mileage yet
   "awaiting_ultra_background",    // only shown for 50K+ goals
   "awaiting_injury_background",   // only shown for injury_recovery goals
   "awaiting_timezone",            // confirm/set timezone for accurate reminder timing
@@ -1059,6 +1114,14 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       return !!(data.strava_connected || data.strava_skipped);
     case "awaiting_schedule":
       return Array.isArray(data.training_days) && (data.training_days as string[]).length > 0;
+    case "awaiting_mileage_baseline":
+      // Skip for Strava users — we have real activity data
+      if (data.strava_connected) return true;
+      // Skip if mileage was already captured (in goal message, injury bg, etc.)
+      if (data.weekly_miles != null || data.weekly_hours != null) return true;
+      // Skip for injury_recovery — awaiting_injury_background collects current mileage
+      if (data.goal === "injury_recovery") return true;
+      return false;
     case "awaiting_ultra_background":
       // Only relevant for ultra goals — skip entirely for everything else.
       if (!ULTRA_GOALS.includes(data.goal as string)) return true;
@@ -1138,8 +1201,14 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       if (isCycling) return "How many days a week do you want to ride? And which days work best for you?";
       return "How many days a week do you want to run, and which days work best for you?";
 
+    case "awaiting_mileage_baseline": {
+      const units = (data.preferred_units as string) === "metric" ? "km" : "miles";
+      return `One more quick one: roughly how many ${units} a week are you running right now? A ballpark is totally fine.`;
+    }
+
     case "awaiting_ultra_background":
-      return data.strava_connected
+      // Don't re-ask for mileage if awaiting_mileage_baseline already captured it
+      return (data.strava_connected || data.weekly_miles != null)
         ? "An ultra — love it. Have you run any before? Any experience with the distance is helpful to know."
         : "An ultra — love it. Have you run any before? And what's your current weekly mileage and longest recent long run?";
 
