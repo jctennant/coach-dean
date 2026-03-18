@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — Fix weekly mileage hallucination from stale Strava stats aggregate
+
+**Type:** Bug Fix
+**Reported by:** User b1b308cf
+**User feedback:** "I am not at 27 miles for the week. I'm at 10 miles" — Dean cited 26–27 miles across three consecutive messages before the athlete corrected it. Actual total was 9.8 miles.
+**Root cause:** The system prompt included `recent_run_totals` from the Strava stats API — a 4-week aggregate snapshot captured at connect time and never updated. This user's snapshot showed ~27 miles over 4 weeks. Despite a "NOT this week" label, the model grabbed that aggregate and used it as the current week's total, ignoring the authoritative `computeWeekMileage()` figure of 9.8mi. The model even correctly listed the individual activities (7.4mi + 2.4mi = 9.8mi) but still cited 27 miles — a clear case of the wrong field winning over the correct one.
+**Fix / Change:** (1) Removed `recent_run_totals` from the system prompt entirely — it's stale, redundant with the live WEEKLY MILEAGE section, and provably dangerous. (2) Renamed the authoritative mileage line to start with "⚠️ AUTHORITATIVE WEEKLY MILEAGE" and added explicit "do NOT use YTD, all-time, or any other aggregate" instruction. (3) Added a MILEAGE ACCURACY block at the top of the post_run trigger prompt requiring the model to read the authoritative line before writing any mileage figure.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-17 — Avoid double post-run response when athlete texted before Strava synced
 
 **Type:** Improvement

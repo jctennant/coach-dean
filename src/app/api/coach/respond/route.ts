@@ -1000,9 +1000,10 @@ function buildSystemPrompt(
     if (ytdRun) {
       allTimeInfo += `- Year-to-date: ${ytdRun.count || 0} runs, ${Math.round((ytdRun.distance || 0) / 1609.34)} miles\n`;
     }
-    if (recentRun) {
-      allTimeInfo += `- Last 4 weeks (aggregate across all 4 weeks, NOT this week): ${recentRun.count || 0} runs, ${Math.round((recentRun.distance || 0) / 1609.34)} miles total\n`;
-    }
+    // recent_run_totals (last 4 weeks from Strava) intentionally omitted — it's a stale
+    // snapshot from connect time and has caused hallucinations where the model confuses
+    // the 4-week aggregate with the current week's total. Live weekly breakdowns are in
+    // WEEKLY MILEAGE below; current week is authoritative in CURRENT TRAINING STATE.
   }
 
   const trainingDays = profile?.training_days
@@ -1206,7 +1207,7 @@ ${(() => {
   })();
   return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
-- Mileage so far this week: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} (Strava-synced; authoritative — use ONLY these figures for session count and weekly mileage, do NOT use "Last 4 weeks" totals from ATHLETE HISTORY; when projecting end-of-week totals, always ADD this to any remaining planned sessions — never report just the planned sessions as the week total; e.g. if this is 8 mi and Saturday has 4 mi planned, the projected total is 12 mi)
+⚠️ AUTHORITATIVE WEEKLY MILEAGE — USE THIS NUMBER ONLY: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} this week (computed live from Strava). Do NOT use YTD, all-time, or any other aggregate figure to infer this week's mileage. When projecting end-of-week totals, ADD this to remaining planned sessions — never report planned sessions alone as the week total (e.g. if this is 8 mi and Saturday has 4 mi planned, projected total = 12 mi).
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
@@ -1688,8 +1689,10 @@ ${JSON.stringify(activityForClaude, null, 2)}
 
 Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.
 
+MILEAGE ACCURACY — CRITICAL: Before writing any mileage figure, read the ⚠️ AUTHORITATIVE WEEKLY MILEAGE line in CURRENT TRAINING STATE. That is the only number to use for this week's total. Do not sum activities yourself, do not use YTD or all-time totals, do not use any figure from ATHLETE HISTORY. If you find yourself about to cite a weekly mileage that differs from the authoritative figure, stop and use the authoritative figure.
+
 PLAN CONSISTENCY RULES — follow these exactly:
-- Week-to-date mileage: use the "Mileage so far this week" figure from CURRENT TRAINING STATE. Do not manually sum runs from conversation history or include runs from previous weeks.
+- Week-to-date mileage: use the ⚠️ AUTHORITATIVE WEEKLY MILEAGE figure from CURRENT TRAINING STATE. Do not manually sum runs from conversation history or include runs from previous weeks.
 - Upcoming sessions: if THIS WEEK'S PLANNED SESSIONS is present in CURRENT TRAINING STATE, use those exact sessions and distances. Do not recalculate, substitute, or invent different numbers. Only omit sessions that have already been completed (i.e. activity date falls on or before today's date).
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
