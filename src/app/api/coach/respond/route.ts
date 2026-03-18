@@ -144,7 +144,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const excludeFromSummary = trigger === "post_run" && activityData?.start_date
     ? new Date(activityData.start_date as string).getTime()
     : undefined;
-  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary);
+  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, trigger === "post_run");
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
   const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
   // Fall back to the onboarding-stated mileage baseline for non-Strava users until
@@ -748,7 +748,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
 /**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
-function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number): string {
+function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number, suppressRecentWorkouts = false): string {
   if (activities.length === 0) return "No activity history available.";
 
   // Group by Mon–Sun week in the user's local timezone (key = "YYYY-MM-DD" of that Monday)
@@ -843,32 +843,33 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
     summary += `\nHEART RATE: avg ${Math.round(avgHR)} bpm across runs, highest avg ${maxHR} bpm\n`;
   }
 
-  // Individual workout log — chronological (oldest first) so Claude can list them in order.
-  // Each entry is tagged [THIS WEEK] or [PREV WEEK n] so Claude never sums across weeks.
-  // Exclude the current activity (post_run) — it's shown in full in the user message and
-  // showing it here too causes Claude to double-count it against the week total.
-  const recentRaw = [...activities].reverse().slice(-20);
-  const recent = excludeStartMs !== undefined
-    ? recentRaw.filter(a => new Date(a.start_date).getTime() !== excludeStartMs)
-    : recentRaw;
-  const currentWeekKey = localWeekMonday(new Date(), timezone);
-  summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
-  for (const a of recent) {
-    const d = new Date(a.start_date);
-    const dateLabel = d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
-    const miles = a.distance_meters ? (a.distance_meters / 1609.34).toFixed(1) : null;
-    const parts = [
-      a.activity_type || "Workout",
-      miles ? `${miles}mi` : null,
-      a.average_pace ? `@ ${a.average_pace}` : null,
-      a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
-    ].filter(Boolean);
-    const actWeekKey = localWeekMonday(d, timezone);
-    const weekDiff = Math.round(
-      (new Date(currentWeekKey).getTime() - new Date(actWeekKey).getTime()) / (7 * 24 * 60 * 60 * 1000)
-    );
-    const weekTag = weekDiff === 0 ? "[THIS WEEK]" : `[${weekDiff}wk ago]`;
-    summary += `  ${weekTag} ${dateLabel}: ${parts.join(", ")}\n`;
+  if (!suppressRecentWorkouts) {
+    // Individual workout log — chronological (oldest first) for weekly_recap / initial_plan
+    // context. Suppressed for post_run because the current activity is already shown in
+    // full detail in the user message, and listing prior runs causes week-mileage confusion.
+    const recentRaw = [...activities].reverse().slice(-20);
+    const recent = excludeStartMs !== undefined
+      ? recentRaw.filter(a => new Date(a.start_date).getTime() !== excludeStartMs)
+      : recentRaw;
+    const currentWeekKey = localWeekMonday(new Date(), timezone);
+    summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
+    for (const a of recent) {
+      const d = new Date(a.start_date);
+      const dateLabel = d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
+      const miles = a.distance_meters ? (a.distance_meters / 1609.34).toFixed(1) : null;
+      const parts = [
+        a.activity_type || "Workout",
+        miles ? `${miles}mi` : null,
+        a.average_pace ? `@ ${a.average_pace}` : null,
+        a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
+      ].filter(Boolean);
+      const actWeekKey = localWeekMonday(d, timezone);
+      const weekDiff = Math.round(
+        (new Date(currentWeekKey).getTime() - new Date(actWeekKey).getTime()) / (7 * 24 * 60 * 60 * 1000)
+      );
+      const weekTag = weekDiff === 0 ? "[THIS WEEK]" : `[${weekDiff}wk ago]`;
+      summary += `  ${weekTag} ${dateLabel}: ${parts.join(", ")}\n`;
+    }
   }
 
   return summary;
