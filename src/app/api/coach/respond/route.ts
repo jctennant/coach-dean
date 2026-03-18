@@ -1269,11 +1269,17 @@ ${(() => {
     });
     if (activeSessions.length === 0) return "";
     const list = activeSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-    return `\n- THIS WEEK'S PLANNED SESSIONS (authoritative — use these exact sessions and distances; do not recalculate or change them unless the athlete explicitly asks to adjust):\n${list}`;
+    // If the weekly target is already met, flag remaining sessions as optional so
+    // Claude doesn't project them into the week total.
+    const targetAlreadyMet = targetMiles > 0 && weekMileageSoFar >= targetMiles;
+    const sessionHeader = targetAlreadyMet
+      ? `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only; do NOT add them to the week total):\n`
+      : `\n- THIS WEEK'S PLANNED SESSIONS (authoritative — use these exact sessions and distances; do not recalculate or change them unless the athlete explicitly asks to adjust):\n`;
+    return `${sessionHeader}${list}`;
   })();
   return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
-⚠️ AUTHORITATIVE WEEKLY MILEAGE — USE THIS NUMBER ONLY: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} this week (computed live from Strava). Do NOT use YTD, all-time, or any other aggregate figure to infer this week's mileage. When projecting end-of-week totals, ADD this to remaining planned sessions — never report planned sessions alone as the week total (e.g. if this is 8 mi and Saturday has 4 mi planned, projected total = 12 mi).
+⚠️ AUTHORITATIVE WEEKLY MILEAGE — USE THIS NUMBER ONLY: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} this week (computed live from Strava). Do NOT use YTD, all-time, or any other aggregate figure to infer this week's mileage. When projecting end-of-week totals, ADD this to remaining planned sessions — never report planned sessions alone as the week total (e.g. if this is 8 mi and Saturday has 4 mi planned, projected total = 12 mi). ${targetMiles > 0 ? (weekMileageSoFar >= targetMiles ? `⚠️ WEEKLY TARGET ALREADY MET: the athlete is at ${mi(weekMileageSoFar)} which already meets or exceeds the ${mi(targetMiles)} weekly target — do NOT project additional miles by summing remaining sessions; the week total is effectively done.` : `Remaining to reach weekly target: ${mi(Math.max(0, targetMiles - weekMileageSoFar))}.`) : ""}
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
