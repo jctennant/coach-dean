@@ -144,7 +144,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const excludeFromSummary = trigger === "post_run" && activityData?.start_date
     ? new Date(activityData.start_date as string).getTime()
     : undefined;
-  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, trigger === "post_run");
+  const recentWorkoutsMode =
+    trigger === "post_run" ? "suppress" :
+    trigger === "weekly_recap" ? "this_week_only" : "full";
+  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only");
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
   const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
   // Fall back to the onboarding-stated mileage baseline for non-Strava users until
@@ -297,7 +300,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // on current vs projected mileage, so running the correction would only interfere.
   const alreadyCompletedMiles =
     trigger === "initial_plan" || trigger === "weekly_recap" ? 0 : weekMileageSoFar;
-  const coachMessage = (trigger === "post_run" || trigger === "user_message")
+  const coachMessage = (trigger === "post_run" || trigger === "user_message" || trigger === "weekly_recap")
     ? stripMarkdown(strippedRaw)
     : correctMileageTotal(stripMarkdown(strippedRaw), alreadyCompletedMiles);
 
@@ -748,7 +751,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
 /**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
-function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number, suppressRecentWorkouts = false): string {
+function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number, recentWorkoutsMode: "full" | "suppress" | "this_week_only" = "full"): string {
   if (activities.length === 0) return "No activity history available.";
 
   // Group by Mon–Sun week in the user's local timezone (key = "YYYY-MM-DD" of that Monday)
@@ -843,32 +846,36 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
     summary += `\nHEART RATE: avg ${Math.round(avgHR)} bpm across runs, highest avg ${maxHR} bpm\n`;
   }
 
-  if (!suppressRecentWorkouts) {
-    // Individual workout log — chronological (oldest first) for weekly_recap / initial_plan
-    // context. Suppressed for post_run because the current activity is already shown in
-    // full detail in the user message, and listing prior runs causes week-mileage confusion.
+  if (recentWorkoutsMode !== "suppress") {
+    // Individual workout log — chronological (oldest first).
+    // "suppress": omitted entirely (post_run — current activity is in user message).
+    // "this_week_only": only shows runs from the current week (weekly_recap — avoids cross-week summing while still giving Claude the details it needs to recap the week).
+    // "full": all recent runs with week tags (initial_plan, user_message, etc.).
     const recentRaw = [...activities].reverse().slice(-20);
     const recent = excludeStartMs !== undefined
       ? recentRaw.filter(a => new Date(a.start_date).getTime() !== excludeStartMs)
       : recentRaw;
     const currentWeekKey = localWeekMonday(new Date(), timezone);
-    summary += `\nRECENT WORKOUTS (chronological, oldest first):\n`;
-    for (const a of recent) {
-      const d = new Date(a.start_date);
-      const dateLabel = d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
-      const miles = a.distance_meters ? (a.distance_meters / 1609.34).toFixed(1) : null;
-      const parts = [
-        a.activity_type || "Workout",
-        miles ? `${miles}mi` : null,
-        a.average_pace ? `@ ${a.average_pace}` : null,
-        a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
-      ].filter(Boolean);
-      const actWeekKey = localWeekMonday(d, timezone);
-      const weekDiff = Math.round(
-        (new Date(currentWeekKey).getTime() - new Date(actWeekKey).getTime()) / (7 * 24 * 60 * 60 * 1000)
-      );
-      const weekTag = weekDiff === 0 ? "[THIS WEEK]" : `[${weekDiff}wk ago]`;
-      summary += `  ${weekTag} ${dateLabel}: ${parts.join(", ")}\n`;
+    const filteredRecent = recentWorkoutsMode === "this_week_only"
+      ? recent.filter(a => localWeekMonday(new Date(a.start_date), timezone) === currentWeekKey)
+      : recent;
+    if (filteredRecent.length > 0) {
+      const header = recentWorkoutsMode === "this_week_only"
+        ? `\nTHIS WEEK'S RUNS (do not sum these to compute mileage — use the authoritative figure above):\n`
+        : `\nRECENT WORKOUTS (chronological, oldest first):\n`;
+      summary += header;
+      for (const a of filteredRecent) {
+        const d = new Date(a.start_date);
+        const dateLabel = d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
+        const miles = a.distance_meters ? (a.distance_meters / 1609.34).toFixed(1) : null;
+        const parts = [
+          a.activity_type || "Workout",
+          miles ? `${miles}mi` : null,
+          a.average_pace ? `@ ${a.average_pace}` : null,
+          a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
+        ].filter(Boolean);
+        summary += `  ${dateLabel}: ${parts.join(", ")}\n`;
+      }
     }
   }
 
@@ -1842,8 +1849,10 @@ If tomorrow hasn't been covered yet, send a short reminder text about tomorrow's
 3. A short, warm closer — vary this too. Rotate through things like "Good luck!", "Let me know how it goes.", "Have fun out there.", "You've got this.", "Enjoy the run.", etc. One short phrase, nothing more.
 
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
-    case "weekly_recap":
-      return `Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — week 4 is a recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+    case "weekly_recap": {
+      const weekMilesStr = weekMileageSoFar.toFixed(1);
+      const weekMileageContext = `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself.\n\n`;
+      return `${weekMileageContext}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — week 4 is a recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
 MONDAY: Make sure Monday's session is clearly included in the sessions list. Close the final bubble with a natural, warm invitation to check in after Monday — vary the phrasing so it doesn't feel templated. Something like "Excited to hear how Monday goes." or "Hit me up after Monday's run." or "Let me know how the week kicks off." One short sentence, feels like a real coach signing off for the weekend.
 
@@ -1861,6 +1870,7 @@ Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. N
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
 
 MILEAGE ACCURACY: Before writing any weekly mileage total, silently sum every running session distance to verify it. Strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match, correct the sessions or the stated total before writing — never show the calculation in your response. If you're not listing every session, omit the total entirely.`;
+    }
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
 
