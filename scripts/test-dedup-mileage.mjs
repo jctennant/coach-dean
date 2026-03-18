@@ -107,8 +107,8 @@ assert("Distance >15% different → both kept", deduplicateActivities(differentD
 const nonRunningRe = /strength|mobility|yoga|bike|swim|elliptical|cross.train|rest day|hike/i;
 const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d+\/\d+\s+·\s+(.+)$/gm;
 
-function correctMileageTotal(message) {
-  let computedMiles = 0;
+function correctMileageTotal(message, alreadyCompletedMiles = 0) {
+  let plannedMiles = 0;
   let hasSessionList = false;
   let m;
 
@@ -121,12 +121,13 @@ function correctMileageTotal(message) {
       || desc.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
     const firstMi = desc.match(/(\d+(?:\.\d+)?)\s*mi/i);
     const miMatch = explicitTotal || firstMi;
-    if (miMatch) computedMiles += parseFloat(miMatch[1]);
+    if (miMatch) plannedMiles += parseFloat(miMatch[1]);
   }
 
-  if (!hasSessionList || computedMiles === 0) return message;
+  if (!hasSessionList || plannedMiles === 0) return message;
 
-  const rounded = Math.round(computedMiles * 10) / 10;
+  const correctTotal = Math.round((plannedMiles + alreadyCompletedMiles) * 10) / 10;
+  const plannedRounded = Math.round(plannedMiles * 10) / 10;
 
   const totalPatterns = [
     /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
@@ -141,10 +142,11 @@ function correctMileageTotal(message) {
   for (const pattern of totalPatterns) {
     corrected = corrected.replace(pattern, (full, pre, num, post) => {
       const stated = parseFloat(num);
-      if (Math.abs(stated - rounded) > 0.4) {
-        return `${pre}${rounded}${post}`;
+      if (Math.abs(stated - correctTotal) <= 0.4) return full;
+      if (alreadyCompletedMiles > 0.5 && Math.abs(stated - plannedRounded) <= 0.4) {
+        return `${pre}${correctTotal}${post}`;
       }
-      return full;
+      return `${pre}${correctTotal}${post}`;
     });
   }
   return corrected;
@@ -204,6 +206,53 @@ assert("Strength day excluded from total", strengthResult.includes("~10mi"), tru
 // No session list → no-op
 const noSessionMsg = "Great work this week! You hit 25 miles total.";
 assert("No session list → no-op", correctMileageTotal(noSessionMsg), noSessionMsg);
+
+// ─── correctMileageTotal() with alreadyCompletedMiles (the b1b308cf bug) ─────
+
+console.log("\ncorrectMileageTotal() with existing week miles");
+
+// Exact bug: 9.8mi already done, plan = 8+6+5+10 = 29mi, Dean stated 29 (plan only)
+const bugMsg = `Wed 3/18 · Easy 8mi @ 9:00/mi
+Thu 3/19 · Easy 6mi @ 9:00/mi
+Fri 3/20 · Easy 5mi @ 9:00/mi
+Sat 3/21 · Long run 10mi easy
+
+That puts you at 29 miles total for the week.`;
+
+const bugCorrected = correctMileageTotal(bugMsg, 9.8);
+assert("Bug: stated plan-only total (29) corrected to full week (38.8)", bugCorrected.includes("38.8"), true);
+assert("Bug: original wrong total removed", !bugCorrected.includes("29 miles"), true);
+
+// Dean correctly states the full week total — should NOT be changed
+const correctWeekMsg = `Wed 3/18 · Easy 8mi @ 9:00/mi
+Thu 3/19 · Easy 6mi @ 9:00/mi
+Fri 3/20 · Easy 5mi @ 9:00/mi
+Sat 3/21 · Long run 10mi easy
+
+That puts you at 38.8 miles total for the week.`;
+
+const notChangedWeek = correctMileageTotal(correctWeekMsg, 9.8);
+assert("Correct full-week total (38.8) unchanged", notChangedWeek.includes("38.8 miles"), true);
+
+// weekly_recap (alreadyCompletedMiles = 0) — plan total should be used as-is
+const recapMsg = `Mon 3/23 · Easy 5mi
+Wed 3/25 · Tempo 7mi
+Sat 3/28 · Long run 12mi
+
+Total: ~24 miles for the week.`;
+
+const recapResult = correctMileageTotal(recapMsg, 0);
+assert("Weekly recap (0 existing miles): correct total unchanged", recapResult.includes("~24 miles"), true);
+
+// weekly_recap with wrong total, no existing miles
+const recapWrong = `Mon 3/23 · Easy 5mi
+Wed 3/25 · Tempo 7mi
+Sat 3/28 · Long run 12mi
+
+Total: ~20 miles for the week.`;
+
+const recapFixed = correctMileageTotal(recapWrong, 0);
+assert("Weekly recap wrong total (20→24) corrected", recapFixed.includes("24"), true);
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

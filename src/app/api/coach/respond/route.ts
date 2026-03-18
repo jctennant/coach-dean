@@ -282,7 +282,13 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   const strippedRaw = rawText.replace(/\[NO_REPLY\]/gi, "").trim();
-  const coachMessage = correctMileageTotal(stripMarkdown(strippedRaw));
+  // For mid-week triggers (post_run, user_message) the session list covers the
+  // remaining days of the current week, so the stated total should be
+  // planned miles + already-completed miles. For weekly_recap / initial_plan
+  // the sessions are a full future week — don't add existing miles.
+  const alreadyCompletedMiles =
+    trigger === "post_run" || trigger === "user_message" ? weekMileageSoFar : 0;
+  const coachMessage = correctMileageTotal(stripMarkdown(strippedRaw), alreadyCompletedMiles);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -418,14 +424,14 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
  * Only activates when both a session list (lines matching our format) and a
  * stated total are found — otherwise it's a no-op.
  */
-function correctMileageTotal(message: string): string {
+function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string {
   // Non-running keywords — lines containing these don't contribute mileage
   const nonRunningRe = /strength|mobility|yoga|bike|swim|elliptical|cross.train|rest day|hike/i;
 
   // Session lines: "Mon 3/2 · ..." or "Tue 3/10 · ..."
   const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d+\/\d+\s+·\s+(.+)$/gm;
 
-  let computedMiles = 0;
+  let plannedMiles = 0;
   let hasSessionList = false;
   let m: RegExpExecArray | null;
 
@@ -440,12 +446,15 @@ function correctMileageTotal(message: string): string {
       || desc.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
     const firstMi = desc.match(/(\d+(?:\.\d+)?)\s*mi/i);
     const miMatch = explicitTotal || firstMi;
-    if (miMatch) computedMiles += parseFloat(miMatch[1]);
+    if (miMatch) plannedMiles += parseFloat(miMatch[1]);
   }
 
-  if (!hasSessionList || computedMiles === 0) return message;
+  if (!hasSessionList || plannedMiles === 0) return message;
 
-  const rounded = Math.round(computedMiles * 10) / 10;
+  // The correct week total = planned sessions + miles already completed this week.
+  // For weekly_recap / initial_plan callers, alreadyCompletedMiles is 0.
+  const correctTotal = Math.round((plannedMiles + alreadyCompletedMiles) * 10) / 10;
+  const plannedRounded = Math.round(plannedMiles * 10) / 10;
 
   // Patterns that state a weekly total — replace the number if wrong
   // Handles: "10 miles total", "Total: 10mi", "stays at 10 miles", "~10mi total", etc.
@@ -462,11 +471,16 @@ function correctMileageTotal(message: string): string {
   for (const pattern of totalPatterns) {
     corrected = corrected.replace(pattern, (full, pre, num, post) => {
       const stated = parseFloat(num);
-      if (Math.abs(stated - rounded) > 0.4) {
-        console.warn(`[correctMileageTotal] stated ${stated}mi but sessions sum to ${rounded}mi — correcting`);
-        return `${pre}${rounded}${post}`;
+      // Already correct — stated matches the full week total
+      if (Math.abs(stated - correctTotal) <= 0.4) return full;
+      // Stated matches plan-only total but ignores already-completed miles — correct it
+      if (alreadyCompletedMiles > 0.5 && Math.abs(stated - plannedRounded) <= 0.4) {
+        console.warn(`[correctMileageTotal] stated ${stated}mi = plan only; full week total is ${correctTotal}mi (${plannedRounded} planned + ${alreadyCompletedMiles} completed) — correcting`);
+        return `${pre}${correctTotal}${post}`;
       }
-      return full;
+      // Stated is wrong outright — correct to full week total
+      console.warn(`[correctMileageTotal] stated ${stated}mi, correct total is ${correctTotal}mi — correcting`);
+      return `${pre}${correctTotal}${post}`;
     });
   }
 

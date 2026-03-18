@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — Fix mid-week plan total ignoring already-completed miles
+
+**Type:** Bug Fix
+**Reported by:** User b1b308cf
+**User feedback:** "That puts you at 29 miles total for the week" — actual total was 38.8mi (9.8mi already done + 8+6+5+10mi planned)
+**Root cause:** `correctMileageTotal()` summed the planned session list (29mi) and compared it to Dean's stated total (also 29mi) — so |29-29| = 0, no correction triggered. The function had no knowledge of miles already completed earlier in the week, so "plan-only total = stated total" looked correct even though the true week total was 38.8mi.
+**Fix / Change:** `correctMileageTotal()` now accepts `alreadyCompletedMiles`. For mid-week triggers (`post_run`, `user_message`) it receives `weekMileageSoFar`; for full-week plan triggers (`weekly_recap`, `initial_plan`) it receives 0. When a stated total matches the plan-only sum but existing miles are present, it corrects to `planned + completed`. When a stated total already matches the full week total, it's left alone.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `scripts/test-dedup-mileage.mjs`
+
+---
+
 ## 2026-03-18 — System prompt cleanup: remove extraneous/stale fields, gate race prep
 
 **Type:** Improvement
