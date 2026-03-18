@@ -286,13 +286,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   const strippedRaw = rawText.replace(/\[NO_REPLY\]/gi, "").trim();
-  // For mid-week triggers (post_run, user_message) the session list covers the
-  // remaining days of the current week, so the stated total should be
-  // planned miles + already-completed miles. For weekly_recap / initial_plan
-  // the sessions are a full future week — don't add existing miles.
+  // correctMileageTotal is designed for initial_plan / weekly_recap where Claude
+  // drafts a full future week and might forget to add already-completed miles to the
+  // stated total. For post_run and user_message the prompt explicitly instructs Claude
+  // on current vs projected mileage, so running the correction would only interfere.
   const alreadyCompletedMiles =
-    trigger === "post_run" || trigger === "user_message" ? weekMileageSoFar : 0;
-  const coachMessage = correctMileageTotal(stripMarkdown(strippedRaw), alreadyCompletedMiles);
+    trigger === "initial_plan" || trigger === "weekly_recap" ? 0 : weekMileageSoFar;
+  const coachMessage = (trigger === "post_run" || trigger === "user_message")
+    ? stripMarkdown(strippedRaw)
+    : correctMileageTotal(stripMarkdown(strippedRaw), alreadyCompletedMiles);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
