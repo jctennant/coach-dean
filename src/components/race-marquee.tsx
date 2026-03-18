@@ -5,25 +5,25 @@ const ROW_ONE = [
   "Ironman 70.3",
   "5K PR",
   "NYC Marathon",
-  "Ironman World Champs",
-  "Half Marathon PR",
+  "Post injury recovery",
+  "First half marathon",
   "Olympic Tri",
-  "Gorge Waterfalls 100K",
+  "Couch to 5k",
   "Chicago Marathon",
   "Sprint Triathlon",
 ];
 
 const ROW_TWO = [
-  "Western States 100",
+  "Shin split recovery",
   "Cirque Series",
   "Philadephia Marathon",
   "10K",
   "Broken Arrow 46K",
-  "Ironman 70.3 World Champs",
+  "Sub 2hr Half Marathon",
   "California International Marathon",
   "Mile Time Trial",
   "Paris Marathon",
-  "Behind the Rocks 50 Miler",
+  "First ultra race",
 ];
 
 function Pill({ label }: { label: string }) {

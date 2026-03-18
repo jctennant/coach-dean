@@ -49,8 +49,8 @@ export default function Home() {
               Personalized coaching, just a text away.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              Dean tracks your training and injury history, learns how your body responds,
-              and texts you exactly what to do next — so you arrive at the start line healthy and ready for a new PR.
+              You signed up for a race. Now what? 
+              Dean asks a few questions, builds a plan around your life, texts you exactly what to do next, and adjusts when life gets in the way.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
