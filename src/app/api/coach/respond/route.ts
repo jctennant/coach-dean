@@ -481,6 +481,9 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
       const stated = parseFloat(num);
       // Already correct — stated matches the full week total
       if (Math.abs(stated - correctTotal) <= 0.4) return full;
+      // Stated matches already-completed miles — Claude is correctly reporting current
+      // week-to-date mileage (not a projected total). Leave it alone.
+      if (alreadyCompletedMiles > 0.5 && Math.abs(stated - alreadyCompletedMiles) <= 0.4) return full;
       // Stated matches plan-only total but ignores already-completed miles — correct it
       if (alreadyCompletedMiles > 0.5 && Math.abs(stated - plannedRounded) <= 0.4) {
         console.warn(`[correctMileageTotal] stated ${stated}mi = plan only; full week total is ${correctTotal}mi (${plannedRounded} planned + ${alreadyCompletedMiles} completed) — correcting`);
@@ -1258,7 +1261,7 @@ ${(() => {
   })();
   return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
 - Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
-⚠️ AUTHORITATIVE WEEKLY MILEAGE — USE THIS NUMBER ONLY: ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} this week (computed live from Strava). Do NOT use YTD, all-time, or any other aggregate figure to infer this week's mileage. When projecting end-of-week totals, ADD this to remaining planned sessions — never report planned sessions alone as the week total (e.g. if this is 8 mi and Saturday has 4 mi planned, projected total = 12 mi). ${targetMiles > 0 ? (weekMileageSoFar >= targetMiles ? `⚠️ WEEKLY TARGET ALREADY MET: the athlete is at ${mi(weekMileageSoFar)} which already meets or exceeds the ${mi(targetMiles)} weekly target — do NOT project additional miles by summing remaining sessions; the week total is effectively done.` : `Remaining to reach weekly target: ${mi(Math.max(0, targetMiles - weekMileageSoFar))}.`) : ""}
+⚠️ AUTHORITATIVE WEEK-TO-DATE MILEAGE (already completed runs only): ${mi(weekMileageSoFar)} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} this week. This is what the athlete has DONE so far — not a projection. Do NOT add planned sessions to this figure when stating current mileage. If projecting an end-of-week total, always frame it separately: "on track for ~X mi by end of week" — never say "you're at X mi" when X includes unrun sessions. ${targetMiles > 0 ? (weekMileageSoFar >= targetMiles ? `⚠️ WEEKLY TARGET ALREADY MET: the athlete has completed ${mi(weekMileageSoFar)} which meets or exceeds the ${mi(targetMiles)} target.` : `Projected week total if remaining sessions completed: ${mi(weekMileageSoFar + Math.max(0, targetMiles - weekMileageSoFar))} (${mi(weekMileageSoFar)} done + ${mi(Math.max(0, targetMiles - weekMileageSoFar))} remaining to target).`) : ""}
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
@@ -1747,10 +1750,10 @@ ${JSON.stringify(activityForClaude, null, 2)}
 
 Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.
 
-MILEAGE ACCURACY — CRITICAL: Before writing any mileage figure, read the ⚠️ AUTHORITATIVE WEEKLY MILEAGE line in CURRENT TRAINING STATE. That is the only number to use for this week's total. It already includes the activity shown above — do NOT add the activity's distance to it again. Do not sum activities yourself, do not use YTD or all-time totals, do not use any figure from ATHLETE HISTORY. If you find yourself about to cite a weekly mileage that differs from the authoritative figure, stop and use the authoritative figure.
+MILEAGE ACCURACY — CRITICAL: The ⚠️ AUTHORITATIVE WEEK-TO-DATE MILEAGE in CURRENT TRAINING STATE is what the athlete has ALREADY RUN this week — it already includes the activity shown above. Use it as the current/completed figure. If you mention a projected end-of-week total, always add the word "on track for" or "projected" to make clear it's not yet achieved. Never say "you're at X miles this week" when X includes future sessions.
 
 PLAN CONSISTENCY RULES — follow these exactly:
-- Week-to-date mileage: use the ⚠️ AUTHORITATIVE WEEKLY MILEAGE figure from CURRENT TRAINING STATE. Do not manually sum runs from conversation history or include runs from previous weeks.
+- Week-to-date mileage: use the ⚠️ AUTHORITATIVE WEEK-TO-DATE MILEAGE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
 - Upcoming sessions: if THIS WEEK'S PLANNED SESSIONS is present in CURRENT TRAINING STATE, use those exact sessions and distances. Do not recalculate, substitute, or invent different numbers. Only omit sessions that have already been completed (i.e. activity date falls on or before today's date).
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
