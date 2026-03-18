@@ -39,6 +39,7 @@ function deduplicateActivities(activities) {
   for (const a of activities) {
     const aMs = new Date(a.start_date).getTime();
     const dupeIndex = kept.findIndex((k) => {
+      if (k.activity_type !== a.activity_type) return false;
       const kMs = new Date(k.start_date).getTime();
       if (Math.abs(aMs - kMs) > 120_000) return false;
       const larger = Math.max(k.distance_meters || 0, a.distance_meters || 0);
@@ -102,6 +103,13 @@ const differentDistance = [
 ];
 assert("Distance >15% different → both kept", deduplicateActivities(differentDistance).length, 2);
 
+// Cross-type: bike + run within 2min, similar distance → both kept (issue 4)
+const bikeRunSameTime = [
+  { id: "M", start_date: "2026-03-15T14:00:00Z", distance_meters: 6437, average_heartrate: null, activity_type: "Run" },
+  { id: "N", start_date: "2026-03-15T14:00:30Z", distance_meters: 6500, average_heartrate: 140,  activity_type: "Ride" },
+];
+assert("Cross-type (Run + Ride) not deduped even if distance/time match", deduplicateActivities(bikeRunSameTime).length, 2);
+
 // ─── correctMileageTotal ──────────────────────────────────────────────────────
 
 const nonRunningRe = /strength|mobility|yoga|bike|swim|elliptical|cross.train|rest day|hike/i;
@@ -130,12 +138,12 @@ function correctMileageTotal(message, alreadyCompletedMiles = 0) {
   const plannedRounded = Math.round(plannedMiles * 10) / 10;
 
   const totalPatterns = [
-    /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\s*(?:total|this week|for the week))/gi,
-    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(stays?\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(staying\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(Total:\s*~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\s*(?:total|this week|for the week))/gi,
+    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(stays?\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(staying\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
   ];
 
   let corrected = message;
@@ -253,6 +261,44 @@ Total: ~20 miles for the week.`;
 
 const recapFixed = correctMileageTotal(recapWrong, 0);
 assert("Weekly recap wrong total (20→24) corrected", recapFixed.includes("24"), true);
+
+// ─── correctMileageTotal() range-typo guard (issue 6) ────────────────────────
+
+console.log("\ncorrectMileageTotal() range-typo guard");
+
+// "34-36 miles total" — correctMileageTotal should NOT mangle it into "34-26"
+// by replacing the second number in the range. The sessions sum to 36mi.
+const rangeMsg = `Mon 3/23 · Easy 6mi
+Tue 3/24 · Tempo 8mi
+Thu 3/26 · Easy 6mi
+Sat 3/28 · Long run 10mi
+Sun 3/29 · Easy 6mi
+
+That puts you at 34-36 miles total for the week.`;
+
+const rangeResult = correctMileageTotal(rangeMsg, 0);
+// plannedMiles = 6+8+6+10+6 = 36. correctTotal = 36.
+// "36 miles total" IS the correct total → no replacement needed.
+// But even if there were a correction attempted, "34" should NOT be
+// turned into something else (it's a lower bound in a range, not a total).
+assert("Range phrase not mangled: still contains '34-'", rangeResult.includes("34-"), true);
+
+// Simulate the actual bug: sessions sum to 26mi but Dean wrote "34-36 miles total"
+// (wrong total, range form). correctMileageTotal should correct to 26 but must NOT
+// produce "34-26" — the correction should target the whole range, not just 36.
+// In practice the session-list guardrail catches this, but the range guard prevents
+// the worst-case "34-26" corruption even if the regex fires.
+const rangeBugMsg = `Mon 3/23 · Easy 5mi
+Tue 3/24 · Tempo 7mi
+Thu 3/26 · Easy 4mi
+Sat 3/28 · Long run 10mi
+
+That puts you at 34-36 miles total for the week.`;
+const rangeBugResult = correctMileageTotal(rangeBugMsg, 0);
+// plannedMiles = 5+7+4+10 = 26. correctTotal = 26.
+// Pattern 2 would previously match "36 miles total..." and replace 36→26 → "34-26 miles"
+// With the fix ((?<!-) lookbehind), "36" is preceded by "-" → not replaced.
+assert("Range-typo bug: '34-26' not produced", !rangeBugResult.includes("34-26"), true);
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

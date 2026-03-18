@@ -8,6 +8,38 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-18 — Fix bike activities polluting run mileage, double onboarding message, and range typo
+
+**Type:** Bug Fix (3 issues)
+**Reported by:** User 55babb83 (bike mileage), User 2201ddfe (double onboarding), User b1b308cf (range typo)
+**User feedback:**
+- "4mi bike at 4:32 average — that's solid controlled cross-training... You're at 9.8mi this week" (bike miles included in running weekly total)
+- Dean sent two messages 1 min apart during onboarding, both asking "which days work best for you?"
+- "That puts you at 34-26 miles total for the week" (nonsensical range after regex replacement)
+**Root cause (bike):** `deduplicateActivities()` and the Strava webhook near-dupe query didn't guard against cross-type matches — a Ride could near-dupe a Run and delete it (causing mileage to drop). Separately, `buildActivitySummary`'s `roadRuns` pace-analysis filter used only pace threshold (< 12 min/mi), so bikes at ~13 mph passed and appeared in PACE ANALYSIS.
+**Root cause (onboarding double-message):** Race condition between the Strava OAuth callback and the onboarding SMS handler. If the user texted while the Strava link was being authorized, both the callback (which asks the schedule question) and the `handleStrava` onboarding handler (which advances the step and also asks the schedule question) fired within seconds of each other.
+**Root cause (range typo):** `correctMileageTotal` pattern 2 (`/(~?)(\d+)(\s*mi...total|this week|for the week)/`) matched the second number in a range like "34-36 miles total", replacing "36" with the calculated total (26) and producing "34-26 miles".
+**Fix / Change:**
+- `deduplicateActivities`: added `if (k.activity_type !== a.activity_type) return false` — activities of different types can never be near-dupes of each other
+- Strava webhook near-dupe query: added `.eq("activity_type", activity.type)` so DB-level filtering prevents cross-type deletion
+- `buildActivitySummary.roadRuns`: added `if (!RUN_TYPES.has(a.activity_type)) return false` before the pace threshold check
+- Strava callback: before sending the schedule question to non-onboarded users, checks `conversations` for any assistant message in the last 3 minutes; if found, sends a shorter "Strava connected! Go ahead and answer that question above" instead of re-asking the same question
+- `correctMileageTotal` all `totalPatterns`: added `(?<!-)` lookbehind before the number capture group — numbers immediately preceded by a dash (part of a range) are now skipped
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/webhooks/strava/route.ts, src/app/api/auth/strava/callback/route.ts, scripts/test-dedup-mileage.mjs
+
+---
+
+## 2026-03-18 — Fix taper mileage targets shifting between messages
+
+**Type:** Bug Fix
+**Reported by:** User b1b308cf
+**User feedback:** Dean said "36 miles this week" at 14:30, then "26 miles this week" at 17:19 — same day, same taper week, different targets.
+**Root cause:** The taper protocol computed peak volume from `avgWeeklyMileage` on every message. Between the two messages, `avgWeeklyMileage` changed (likely because the 6-month async import completed and shifted the rolling average), causing the taper targets to recalculate to different numbers with no acknowledgment of the change.
+**Fix / Change:** Added `taper_peak_miles` column to `training_state`. The first time a user enters the taper window (≤21 days to race), the computed peak is stored and locked in. All subsequent messages use the stored peak instead of recalculating. Cleared on `initial_plan` so a new training cycle after the race gets a fresh peak.
+**Files changed:** `supabase/migrations/017_taper_peak_miles.sql`, `src/lib/database.types.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-18 — Fix mid-week plan total ignoring already-completed miles
 
 **Type:** Bug Fix

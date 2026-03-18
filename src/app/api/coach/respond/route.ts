@@ -360,6 +360,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
+    // Clear taper_peak_miles so a fresh training cycle re-locks the peak when
+    // the next taper window is entered (prevents stale peak from a previous race).
+    void supabase.from("training_state").update({ taper_peak_miles: null }).eq("user_id", userId);
     // Extract and store the specific planned sessions so all subsequent messages
     // (post_run, reminders) use the exact same distances — not independently recalculated.
     void extractAndStorePlanSessions(userId, coachMessage);
@@ -459,12 +462,12 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
   // Patterns that state a weekly total — replace the number if wrong
   // Handles: "10 miles total", "Total: 10mi", "stays at 10 miles", "~10mi total", etc.
   const totalPatterns: RegExp[] = [
-    /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\s*(?:total|this week|for the week))/gi,
-    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(stays?\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(staying\s+at\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(Total:\s*~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\s*(?:total|this week|for the week))/gi,
+    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(stays?\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(staying\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
   ];
 
   let corrected = message;
@@ -602,6 +605,8 @@ function deduplicateActivities(activities: ActivityRow[]): ActivityRow[] {
   for (const a of activities) {
     const aMs = new Date(a.start_date).getTime();
     const dupeIndex = kept.findIndex((k) => {
+      // Never dedup across different activity types — a bike can't be a near-dupe of a run
+      if (k.activity_type !== a.activity_type) return false;
       const kMs = new Date(k.start_date).getTime();
       if (Math.abs(aMs - kMs) > 120_000) return false;
       const larger = Math.max(k.distance_meters || 0, a.distance_meters || 0);
@@ -775,6 +780,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string): stri
 
   // Pace distribution from road-like runs (< 12 min/mi)
   const roadRuns = activities.filter((a) => {
+    if (!RUN_TYPES.has(a.activity_type)) return false;
     const miles = a.distance_meters / 1609.34;
     const pace = miles > 0 ? a.moving_time_seconds / 60 / miles : 999;
     return pace < 12 && miles > 0.5;
@@ -1073,9 +1079,20 @@ function buildSystemPrompt(
     dateContext += `- Race date: ${profile.race_date} (${daysUntil} days / ~${weeksUntil} weeks away)\n`;
     dateContext += `- Plan backwards from race date: allocate taper (2 weeks), peak (2-3 weeks), build, and base phases\n`;
 
-    // Inject a code-computed taper plan when 21 days or fewer remain
+    // Inject a code-computed taper plan when 21 days or fewer remain.
+    // Use the stored taper_peak_miles if available — this locks in the peak on first
+    // entry so targets don't shift as avgWeeklyMileage fluctuates between messages.
+    // If not yet stored, use avgWeeklyMileage and persist it as a side-effect.
     if (daysUntil > 0 && daysUntil <= 21 && avgWeeklyMileage && avgWeeklyMileage > 0) {
-      const peak = Math.round(avgWeeklyMileage * 10) / 10;
+      const storedPeak = state?.taper_peak_miles as number | null;
+      if (!storedPeak) {
+        // First time entering the taper window — lock in the peak
+        void supabase
+          .from("training_state")
+          .update({ taper_peak_miles: Math.round(avgWeeklyMileage * 10) / 10 })
+          .eq("user_id", user.id as string);
+      }
+      const peak = storedPeak ?? Math.round(avgWeeklyMileage * 10) / 10;
       const goal = profile?.goal as string | null;
       const isUltra = ["50k","100k","50mi","100mi"].includes(goal ?? "");
       const isMarathon = goal === "marathon";

@@ -248,6 +248,7 @@ export type Database = {
           last_activity_summary: Json | null
           long_run_target: number | null
           plan_adjustments: string | null
+          taper_peak_miles: number | null
           updated_at: string | null
           user_id: string
           week_mileage_so_far: number | null
@@ -262,6 +263,7 @@ export type Database = {
           last_activity_summary?: Json | null
           long_run_target?: number | null
           plan_adjustments?: string | null
+          taper_peak_miles?: number | null
           updated_at?: string | null
           user_id: string
           week_mileage_so_far?: number | null
@@ -276,6 +278,7 @@ export type Database = {
           last_activity_summary?: Json | null
           long_run_target?: number | null
           plan_adjustments?: string | null
+          taper_peak_miles?: number | null
           updated_at?: string | null
           user_id?: string
           week_mileage_so_far?: number | null

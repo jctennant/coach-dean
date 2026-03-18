@@ -150,6 +150,7 @@ export async function POST(request: Request) {
           .select("id, strava_activity_id, distance_meters, average_heartrate, summary")
           .eq("user_id", user.id)
           .neq("strava_activity_id", activity.id)
+          .eq("activity_type", activity.type)
           .gte("start_date", startLow)
           .lte("start_date", startHigh);
 

@@ -157,9 +157,30 @@ export async function GET(request: Request) {
   });
 
   const firstName = user.name ? ` ${user.name}` : "";
+
+  // Check whether the onboarding flow already sent a message in the last 3 minutes.
+  // This prevents a double-message race: if the user texted while waiting for Strava to
+  // connect, the onboarding handler fires (advancing to awaiting_schedule and asking
+  // the schedule question) at nearly the same time as this callback — resulting in two
+  // consecutive messages both asking the same question.
+  let recentOnboardingMessage = false;
+  if (!alreadyOnboarded) {
+    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+    const { data: recentMsgs } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("role", "assistant")
+      .gte("created_at", threeMinutesAgo)
+      .limit(1);
+    recentOnboardingMessage = !!(recentMsgs && recentMsgs.length > 0);
+  }
+
   const smsMsg = alreadyOnboarded
     ? `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`
-    : `Strava connected${firstName} — I can see your training history, this is going to help a lot. A couple more quick questions: which days of the week work best for you? (e.g. Mon, Wed, Fri, Sun)`;
+    : recentOnboardingMessage
+      ? `Strava connected${firstName}! Go ahead and answer that question above when you're ready.`
+      : `Strava connected${firstName} — I can see your training history, this is going to help a lot. A couple more quick questions: which days of the week work best for you? (e.g. Mon, Wed, Fri, Sun)`;
 
   await Promise.all([
     sendSMS(user.phone_number, smsMsg),
