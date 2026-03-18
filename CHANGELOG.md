@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-17 — Fix weekly mileage history on initial Strava connect
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Gwyneth's connect week)
+**User feedback:** "the week my wife connected strava we only had part of her activities in the activities table, so maybe are getting the mileage for that week incorrect based on her conversation"
+**Root cause:** Two bugs: (1) The synchronous activity import on connect only fetched 14 days, so `computeAvgWeeklyMileage` (which needs 6 complete prior weeks) was computed from incomplete data on the first coaching message. (2) `computeAvgWeeklyMileage` used `Object.values(weeks).slice(-6)` which — since activities are fetched newest-first — was returning the 6 *oldest* weeks in the dataset rather than the 6 most recent.
+**Fix / Change:** Expanded the synchronous import on Strava connect from 14 days to 8 weeks (56 days), so both current-week mileage and the 6-week average are accurate before `initial_plan` fires. Fixed `slice(-6)` to sort week keys alphabetically (YYYY-MM-DD = chronological) before slicing, ensuring the most recent 6 weeks are always used.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-16 — Fix mileage total correction for complex interval sessions
 
 **Type:** Bug Fix

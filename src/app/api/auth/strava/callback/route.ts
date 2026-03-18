@@ -134,9 +134,9 @@ export async function GET(request: Request) {
     .from("training_profiles")
     .upsert({ user_id: user.id, preferred_units: preferredUnits, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
 
-  // Synchronously import the last 14 days so week mileage is available immediately
-  // when initial_plan fires (which can happen within seconds of onboarding completing).
-  // The full 2-year history import runs in the background.
+  // Synchronously import the last 8 weeks so current-week mileage AND the 6-week
+  // average are accurate when initial_plan fires. The full 2-year history import
+  // runs in the background for race history and deeper analytics.
   await importRecentActivities(user.id, access_token).catch((err) =>
     console.error("[strava-callback] recent activity import error:", err)
   );
@@ -217,12 +217,13 @@ async function upsertActivities(userId: string, activities: Array<Record<string,
 }
 
 /**
- * Synchronously import the last 14 days of activities so that week mileage
- * is available immediately when initial_plan fires. Fast — typically 1 API page.
+ * Synchronously import the last 8 weeks of activities so that both current-week
+ * mileage AND the 6-week average are accurate when initial_plan fires.
+ * Fast — typically 1 API page (200 activities covers 8 weeks for any runner).
  */
 async function importRecentActivities(userId: string, accessToken: string) {
-  const fourteenDaysAgo = Math.floor(Date.now() / 1000) - 14 * 24 * 60 * 60;
-  const activities = await getAllActivities(accessToken, { after: fourteenDaysAgo, maxPages: 1 });
+  const eightWeeksAgo = Math.floor(Date.now() / 1000) - 56 * 24 * 60 * 60;
+  const activities = await getAllActivities(accessToken, { after: eightWeeksAgo, maxPages: 1 });
   const count = await upsertActivities(userId, activities as Array<Record<string, unknown>>);
   console.log(`[strava-callback] synced ${count} recent activities for user ${userId}`);
 }

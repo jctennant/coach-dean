@@ -637,7 +637,13 @@ function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): n
     weeks[mondayKey] = (weeks[mondayKey] || 0) + (a.distance_meters || 0) / 1609.34;
   }
 
-  const weekValues = Object.values(weeks).slice(-6);
+  // Sort by week key (YYYY-MM-DD) so slice(-6) takes the 6 most recent weeks,
+  // not the 6 oldest (Object.values insertion order is newest-first since
+  // activities are fetched start_date DESC).
+  const weekValues = Object.entries(weeks)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-6)
+    .map(([, v]) => v);
   if (weekValues.length === 0) return null;
   return weekValues.reduce((s, v) => s + v, 0) / weekValues.length;
 }
