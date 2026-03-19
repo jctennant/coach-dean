@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-19 — Communicate Dean's features earlier in onboarding and on the landing page
+
+**Type:** Improvement
+**Reported by:** User feedback
+**User feedback:** "It wasn't clear about all of the different things that she could do with Coach Dean."
+**Root cause:** The welcome SMS focused on goal types but didn't mention the four differentiating features. The landing page buried Strava in a FAQ answer and never mentioned reminders.
+**Fix / Change:**
+- Rewrote welcome SMS to the approved copy: "I'm Coach Dean — your AI running coach, entirely over text. I can build you a personalized training plan, analyze your runs via Strava, incorporate strength and mobility work to keep you injury-free, and discuss race strategy and pacing. What are you training for?"
+- Updated the fallback intro in `handleGoal` (direct-text path) to match, with a "Hey {name}!" prefix when the name is known.
+- Updated landing page hero description to mention reminders and Strava analysis.
+- Replaced the standalone "What Dean does" card grid with a lightweight ✓ checklist inline below the signup form in the hero — same information, less visual weight, no competition with the value prop sections below.
+- TODO (deferred): Add a comparison table (Dean vs ChatGPT vs Runna) once pricing is set — Dean's differentiators include no app needed, flexibility around illness/travel/injury, reminders, and Strava analysis.
+**Files changed:** `src/app/api/signup/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/page.tsx`
+
+---
+
 ## 2026-03-19 — Token cost optimizations batch 2
 
 **Type:** Improvement

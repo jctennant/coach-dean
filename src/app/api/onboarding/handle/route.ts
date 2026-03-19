@@ -245,8 +245,8 @@ Rules:
     } else if (!introAlreadySent) {
       // Intro not yet sent — include it now, personalized with name if known
       responseText = name
-        ? `Hey ${name}! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat are you training for?`
-        : `Hey! I'm Coach Dean — your AI endurance coach. I can build you a personalized training plan, check in after workouts, and adapt things as your fitness builds.\n\nWhat's your name, and what are you training for?`;
+        ? `Hey ${name}! I'm Coach Dean — your AI running coach, entirely over text. I can build you a personalized training plan, analyze your runs via Strava, incorporate strength and mobility work to keep you injury-free, and discuss race strategy and pacing.\n\nWhat are you training for?`
+        : `I'm Coach Dean — your AI running coach, entirely over text. I can build you a personalized training plan, analyze your runs via Strava, incorporate strength and mobility work to keep you injury-free, and discuss race strategy and pacing.\n\nWhat are you training for?`;
     } else if (name) {
       // Intro already sent, name known — just ask the question
       responseText = `Hey ${name}! What are you training for — a race, general fitness, something else?`;

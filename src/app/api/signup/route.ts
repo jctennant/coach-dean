@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   }
 
   const welcomeMessage =
-    "Hey, I'm Coach Dean — your AI running coach, working entirely over text.\n\nI help with a few things: training for a race (5K up to ultra), building a consistent running habit, coming back from injury and rebuilding safely, or just general coaching on pacing, nutrition, and gear.\n\nWhat's your name, and what's brought you here?";
+    "I'm Coach Dean — your AI running coach, entirely over text. I can build you a personalized training plan, analyze your runs via Strava, incorporate strength and mobility work to keep you injury-free, and discuss race strategy and pacing.\n\nWhat are you training for?";
 
   // Send welcome SMS and store in conversations.
   // Capture the chatId from Linq so read receipts and typing indicators work
