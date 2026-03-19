@@ -8,6 +8,42 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-19 — Token cost optimizations batch 2
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Several API calls were using Sonnet for tasks Haiku handles equally well (binary classification, date parsing, short text generation), max_tokens was 2048 for SMS outputs capped at ~640 chars, and the daily analysis cron used Opus when Sonnet is sufficient.
+**Fix / Change:**
+- Daily conversation analysis cron: `claude-opus-4-6` → `claude-sonnet-4-6`. Opus is 5–10× more expensive per token; Sonnet is fully capable of error detection and HTML report generation.
+- Conversation history limit: `15` messages for all triggers → `15` for `user_message`, `8` for all other triggers (reminders, post_run, plan generation). Proactive triggers don't need full conversation depth.
+- Main coaching response `max_tokens`: `2048` → `800` for plan triggers (`initial_plan`, `weekly_recap`), `512` for all others. SMS output is ~150 tokens; 2048 was 13× the actual output size.
+- Race date extraction: `claude-sonnet-4-5-20250929` → `claude-haiku-4-5-20251001`. Parsing "June 15" or "next April" to ISO date is straightforward structured extraction.
+- Training schedule extraction: `claude-sonnet-4-5-20250929` → `claude-haiku-4-5-20251001`. Extracting days of week from "Tuesday, Thursday, Saturday" doesn't need Sonnet.
+- "Anything else?" response: `claude-sonnet-4-5-20250929` → `claude-haiku-4-5-20251001`. Short conversational acknowledgment at end of onboarding.
+- Off-topic detection: `claude-sonnet-4-5-20250929` → `claude-haiku-4-5-20251001`. Binary on-topic/off-topic classification with a reply fallback.
+**Files changed:** `src/app/api/cron/analyze-conversations/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
+## 2026-03-19 — Trigger-conditional system prompt to reduce token cost
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** `buildSystemPrompt` emitted the full ~18,000-char prompt for every trigger type, including ~7,300 chars of sections irrelevant to reminders (training philosophy, product capabilities, athlete philosophy references, plan deviation tone guides, etc.). At $3/M input tokens this was ~$0.006/call in dead weight for morning and nightly reminders alone.
+**Fix / Change:** Added `trigger` parameter to `buildSystemPrompt`. Wrapped 6 sections in trigger-conditional guards:
+- TRAINING PHILOSOPHY (6 principles): skipped for `morning_reminder`, `nightly_reminder` — reminders don't prescribe new plans, the coach already knows the philosophy
+- WHEN NOT TO REPLY: only for `user_message`, `post_run`, `workout_image` — reminders and plan triggers always reply
+- TONE WHEN ATHLETE RUNS FASTER / DIFFERENT WORKOUT: only for `user_message`, `post_run` — only relevant when reviewing a completed run
+- PRODUCT CAPABILITIES: only for `user_message` — athletes only ask about features in conversation, not during reminders or plan generation
+- STRENGTH, MOBILITY & CROSS-TRAINING: skipped for `morning_reminder`, `nightly_reminder`, `post_run` — not building a plan
+- ATHLETE-STATED PHILOSOPHIES reference table: only for `user_message` — only relevant when athlete brings up a methodology in chat
+Estimated savings: ~1,800 tokens/reminder call, ~1,400 tokens/post_run call.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-19 — Store and use exact goal race distance for non-standard events
 
 **Type:** Feature / Improvement

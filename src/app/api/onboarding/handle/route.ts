@@ -366,7 +366,7 @@ async function handleRaceDate(
 ) {
   const [parseResponse, extra, acknowledgment] = await Promise.all([
     anthropic.messages.create({
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 64,
       system: `Extract a race/target date from the user's message. Respond with ONLY valid JSON, no other text.
 
@@ -514,7 +514,7 @@ async function handleSchedule(
 ) {
   const [parseResponse, extra] = await Promise.all([
     anthropic.messages.create({
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 200,
       system: `Extract training schedule preferences from the user's message. Respond with ONLY valid JSON, no other text.
 
@@ -1560,7 +1560,7 @@ async function generateAnythingElseResponse(
     : "The athlete is in the process of setting up their training plan.";
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 200,
     system: `You are Coach Dean, an AI endurance coach. ${context} You just asked: "Before I put your plan together, anything else I should know?"
 
@@ -1689,7 +1689,7 @@ async function checkOffTopic(
   if (!ctx) return { offTopic: false };
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 200,
     system: `You are Coach Dean, an AI running coach onboarding a new athlete via SMS. You are currently collecting information about ${ctx.topic}.
 

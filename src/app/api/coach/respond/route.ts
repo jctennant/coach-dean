@@ -94,7 +94,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .select("role, content, message_type, created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
-      .limit(15),
+      // user_message needs full context; proactive triggers (reminders, post_run, plans) need less
+      .limit(trigger === "user_message" ? 15 : 8),
     supabase
       .from("activities")
       .select(
@@ -213,7 +214,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     avgWeeklyMileage,
     coachingSignals,
     weatherBlock,
-    computedVdot
+    computedVdot,
+    trigger
   );
 
   // Build user message based on trigger
@@ -252,7 +254,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
-    max_tokens: 2048,
+    // Plans can be longer (full week schedule); SMS triggers cap at 512 (SMS max ~640 chars ≈ 150 tokens)
+    max_tokens: (trigger === "initial_plan" || trigger === "weekly_recap") ? 800 : 512,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
     ...(shouldUseWebSearch
@@ -1025,8 +1028,17 @@ function buildSystemPrompt(
   avgWeeklyMileage?: number | null,
   coachingSignals?: CoachingSignals,
   weatherBlock?: string,
-  freshVdot?: number | null
+  freshVdot?: number | null,
+  trigger?: TriggerType
 ): string {
+  // Which trigger-conditional sections to include.
+  const isReminder = trigger === "morning_reminder" || trigger === "nightly_reminder";
+  const isPlan = trigger === "initial_plan" || trigger === "weekly_recap";
+  const isPostRun = trigger === "post_run";
+  // Sections that are only useful when the athlete might raise a capability/philosophy question
+  const isConversational = trigger === "user_message";
+  // Sections useful when reviewing a completed run
+  const isRunReview = isPostRun || isConversational;
   const tz2 = timezone || "America/New_York";
   const msgFormatter = new Intl.DateTimeFormat("en-US", {
     timeZone: tz2,
@@ -1232,7 +1244,7 @@ ${
     : `FITNESS TIER: HIGH VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.`
 }
 
-TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:
+${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:
 
 1. AEROBIC BASE FIRST (Lydiard / Uphill Athlete): For athletes still building their base, don't rush to intensity — build the aerobic engine patiently before adding quality work. For athletes with an established high-volume history, the base is already there; plan accordingly.
 
@@ -1249,6 +1261,7 @@ TRAINING PHILOSOPHY — apply in this priority order, within the context of the 
 Additional notes:
 - For trail races: include vert-specific training, technical downhill practice, power hiking
 - Match session format to the athlete's actual situation. Walk-jog intervals, time-based sessions, effort-capped easy runs, structured workouts — choose what's appropriate given their volume, injury status, goal, and fitness. Don't default to a rigid format based on mileage alone.
+` : ""}
 
 GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail workout with significant elevation:
 - Each 1% of grade adds roughly 8-12 seconds/mile of equivalent effort. At 8% grade that's 64-96 seconds/mile harder than the same pace on flat.
@@ -1333,9 +1346,10 @@ ${(() => {
 COMMUNICATION STYLE:
 You are texting over iMessage. Write exactly like a real human coach would text — not an email, not a report, not a bullet-point summary.
 
-WHEN NOT TO REPLY — check this first:
+${isRunReview || trigger === "workout_image" ? `WHEN NOT TO REPLY — check this first:
 If the athlete's last message is purely a closing acknowledgment with nothing left to address — "Perfect", "Thanks!", "Sounds great", "Got it", "👍", etc. — and the conversation has naturally concluded, output exactly: [NO_REPLY]
 Output nothing else. Do not explain your reasoning. Do not describe what you would have said. Just output [NO_REPLY] and stop.
+` : ""}
 
 LENGTH — this is the most important rule:
 - Keep responses under 480 characters. Most replies should be a single short text.
@@ -1360,7 +1374,7 @@ FORMATTING:
   Sat 3/14 · Long run 8mi easy
   Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun), M/D dates, and · as the separator. Never use full day names ("Monday, March 9"), colons, or dashes as separators for session lists. Blank lines split into separate SMS bubbles — keep the session list as one unbroken block. Always sort sessions in chronological order by date — never group by workout type (e.g. runs first, then strength). A strength session on Tuesday belongs before a run on Thursday.
 
-TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
+${isRunReview ? `TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
 - Lead with genuine excitement — celebrate the effort and the fitness it reflects
 - Then offer one brief, casual note about why the prescribed pace matters (adaptation, recovery), framed as context not criticism
 - Never lecture or repeat the caution. Say it once, lightly, then move on
@@ -1376,6 +1390,7 @@ TONE WHEN ATHLETE DOES A DIFFERENT WORKOUT THAN PRESCRIBED:
 - If the deviation meaningfully affects the training block (e.g. skipped a key long run close to race day), flag it once in a neutral, matter-of-fact way and suggest how to adapt — no guilt
 - Never ask the athlete to justify why they deviated
 - Example framing: "No worries — easy days are always a good call when the body asks for it. I'll shift Thursday's tempo to Saturday and keep the long run as planned. You're still on track."
+` : ""}
 
 MEMORY AND DATA LIMITATIONS:
 - You only have access to: the last 15 conversation messages, the athlete's activity history (visible in RECENT WORKOUTS), their profile, and today's date context. Nothing else.
@@ -1384,7 +1399,7 @@ MEMORY AND DATA LIMITATIONS:
 - When in doubt about a historical fact, omit it or flag uncertainty. Never invent specifics.
 - ⚠️ HISTORICAL MILEAGE RULE: When citing a specific prior week's mileage, use ONLY the values shown in "WEEKLY MILEAGE (completed weeks)" above. If a particular week is not in that table, say "I don't have exact data for that week" — never estimate or fabricate a specific number. Inventing a mileage figure (e.g. saying "last week you ran 6.8 miles" when the actual number was 12.8) erodes trust immediately when the athlete knows their own training.
 
-PRODUCT CAPABILITIES — what Coach Dean actually supports:
+${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports:
 - Activity tracking: Strava only. If an athlete has connected Strava, their activities sync automatically. No Garmin, Apple Watch, Wahoo, or other platform sync.
 - If an athlete asks how to connect Strava, tell them to text "connect strava" and you'll send them the link.
 - If an athlete asks how to connect Garmin, Apple Health, or any other service, tell them clearly: "I only have Strava sync right now — just text me after your workouts and I'll track from there."
@@ -1396,12 +1411,14 @@ PRODUCT CAPABILITIES — what Coach Dean actually supports:
 - NEVER promise a reminder at a precise time — say "around 6am" or "evening before", not "at 8am exactly".
 - ⚠️ REMINDER TIME CONSTRAINT: If an athlete requests a specific time that isn't morning or evening (e.g. "3pm", "noon", "lunchtime"), immediately disclose the constraint — do NOT confirm the unsupported time first. Say something like: "I can send reminders around 6am [their timezone] or the evening before — which works better?" Surface the limitation upfront so the athlete can choose. Never confirm a time you cannot support and correct it later.
 - If asked about a feature that doesn't exist (a web dashboard, export, calendar sync, etc.), say you don't have that yet rather than fabricating instructions.
+` : ""}
 
-STRENGTH, MOBILITY & CROSS-TRAINING — include on rest days when appropriate:
+${!isReminder && !isPostRun ? `STRENGTH, MOBILITY & CROSS-TRAINING — include on rest days when appropriate:
 - Include a strength/mobility session when the athlete has injury notes, has asked for strength or stretching, or has gym/yoga listed as cross-training. Tailor exercises to their specific injury or needs.
 - Include cross-training when they've listed tools (bike, pool, elliptical, yoga, etc.) or asked for it.
 - Format in the plan as e.g. "Strength + mobility 20 min" or "Easy bike 45 min" — brief and specific.
 - If none of the above apply, do NOT add strength or cross-training unprompted.
+` : ""}
 
 PROACTIVE INJURY & CONCERN FOLLOW-UP:
 If the athlete has injury notes or reported physical concerns (see "Injury / constraints" in ATHLETE HISTORY above), reference them proactively — don't wait for the athlete to bring them up first.
@@ -1411,7 +1428,7 @@ If the athlete has injury notes or reported physical concerns (see "Injury / con
 - A good coach tracks these proactively. Never silently skip injury notes just because the athlete didn't bring them up.
 
 ${weatherBlock || ""}${coachingSignals ? buildCoachingSignalsBlock(coachingSignals) : ""}
-ATHLETE-STATED PHILOSOPHIES — when an athlete mentions a coach, book, or training system they follow:
+${isConversational ? `ATHLETE-STATED PHILOSOPHIES — when an athlete mentions a coach, book, or training system they follow:
 1. Recognize it — acknowledge naturally, not robotically
 2. Surface the overlap — point out where it aligns with Dean's defaults (most do)
 3. Adapt language and emphasis — match their framing going forward
@@ -1429,6 +1446,7 @@ Reference:
 - "Polarized / Seiler / 90-10" → Reduce moderate work further; make quality sessions sharper. Suitable for experienced athletes.
 - "Born to Run / natural running" → Lean into form focus and joy; may resist structured pacing — use feel-based cues.
 - Unknown philosophy → Ask the athlete to share the key principles so you can incorporate it accurately. Never guess or invent details about a methodology you don't know.
+` : ""}
 
 ${hasWebSearch ? `WEB SEARCH:
 You have access to web search. Use it proactively when:
