@@ -165,7 +165,8 @@ goal_distance_miles rules:
   - "9-mile Dipsea" → goal_distance_miles: 9.0
   - "80K ultra" → goal_distance_miles: 49.71
   - "15-mile trail race" → goal_distance_miles: 15.0
-- For standard goal types (1 mile, 5K, 10K, half marathon, marathon, 30K, 50K, 50 miles, 100K, 100 miles) where no non-standard distance is mentioned → goal_distance_miles: null (system fills this in)
+- For standard goal types (5K, 10K, half marathon, marathon, 30K, 50K, 50 miles, 100K, 100 miles) where no non-standard distance is mentioned → goal_distance_miles: null (system fills this in)
+- For non-standard distances mapped to the "mile" bucket (e.g. 1.5 mile, 2 mile): always output the exact distance → goal_distance_miles: 1.5, 2.0, etc.
 - For general_fitness, return_to_running, injury_recovery, triathlon types, cycling → goal_distance_miles: null
 
 Rules:
@@ -175,12 +176,15 @@ Rules:
 - Named specific race or event (e.g. "Behind the Rocks trail race", "Wasatch 100", "Boston Marathon", "local 5K next spring") → complete: true. Use any explicit distance cues in the message: "Wasatch 100" → "100k"; "Boston Marathon" → "marathon"; "local half" → "half_marathon". If the name contains no distance info (e.g. just "Behind the Rocks trail race"), use "50k" as a placeholder — the web search step will clarify if needed.
 - "mile PR", "mile time trial", "1 mile", "track mile", "1-mile race", "sub-5 mile", "sub-4 mile", "mile repeat" as a goal → "mile"
 - "half marathon" or "half" → "half_marathon"
+
 - "full marathon" or "marathon" → "marathon"
 - "50 miles", "50-mile", "50-miler", "50mi", "fifty miles", "50 mile ultra" → "50mi" (NOT "50k" — these are very different races)
 - "100 miles", "100-mile", "100-miler", "100mi", "hundred miles", "100 mile ultra", "Western States", "Leadville", "UTMB" → "100mi"
 - "ultra" without distance → "50k"
 - Non-standard distances — map to nearest standard bucket:
-  - Under ~12K (less than 8 miles) → "10k"
+  - Under ~5K (less than ~3 miles): 1.5 mile run, 2 mile race, 2.5 mile time trial → "mile" (same speed/neuromuscular training as a mile)
+  - ~5K to ~10K (3 to 6 miles): 4-mile race, 8K, 5-mile race → "5k"
+  - ~10K to half marathon (6 to 12 miles): 10-mile race, 15K → "10k"
   - 13K to ~42K (between a half marathon and marathon distance) → "30k"
   - 13K to 19K is closest to half marathon in spirit; still use "30k" as the bucket
   - 60K, 70K, 80K, any race between 50K and 100K → "100k"
