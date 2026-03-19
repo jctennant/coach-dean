@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-19 — Add mile time trial as a first-class goal type
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** A mile PR goal was bucketed to "10k" by the classifier, which was wrong in two concrete ways: (1) goal pace calculation used 6.214 miles instead of 1.0 mile, producing a completely wrong target pace; (2) the coaching methodology for 10K (threshold work, aerobic volume) is fundamentally different from mile training (VO2max intervals, strides, neuromuscular speed, no traditional taper).
+**Fix / Change:**
+- Added `"mile"` as a goal type to the classifier output format with explicit rules: "mile PR", "mile time trial", "1 mile", "track mile", "sub-5 mile" → "mile"
+- Added `"mile": 1.0` to `runGoalDistancesMiles` in both files — goal pace now computes correctly (e.g., 5:30 goal = 5:30/mi, not 0:53/mi)
+- Added `formatGoalLabel("mile")` = "a mile time trial" and `formatGoalInline("mile")` = "mile time trial"
+- Taper protocol: mile gets a distinct sharpening-week instruction (−30% volume, 4-6x400m) in the final 7 days instead of the standard 3-week taper protocol
+- Added MILE TIME TRIAL GOAL coaching instruction to the initial_plan section: 800m/400m repeats at mile effort, strides 2-3x/week, modest total volume (25-35mi/week), interval paces derived from goal time
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-19 — Communicate Dean's features earlier in onboarding and on the landing page
 
 **Type:** Improvement

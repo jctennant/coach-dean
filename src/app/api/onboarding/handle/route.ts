@@ -145,7 +145,7 @@ async function handleGoal(
       max_tokens: 256,
       system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery"|null, "race_name": string|null, "goal_distance_miles": number|null}
+Output format: {"complete": true|false, "no_event": true|false, "goal": "mile"|"5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery"|null, "race_name": string|null, "goal_distance_miles": number|null}
 
 race_name rules:
 - Set race_name when the athlete mentions a specific named event OR a non-standard distance. Examples:
@@ -165,7 +165,7 @@ goal_distance_miles rules:
   - "9-mile Dipsea" → goal_distance_miles: 9.0
   - "80K ultra" → goal_distance_miles: 49.71
   - "15-mile trail race" → goal_distance_miles: 15.0
-- For standard goal types (5K, 10K, half marathon, marathon, 30K, 50K, 50 miles, 100K, 100 miles) where no non-standard distance is mentioned → goal_distance_miles: null (system fills this in)
+- For standard goal types (1 mile, 5K, 10K, half marathon, marathon, 30K, 50K, 50 miles, 100K, 100 miles) where no non-standard distance is mentioned → goal_distance_miles: null (system fills this in)
 - For general_fitness, return_to_running, injury_recovery, triathlon types, cycling → goal_distance_miles: null
 
 Rules:
@@ -173,6 +173,7 @@ Rules:
 - no_event: true if the athlete explicitly says they have no race or event planned right now ("nothing on the calendar", "no race yet", "not signed up for anything", "no events planned") — regardless of whether complete is true or false
 - Pure greetings with no goal context → complete: false, no_event: false, goal: null
 - Named specific race or event (e.g. "Behind the Rocks trail race", "Wasatch 100", "Boston Marathon", "local 5K next spring") → complete: true. Use any explicit distance cues in the message: "Wasatch 100" → "100k"; "Boston Marathon" → "marathon"; "local half" → "half_marathon". If the name contains no distance info (e.g. just "Behind the Rocks trail race"), use "50k" as a placeholder — the web search step will clarify if needed.
+- "mile PR", "mile time trial", "1 mile", "track mile", "1-mile race", "sub-5 mile", "sub-4 mile", "mile repeat" as a goal → "mile"
 - "half marathon" or "half" → "half_marathon"
 - "full marathon" or "marathon" → "marathon"
 - "50 miles", "50-mile", "50-miler", "50mi", "fifty miles", "50 mile ultra" → "50mi" (NOT "50k" — these are very different races)
@@ -1020,7 +1021,7 @@ async function completeOnboarding(
   // Exact race distance: prefer classifier-extracted value (non-standard distances),
   // fall back to the canonical bucket distance for standard goals.
   const runGoalDistancesMilesStandard: Record<string, number> = {
-    "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
+    "mile": 1.0, "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
     "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
   };
   const goalDistanceMiles =
@@ -1767,6 +1768,7 @@ function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null,
 
 function formatGoalInline(goal: string): string {
   const labels: Record<string, string> = {
+    mile: "mile time trial",
     "5k": "5K",
     "10k": "10K",
     half_marathon: "half marathon",

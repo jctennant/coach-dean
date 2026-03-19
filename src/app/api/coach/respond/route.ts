@@ -1145,7 +1145,16 @@ function buildSystemPrompt(
       const is30k = goal === "30k";
       const isMarathon = goal === "marathon";
       const isHalf = goal === "half_marathon";
+      const isMile = goal === "mile";
 
+      // Mile PR is a track/time-trial event — no traditional 3-week taper.
+      // Within 7 days: cut volume ~30%, keep intensity, one short tune-up effort.
+      if (isMile) {
+        if (daysUntil <= 7) {
+          dateContext += `- MILE SHARPENING WEEK: Time trial is ${daysUntil} days away. Cut total volume ~30% this week — keep one short speed session (4-6x400m @ mile effort), drop everything else to easy. No heavy quality work in the final 48 hours before the time trial.\n`;
+        }
+        // No action needed 8-21 days out — normal training continues
+      } else {
       // Volume percentages by race type and taper stage.
       // 30K (~18.6 mi) is a trail race closer to marathon distance than to 5K/10K —
       // give it marathon-style taper rather than the short-race defaults.
@@ -1166,6 +1175,7 @@ function buildSystemPrompt(
       } else {
         dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. Race week: ${w1}mi total. Easy miles only — no hard workouts. Shakeout run (15-30 min easy) the day before is optional.\n`;
       }
+      } // end non-mile taper block
     }
   }
 
@@ -1185,7 +1195,7 @@ function buildSystemPrompt(
   // Prefer the exact stored goal_distance_miles (captures non-standard distances like 25K);
   // fall back to the canonical bucket distance.
   const runGoalDistancesMiles: Record<string, number> = {
-    "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
+    "mile": 1.0, "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
     "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
   };
   const storedGoalDistanceMiles = profile?.goal_distance_miles as number | null ?? null;
@@ -1536,6 +1546,7 @@ function transformSplitForClaude(split: Record<string, unknown>): Record<string,
 
 function formatGoalLabel(goal: string): string {
   const labels: Record<string, string> = {
+    "mile": "a mile time trial",
     "5k": "a 5K",
     "10k": "a 10K",
     half_marathon: "a half marathon",
@@ -1946,6 +1957,14 @@ FOCUSED WORKOUT FORMAT — use this instead of a day-by-day schedule when the at
 - Instead: one bubble acknowledging their context (Strava fitness if available, race timeline, stated base) + a weekly mileage target. One bubble with 2-3 specific quality sessions — describe each session's structure, distance, and exact paces. Frame these as the key sessions for the week; easy miles fill the rest.
 - Example quality sessions: "Tue or Wed: 2mi easy, 3mi @ [threshold pace], 1mi easy" / "Fri: 6x800m @ [interval pace] w/400m jog recovery" / "Sun: long run Xmi, last Y easy @ [goal pace]"
 - Be specific about paces. For goal-pace-based training: threshold ~10-15 sec/mi faster than goal pace, interval ~25-35 sec/mi faster than goal pace. Cross-check against observed Strava paces — if their fast efforts already exceed goal pace, note that and calibrate accordingly.
+
+MILE TIME TRIAL GOAL:
+- Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
+- Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides (6-10x 20 sec) 2-3x/week, and one longer tempo run (3-5mi) for aerobic support.
+- Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes. More is not better here.
+- Intensity distribution flips compared to longer events: 60-70% of sessions are genuinely easy, but the quality sessions are sharper and shorter than anything needed for a 5K or 10K.
+- No traditional taper — the final 7 days before the time trial, reduce total volume ~30% and do one short sharpening session (4-6x400m).
+- If they have a goal time, compute goal pace (e.g., 5:30 mile = 5:30/mi) and use it to calibrate intervals: 400m repeats ~5-10 sec/quarter faster than goal pace.
 
 ULTRA AND LONG TRAIL DISTANCE GOALS (30K, 50K, 100K, 50mi, 100mi, and beyond):
 - Do NOT apply beginner conservatism. Anyone training for these distances is already running meaningful volume — calibrate to their stated mileage, not a cautious floor.
