@@ -156,6 +156,39 @@ export type Database = {
         }
         Relationships: []
       }
+      exercise_library: {
+        Row: {
+          aliases: string[]
+          category: string
+          created_at: string | null
+          gif_url: string
+          id: string
+          instructions: string | null
+          linq_attachment_id: string | null
+          name: string
+        }
+        Insert: {
+          aliases?: string[]
+          category: string
+          created_at?: string | null
+          gif_url?: string
+          id?: string
+          instructions?: string | null
+          linq_attachment_id?: string | null
+          name: string
+        }
+        Update: {
+          aliases?: string[]
+          category?: string
+          created_at?: string | null
+          gif_url?: string
+          id?: string
+          instructions?: string | null
+          linq_attachment_id?: string | null
+          name?: string
+        }
+        Relationships: []
+      }
       training_profiles: {
         Row: {
           constraints: string | null

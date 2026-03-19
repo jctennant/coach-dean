@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-19 — Store and use exact goal race distance for non-standard events
+
+**Type:** Feature / Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Non-standard race distances (e.g., a 25K, 9-mile trail race, 80K) were bucketed to the nearest standard goal type (30K, 10K, 100K) but the bucket's canonical distance was used for all downstream calculations. A 25K athlete with a 2:45 goal would get their target pace calculated over 18.64 miles (30K) instead of 15.53 miles (25K), making the pace wrong. The coach framing also didn't mention the actual distance.
+**Fix / Change:**
+- Added `goal_distance_miles float` column to `training_profiles` (migration 018). Backfilled with standard bucket distances for all existing rows.
+- Goal classifier in `onboarding/handle` now outputs `goal_distance_miles` when a non-standard distance is mentioned (e.g., "25K" → 15.53). Standard distances return null; `completeOnboarding` fills those from the bucket lookup.
+- `completeOnboarding` writes `goal_distance_miles` to `training_profiles` (exact if available, bucket standard otherwise).
+- `coach/respond` pace calculation uses `profile.goal_distance_miles` first, falling back to bucket distance. For a 25K athlete targeting 2:45, the pace now reflects the actual 15.53 miles.
+- System prompt goal display appends `(X miles)` when the stored distance differs from the bucket standard by more than 0.5 miles, so Claude always knows the exact race distance.
+**Files changed:** `supabase/migrations/018_goal_distance_miles.sql`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-19 — Race distance classification overhaul (50mi/100mi + non-standard)
 
 **Type:** Bug Fix

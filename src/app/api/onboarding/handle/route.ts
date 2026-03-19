@@ -142,10 +142,10 @@ async function handleGoal(
   const [parseResponse, extra] = await Promise.all([
     anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 200,
+      max_tokens: 256,
       system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery"|null, "race_name": string|null}
+Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery"|null, "race_name": string|null, "goal_distance_miles": number|null}
 
 race_name rules:
 - Set race_name when the athlete mentions a specific named event OR a non-standard distance. Examples:
@@ -158,6 +158,15 @@ race_name rules:
   - "a marathon in April" → goal: "marathon", race_name: null (no specific race name, just a distance)
   - "half marathon in April" → goal: "half_marathon", race_name: null (no specific name)
 - When goal is general_fitness, return_to_running, or injury_recovery → race_name: null
+
+goal_distance_miles rules:
+- When the athlete mentions a non-standard distance, output the exact distance in miles. Examples:
+  - "25K Marin Headlands" → goal_distance_miles: 15.53
+  - "9-mile Dipsea" → goal_distance_miles: 9.0
+  - "80K ultra" → goal_distance_miles: 49.71
+  - "15-mile trail race" → goal_distance_miles: 15.0
+- For standard goal types (5K, 10K, half marathon, marathon, 30K, 50K, 50 miles, 100K, 100 miles) where no non-standard distance is mentioned → goal_distance_miles: null (system fills this in)
+- For general_fitness, return_to_running, injury_recovery, triathlon types, cycling → goal_distance_miles: null
 
 Rules:
 - complete: true only if a clear training goal is identifiable
@@ -195,7 +204,7 @@ Rules:
     parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
   console.log("[onboarding] goal raw response:", parseText);
 
-  let parsed: { complete: boolean; no_event: boolean; goal: string | null; race_name?: string | null } = { complete: false, no_event: false, goal: null };
+  let parsed: { complete: boolean; no_event: boolean; goal: string | null; race_name?: string | null; goal_distance_miles?: number | null } = { complete: false, no_event: false, goal: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
@@ -291,6 +300,9 @@ Rules:
     // Store the specific race name / non-standard distance when it differs from the goal bucket.
     // This lets the coaching system display "25K Marin Headlands" instead of just "30K trail race".
     ...(parsed.race_name ? { race_name: parsed.race_name } : {}),
+    // Store exact distance in miles when classifier extracted a non-standard value.
+    // completeOnboarding will fall back to the bucket standard if this is null.
+    ...(parsed.goal_distance_miles != null ? { goal_distance_miles: parsed.goal_distance_miles } : {}),
   };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
@@ -1004,6 +1016,16 @@ async function completeOnboarding(
   const name = (data.name as string) || null;
 
   const isUltra = ULTRA_GOALS.includes(goal);
+
+  // Exact race distance: prefer classifier-extracted value (non-standard distances),
+  // fall back to the canonical bucket distance for standard goals.
+  const runGoalDistancesMilesStandard: Record<string, number> = {
+    "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
+    "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
+  };
+  const goalDistanceMiles =
+    (data.goal_distance_miles as number | null) ?? runGoalDistancesMilesStandard[goal] ?? null;
+
   const fitnessLevel = assessFitnessLevel(experienceYears, weeklyMiles, weeklyHours, goal, daysPerWeek);
   const weeklyMilesRaw = weeklyMiles ?? (isUltra ? 30 : 15);
   const weeklyMileage =
@@ -1031,6 +1053,7 @@ async function completeOnboarding(
         crosstraining_tools: crosstrain,
         proactive_cadence: "weekly_only",
         injury_notes: injuryNotes,
+        goal_distance_miles: goalDistanceMiles,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }

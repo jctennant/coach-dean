@@ -1170,13 +1170,16 @@ function buildSystemPrompt(
 
   // Pre-compute goal pace so Claude never has to do the arithmetic (it gets it wrong).
   // Only computed for single-sport running goals where a race distance is known.
+  // Prefer the exact stored goal_distance_miles (captures non-standard distances like 25K);
+  // fall back to the canonical bucket distance.
   const runGoalDistancesMiles: Record<string, number> = {
     "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
     "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
   };
+  const storedGoalDistanceMiles = profile?.goal_distance_miles as number | null ?? null;
   let goalPaceStr = "";
   if (goalTimeMinutes != null && profile?.goal) {
-    const distMiles = runGoalDistancesMiles[profile.goal as string];
+    const distMiles = storedGoalDistanceMiles ?? runGoalDistancesMiles[profile.goal as string];
     if (distMiles) {
       const paceMinsPerMile = goalTimeMinutes / distMiles;
       const pacePerKm = goalTimeMinutes / (distMiles * 1.60934);
@@ -1191,7 +1194,17 @@ function buildSystemPrompt(
 
   // TODO: Once Strava API app is approved, update "Activity tracking" in PRODUCT CAPABILITIES below to:
   // "Activity tracking: Strava only. No Garmin, Apple Watch, Wahoo, etc."
-  const goalDisplay = raceName ?? (profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness");
+  // When the exact stored distance differs from the bucket standard (i.e., non-standard race),
+  // append "(X miles)" so Claude never has to infer it.
+  const bucketDistanceMiles = runGoalDistancesMiles[profile?.goal as string] ?? null;
+  const isNonStandardDistance =
+    storedGoalDistanceMiles != null &&
+    bucketDistanceMiles != null &&
+    Math.abs(storedGoalDistanceMiles - bucketDistanceMiles) > 0.5;
+  const exactDistanceSuffix = isNonStandardDistance ? ` (${storedGoalDistanceMiles} miles)` : "";
+  const goalDisplay = raceName
+    ? `${raceName}${exactDistanceSuffix}`
+    : (profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness");
   return `You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
 
 CRITICAL — OUTPUT RULES:
@@ -1246,7 +1259,7 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 ATHLETE HISTORY:
 ${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}
-- Goal: ${raceName ?? (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
+- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
 ⚠️ RACE DATA RULE: The athlete's goal race is exactly as shown above. When referencing their race, use the exact goal type and distance above — do NOT substitute a different distance, format, or race type from memory or inference. If it says "50-mile ultra", it is 50 miles, not 50K. If it says "10K", it is a 10K. These values come from the athlete's profile and are authoritative.
 ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
