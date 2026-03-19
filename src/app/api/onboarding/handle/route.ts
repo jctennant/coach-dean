@@ -142,10 +142,22 @@ async function handleGoal(
   const [parseResponse, extra] = await Promise.all([
     anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 128,
+      max_tokens: 200,
       system: `Classify whether the user's message contains a clear fitness or endurance goal. Respond with ONLY valid JSON, no other text.
 
-Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"100k"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery"|null}
+Output format: {"complete": true|false, "no_event": true|false, "goal": "5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery"|null, "race_name": string|null}
+
+race_name rules:
+- Set race_name when the athlete mentions a specific named event OR a non-standard distance. Examples:
+  - "25K Marin Headlands Trail Race" → goal: "30k", race_name: "25K Marin Headlands Trail Race"
+  - "9-mile Dipsea" → goal: "10k", race_name: "9-mile Dipsea"
+  - "Western States 100" → goal: "100mi", race_name: "Western States 100"
+  - "Signed up for Western States — 100 miles" → goal: "100mi", race_name: "Western States"
+  - "Golden Gate 100K" → goal: "100k", race_name: "Golden Gate 100K"
+  - "Boston Marathon" → goal: "marathon", race_name: "Boston Marathon" (specific named event)
+  - "a marathon in April" → goal: "marathon", race_name: null (no specific race name, just a distance)
+  - "half marathon in April" → goal: "half_marathon", race_name: null (no specific name)
+- When goal is general_fitness, return_to_running, or injury_recovery → race_name: null
 
 Rules:
 - complete: true only if a clear training goal is identifiable
@@ -154,7 +166,17 @@ Rules:
 - Named specific race or event (e.g. "Behind the Rocks trail race", "Wasatch 100", "Boston Marathon", "local 5K next spring") → complete: true. Use any explicit distance cues in the message: "Wasatch 100" → "100k"; "Boston Marathon" → "marathon"; "local half" → "half_marathon". If the name contains no distance info (e.g. just "Behind the Rocks trail race"), use "50k" as a placeholder — the web search step will clarify if needed.
 - "half marathon" or "half" → "half_marathon"
 - "full marathon" or "marathon" → "marathon"
+- "50 miles", "50-mile", "50-miler", "50mi", "fifty miles", "50 mile ultra" → "50mi" (NOT "50k" — these are very different races)
+- "100 miles", "100-mile", "100-miler", "100mi", "hundred miles", "100 mile ultra", "Western States", "Leadville", "UTMB" → "100mi"
 - "ultra" without distance → "50k"
+- Non-standard distances — map to nearest standard bucket:
+  - Under ~12K (less than 8 miles) → "10k"
+  - 13K to ~42K (between a half marathon and marathon distance) → "30k"
+  - 13K to 19K is closest to half marathon in spirit; still use "30k" as the bucket
+  - 60K, 70K, 80K, any race between 50K and 100K → "100k"
+  - 15 miles, 20 miles, any race between marathon (26.2mi) and 50 miles → "50mi"
+  - 60 miles, 75 miles, any race between 50 miles and 100 miles → "100mi"
+  - If unsure of the correct bucket, output null (do NOT guess "50k" for races that are clearly shorter)
 - "triathlon" or "tri" without a distance → "olympic_tri"
 - "sprint tri" or "sprint triathlon" → "sprint_tri"
 - "70.3", "half ironman", "half-ironman" → "70.3"
@@ -173,7 +195,7 @@ Rules:
     parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
   console.log("[onboarding] goal raw response:", parseText);
 
-  let parsed: { complete: boolean; no_event: boolean; goal: string | null } = { complete: false, no_event: false, goal: null };
+  let parsed: { complete: boolean; no_event: boolean; goal: string | null; race_name?: string | null } = { complete: false, no_event: false, goal: null };
   try {
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
@@ -266,6 +288,9 @@ Rules:
     ...(raceInfo.secondaryGoal || extra.secondary_goal
       ? { secondary_goal: raceInfo.secondaryGoal ?? extra.secondary_goal }
       : {}),
+    // Store the specific race name / non-standard distance when it differs from the goal bucket.
+    // This lets the coaching system display "25K Marin Headlands" instead of just "30K trail race".
+    ...(parsed.race_name ? { race_name: parsed.race_name } : {}),
   };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
@@ -1699,7 +1724,7 @@ async function sendAndStore(userId: string, phone: string, message: string, step
   return { chatId };
 }
 
-const ULTRA_GOALS = ["50k", "100k", "30k"];
+const ULTRA_GOALS = ["30k", "50k", "50mi", "100k", "100mi"];
 
 function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null, weeklyHours: number | null, goal?: string, daysPerWeek?: number): string {
   // Use hours as primary signal for multi-sport athletes
@@ -1725,7 +1750,9 @@ function formatGoalInline(goal: string): string {
     marathon: "full marathon",
     "30k": "30K trail race",
     "50k": "50K ultra",
+    "50mi": "50-mile ultra",
     "100k": "100K ultra",
+    "100mi": "100-mile ultra",
     sprint_tri: "sprint triathlon",
     olympic_tri: "Olympic-distance triathlon",
     "70.3": "70.3 Half Ironman",

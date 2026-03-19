@@ -8,6 +8,60 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-19 — Race distance classification overhaul (50mi/100mi + non-standard)
+
+**Type:** Bug Fix
+**Reported by:** Follow-up audit of race distance handling
+**User feedback:** N/A (proactive audit triggered by b1b308cf 50K/50-miler hallucination)
+**Root cause:** The goal classifier in onboarding never produced "50mi" or "100mi" as output values — only "50k" and "100k" existed in the prompt. Any athlete saying "50-mile race" had their goal stored as "50k", which propagated forward into every system prompt, taper calculation, and coaching message. The b1b308cf hallucination (50-miler called 50K) traced directly to this. Additionally: non-standard distances (25K, 80K, 9-mile) had no explicit mapping rules and could map unpredictably; ULTRA_GOALS constant was missing 50mi/100mi so onboarding skipped the wrong questions; runGoalDistancesMiles had no 50mi/100mi so goal pace couldn't be calculated; formatGoalInline (onboarding display) had no labels for those types.
+**Fix / Change:**
+- Goal classifier: added "50mi" and "100mi" as valid output types with explicit rules ("50 miles", "50-miler", "fifty miles" → "50mi"; "100 miles", "100-miler", "Western States", "Leadville", "UTMB" → "100mi"). Critically: added "NOT 50k" warning so the model doesn't quietly collapse 50-milers.
+- Non-standard distance bucketing: added explicit rules (under 12K → "10k"; 13K–42K → "30k"; 60K–80K → "100k"; 15mi–49mi → "50mi"; 60mi–99mi → "100mi"). Added instruction to return null rather than guess "50k" for races that are clearly shorter.
+- Added race_name field to classifier output: when the athlete mentions a specific named event (Western States, Dipsea, 25K Marin Headlands) or a non-standard distance, the exact name is stored in onboarding_data.race_name. The coaching system prompt then uses this for display instead of the generic bucket label — so Claude says "your 25K Marin Headlands race" not "your 30K trail race".
+- ULTRA_GOALS constant: added "50mi" and "100mi" — affects onboarding step-skipping (ultra background question), fitness level assessment, and default mileage baseline.
+- formatGoalInline (onboarding): added "50mi" → "50-mile ultra" and "100mi" → "100-mile ultra".
+- runGoalDistancesMiles (coach/respond): added "50mi" = 50.0 and "100mi" = 100.0 miles — enables goal pace calculation for athletes who have a finish time goal.
+- System prompt: `goalDisplay` now uses raceName (onboarding_data.race_name) when available, falling back to formatGoalLabel(profile.goal).
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts, scripts/test-race-distance-handling.mjs
+
+## 2026-03-19 — March 2026 coaching accuracy batch (9 issues, P0–P2)
+
+**Type:** Bug Fix (batch)
+**Reported by:** Internal observation / session review
+**User feedback:**
+- (Scott, 837e368a): Coach Dean prescribed 15 miles to an athlete running 5 miles/week — a 200% jump in week one. "Give your body room to adapt without jumping too fast" appeared in the same message that tripled their volume.
+- (User b1b308cf): "Reminder, I'm doing a 50 mile race not 50k"
+- (User 479e43d6): "No, the week before the 16.8 was 12.84, per Strava" (Coach had cited 6.8)
+- (User 479e43d6): "Also where did you get race day from, I don't remember saying I was going to do a race."
+- (User 479e43d6): "I thought your original plan for the week for me was 3 miles Thursday, 4 miles Saturday" (Coach forgot its own plan)
+- (Roya, 61ae5521): Asked for 5 days, got 4. Asked for 6 days, Coach ignored the request the first time.
+- (Scott, 837e368a): "sure, reminders around 3pm on the day of the run" → Coach confirmed "morning" instead.
+- (User 455af698): Two post-run messages ~56 minutes apart — one from coach_response, one from Strava post_run trigger. Slightly different day counts (11 vs 10 days to race).
+- (User 55babb83): Weekly mileage tracker went 10mi → 12.4mi → 7mi across 3 messages on the same day.
+
+**Root causes:**
+1. (P0) No numerical volume cap in system prompt — Claude used race ambition (50K) to justify 15 miles, ignoring the 5 mi/week baseline. The FITNESS TIER said "be conservative" but gave no hard number.
+2. (P1) "50mi" was not in formatGoalLabel, and the system prompt didn't explicitly instruct Claude to use only the stored race description — Claude substituted from context or memory.
+3. (P1) No explicit rule preventing Claude from citing mileage numbers not in the WEEKLY MILEAGE table.
+4. (P1) Same root cause as #2 — race goal could appear in plan without being verified against stored profile data.
+5. (P2) weekly_plan_sessions persistence was in place, but user_message prompt didn't explicitly instruct Claude to quote stored sessions before offering alternatives.
+6. (P2) No count-validation step in weekly_recap prompt — Claude counted wrong without a check.
+7. (P2) System prompt said "specific times not supported" but didn't instruct Claude to disclose the constraint before confirming. Claude confirmed "morning" when athlete asked for 3pm.
+8. (P2) CONTEXT CHECK only mentioned athlete messages; didn't cover the Strava-delay scenario where Coach already responded and Strava fires a second post_run trigger 60 min later.
+9. (P2/P9) AUTHORITATIVE mileage figure should be the single source, but the week boundary drop (12.4 → 7) likely reflects a timezone or run-date edge case. The existing guards should catch it; no code change beyond the historical mileage rule.
+
+**Fix / Change:**
+1. Added ⚠️ WEEK 1 VOLUME CAP section to FITNESS TIER in buildSystemPrompt. For athletes <10 mi/week: hard cap = max(current × 1.30, 6 mi). Includes explicit example: "5 mi/week → 15 mi is 200% jump and is wrong." For null history: cap is 10 mi. Also reinforced in initial_plan user message VOLUME AND SAFETY section.
+2. Added "50mi" → "a 50-mile ultra" and "100mi" → "a 100-mile ultra" to formatGoalLabel. Added ⚠️ RACE DATA RULE immediately after the Goal line in ATHLETE HISTORY: "Do NOT substitute a different distance or race type from memory or inference."
+3. Added ⚠️ HISTORICAL MILEAGE RULE to MEMORY AND DATA LIMITATIONS section: cite only values from WEEKLY MILEAGE table; if a week isn't there, say "I don't have exact data for that week."
+4. Same as #2 fix — RACE DATA RULE prevents fabricated races too.
+5. Added PLAN CONSISTENCY block to user_message trigger: "If UPCOMING SESSIONS THIS WEEK exists in CURRENT TRAINING STATE, reference those stored sessions first — don't reconstruct from memory or guess different distances."
+6. Added TRAINING DAY COUNT VALIDATION to weekly_recap SCHEDULE CONSTRAINT: count running sessions before finalizing, verify against athlete's days/week preference.
+7. Added ⚠️ REMINDER TIME CONSTRAINT to PRODUCT CAPABILITIES: "If athlete requests a non-supported time (3pm, noon, etc.), immediately disclose the constraint — do NOT confirm first and correct later."
+8. Updated post_run CONTEXT CHECK: explicitly covers the case where a prior coach response (not just an athlete message) already addressed this workout, explaining the Strava-delay scenario.
+
+**Files changed:** src/app/api/coach/respond/route.ts, scripts/test-bug-fixes-mar2026.mjs
+
 ## 2026-03-18 — Fix post_run week-mileage reporting (multi-iteration)
 
 **Type:** Bug Fix
