@@ -8,6 +8,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-20 — Four onboarding plan quality fixes from pressure-test run
+
+**Type:** Bug Fix
+**Reported by:** Internal testing (20-scenario pressure test)
+**User feedback:** N/A
+**Root cause:** Four separate issues discovered in full 20-scenario test run:
+1. `generateRaceAcknowledgment` returned `["12K", "15K"]` for Bay to Breakers (single-distance race). Prompt rule existed but wasn't strong enough. Claude confabulated a "15K option" from a unit-conversion variant.
+2. True beginners (TC06 only walks, TC18 doesn't run) got continuous 3mi runs instead of run/walk intervals. `initial_plan` prompt had volume cap but no run/walk trigger.
+3. Timeline math was nondeterministic — Claude independently computed "7.5 weeks" for a 32-week-away marathon by unit-converting incorrectly. DATE CONTEXT already had the pre-calculated value but no instruction to use it exclusively.
+4. `awaiting_ultra_background` step never fired for TC03/TC07/TC19 because `isStepSatisfied` checked `experience_years != null` which got set from non-ultra context (lottery attempts, etc.) and prematurely satisfied the step.
+**Fix / Change:**
+- Bug 1: Strengthened `generateRaceAcknowledgment` prompt to distinguish "distinct entry categories" from "unit-conversion variants". Added code-level ratio filter: `distanceOptions` is discarded if max/min < 1.3 (catches 12K vs 15K which differ by only 25%).
+- Bug 2: Added `RUN/WALK INTERVALS FOR ZERO-BASELINE ATHLETES` rule to `initial_plan` prompt in coach/respond — triggers when FITNESS TIER is "No activity data" or weekly miles ≈ 0 with no running habit.
+- Bug 3: Added `RACE TIMELINE — never compute this yourself` rule to `initial_plan` prompt, pointing at the pre-calculated days/weeks in DATE CONTEXT.
+- Bug 4: Changed `isStepSatisfied("awaiting_ultra_background")` to require `data.ultra_race_history` (explicit) instead of `data.experience_years != null` (too broad). Added `ultra_race_history` field to `extractAdditionalFields` so the extractor captures it when the user mentions actual races completed.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-20 — Fix initial_plan DB constraint blocking plan storage in dry_run tests
 
 **Type:** Bug Fix

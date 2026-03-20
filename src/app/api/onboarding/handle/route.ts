@@ -1221,8 +1221,11 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       if (!ULTRA_GOALS.includes(data.goal as string)) return true;
       // If Strava is connected, we can infer training background from activity history — skip the question.
       if (data.strava_connected) return true;
-      // Satisfied if we already have both weekly mileage and some race/experience context.
-      return !!(data.weekly_miles) && !!(data.ultra_race_history || data.experience_years != null);
+      // For non-Strava ultra athletes, always ask — it's a critical context question.
+      // We avoid data-based skipping here because the extractor can pick up experience_years or
+      // ultra_race_history from non-race context (e.g. "5 years of lottery attempts") and
+      // incorrectly satisfy the step before the athlete has actually described their background.
+      return false;
     case "awaiting_injury_background":
       // Only relevant for injury_recovery goals — skip entirely for everything else.
       if (data.goal !== "injury_recovery") return true;
@@ -1382,7 +1385,7 @@ CRITICAL RULES:
 - If results are ambiguous or conflicting, set "ack" to null.
 - Only include "date" if you find a specific confirmed upcoming date from a reliable source — do not guess or infer from relative expressions like "5 months from now".
 - Never include timeline or countdown language ("X weeks out", "not much runway", "plenty of time") in the ack unless you set a confirmed "date" from web search — if you don't know the date, don't reference the timeline.
-- For distance_options: ONLY list multiple distances if the race genuinely offers multiple distance options AND you found clear, unambiguous evidence for each. Do NOT guess, confabulate, or add distances you are unsure about. A single-distance race must have distance_options: null.
+- For distance_options: ONLY list distinct, officially separate entry categories (e.g. a race that lets athletes register for a 10K OR a 50K as separate events). Do NOT list measurement variants of the same course — if one source says "7.46 miles" and another says "12K", that is the SAME course measured in different units, not two different options. distance_options must be null for any race where all participants run the same course. When uncertain, set distance_options: null.
 - If no specific named event is mentioned (just generic categories), return only: null`,
       messages: [{ role: "user", content: message }],
     });
@@ -1397,9 +1400,28 @@ CRITICAL RULES:
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-      const distanceOptions = Array.isArray(parsed?.distance_options) && parsed.distance_options.length > 1
+      // Parse a km value from a distance string like "12K", "50 miles", "50K", "10 km"
+      const parseKm = (s: string): number | null => {
+        const m = s.match(/(\d+(?:\.\d+)?)\s*(mi(?:les?)?|km?)?/i);
+        if (!m) return null;
+        const n = parseFloat(m[1]);
+        const unit = (m[2] || "k").toLowerCase();
+        return unit.startsWith("mi") ? n * 1.609 : n;
+      };
+      // Only keep distanceOptions if there are 2+ entries AND they differ by ≥30% in distance.
+      // This filters out confabulated variants of the same course (e.g. "12K" vs "15K" for Bay to Breakers).
+      const rawOptions = Array.isArray(parsed?.distance_options) && parsed.distance_options.length > 1
         ? parsed.distance_options as string[]
         : null;
+      const distanceOptions = rawOptions ? (() => {
+        const kms = rawOptions.map(parseKm).filter((d): d is number => d != null);
+        if (kms.length >= 2) {
+          const min = Math.min(...kms);
+          const max = Math.max(...kms);
+          if (max / min < 1.3) return null; // too similar — likely confabulation or unit variants
+        }
+        return rawOptions;
+      })() : null;
       const secondaryGoal = (typeof parsed?.secondary_goal === "string" && parsed.secondary_goal) ? parsed.secondary_goal : null;
       const rawAck = parsed?.ack ?? null;
       const ack = rawAck ? rawAck.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim() : null;
@@ -1427,7 +1449,7 @@ async function extractAdditionalFields(
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "race_month": "Month" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "pr_year": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null, "goal_time_minutes": number}
+{"race_date": "YYYY-MM-DD" | null, "race_month": "Month" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "pr_year": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null, "goal_time_minutes": number, "ultra_race_history": string | null}
 
 Rules:
 - name: Extract if the athlete introduces themselves. Be generous — people introduce themselves in many ways:
@@ -1450,6 +1472,7 @@ Rules:
 - other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, etc. null if nothing else.
 - secondary_goal: if the athlete mentions a second distinct race or goal beyond the primary one (e.g. "and then a marathon in the fall", "plus Boston next year", "also want to do a crit series"). Short plain-text description. null if only one goal is mentioned.
 - goal_time_minutes: ONLY include this field if the athlete EXPLICITLY states a specific finish-time goal (e.g. "sub 3:05" → 185, "under 2 hours" → 120, "1:55" → 115, "around 23 minutes" → 23). Convert to total minutes as a number. OMIT THIS FIELD ENTIRELY if no specific finish time is mentioned — do NOT set it to null. Never infer a time goal that wasn't explicitly stated.
+- ultra_race_history: if the athlete explicitly describes their trail or ultra race background (e.g. "done two 100Ks", "finished a 50-miler last year", "ran Western States in 2022", "completed three 50Ks"). Short plain-text summary. null if not mentioned. IMPORTANT: do NOT set this from lottery attempts, general hiking, or non-race experience — it must describe actual races completed.
 - Return {} if nothing is present.`,
     messages: [{ role: "user", content: message }],
   });
@@ -1472,6 +1495,7 @@ Rules:
     if (parsed.other_notes != null) result.other_notes = parsed.other_notes;
     if (parsed.name != null) result.name = parsed.name;
     if (typeof parsed.goal_time_minutes === "number") result.goal_time_minutes = parsed.goal_time_minutes;
+    if (parsed.ultra_race_history != null) result.ultra_race_history = parsed.ultra_race_history;
     return result;
   } catch {
     return {};
