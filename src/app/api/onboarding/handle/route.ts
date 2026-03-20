@@ -8,10 +8,16 @@ import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
 
+// Tracks userIds currently in a dry_run onboarding request.
+// Allows sendAndStore / completeOnboarding to skip SMS without threading
+// dry_run through every helper function signature.
+const dryRunUsers = new Set<string>();
+
 interface OnboardingRequest {
   userId: string;
   message: string;
   chatId?: string | null;
+  dry_run?: boolean; // skip SMS send; responses still stored in conversations for test inspection
 }
 
 /** Extract JSON from Claude's response, handling markdown code blocks */
@@ -38,7 +44,8 @@ function extractJSON(text: string): string {
  * Steps are skipped automatically if data was already captured in an earlier message.
  */
 export async function POST(request: Request) {
-  const { userId, message, chatId }: OnboardingRequest = await request.json();
+  const { userId, message, chatId, dry_run = false }: OnboardingRequest = await request.json();
+  if (dry_run) dryRunUsers.add(userId);
 
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -124,6 +131,7 @@ export async function POST(request: Request) {
   }
 
   keepTypingAlive = false;
+  if (dry_run) dryRunUsers.delete(userId);
   return result;
 }
 
@@ -1104,18 +1112,45 @@ async function completeOnboarding(
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
 
   // No wrap-up SMS — the initial_plan IS the response, addressed by name.
-  after(async () => {
+  const isDryRun = dryRunUsers.has(user.id);
+  if (isDryRun) {
+    // dry_run: call coach/respond inline with dry_run=true, then store result ourselves
+    // so the test runner can read it from conversations.
     try {
       await trackEvent(user.id, "onboarding_completed", { goal });
-      await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, trigger: "initial_plan", chatId: chatId ?? undefined }),
+        body: JSON.stringify({ userId: user.id, trigger: "initial_plan", dry_run: true }),
       });
+      const { message } = (await res.json()) as { message?: string };
+      if (message) {
+        for (const part of message.split(/\n\n+/).filter(Boolean)) {
+          await supabase.from("conversations").insert({
+            user_id: user.id,
+            role: "assistant",
+            content: part,
+            message_type: "initial_plan",
+          });
+        }
+      }
     } catch (err) {
-      console.error("[onboarding] coach trigger failed:", err);
+      console.error("[onboarding] dry_run coach trigger failed:", err);
     }
-  });
+  } else {
+    after(async () => {
+      try {
+        await trackEvent(user.id, "onboarding_completed", { goal });
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, trigger: "initial_plan", chatId: chatId ?? undefined }),
+        });
+      } catch (err) {
+        console.error("[onboarding] coach trigger failed:", err);
+      }
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1345,7 +1380,8 @@ CRITICAL RULES:
 - Do NOT narrate your search process. Output nothing until you have the final JSON answer.
 - Your ENTIRE response must be that JSON object (or the word null). Never output intermediate thoughts.
 - If results are ambiguous or conflicting, set "ack" to null.
-- Only include "date" if you find a specific confirmed upcoming date — do not guess.
+- Only include "date" if you find a specific confirmed upcoming date from a reliable source — do not guess or infer from relative expressions like "5 months from now".
+- Never include timeline or countdown language ("X weeks out", "not much runway", "plenty of time") in the ack unless you set a confirmed "date" from web search — if you don't know the date, don't reference the timeline.
 - If no specific named event is mentioned (just generic categories), return only: null`,
       messages: [{ role: "user", content: message }],
     });
@@ -1364,10 +1400,16 @@ CRITICAL RULES:
         ? parsed.distance_options as string[]
         : null;
       const secondaryGoal = (typeof parsed?.secondary_goal === "string" && parsed.secondary_goal) ? parsed.secondary_goal : null;
-      return { ack: parsed?.ack ?? null, raceDate: parsed?.date ?? null, distanceOptions, secondaryGoal };
+      const rawAck = parsed?.ack ?? null;
+      const ack = rawAck ? rawAck.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim() : null;
+      // Validate raceDate is actually in the future — discard if in the past (hallucinated date)
+      let raceDate = parsed?.date ?? null;
+      if (raceDate && raceDate < today) raceDate = null;
+      return { ack, raceDate, distanceOptions, secondaryGoal };
     } catch {
       // Fallback: treat as plain-text ack if JSON parse fails
-      return { ack: text, raceDate: null, distanceOptions: null, secondaryGoal: null };
+      const cleanText = text.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim();
+      return { ack: cleanText, raceDate: null, distanceOptions: null, secondaryGoal: null };
     }
   } catch {
     return empty;
@@ -1384,7 +1426,7 @@ async function extractAdditionalFields(
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "race_month": "Month" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "pr_year": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null}
+{"race_date": "YYYY-MM-DD" | null, "race_month": "Month" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "pr_year": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null, "goal_time_minutes": number}
 
 Rules:
 - name: Extract if the athlete introduces themselves. Be generous — people introduce themselves in many ways:
@@ -1406,6 +1448,7 @@ Rules:
 - crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
 - other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, etc. null if nothing else.
 - secondary_goal: if the athlete mentions a second distinct race or goal beyond the primary one (e.g. "and then a marathon in the fall", "plus Boston next year", "also want to do a crit series"). Short plain-text description. null if only one goal is mentioned.
+- goal_time_minutes: ONLY include this field if the athlete EXPLICITLY states a specific finish-time goal (e.g. "sub 3:05" → 185, "under 2 hours" → 120, "1:55" → 115, "around 23 minutes" → 23). Convert to total minutes as a number. OMIT THIS FIELD ENTIRELY if no specific finish time is mentioned — do NOT set it to null. Never infer a time goal that wasn't explicitly stated.
 - Return {} if nothing is present.`,
     messages: [{ role: "user", content: message }],
   });
@@ -1427,6 +1470,7 @@ Rules:
     if (Array.isArray(parsed.crosstraining_tools) && parsed.crosstraining_tools.length > 0) result.crosstraining_tools = parsed.crosstraining_tools;
     if (parsed.other_notes != null) result.other_notes = parsed.other_notes;
     if (parsed.name != null) result.name = parsed.name;
+    if (typeof parsed.goal_time_minutes === "number") result.goal_time_minutes = parsed.goal_time_minutes;
     return result;
   } catch {
     return {};
@@ -1751,6 +1795,16 @@ async function sendAndStore(userId: string, phone: string, message: string, step
   // exposing internal payloads. Log for monitoring.
   if (/^\s*\{/.test(message)) {
     console.error("[onboarding/sendAndStore] blocked JSON-starting message:", message.slice(0, 120), "step:", step);
+    return { chatId: null };
+  }
+  // dry_run: store in conversations for test inspection but skip actual SMS send
+  if (dryRunUsers.has(userId)) {
+    await supabase.from("conversations").insert({
+      user_id: userId,
+      role: "assistant",
+      content: message,
+      message_type: "coach_response",
+    });
     return { chatId: null };
   }
   const [{ chatId }] = await Promise.all([

@@ -8,6 +8,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-20 — Onboarding bug fixes from pressure-test run + step-driven test runner
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Internal — automated 20-scenario pressure test
+**User feedback:** N/A
+**Root cause:** Three distinct bugs found in `generateRaceAcknowledgment` and `extractAdditionalFields`:
+1. Web search `<cite index="...">` tags leaked into SMS ack text verbatim
+2. `goal_time_minutes` was never extracted from the initial goal message, causing `awaiting_goal_time` to always fire even when user stated their time goal upfront (e.g. "Need to run sub 3:05")
+3. Hallucinated race dates: model inferred a date from "5 months from now" or made up a past date, then included countdown language ("6 weeks out") based on it
+**Fix / Change:**
+- Bug 1: Strip `<cite ...>...</cite>` and self-closing `<cite ... />` tags from `ack` after web search response; also strip from plain-text fallback
+- Bug 2: Added `goal_time_minutes` to `extractAdditionalFields` — only extracted when user EXPLICITLY states a specific finish time; omitted entirely (not null) when not mentioned, so `awaiting_goal_time` still fires when needed
+- Bug 3: (a) Strengthened prompt: never compute date from relative expressions, never include timeline language without a confirmed search date. (b) Post-processing: discard `raceDate` if it's in the past relative to today
+- Test runner rewritten to be fully step-driven: queries actual DB `onboarding_step` after each exchange, sends matching scenario message or default fallback; handles dynamic steps (timezone, ultra_background, etc.) automatically without hard-coding into each scenario
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `tests/run-onboarding-test.mjs`
+
+---
+
 ## 2026-03-20 — Future-proof non-running session detection in mileage calculation
 
 **Type:** Improvement

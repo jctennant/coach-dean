@@ -1,0 +1,1311 @@
+{
+  "_readme": [
+    "Onboarding pressure-test scenarios for Coach Dean.",
+    "Each case simulates a full onboarding conversation.",
+    "Run manually via the admin/trigger endpoint (dry_run: true) or use the conversation",
+    "exchanges below to walk through the SMS flow step by step.",
+    "",
+    "Onboarding flow:",
+    "  awaiting_goal → (awaiting_race_date?) → (awaiting_ultra_background? for 50K+)",
+    "  → (awaiting_injury_background? for injury_recovery) → (awaiting_goal_time?)",
+    "  → awaiting_strava → awaiting_schedule → (awaiting_mileage_baseline? no strava)",
+    "  → awaiting_anything_else → NULL (initial_plan fired)",
+    "",
+    "Key things to watch for in every case:",
+    "  - Does Dean extract the goal correctly (right bucket + right distance)?",
+    "  - Does Dean ever repeat a question already answered?",
+    "  - Does Dean say anything tonally weird (too formal, too robotic, generic)?",
+    "  - Does Dean handle non-standard races without hallucinating the distance?",
+    "  - Does the initial plan reflect the athlete's actual constraints?"
+  ],
+  "cases": [
+    {
+      "id": "TC01",
+      "name": "NYC Marathon First-Timer",
+      "tags": ["marathon", "beginner", "no-strava"],
+      "persona": {
+        "name": "Sarah",
+        "age": 28,
+        "background": "Never run a race. Runs occasionally, maybe 2 miles at a time.",
+        "strava": false,
+        "goal_race": "TCS NYC Marathon, November 2026",
+        "goal_time": "Finish, no time goal",
+        "days_available": 3,
+        "schedule_notes": "Mon/Wed/Sat work best"
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hi! I'm Sarah. I just signed up for the NYC Marathon in November and have no idea what I'm doing 😅",
+          "expect_goal_bucket": "marathon",
+          "expect_race_name": "NYC Marathon",
+          "watch_for": ["Should NOT assume she has a time goal", "Should welcome her warmly without being cheesy"]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "I just want to finish honestly. I'd be thrilled to run the whole thing",
+          "watch_for": ["Should accept 'finish' as valid — no time goal is fine", "Should not push for a specific time"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "I don't have Strava",
+          "watch_for": ["Should move on cleanly, not dwell on it"]
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I run maybe 2-3 miles at a time a couple times a week",
+          "watch_for": ["Should recognize this is low base", "Should NOT assign aggressive week 1 mileage"]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "Monday, Wednesday, and Saturday work best for me",
+          "watch_for": ["Should confirm 3 days/week", "Should not put runs on Tue/Thu/Fri/Sun"]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Nope I think that's everything!",
+          "watch_for": ["Clean close, should fire initial_plan"]
+        }
+      ],
+      "red_flags": [
+        "Assigns more than 10-12 miles in week 1",
+        "Assigns tempo or interval work in week 1 for a beginner",
+        "Asks for a finish time goal after she said 'just finish'",
+        "Generic opener like 'Great! Let's get started'"
+      ]
+    },
+
+    {
+      "id": "TC02",
+      "name": "Boston Qualifier Chaser",
+      "tags": ["marathon", "experienced", "strava", "time-goal"],
+      "persona": {
+        "name": "Marcus",
+        "age": 42,
+        "background": "Has run 4 marathons, PR is 3:18. Needs sub-3:05 to BQ for his age group.",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_miles": 38,
+          "easy_pace": "8:45/mi",
+          "recent_races": "Half in October — 1:27:30"
+        },
+        "goal_race": "Chicago Marathon, October 2026",
+        "goal_time": "Sub-3:05",
+        "days_available": 5
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hey Dean, I'm Marcus. I'm chasing a Boston qualifier at Chicago in October. Need to run sub 3:05.",
+          "expect_goal_bucket": "marathon",
+          "expect_race_name": "Chicago Marathon",
+          "watch_for": ["Should pick up the BQ context and time goal in one shot", "Should NOT re-ask for time goal since he stated it"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yes I'm on Strava — linking now",
+          "watch_for": ["Smooth Strava link flow"]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "5 days a week, flexible on which days",
+          "watch_for": ["Should assign balanced 5-day split", "Should include a long run on weekend"]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "I have a slight history of plantar fasciitis in my right foot, nothing active right now",
+          "watch_for": ["Should capture injury note", "Should not ignore it", "Should not panic about it"]
+        }
+      ],
+      "red_flags": [
+        "Re-asks for time goal after he stated sub-3:05 in his first message",
+        "Assigns easy-only training for someone at this level",
+        "Ignores the plantar fasciitis note in the initial plan",
+        "Uses generic VDOT paces without acknowledging his recent half time"
+      ]
+    },
+
+    {
+      "id": "TC03",
+      "name": "Western States 100",
+      "tags": ["100mi", "ultra", "trail", "strava", "high-volume"],
+      "persona": {
+        "name": "Priya",
+        "age": 35,
+        "background": "Trail ultrarunner. Has finished two 50Ks and one 50-miler. Training for Western States 100.",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_miles": 55,
+          "includes_vert": true,
+          "long_run_recent": "22mi trail"
+        },
+        "goal_race": "Western States Endurance Run 100, June 2026",
+        "goal_time": "Finish under 30 hours",
+        "days_available": 6
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Training for Western States 100 in June. Got in through the lottery after 5 years of trying!",
+          "expect_goal_bucket": "100mi",
+          "expect_race_name": "Western States",
+          "watch_for": [
+            "Should recognize this is a 100-mile race, NOT a 100K",
+            "Should not apply beginner conservatism",
+            "The excitement/context is meaningful — Dean shouldn't ignore it"
+          ]
+        },
+        {
+          "step": "awaiting_ultra_background",
+          "user_says": "I've done two 50Ks and finished the Marin Ultra Challenge 50 miler last spring. Running about 50-55 miles a week right now with decent vert.",
+          "watch_for": [
+            "Should NOT cap week 1 at 10 miles",
+            "Should recognize this athlete is ready for 100mi training, not base building",
+            "Should note back-to-back long runs are appropriate"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "I'd love to finish under 30 hours but honestly just want to make it to Auburn",
+          "watch_for": ["Should accept this gracefully", "Finish goal is valid for 100s"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yep, I'm on Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "6 days a week, I take Fridays off. Long runs Saturday and Sunday back to back.",
+          "watch_for": [
+            "Should honor back-to-back long run preference",
+            "Should NOT put a run on Friday",
+            "6 days is appropriate for 100mi training"
+          ]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "No I think we're good",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Caps week 1 at 10 miles for a 55mi/week athlete",
+        "No mention of vert / elevation in the plan",
+        "No back-to-back long runs in the structure",
+        "Treats this like a marathon plan",
+        "Assigns road-running style paces without acknowledging trail"
+      ]
+    },
+
+    {
+      "id": "TC04",
+      "name": "Bay to Breakers (Non-Standard Distance)",
+      "tags": ["non-standard-distance", "casual", "no-strava"],
+      "persona": {
+        "name": "Jordan",
+        "age": 31,
+        "background": "Casual runner. Does 2-3 mile runs occasionally. Not competitive.",
+        "strava": false,
+        "goal_race": "Bay to Breakers, San Francisco — May 2026",
+        "goal_time": "Just finish without stopping",
+        "days_available": 3,
+        "notes": "Bay to Breakers is ~7.5 miles (12K). Jordan doesn't know the exact distance."
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "I want to do Bay to Breakers in San Francisco in May! It's kind of a fun run but I've never done it",
+          "expect_goal_bucket": "10k",
+          "expect_goal_distance_miles": 7.46,
+          "expect_race_name": "Bay to Breakers",
+          "watch_for": [
+            "Should NOT bucket this as a 5K or marathon",
+            "Should look up / correctly identify Bay to Breakers as ~7.5 miles",
+            "Should use goal_distance_miles = 7.46 (or similar) NOT null",
+            "This is a casual vibe race — Dean should match that energy"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "No time goal, just want to run the whole way without walking",
+          "watch_for": ["Should accept no-time-goal cleanly"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Nah I don't use Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I run like 2-3 miles a couple times a week, nothing structured",
+          "watch_for": ["Plan should build to 7.5 miles, not 13.1"]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "3 days a week, any days are fine",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "No that's it!",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Calls this a 10K (it's 7.46mi, not 6.2mi) in the plan",
+        "Calls this a half marathon",
+        "Sets goal mileage as 13.1 instead of 7.5",
+        "Assigns tempo or interval work for a casual fun run",
+        "Dean doesn't know Bay to Breakers and asks what race it is (it should web-search)"
+      ]
+    },
+
+    {
+      "id": "TC05",
+      "name": "Air Force PT Test — 1.5 Mile Under 9:29",
+      "tags": ["mile", "military", "time-goal", "no-strava", "short-timeline"],
+      "persona": {
+        "name": "Tyler",
+        "age": 24,
+        "background": "Active duty Air Force. Decent base fitness from gym work, not a dedicated runner.",
+        "strava": false,
+        "goal_race": "Air Force PT test — 1.5 mile run",
+        "goal_time": "Under 9:29 (current: ~11:00)",
+        "days_available": 5,
+        "timeline": "6 weeks",
+        "notes": "This is a fitness test, not a race. Failing has real consequences."
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "I have my Air Force PT test in 6 weeks and need to run 1.5 miles in under 9:29. Currently running it around 11 minutes.",
+          "expect_goal_bucket": "mile",
+          "expect_goal_distance_miles": 1.5,
+          "watch_for": [
+            "Should extract goal_distance_miles: 1.5",
+            "Should understand the time constraint (6 weeks)",
+            "Should recognize the stakes without being dramatic",
+            "Goal pace: 9:29 / 1.5 = 6:19/mi — should use this"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Under 9:29, that's the cutoff",
+          "watch_for": ["Should store 9:29 as the goal time for 1.5 miles"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "I don't have Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I run about 8-10 miles a week, mostly just easy stuff",
+          "watch_for": ["Should not overcomplicate this — 6-week plan needs to be focused"]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "5 days a week, mornings before PT",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "No that's it, just need to pass",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Treats this like a 5K plan (it's 1.5 miles — very different training)",
+        "Adds long runs or high volume — wrong for a 1.5-mile speed goal",
+        "Ignores the 6-week urgency",
+        "Uses marathon-style periodization",
+        "Goal pace math is wrong (should be ~6:19/mi)"
+      ]
+    },
+
+    {
+      "id": "TC06",
+      "name": "Absolute Beginner 5K",
+      "tags": ["5k", "beginner", "no-strava", "couch-to-5k"],
+      "persona": {
+        "name": "Diane",
+        "age": 52,
+        "background": "Hasn't run since high school. Signed up for a local 5K with her daughter in 10 weeks.",
+        "strava": false,
+        "goal_race": "Local 5K charity run",
+        "goal_time": "Finish without walking",
+        "days_available": 3
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hi, I'm Diane! I signed up for a 5K with my daughter in about 10 weeks. I haven't really run in... decades honestly 😬",
+          "expect_goal_bucket": "5k",
+          "watch_for": [
+            "Should be warm and encouraging without being patronizing",
+            "Should not assume she's unfit — she just hasn't run"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "No time goal. I just want to run the whole thing without stopping — my daughter is fast and I don't want to embarrass her lol",
+          "watch_for": ["Tone should be fun/warm here"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "What's Strava?",
+          "watch_for": [
+            "Should explain briefly and move on — should NOT make her feel behind for not knowing",
+            "Should not spend multiple messages on this"
+          ]
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I don't really run. I walk a lot, maybe 30-40 minutes a day.",
+          "watch_for": [
+            "Should recognize walk-jog intervals are the right starting point",
+            "Week 1 should NOT start with 3mi runs"
+          ]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "3 days a week. Tues, Thurs, and Saturday morning.",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "I also have mild knee pain sometimes, nothing serious but wanted to mention it",
+          "watch_for": [
+            "Should acknowledge the knee and factor into plan",
+            "Should not alarm her",
+            "Should suggest strength work for knees"
+          ]
+        }
+      ],
+      "red_flags": [
+        "Week 1 assigns continuous running for a true beginner",
+        "No walk-jog intervals",
+        "Knee pain mention is ignored in initial plan",
+        "Plan exceeds 5K distance in early weeks",
+        "Condescending or overly cautious tone"
+      ]
+    },
+
+    {
+      "id": "TC07",
+      "name": "Road Runner Moving to Trail 50K",
+      "tags": ["50k", "trail", "ultra", "strava", "road-background"],
+      "persona": {
+        "name": "Ben",
+        "age": 38,
+        "background": "Road marathon runner (PR 3:45). Wants to try trail running. Signed up for a trail 50K in 5 months.",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_miles": 35,
+          "easy_pace": "9:00/mi",
+          "all_road": true
+        },
+        "goal_race": "Marin Ultra Challenge 50K",
+        "goal_time": null,
+        "days_available": 5
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Ben here. I've been running road marathons for a few years but I just signed up for the Marin Ultra Challenge 50K trail race in 5 months. First trail race ever.",
+          "expect_goal_bucket": "50k",
+          "expect_race_name": "Marin Ultra Challenge 50K",
+          "watch_for": [
+            "Should recognize this as a 50K (31 miles), not a marathon",
+            "Should note the trail transition in the plan",
+            "Should not treat him like a beginner — he has a solid base"
+          ]
+        },
+        {
+          "step": "awaiting_ultra_background",
+          "user_says": "I've run 4 marathons, PR is 3:45. I run about 35 miles a week right now. Never done a trail race.",
+          "watch_for": [
+            "Should NOT cap week 1 at 10 miles for someone running 35/week",
+            "Should address trail-specific prep (vert, technical terrain, time-on-feet)",
+            "Power hiking mention is appropriate for a 50K newcomer"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "No time goal, just finish",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yeah I use Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "5 days a week, back-to-back long runs on the weekend",
+          "watch_for": ["Back-to-back long runs are correct for ultra training — should honor it"]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "No I think that covers it",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Treats this as a marathon plan",
+        "No mention of elevation/vert in the plan",
+        "Sandbangs week 1 to 20mi when he's running 35/week",
+        "No back-to-back long run structure",
+        "Assigns road paces for a trail race"
+      ]
+    },
+
+    {
+      "id": "TC08",
+      "name": "Injury Recovery — Stress Fracture",
+      "tags": ["injury-recovery", "experienced", "no-strava", "returning"],
+      "persona": {
+        "name": "Kevin",
+        "age": 45,
+        "background": "Experienced marathoner (5 finishes). Had a metatarsal stress fracture. Just cleared to run last week after 4 months off.",
+        "strava": false,
+        "goal_race": "Half marathon in 3 months",
+        "goal_time": "No specific time",
+        "days_available": 4,
+        "notes": "4 months total off. Very motivated but needs conservative approach."
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hi, I'm Kevin. I'm coming back from a stress fracture in my foot — just cleared by my doctor last week after 4 months off. I want to work toward a half marathon in about 3 months.",
+          "expect_goal_bucket": "half_marathon",
+          "watch_for": [
+            "Should route through injury_recovery OR half_marathon — either is acceptable",
+            "Should acknowledge the return-to-run context seriously",
+            "Should NOT assign aggressive volume in week 1"
+          ]
+        },
+        {
+          "step": "awaiting_injury_background",
+          "user_says": "Metatarsal stress fracture in my right foot. 4 months off, no running at all. I was running about 40 miles a week before it happened. Doctor says I'm cleared but to take it easy.",
+          "watch_for": [
+            "Should acknowledge the 4 months off means significant detraining",
+            "Should suggest a very gradual return — not jumping to 40mi/week",
+            "3 months to half marathon from 0 is doable but tight — should address this honestly"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "No time goal. Just getting back to running.",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "No Strava. Haven't touched it since I got hurt.",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "Zero right now. First week back.",
+          "watch_for": [
+            "Week 1 should be extremely conservative — maybe 10-15 min easy runs",
+            "Should build very gradually given bone stress fracture history"
+          ]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "4 days a week works",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Just hope to make it to the start line healthy",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Assigns more than 12-15 miles in week 1 for someone coming back from a bone injury",
+        "No mention of gradual return or bone loading caution",
+        "3-month half marathon plan is treated as normal — doesn't flag the timeline is tight",
+        "Ignores the stress fracture history in session design",
+        "No strength/mobility work included"
+      ]
+    },
+
+    {
+      "id": "TC09",
+      "name": "Vague Goal — 'Just Want to Get Faster'",
+      "tags": ["general-fitness", "vague", "no-strava", "no-race"],
+      "persona": {
+        "name": "Aisha",
+        "age": 27,
+        "background": "Runs 3-4 miles a few times a week. No race planned. Wants to get faster generally.",
+        "strava": false,
+        "goal_race": null,
+        "goal_time": null,
+        "days_available": 4
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hey I just want to get faster. No race in particular, just tired of being slow.",
+          "expect_goal_bucket": "general_fitness",
+          "watch_for": [
+            "Should handle the vague goal gracefully",
+            "Should ask a clarifying question — what does 'faster' mean to her?",
+            "Should NOT route her to marathon or 5K without her saying so",
+            "Should find out if there's a specific distance she runs"
+          ]
+        },
+        {
+          "step": "awaiting_goal",
+          "user_says": "Like, I run 5Ks sometimes and just want to do them faster. Maybe break 30 minutes?",
+          "expect_goal_bucket": "5k",
+          "watch_for": [
+            "Should update to 5K goal with sub-30 time target",
+            "Should not re-ask what she already answered"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Yeah, sub-30 would be great",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "No Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "Maybe 10-12 miles a week? I run like 3-4 miles 3 times a week",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "4 days a week, mornings before work",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Nope!",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Buckets vague 'get faster' as marathon or some other specific race",
+        "Asks for race date when she said she has no race",
+        "Re-asks for time goal after she said sub-30 in the clarification",
+        "Doesn't adapt when she clarifies 5K mid-conversation"
+      ]
+    },
+
+    {
+      "id": "TC10",
+      "name": "Masters Runner — Boston Qualifier at 62",
+      "tags": ["marathon", "masters", "strava", "time-goal"],
+      "persona": {
+        "name": "Carol",
+        "age": 62,
+        "background": "Lifelong runner. Marathon PR 3:42 from 12 years ago. Wants to qualify for Boston (needs sub-4:00 for her AG).",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_miles": 28,
+          "easy_pace": "10:15/mi",
+          "long_run_recent": "14mi"
+        },
+        "goal_race": "Boston Marathon 2027 qualifier race (TBD)",
+        "goal_time": "Sub-4:00",
+        "days_available": 5
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hi Dean! I'm Carol, 62 years old. I've been running for 30 years and I want to qualify for Boston. My AG standard is 4:00 and my PR is 3:42 from 2012.",
+          "expect_goal_bucket": "marathon",
+          "watch_for": [
+            "Should recognize the age group context and the 4:00 standard",
+            "Should NOT ignore or minimize her experience",
+            "Should not be condescending about her age"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Sub-4:00. Ideally closer to 3:55 to have a cushion for entry.",
+          "watch_for": ["Should use 3:55 as the working goal pace"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yes, on Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "5 days, but I need one of those to be a rest or easy day — my body doesn't recover like it used to",
+          "watch_for": [
+            "Should honor recovery needs for masters athlete",
+            "Should not assign 5 hard days"
+          ]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Just some mild hip tightness, nothing that stops me. I do yoga twice a week.",
+          "watch_for": [
+            "Should capture yoga and hip tightness",
+            "Should include hip mobility work",
+            "Should not put runs on yoga days if she designates them"
+          ]
+        }
+      ],
+      "red_flags": [
+        "Ignores her 30 years of experience and treats her like a beginner",
+        "Assigns 5 quality sessions per week for a masters runner",
+        "Doesn't mention recovery as a key training lever for her age",
+        "Uses her old PR paces (3:42) instead of her current fitness (4:00 goal)"
+      ]
+    },
+
+    {
+      "id": "TC11",
+      "name": "Spartan Beast (OCR — Non-Running Goal)",
+      "tags": ["non-standard-distance", "ocr", "strength-background", "no-strava"],
+      "persona": {
+        "name": "Jake",
+        "age": 33,
+        "background": "CrossFit athlete, 4 days/week. Does 3-mile runs occasionally. First Spartan Beast (~13 miles + obstacles).",
+        "strava": false,
+        "goal_race": "Spartan Beast (~13 miles)",
+        "goal_time": "Finish",
+        "days_available": 3,
+        "notes": "CrossFit 4 days/week already, can only add 3 days of running"
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hey I'm Jake. I do CrossFit and I'm signing up for a Spartan Beast in 4 months. It's like 13 miles with obstacles. I can handle the obstacles but my running sucks.",
+          "expect_goal_bucket": "half_marathon",
+          "expect_goal_distance_miles": 13.0,
+          "expect_race_name": "Spartan Beast",
+          "watch_for": [
+            "Should bucket as half_marathon distance (~13mi) with race_name 'Spartan Beast'",
+            "Should understand this is an obstacle race, not a road half",
+            "Should note he already has a strength base from CrossFit"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Just finish. Complete all the obstacles or do the penalty burpees.",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "No Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I run maybe 5-6 miles a week. My long run is like 3 miles. But I'm fit from CrossFit.",
+          "watch_for": [
+            "Should acknowledge his CrossFit base — he's not a beginner athlete",
+            "Running volume should be built up to 13 miles over 4 months"
+          ]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "3 days of running, I do CrossFit Mon/Tue/Thu/Sat",
+          "watch_for": [
+            "Should NOT put runs on Mon/Tue/Thu/Sat",
+            "Running days should be Wed/Fri/Sun or similar"
+          ]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "No that's it",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Puts running sessions on CrossFit days (Mon/Tue/Thu/Sat)",
+        "Assigns strength work when he already does CrossFit",
+        "Treats him like a running beginner and ignores his athletic base",
+        "Makes the plan sound like a road half marathon plan"
+      ]
+    },
+
+    {
+      "id": "TC12",
+      "name": "Two Races — Stacked Goal",
+      "tags": ["multi-race", "experienced", "strava", "10k", "half_marathon"],
+      "persona": {
+        "name": "Rachel",
+        "age": 36,
+        "background": "Consistent runner, 25-30mi/week. Has a 10K in 8 weeks and a half marathon 7 weeks after that.",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_miles": 28,
+          "easy_pace": "9:30/mi"
+        },
+        "goal_race": "10K in 8 weeks + half marathon 7 weeks later",
+        "goal_time": "Sub-50 10K, sub-1:55 half",
+        "days_available": 5
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "I have two races — a 10K in 8 weeks and then a half marathon 7 weeks after that. Want to PR both.",
+          "expect_goal_bucket": "10k",
+          "watch_for": [
+            "Should capture both races",
+            "Should understand the 10K comes first — build for 10K, then extend for half",
+            "Should NOT just plan for the half marathon and ignore the 10K"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Sub-50 for the 10K and under 1:55 for the half if possible",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yep Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "5 days, Mon through Fri with weekends usually free for long stuff",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "I also do yoga on Sunday mornings, so I'd rather not run then",
+          "watch_for": [
+            "Should NOT put a run on Sunday",
+            "Yoga is a rest/recovery day"
+          ]
+        }
+      ],
+      "red_flags": [
+        "Ignores the 10K and only builds toward the half",
+        "Puts a run on Sunday after she mentioned yoga",
+        "Doesn't mention the dual-peak structure in the plan rationale",
+        "10K in 8 weeks gets no race-specific sharpening"
+      ]
+    },
+
+    {
+      "id": "TC13",
+      "name": "Triathlete Running Leg Only",
+      "tags": ["triathlon", "running-component-only", "no-strava"],
+      "persona": {
+        "name": "Mei",
+        "age": 29,
+        "background": "Competitive swimmer and cyclist. Running is the weakest discipline. Doing a relay — running the half marathon leg.",
+        "strava": false,
+        "goal_race": "Half ironman relay — running leg (13.1mi)",
+        "goal_time": "Sub-2:15 for the run",
+        "days_available": 4,
+        "notes": "Swims 3x/week and bikes 2x/week already. Only wants run coaching."
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hi! I'm Mei. I'm doing a half ironman relay with friends — I'm running the half marathon leg in 5 months. I swim and bike already, just need help with the running.",
+          "expect_goal_bucket": "half_marathon",
+          "watch_for": [
+            "Should understand she only wants running coaching, not triathlon coaching",
+            "Should NOT recommend swim/bike sessions",
+            "Should note her aerobic base from swimming and cycling is strong"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "I'd love to finish under 2:15 — that's about 10:20/mi pace",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "No I don't track runs on Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I run maybe 6-8 miles a week but my cardio is really strong from swimming and biking",
+          "watch_for": [
+            "Should not cap week 1 conservatively just because she runs little — her aerobic base is strong",
+            "Should factor in cross-training fitness"
+          ]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "4 days of running, I swim Mon/Wed/Fri and bike Tue/Thu",
+          "watch_for": [
+            "Should not put runs on Swim days (Mon/Wed/Fri) or bike days (Tue/Thu) unless she's OK doubling",
+            "This is a real scheduling puzzle — Dean should ask or make a note"
+          ]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Nope, just focus on the running",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Recommends swim or bike sessions",
+        "Treats her as a running beginner despite strong aerobic base",
+        "Ignores the swim/bike schedule conflict when assigning run days",
+        "Plans for a full triathlon instead of relay running leg"
+      ]
+    },
+
+    {
+      "id": "TC14",
+      "name": "Primary Goal: Weight Loss (Half Marathon as Vehicle)",
+      "tags": ["half_marathon", "weight-loss-focus", "no-strava", "beginner"],
+      "persona": {
+        "name": "David",
+        "age": 41,
+        "background": "Non-runner. Joined a half marathon 'for motivation to lose weight.' The race is the vehicle, not the real goal.",
+        "strava": false,
+        "goal_race": "Local half marathon in 6 months",
+        "goal_time": "Finish",
+        "days_available": 3
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "I signed up for a half marathon in 6 months. Honestly the goal is really to lose weight and get in shape, the race is just something to work toward.",
+          "expect_goal_bucket": "half_marathon",
+          "watch_for": [
+            "Should acknowledge the weight loss motivation positively without making it weird",
+            "Should keep the focus on training — Dean is a running coach, not a nutritionist",
+            "Should not over-promise on weight loss outcomes"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "No time goal. Finish is fine.",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Nope",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I barely run. Maybe walk 20 minutes sometimes.",
+          "watch_for": [
+            "Week 1 should be very conservative",
+            "Walk-jog intervals are appropriate"
+          ]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "3 days a week, weekdays whenever",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "I'm also trying to watch what I eat. Any advice on nutrition?",
+          "watch_for": [
+            "Should acknowledge nutrition briefly and redirect to running — Dean is a running coach",
+            "Should NOT give detailed nutrition advice or meal plans",
+            "A brief 'I can help with running — for nutrition you'd want a dietitian' is perfect"
+          ]
+        }
+      ],
+      "red_flags": [
+        "Goes deep on nutrition advice",
+        "Ignores the weight loss motivation entirely (it's motivationally important)",
+        "Assigns high mileage for a non-runner",
+        "Assigns no strength/mobility when this athlete clearly needs it"
+      ]
+    },
+
+    {
+      "id": "TC15",
+      "name": "Army APFT — 2 Mile Run, 4 Weeks",
+      "tags": ["mile", "military", "short-timeline", "no-strava"],
+      "persona": {
+        "name": "Darius",
+        "age": 22,
+        "background": "Army recruit. Needs to run 2 miles under 16:36 (passing standard for 17-21 age group). 4 weeks until test.",
+        "strava": false,
+        "goal_race": "Army APFT 2-mile run",
+        "goal_time": "Under 16:36",
+        "days_available": 6,
+        "notes": "Failing has serious career consequences. He's currently at about 18:30."
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "I have my Army PT test in 4 weeks, 2-mile run, need to do it in under 16:36. I'm running it in about 18:30 right now.",
+          "expect_goal_bucket": "mile",
+          "expect_goal_distance_miles": 2.0,
+          "watch_for": [
+            "Should extract 2.0 miles and 16:36 goal time",
+            "Goal pace: 16:36 / 2 = 8:18/mi — should use this",
+            "4 weeks is short — plan should be focused and urgent",
+            "Need to cut 1:54 off a 2-mile — that's a significant improvement in 4 weeks"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "16:36, that's the passing standard",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "No",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I run about 15 miles a week with the unit. We do formation runs and stuff.",
+          "watch_for": ["Should factor in existing unit PT runs"]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "6 days a week, I'm on base",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "No just need to pass",
+          "watch_for": []
+        }
+      ],
+      "red_flags": [
+        "Assigns long runs or high volume — wrong for a 2-mile speed goal",
+        "Doesn't address the urgency of 4 weeks",
+        "Goal pace math is wrong",
+        "Treats this like a 5K plan"
+      ]
+    },
+
+    {
+      "id": "TC16",
+      "name": "International Athlete — Metric Units",
+      "tags": ["10k", "international", "metric", "strava"],
+      "persona": {
+        "name": "Camille",
+        "age": 34,
+        "background": "French runner training in Paris. Uses km and min/km. Local 10K road race.",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_km": 48,
+          "easy_pace_per_km": "5:45/km",
+          "preferred_units": "metric"
+        },
+        "goal_race": "Paris 10K — Vivicitta",
+        "goal_time": "Under 50 minutes",
+        "days_available": 4
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Bonjour! I'm Camille. I'm training for a 10K in Paris in 2 months. My goal is under 50 minutes.",
+          "expect_goal_bucket": "10k",
+          "watch_for": [
+            "Should use metric units throughout since she's a metric runner",
+            "Should NOT convert everything to miles if she's thinking in km",
+            "Paces should be in min/km"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Under 50 minutes, so 5:00/km pace",
+          "watch_for": ["Should store pace as min/km, not convert to min/mi"]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yes Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "4 days, Tuesday Wednesday Friday Sunday",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Non, c'est tout!",
+          "watch_for": [
+            "Should handle non-English gracefully — doesn't need to respond in French",
+            "Should understand 'that's all' in context"
+          ]
+        }
+      ],
+      "red_flags": [
+        "Uses miles/min per mile throughout when she thinks in km",
+        "Doesn't recognize 5:00/km as her stated goal pace",
+        "Confused by the French sign-off"
+      ]
+    },
+
+    {
+      "id": "TC17",
+      "name": "High Volume Runner, New Baby, Time Crunch",
+      "tags": ["half_marathon", "experienced", "strava", "time-constrained"],
+      "persona": {
+        "name": "Tom",
+        "age": 37,
+        "background": "Used to run 55-60mi/week. New baby 3 months ago. Now averaging 20mi/week, max 4 days. Wants to race a half marathon PR.",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_miles": 20,
+          "recent_high_was": 55,
+          "easy_pace": "8:15/mi",
+          "pr_half": "1:38"
+        },
+        "goal_race": "Half marathon PR",
+        "goal_time": "Sub-1:35",
+        "days_available": 4
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Hey. Had a baby 3 months ago and my running has taken a hit. I'm doing about 20 miles a week now, used to do 55+. I want to train for a half marathon PR — have one in 12 weeks.",
+          "expect_goal_bucket": "half_marathon",
+          "watch_for": [
+            "Should empathize briefly without dwelling on it",
+            "Should meet him where he IS (20mi/week) not where he was (55mi/week)",
+            "Should not push volume he can't sustain with a newborn"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "My PR is 1:38, want to get under 1:35",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yeah, on Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "Max 4 days a week. No back-to-back long days — baby doesn't allow it on weekends honestly.",
+          "watch_for": [
+            "Should honor the 4-day limit",
+            "Should NOT put a long run Saturday AND Sunday",
+            "Should acknowledge the real-world constraint respectfully"
+          ]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Just need something realistic. I can't train like I used to.",
+          "watch_for": ["Dean should confirm this is achievable — it is, with quality over quantity"]
+        }
+      ],
+      "red_flags": [
+        "Assigns 50+ miles per week (his old level)",
+        "Back-to-back long runs when he said he can't do them",
+        "Ignores current 20mi/week base and sandbangs too much",
+        "Doesn't acknowledge the life constraint at all"
+      ]
+    },
+
+    {
+      "id": "TC18",
+      "name": "General Fitness — No Race, No Goal",
+      "tags": ["general-fitness", "no-race", "beginner", "no-strava"],
+      "persona": {
+        "name": "Fatima",
+        "age": 30,
+        "background": "Wants to run more and build a habit. No race in mind. Just wants to feel better.",
+        "strava": false,
+        "goal_race": null,
+        "goal_time": null,
+        "days_available": "flexible"
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "I just want to start running. No race or anything. I just want to be someone who runs.",
+          "expect_goal_bucket": "general_fitness",
+          "watch_for": [
+            "Should handle 'no race' gracefully — this is valid",
+            "Should NOT push her toward signing up for a race if she doesn't want one",
+            "Should ask what 'running more' looks like to her — frequency? distance? how she feels?"
+          ]
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "No Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I basically don't run right now. I walk places but that's it.",
+          "watch_for": [
+            "Week 1 should be very accessible — maybe run/walk intervals",
+            "Should not overwhelm her"
+          ]
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "I want to try 3 days a week to start",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "I guess I'd love to eventually run a 5K without stopping but that feels far away",
+          "watch_for": [
+            "Should seize this as a soft goal and use it to frame the plan",
+            "Should not immediately pivot to race registration — just use it as motivation"
+          ]
+        }
+      ],
+      "red_flags": [
+        "Pushes her to sign up for a race when she explicitly said no race",
+        "Assigns high mileage for a non-runner",
+        "Doesn't give her a short-term milestone to work toward",
+        "Makes running sound hard and complicated"
+      ]
+    },
+
+    {
+      "id": "TC19",
+      "name": "Hardrock 100 — Extreme Vert Ultra",
+      "tags": ["100mi", "ultra", "trail", "vert", "strava", "high-volume"],
+      "persona": {
+        "name": "Alex",
+        "age": 34,
+        "background": "Serious ultrarunner. 70mi/week with significant vert. Has done multiple 100Ks. Training for Hardrock 100 (33,000ft gain).",
+        "strava": true,
+        "strava_mock": {
+          "recent_weekly_miles": 70,
+          "weekly_vert_feet": 8000,
+          "long_run_recent": "26mi trail"
+        },
+        "goal_race": "Hardrock 100",
+        "goal_time": "Under 40 hours",
+        "days_available": 7
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "Training for Hardrock 100 this July. It's a 100-mile mountain race with 33,000 feet of climbing in Colorado. I've done two 100Ks and run about 70 miles a week.",
+          "expect_goal_bucket": "100mi",
+          "expect_race_name": "Hardrock 100",
+          "watch_for": [
+            "Should recognize 33,000ft vert is extremely specific and important",
+            "Should NOT apply any beginner conservatism",
+            "Should acknowledge this is an elite-tier goal — Hardrock has a lottery and a DNF-rate",
+            "Vert-specific training (hiking, power hiking, specific ascent/descent) is critical"
+          ]
+        },
+        {
+          "step": "awaiting_ultra_background",
+          "user_says": "Two 100K finishes — Golden Gate Dirty 30 and Santa Barbara 9 Trails. Running 65-70 miles a week with 6,000-8,000 feet of vert. I hike the steep stuff.",
+          "watch_for": [
+            "Should not cap week 1 at 10 miles — this person runs 70/week",
+            "Back-to-back long runs are essential",
+            "Power hiking should be explicitly part of the plan",
+            "Altitude acclimatization note (Hardrock is 11,000+ ft) is worth mentioning"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Under 40 hours if I'm being honest with myself, but finishing is the real goal — 48hr cutoff",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "Yes, Strava",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "7 days a week, doubles on some days. I take one easy day — usually Tuesday.",
+          "watch_for": [
+            "Should honor the 7-day structure",
+            "Tuesday easy day should be respected",
+            "Doubles are appropriate at this level"
+          ]
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Just need help structuring the big picture — I know what I'm doing day to day",
+          "watch_for": ["Should trust his expertise, not over-coach basics"]
+        }
+      ],
+      "red_flags": [
+        "Week 1 capped at 10 miles for someone running 70/week",
+        "No mention of vert or elevation work",
+        "No back-to-back long run structure",
+        "Ignores power hiking as a training tool",
+        "Treats this like a road marathon plan",
+        "Doesn't mention altitude as a factor for Hardrock"
+      ]
+    },
+
+    {
+      "id": "TC20",
+      "name": "Beer Mile — Novelty / Edge Case",
+      "tags": ["edge-case", "novelty", "no-strava", "humor"],
+      "persona": {
+        "name": "Chris",
+        "age": 26,
+        "background": "Casual runner. Wants to do a Beer Mile (run 1 mile, drinking a beer each quarter mile) with friends.",
+        "strava": false,
+        "goal_race": "Beer Mile",
+        "goal_time": "Under 8 minutes",
+        "days_available": 3,
+        "notes": "This is testing how Dean handles a clearly non-standard, novelty race with good humor."
+      },
+      "conversation": [
+        {
+          "step": "awaiting_goal",
+          "user_says": "I want to do a Beer Mile in 3 weeks. It's a mile run where you drink a beer every quarter mile. Goal is to go under 8 minutes.",
+          "expect_goal_bucket": "mile",
+          "expect_goal_distance_miles": 1.0,
+          "watch_for": [
+            "Should handle this with good humor — it's a real event",
+            "Should bucket as 'mile' goal",
+            "Should NOT be preachy about alcohol",
+            "Goal pace: 8:00/mi — should use this for running training",
+            "Dean can't really train the beer-drinking part, just the running"
+          ]
+        },
+        {
+          "step": "awaiting_goal_time",
+          "user_says": "Under 8 minutes total",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_strava",
+          "user_says": "No",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_mileage_baseline",
+          "user_says": "I run maybe 10 miles a week, nothing structured",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_schedule",
+          "user_says": "3 days a week, I'm flexible",
+          "watch_for": []
+        },
+        {
+          "step": "awaiting_anything_else",
+          "user_says": "Nope just gotta run fast and not throw up",
+          "watch_for": [
+            "Dean should ideally match the humor here — one liner is fine",
+            "Should not lecture about health",
+            "3-week plan for a 1-mile race should be appropriately short and focused"
+          ]
+        }
+      ],
+      "red_flags": [
+        "Lectures about alcohol / refuses to help",
+        "Misses the humor and treats it with complete seriousness",
+        "Assigns a 12-week training program for a 3-week goal",
+        "Ignores that this is 1 mile, not a 5K"
+      ]
+    }
+  ]
+}
