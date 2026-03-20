@@ -297,13 +297,17 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   const strippedRaw = rawText.replace(/\[NO_REPLY\]/gi, "").trim();
-  // correctMileageTotal is designed for initial_plan / weekly_recap where Claude
-  // drafts a full future week and might forget to add already-completed miles to the
-  // stated total. For post_run and user_message the prompt explicitly instructs Claude
-  // on current vs projected mileage, so running the correction would only interfere.
+  // correctMileageTotal catches math errors where Claude states a weekly total that
+  // doesn't match the sum of session distances in the response.
+  // - post_run: skip — no session plan in the response and the user message already has
+  //   the authoritative ⚠️ WEEK-TO-DATE figure; running the correction would interfere.
+  // - user_message: run with weekMileageSoFar — catches cases like Ian's where Dean
+  //   removes a session from the list but forgets to recalculate the stated total.
+  // - weekly_recap / initial_plan: run with alreadyCompletedMiles=0 — full week being planned.
+  // - all other triggers (reminders, morning_plan): run with weekMileageSoFar.
   const alreadyCompletedMiles =
     trigger === "initial_plan" || trigger === "weekly_recap" ? 0 : weekMileageSoFar;
-  const coachMessage = (trigger === "post_run" || trigger === "user_message" || trigger === "weekly_recap")
+  const coachMessage = trigger === "post_run"
     ? stripMarkdown(strippedRaw)
     : correctMileageTotal(stripMarkdown(strippedRaw), alreadyCompletedMiles);
 
@@ -446,9 +450,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
  * stated total are found — otherwise it's a no-op.
  */
 function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string {
-  // Non-running keywords — lines containing these don't contribute mileage
-  const nonRunningRe = /strength|mobility|yoga|bike|swim|elliptical|cross.train|rest day|hike/i;
-
   // Session lines: "Mon 3/2 · ..." or "Tue 3/10 · ..."
   const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d+\/\d+\s+·\s+(.+)$/gm;
 
@@ -459,8 +460,10 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
   while ((m = sessionLineRe.exec(message)) !== null) {
     hasSessionList = true;
     const desc = m[2];
-    if (nonRunningRe.test(desc)) continue;
-    // For complex sessions (intervals etc.), prefer an explicit total marker at the end:
+    // Positive matching: only count sessions that have an explicit mileage marker.
+    // Non-running sessions (strength, cross-training, swimming, cycling, rest) are
+    // instructed in the prompt to NEVER include a distance in miles — so no mi marker
+    // means it's a non-running session. This avoids a brittle exclusion keyword list.
     //   "≈7mi", "~7mi", "(7mi total)", "= 7mi" — these are intentionally placed totals.
     // Fall back to the first mileage figure for simple sessions ("Easy 5mi @ 9:30/mi" → 5).
     const explicitTotal = desc.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
@@ -481,7 +484,7 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
   // Handles: "10 miles total", "Total: 10mi", "stays at 10 miles", "~10mi total", etc.
   const totalPatterns: RegExp[] = [
     /(Total:\s*~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\s*(?:total|this week|for the week))/gi,
+    /(~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?[ \t]*(?:total|this week|for the week))/gi,
     /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
     /(stays?\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
     /(staying\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
@@ -1303,7 +1306,8 @@ ${(() => {
   const mi = (miles: number) => useMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
   const targetMiles = (state?.weekly_mileage_target as number) || 0;
   // Parse remaining session miles from the label text so we can compute the projected total.
-  const nonRunSessionRe = /strength|mobility|yoga|swim|bike|ride|rest|cross/i;
+  // Positive matching: only sessions with an explicit "mi" marker contribute to the projection.
+  // Non-running sessions are instructed in the prompt to never include distance in miles.
   const { sessionRows, projectedWeekMiles } = (() => {
     const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
     if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: null };
@@ -1318,7 +1322,6 @@ ${(() => {
     // Sum remaining session miles for projection
     let remainingSessionMiles = 0;
     for (const s of activeSessions) {
-      if (nonRunSessionRe.test(s.label)) continue;
       const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
       const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
       const mMatch = explicitTotal || firstMi;
@@ -1336,6 +1339,11 @@ ${(() => {
   })();
   const mileageLine = (() => {
     const done = `${mi(weekMileageSoFar)} done so far this week (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`;
+    // For post_run: suppress the projected total — the user message already has the
+    // authoritative ⚠️ WEEK-TO-DATE figure. Showing a projected total here too is what
+    // caused Dean to say "you're at 9.2 miles this week" when only 3.2 had been run:
+    // Claude uses the visible projected number instead of the authoritative done-so-far.
+    if (trigger === "post_run") return done;
     if (projectedWeekMiles !== null && projectedWeekMiles > weekMileageSoFar) {
       return `${done} | Projected week total (done + upcoming sessions): ${mi(projectedWeekMiles)}`;
     }
@@ -1383,6 +1391,7 @@ FORMATTING:
   Wed 3/11 · Tempo 4mi (2mi @ 8:45)
   Sat 3/14 · Long run 8mi easy
   Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun), M/D dates, and · as the separator. Never use full day names ("Monday, March 9"), colons, or dashes as separators for session lists. Blank lines split into separate SMS bubbles — keep the session list as one unbroken block. Always sort sessions in chronological order by date — never group by workout type (e.g. runs first, then strength). A strength session on Tuesday belongs before a run on Thursday.
+- SESSION DISTANCE FORMAT — CRITICAL: Running sessions must always include distance in miles (e.g. "Easy 5mi", "Tempo 4mi", "Long run 8mi"). Non-running sessions — strength, cross-training, swimming, cycling, yoga, spin, Zwift, rowing, aqua jogging, or any other non-running activity — must NEVER include a distance in miles, even if you know the distance. Use duration or just the activity name instead (e.g. "Strength + mobility 30 min", "Master's swim", "Zwift ride 60 min", "Spin class"). This format is how the system counts weekly running mileage — putting miles on a non-running session will cause it to be incorrectly counted as running volume.
 
 ${isRunReview ? `TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
 - Lead with genuine excitement — celebrate the effort and the fitness it reflects
@@ -1927,6 +1936,7 @@ Tue 3/3 · Strength + mobility 20 min
 Wed 3/4 · Tempo 4mi (2mi @ 8:45)
 Sat 3/7 · Long run 8mi easy
 Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
+SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 5mi"). Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 30 min", "Zwift ride 60 min", "Master's swim"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
 
@@ -2000,6 +2010,7 @@ Second bubble: this week's sessions, one per line, sorted chronologically by dat
 Mon 3/2 · Easy 3mi @ easy effort
 Tue 3/3 · Strength + mobility 20 min
 Sat 3/7 · Easy 4mi
+SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 3mi"). Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 20 min", "Zwift ride 60 min"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
 Use short day abbreviations and M/D dates (cross-referenced against DATE CONTEXT — do not compute day names independently). Then close with three short lines on a new line, each as its own sentence:
 1. Invite feedback on the plan — e.g. "How does this look? Happy to adjust anything."
 2. Offer reminders naturally — e.g. "I can also shoot you a reminder the morning of each session or the evening before — just let me know which works better."

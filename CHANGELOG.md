@@ -8,6 +8,57 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-20 — Future-proof non-running session detection in mileage calculation
+
+**Type:** Improvement
+**Reported by:** Internal observation (during Ian bug fix session)
+**User feedback:** N/A
+**Root cause:** `correctMileageTotal` and the session projection loop both used a keyword exclusion regex (`/strength|mobility|yoga|bike|swim|elliptical|cross.train|rest day|hike|spin/i`) to skip non-running sessions. This required ongoing maintenance — "Master's swim", "Zwifting", "indoor trainer", "aqua jogging", "rowing" and any other novel cross-training description not in the list would silently be counted as running mileage if Claude happened to include a distance in miles. Demonstrated failure: `Zwift ride 20mi` would be counted as 20 running miles despite "bike" not matching "Zwift".
+**Fix / Change:**
+- Removed both exclusion regex constants (`nonRunningRe` and `nonRunSessionRe`) from `correctMileageTotal` and the session projection loop.
+- Switched to positive matching: a session contributes to running mileage **only if** it has an explicit `\d+mi` marker in its label. Sessions without a mileage marker contribute zero — regardless of what the activity is called.
+- Added `SESSION DISTANCE FORMAT` instruction to all three plan-generation prompt locations (system prompt session format block, `weekly_recap` user message, `initial_plan` user message): running sessions must always include distance in miles; non-running sessions must never include distance in miles, even if the distance is known (use duration instead). This is the contract that makes positive matching reliable.
+- The combination of prompt instruction + positive code logic means any future cross-training description is automatically handled correctly without any code changes.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-03-20 — Ian's mileage errors: three root causes found and fixed
+
+**Type:** Bug Fix (batch)
+**Reported by:** Manual review of Ian's conversation thread
+**User feedback:** Ian's conversation showed Dean saying "you're at 9.2 miles" after a 3.2mi run, then "12.3 miles total for the week" when the correct total was ~9.25mi — persisting even after the 3/18 `correctMileageTotal` fix.
+
+---
+
+### Bug A: Post-run messages stated projected week total instead of done-so-far
+**Root cause:** `mileageLine` in `buildUserMessage` computed `projectedWeekMiles = weekMileageSoFar + remainingSessionMiles` and showed it in CURRENT TRAINING STATE for all triggers including `post_run`. After Ian's 3.2mi run with two 3mi runs still planned, the projection was 9.2mi. Claude used that number when saying "you're at X miles this week" despite the explicit `⚠️ WEEK-TO-DATE` instruction.
+**Fix:** When `trigger === "post_run"`, return only `weekMileageSoFar` (already-completed miles); skip the projected total entirely.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Bug B: `correctMileageTotal` was disabled for `user_message` and `weekly_recap`
+**Root cause:** The 2026-03-18 fix disabled `correctMileageTotal` for `post_run`, `user_message`, AND `weekly_recap` — meant to avoid double-correction on post_run, but accidentally also stopped correction on the other two triggers. When Ian replied "not running Saturday" and Dean responded with a revised plan (Sat: spin, Sun: 3mi) but kept "12.3 miles total for the week", nothing caught the error.
+**Fix:** Changed exclusion to `post_run` only. `user_message` and `weekly_recap` now run through `correctMileageTotal` as intended.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Bug C: "Spin" sessions counted toward mileage total
+**Root cause:** `nonRunningRe` regex (used inside `correctMileageTotal`) didn't include "spin", so spin-class sessions were treated as running sessions and their distance contributed to the computed week total.
+**Fix:** Added "spin" to both `nonRunningRe` (in `correctMileageTotal`) and `nonRunSessionRe` (in the session projection loop).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Bonus: `correctMileageTotal` pattern 2 cross-line match bug
+**Root cause:** Pattern 2 used `\s*` between `mi(?:les?)?` and the total keyword, which matches newlines. A session line like "Easy 3mi\nTotal: ..." could have its session distance incorrectly modified if "Total" happened to follow on the next line.
+**Fix:** Changed `\s*` to `[ \t]*` in pattern 2 — restricts match to same-line whitespace only.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-20 — Five bug fixes from March 19 conversation analysis
 
 **Type:** Bug Fix (batch)
