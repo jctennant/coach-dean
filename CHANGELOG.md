@@ -8,6 +8,59 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-20 — Five bug fixes from March 19 conversation analysis
+
+**Type:** Bug Fix (batch)
+**Reported by:** Automated daily conversation analysis (Claude Opus, 13 users / 124 messages)
+**User feedback:** N/A (analysis-detected)
+
+---
+
+### Issue 1: Duplicate post_run messages with contradictory mileage targets (P0)
+**Root cause:** Strava sometimes sends two webhook events for the same activity within seconds. Both events arrive before either stores the activity, so both pass the `isNew` check (race condition on the DB upsert) and both fire `/api/coach/respond` with `trigger=post_run`. The two Claude calls generate independently and can produce different weekly mileage projections (40 mi vs 35 mi).
+**Fix:** Added a second dedup guard in `strava/route.ts`: before firing the coaching response, query `conversations` for any `post_run` message sent to this user in the last 5 minutes. If one exists, set `suppressCoaching = true`. This catches the race condition that the `isNew` check misses.
+**Files changed:** `src/app/api/webhooks/strava/route.ts`
+
+---
+
+### Issue 2: Raw JSON `{"on_topic": false}` leaked to athlete (P0)
+**Root cause:** In `checkOffTopic` (`onboarding/handle`), the prompt instructs Claude to return `{"on_topic": true}` for on-topic or plain-text for off-topic. Occasionally Claude returns `{"on_topic": false}` (violating the prompt). The code parses the JSON, checks `=== true` (fails), and returns the full raw text including `{"on_topic": false}` as the `response` field, which is then SMS'd to the athlete verbatim.
+**Fix / Change:**
+- In `checkOffTopic`: when JSON parses successfully but `on_topic !== true`, strip JSON objects from the text to recover any plain-text portion. If nothing remains after stripping, default to `{ offTopic: false }` (safe: treat as on-topic rather than leaking JSON).
+- Added a `sendAndStore` safety guard: if the outbound message starts with `{`, block the send and log an error. Defense-in-depth for any future JSON leakage path.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
+### Issue 3: Onboarding loop re-asks already-answered questions (P1)
+**Root cause:** In `handleSchedule`, when the Haiku model returns `complete: false` (e.g., "3 days" without specific days), the extracted `days_per_week` is **not saved** to `onboarding_data`. On the next message ("Most days are good, Saturday best for longs"), Haiku receives only the new message with no context about the prior "3 days" answer and re-asks for days_per_week. Additionally, the Haiku prompt didn't recognize "most days"/"most days are good" as a valid complete answer.
+**Fix / Change:**
+- In `handleSchedule` incomplete branch: save `days_per_week` (if extracted) to `onboarding_data` immediately, so subsequent messages have full context.
+- Updated the Haiku prompt to include `ALREADY COLLECTED: days_per_week = N` when known, instructing it not to re-ask.
+- Added "most days", "most days work", "most days are good", "any day", "whenever", "whenever I can", "flexible", "you pick", "you choose", "up to you", "no set days" to the complete=true examples (balanced default assigned).
+- Added explicit rule that "a count alone (e.g. '3 days', 'maybe 3') is enough — mark complete and assign a balanced default" — without this, count-only answers would also loop.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
+### Issue 4: Cross-training day overwritten by run in delivered plan (P1)
+**Root cause:** The `initial_plan` and `weekly_recap` SCHEDULE CONSTRAINT prompts said "only put runs on training days" but didn't explicitly protect days the athlete designated for a specific cross-training activity. Claude correctly stored "swimming on Fridays" in `other_notes` but then placed an easy run on Friday anyway.
+**Fix:** Added `⚠️ CROSS-TRAINING DAY PROTECTION` clause to both `initial_plan` and `weekly_recap` user messages: instructs Claude to check "Athlete preferences / notes" before placing any run, and to treat athlete-designated cross-training days as fixed — do not override with a run. Also instructs to verify that a requested count of strength sessions (e.g., "twice a week") appears in the plan.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Issue 5: URL-encoded `%20` passed through in athlete messages (P2)
+**Root cause (two parts):**
+1. The SMS deep-link URLs in `signup-form.tsx` and `page.tsx` used `&body=Hi%20Dean!` — `&` is wrong per RFC 5724 (should be `?`). Some OS SMS parsers don't decode the body when the separator is wrong, passing `Hi%20Dean!` as the literal message.
+2. The Linq webhook message ingestion never decoded the raw body, so any URL-encoded text from any source would be stored and processed as-is.
+**Fix / Change:**
+- Fixed SMS URL separator `&` → `?` and removed manual `%20` encoding (`?body=Hi Dean!`) in both `signup-form.tsx` and `page.tsx`.
+- Added `decodeURIComponent()` at the Linq webhook ingestion point with a try/catch fallback for malformed sequences.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/components/signup-form.tsx`, `src/app/page.tsx`
+
+---
+
 ## 2026-03-19 — Add mile time trial as a first-class goal type
 
 **Type:** Feature

@@ -10,7 +10,9 @@ interface SignupFormProps {
 }
 
 export function SignupForm({ smsPhone, centered }: SignupFormProps) {
-  const smsUrl = `sms:${smsPhone ?? "+18336373002"}&body=Hi%20Dean!`;
+  // Use `?` (not `&`) per RFC 5724, and a literal space so the OS SMS app
+  // doesn't pass "%20" through as literal characters in the message body.
+  const smsUrl = `sms:${smsPhone ?? "+18336373002"}?body=Hi Dean!`;
   const location = centered ? "bottom" : "hero";
 
   function trackCta(device: "mobile" | "desktop") {

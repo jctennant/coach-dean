@@ -77,7 +77,15 @@ export async function POST(request: Request) {
   const textPart = parts.find(
     (p: { type: string; value?: string }) => p.type === "text"
   );
-  const body = textPart?.value?.trim() || "";
+  // Decode URL-encoded characters that some SMS deep-link openers pass through
+  // literally (e.g. "Hi%20Dean!" when the sms: URI body param isn't decoded by the OS).
+  const rawBodyText = textPart?.value?.trim() || "";
+  let body: string;
+  try {
+    body = decodeURIComponent(rawBodyText);
+  } catch {
+    body = rawBodyText; // malformed percent-sequence — use as-is
+  }
 
   // Detect image/media parts. Linq may use type "image", "media", or "mms".
   // Value may be in p.value, p.url, or p.media_url — try all three.

@@ -35,7 +35,9 @@ const valueProps = [
 
 export default function Home() {
   const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
-  const smsUrl = `sms:${smsPhone}&body=Hi%20Dean!`;
+  // Use `?` (not `&`) per RFC 5724, and a literal space so the OS SMS app
+  // doesn't pass "%20" through as literal characters in the message body.
+  const smsUrl = `sms:${smsPhone}?body=Hi Dean!`;
   return (
     <div className="flex min-h-screen flex-col" style={{ minHeight: "100vh" }}>
       <Navbar smsUrl={smsUrl} />

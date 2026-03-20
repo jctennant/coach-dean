@@ -184,6 +184,26 @@ export async function POST(request: Request) {
         }
       }
 
+      // Second dedup guard: Strava sometimes sends two webhook events for the same
+      // activity within seconds. The isNew check above has a race condition if both
+      // events arrive before either stores the activity. A recent post_run message
+      // in the conversations table is a reliable late-stage gate.
+      if (isNew && !suppressCoaching && user.onboarding_step === null) {
+        const recentCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { data: recentPostRun } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("message_type", "post_run")
+          .gte("created_at", recentCutoff)
+          .limit(1)
+          .maybeSingle();
+        if (recentPostRun) {
+          console.log(`[strava-webhook] post_run sent in last 5min for user ${user.id}, suppressing duplicate`);
+          suppressCoaching = true;
+        }
+      }
+
       // Only fire coaching response for new activities (not duplicate webhook events)
       // and only for fully onboarded users.
       if (isNew && !suppressCoaching && user.onboarding_step === null) {

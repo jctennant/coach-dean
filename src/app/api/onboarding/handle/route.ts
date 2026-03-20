@@ -517,12 +517,13 @@ async function handleSchedule(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
+  const alreadyKnownDays = onboardingData.days_per_week as number | null | undefined;
   const [parseResponse, extra] = await Promise.all([
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 200,
       system: `Extract training schedule preferences from the user's message. Respond with ONLY valid JSON, no other text.
-
+${alreadyKnownDays ? `\nALREADY COLLECTED: The athlete already said they want ${alreadyKnownDays} days per week of training. days_per_week is already known — do NOT ask for it again. Only extract which specific days they prefer.\n` : ""}
 Output format: {"complete": true|false, "days_per_week": number|null, "training_days": ["monday"|...|"sunday"]|null, "follow_up": string|null}
 
 Rules:
@@ -531,10 +532,11 @@ Rules:
 - "Weekdays" alone → complete: true, training_days: ["monday","tuesday","wednesday","thursday","friday"]
 - "Weekends" → complete: true, training_days: ["saturday","sunday"]
 - A count + day preference is enough: "4 days, prefer Mon/Wed/Fri/Sat" → complete: true, fill in all 4
-- "doesn't matter", "no preference", "whatever works", "any days" → complete: true. Use a balanced default (e.g. Mon, Wed, Fri, Sun for 4 days)
-- For a range like "3-4 days" with no other info → complete: false, follow_up asks which days work best
+- "doesn't matter", "no preference", "whatever works", "any days", "any day", "most days", "most days work", "most days are good", "whenever", "whenever I can", "flexible", "I'm flexible", "you pick", "you choose", "up to you", "doesn't matter to me", "no set days" → complete: true. Use a balanced default (e.g. Mon, Wed, Fri, Sun for 4 days; Mon, Wed, Sat for 3 days)
+- A count alone (e.g. "3 days", "4 times a week", "maybe 3") is enough — mark complete: true and assign a balanced default for the days
+- For a vague range like "3-4 days" with no other info → complete: false, follow_up asks which days work best
 - complete: false ONLY if there is truly not enough to infer any schedule at all
-- days_per_week: use the number or the midpoint of a range ("3-4" → 4)
+- days_per_week: use the number or the midpoint of a range ("3-4" → 4); "maybe 3" or "around 3" → 3${alreadyKnownDays ? `; if days_per_week is already known (${alreadyKnownDays}), always output ${alreadyKnownDays}` : ""}
 - follow_up: only what's still missing — do NOT re-ask for info already given. If days_per_week is known, don't ask again.
 - If complete is true, follow_up must be null`,
       messages: [{ role: "user", content: message }],
@@ -559,9 +561,13 @@ Rules:
   }
 
   if (!parsed.complete) {
-    // Save any extra fields gleaned from this message even if schedule wasn't complete
-    if (Object.keys(extra).length > 0) {
-      const partialMerge = { ...onboardingData, ...removeNulls(extra) };
+    // Save partial schedule data (days_per_week if extracted) alongside any extra fields.
+    // Without this, a second message like "most days work" would cause Haiku to re-ask
+    // for days_per_week since it has no memory of the previous "3 days" answer.
+    const partialSchedule: Record<string, unknown> = {};
+    if (parsed.days_per_week != null) partialSchedule.days_per_week = parsed.days_per_week;
+    if (Object.keys(extra).length > 0 || Object.keys(partialSchedule).length > 0) {
+      const partialMerge = { ...onboardingData, ...removeNulls(extra), ...partialSchedule };
       const updatePayload: Record<string, unknown> = { onboarding_data: partialMerge };
       if (extra.name) updatePayload.name = extra.name;
       void supabase.from("users").update(updatePayload).eq("id", user.id);
@@ -1722,8 +1728,14 @@ If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. 
   try {
     const parsed = JSON.parse(extractJSON(text));
     if (parsed.on_topic === true) return { offTopic: false };
+    // Claude returned JSON but with on_topic !== true — it should have written plain text.
+    // Strip any JSON objects from the text to recover any plain-text portion, or
+    // treat as on-topic (safe default) if nothing remains.
+    const stripped = text.replace(/\{[^{}]*\}/g, "").trim();
+    if (!stripped) return { offTopic: false };
+    return { offTopic: true, response: stripped };
   } catch {
-    // Not JSON — Claude wrote a plain-text off-topic response
+    // Not JSON — Claude wrote a plain-text off-topic response (expected path)
   }
 
   return { offTopic: true, response: text };
@@ -1734,6 +1746,13 @@ If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. 
 // ---------------------------------------------------------------------------
 
 async function sendAndStore(userId: string, phone: string, message: string, step?: string): Promise<{ chatId: string | null }> {
+  // Safety guard: never deliver raw JSON to the athlete. If a classification
+  // response was mis-routed as the reply text, block it here rather than
+  // exposing internal payloads. Log for monitoring.
+  if (/^\s*\{/.test(message)) {
+    console.error("[onboarding/sendAndStore] blocked JSON-starting message:", message.slice(0, 120), "step:", step);
+    return { chatId: null };
+  }
   const [{ chatId }] = await Promise.all([
     sendSMS(phone, message),
     supabase.from("conversations").insert({
