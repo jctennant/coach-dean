@@ -1382,6 +1382,7 @@ CRITICAL RULES:
 - If results are ambiguous or conflicting, set "ack" to null.
 - Only include "date" if you find a specific confirmed upcoming date from a reliable source — do not guess or infer from relative expressions like "5 months from now".
 - Never include timeline or countdown language ("X weeks out", "not much runway", "plenty of time") in the ack unless you set a confirmed "date" from web search — if you don't know the date, don't reference the timeline.
+- For distance_options: ONLY list multiple distances if the race genuinely offers multiple distance options AND you found clear, unambiguous evidence for each. Do NOT guess, confabulate, or add distances you are unsure about. A single-distance race must have distance_options: null.
 - If no specific named event is mentioned (just generic categories), return only: null`,
       messages: [{ role: "user", content: message }],
     });

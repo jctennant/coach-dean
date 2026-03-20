@@ -72,6 +72,7 @@ const hr = (char = "─", len = 70) => char.repeat(len);
 // ── Default responses for each dynamic step ───────────────────────────────────
 // Used when the DB is at a step not covered by the scenario script.
 const STEP_DEFAULTS = {
+  awaiting_goal:             "I want to run a 5K this spring",  // fallback if disambiguation loops
   awaiting_race_date:        "Not sure of the exact date yet — sometime this fall",
   awaiting_goal_time:        "No specific time, just want to finish strong",
   awaiting_ultra_background: "I've done a few shorter trail races, nothing over a marathon",
@@ -183,6 +184,17 @@ async function sendExchange(userId, dbStep, message, watchFor, label) {
     }
   }
 
+  // Debug: show DB state after each exchange
+  const { data: dbState } = await db.from("users")
+    .select("onboarding_step, onboarding_data")
+    .eq("id", userId)
+    .single();
+  if (dbState) {
+    const od = dbState.onboarding_data ?? {};
+    const keys = Object.keys(od).filter(k => od[k] != null && od[k] !== false).join(", ");
+    console.log(`${C.dim}  [DB] step=${dbState.onboarding_step ?? "null"} | data keys: ${keys || "none"}${C.reset}`);
+  }
+
   console.log("\n" + hr("·"));
   return replies;
 }
@@ -247,6 +259,36 @@ async function runScenario(scenario) {
 
     if (exchanges >= MAX_EXCHANGES) {
       console.log(`${C.yellow}⚠ Hit max exchanges (${MAX_EXCHANGES}) — onboarding may be stuck${C.reset}`);
+    }
+
+    // Wait for completeOnboarding's plan generation, then show initial plan.
+    // We wait up to 20s because Claude's initial plan generation can take 10-15s.
+    if (exchanges < MAX_EXCHANGES) {
+      let planMessages = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await new Promise(r => setTimeout(r, 5000));
+        const result = await db.from("conversations")
+          .select("content, message_type, created_at")
+          .eq("user_id", userId)
+          .eq("message_type", "initial_plan")
+          .order("created_at", { ascending: true });
+        if (result.data?.length) { planMessages = result.data; break; }
+      }
+      if (planMessages?.length) {
+        console.log(`\n${C.bg_green} INITIAL PLAN ${C.reset}`);
+        for (const msg of planMessages) {
+          console.log(`${C.green}${wrap(msg.content)}${C.reset}\n`);
+        }
+      } else {
+        // Debug: show all assistant conversations to diagnose what was stored
+        const allMsgs = await db.from("conversations")
+          .select("content, message_type, created_at")
+          .eq("user_id", userId)
+          .eq("role", "assistant")
+          .order("created_at", { ascending: true });
+        const types = [...new Set((allMsgs.data ?? []).map(m => m.message_type))];
+        console.log(`\n${C.yellow}⚠ No initial_plan found. Stored message types: ${types.join(", ") || "none"}${C.reset}`);
+      }
     }
 
     // Print unused scenario steps (steps in script that never fired)

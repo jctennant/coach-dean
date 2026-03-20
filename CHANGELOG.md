@@ -8,6 +8,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-20 — Fix initial_plan DB constraint blocking plan storage in dry_run tests
+
+**Type:** Bug Fix
+**Reported by:** Internal — debug investigation of missing initial_plan in test output
+**User feedback:** N/A
+**Root cause:** `conversations` table had a CHECK constraint (`conversations_message_type_check`) listing only `'morning_plan', 'post_run', 'user_message', 'coach_response', 'reengagement'`. `initial_plan` was not included. All 5 insert attempts in `completeOnboarding`'s dry_run path silently failed with postgres error 23514. The plan was generated (773 chars, correct content) but never persisted.
+**Fix / Change:** Migration `019_initial_plan_message_type.sql` drops and recreates the constraint with `'initial_plan'` added. Also removed temporary `[debug/completeOnboarding]` and `[debug/timezone]` console.log statements added during diagnosis.
+**Files changed:** `supabase/migrations/019_initial_plan_message_type.sql`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
+## 2026-03-20 — Fix initial plan display in test runner + Bay to Breakers loop
+
+**Type:** Bug Fix (test tooling)
+**Reported by:** Internal — second 20-scenario test run
+**User feedback:** N/A
+**Root cause:** (1) Test runner exited loop at step=null before `completeOnboarding` finished generating the initial plan — never showed the plan output. (2) Bay to Breakers web search hallucinated a "15K option" that doesn't exist, triggering a disambiguation loop. The default for `awaiting_goal` was "OK, sounds good" which doesn't resolve a goal, causing 15-round infinite loop. (3) `generateRaceAcknowledgment` lacked a clear rule against confabulating distances.
+**Fix / Change:** Added 5s post-loop wait + explicit `initial_plan` query so plans are always shown. Added `awaiting_goal` fallback default to break disambiguation loops. Added distance_options confabulation rule to web search prompt.
+**Files changed:** `tests/run-onboarding-test.mjs`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-20 — Onboarding bug fixes from pressure-test run + step-driven test runner
 
 **Type:** Bug Fix + Improvement
