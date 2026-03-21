@@ -179,19 +179,34 @@ assert("Strava record kept over conversation shadow", convResult[0].source, "str
 
 // ─── correctMileageTotal ──────────────────────────────────────────────────────
 
-const nonRunningRe = /strength|mobility|yoga|bike|swim|elliptical|cross.train|rest day|hike/i;
-const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d+\/\d+\s+·\s+(.+)$/gm;
+const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d+)\/(\d+)\s+·\s+(.+)$/gm;
+
+function getUTCMonday(d) {
+  const dow = d.getUTCDay();
+  const daysBack = dow === 0 ? 6 : dow - 1;
+  return d.getTime() - daysBack * 86_400_000;
+}
 
 function correctMileageTotal(message, alreadyCompletedMiles = 0) {
   let plannedMiles = 0;
   let hasSessionList = false;
+  let earliestSessionMs = Infinity;
   let m;
 
   sessionLineRe.lastIndex = 0;
   while ((m = sessionLineRe.exec(message)) !== null) {
     hasSessionList = true;
-    const desc = m[2];
-    if (nonRunningRe.test(desc)) continue;
+    const monthNum = parseInt(m[2], 10);
+    const dayNum = parseInt(m[3], 10);
+    const desc = m[4];
+
+    const now = new Date();
+    const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), monthNum - 1, dayNum));
+    if (now.getTime() - sessionDate.getTime() > 180 * 24 * 60 * 60 * 1000) {
+      sessionDate.setUTCFullYear(now.getUTCFullYear() + 1);
+    }
+    if (sessionDate.getTime() < earliestSessionMs) earliestSessionMs = sessionDate.getTime();
+
     const explicitTotal = desc.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
       || desc.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
     const firstMi = desc.match(/(\d+(?:\.\d+)?)\s*mi/i);
@@ -201,7 +216,14 @@ function correctMileageTotal(message, alreadyCompletedMiles = 0) {
 
   if (!hasSessionList || plannedMiles === 0) return message;
 
-  const correctTotal = Math.round((plannedMiles + alreadyCompletedMiles) * 10) / 10;
+  let effectiveCompleted = alreadyCompletedMiles;
+  if (earliestSessionMs !== Infinity && alreadyCompletedMiles > 0) {
+    const planMonday = getUTCMonday(new Date(earliestSessionMs));
+    const todayMonday = getUTCMonday(new Date());
+    if (planMonday > todayMonday) effectiveCompleted = 0;
+  }
+
+  const correctTotal = Math.round((plannedMiles + effectiveCompleted) * 10) / 10;
   const plannedRounded = Math.round(plannedMiles * 10) / 10;
 
   const totalPatterns = [
@@ -218,7 +240,8 @@ function correctMileageTotal(message, alreadyCompletedMiles = 0) {
     corrected = corrected.replace(pattern, (full, pre, num, post) => {
       const stated = parseFloat(num);
       if (Math.abs(stated - correctTotal) <= 0.4) return full;
-      if (alreadyCompletedMiles > 0.5 && Math.abs(stated - plannedRounded) <= 0.4) {
+      if (effectiveCompleted > 0.5 && Math.abs(stated - effectiveCompleted) <= 0.4) return full;
+      if (effectiveCompleted > 0.5 && Math.abs(stated - plannedRounded) <= 0.4) {
         return `${pre}${correctTotal}${post}`;
       }
       return `${pre}${correctTotal}${post}`;
@@ -308,6 +331,49 @@ That puts you at 38.8 miles total for the week.`;
 
 const notChangedWeek = correctMileageTotal(correctWeekMsg, 9.8);
 assert("Correct full-week total (38.8) unchanged", notChangedWeek.includes("38.8 miles"), true);
+
+// ─── correctMileageTotal() future-week detection ─────────────────────────────
+
+console.log("\ncorrectMileageTotal() future-week detection");
+
+// Build next-week dates dynamically so the test doesn't rot as time passes
+{
+  const now = new Date();
+  const todayDow = now.getUTCDay(); // 0=Sun
+  const daysToNextMon = todayDow === 0 ? 1 : 8 - todayDow;
+  const nextMon = new Date(now.getTime() + daysToNextMon * 86_400_000);
+  const nextWed = new Date(nextMon.getTime() + 2 * 86_400_000);
+  const nextThu = new Date(nextMon.getTime() + 3 * 86_400_000);
+  const nextSat = new Date(nextMon.getTime() + 5 * 86_400_000);
+  const fmt = (d) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  const dayName = (d) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()];
+
+  // Exact failing case: user asks for next week's plan mid-week (10 mi done this week).
+  // Plan = 3+4+4+4 = 15 mi; alreadyCompletedMiles = 10. Dean states "15 mi total" which
+  // is correct for next week but was being "corrected" to 25 because the function
+  // added current-week miles to a future-week plan.
+  const nextWeekMsg = `${dayName(nextMon)} ${fmt(nextMon)} · Easy 3mi @ 9:30–9:50
+${dayName(nextWed)} ${fmt(nextWed)} · Easy 4mi @ 9:30–9:50
+${dayName(nextThu)} ${fmt(nextThu)} · Easy 4mi @ 9:30–9:50
+${dayName(nextSat)} ${fmt(nextSat)} · Easy 4mi @ 9:30–9:50
+
+15 mi total, all easy pace.`;
+
+  const nextWeekResult = correctMileageTotal(nextWeekMsg, 10);
+  assert("Future-week plan: 15 mi total not inflated to 25 (bug fix)", nextWeekResult.includes("15 mi total"), true);
+  assert("Future-week plan: does not contain 25", !nextWeekResult.includes("25"), true);
+
+  // Dean states wrong total for a future-week plan — should still be corrected to planned sum
+  const nextWeekWrong = `${dayName(nextMon)} ${fmt(nextMon)} · Easy 3mi @ 9:30–9:50
+${dayName(nextWed)} ${fmt(nextWed)} · Easy 4mi @ 9:30–9:50
+${dayName(nextSat)} ${fmt(nextSat)} · Easy 4mi @ 9:30–9:50
+
+20 mi total, all easy pace.`;
+
+  const nextWeekWrongResult = correctMileageTotal(nextWeekWrong, 10);
+  // planned = 3+4+4 = 11mi; correct for future week = 11 (not 21)
+  assert("Future-week plan: wrong total corrected to plan sum (not plan+completed)", nextWeekWrongResult.includes("11"), true);
+}
 
 // weekly_recap (alreadyCompletedMiles = 0) — plan total should be used as-is
 const recapMsg = `Mon 3/23 · Easy 5mi

@@ -452,15 +452,29 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
  */
 function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string {
   // Session lines: "Mon 3/2 · ..." or "Tue 3/10 · ..."
-  const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d+\/\d+\s+·\s+(.+)$/gm;
+  // Capture month/day so we can detect future-week plans.
+  const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d+)\/(\d+)\s+·\s+(.+)$/gm;
 
   let plannedMiles = 0;
   let hasSessionList = false;
+  let earliestSessionMs = Infinity;
   let m: RegExpExecArray | null;
 
   while ((m = sessionLineRe.exec(message)) !== null) {
     hasSessionList = true;
-    const desc = m[2];
+    const monthNum = parseInt(m[2], 10);
+    const dayNum = parseInt(m[3], 10);
+    const desc = m[4];
+
+    // Track earliest session date to detect future-week plans
+    const now = new Date();
+    const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), monthNum - 1, dayNum));
+    // If this date appears to be >180 days in the past, assume it wraps to next year
+    if (now.getTime() - sessionDate.getTime() > 180 * 24 * 60 * 60 * 1000) {
+      sessionDate.setUTCFullYear(now.getUTCFullYear() + 1);
+    }
+    if (sessionDate.getTime() < earliestSessionMs) earliestSessionMs = sessionDate.getTime();
+
     // Positive matching: only count sessions that have an explicit mileage marker.
     // Non-running sessions (strength, cross-training, swimming, cycling, rest) are
     // instructed in the prompt to NEVER include a distance in miles — so no mi marker
@@ -476,9 +490,26 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
 
   if (!hasSessionList || plannedMiles === 0) return message;
 
+  // If the plan's sessions start in a future week, the already-completed miles for the
+  // current week don't apply — the new week starts at 0. Without this check, a user who
+  // has run 10 mi this week and asks for next week's 15 mi plan gets correctTotal = 25,
+  // which makes Dean's "15 mi total" look wrong and get "corrected" upward to 25.
+  let effectiveCompleted = alreadyCompletedMiles;
+  if (earliestSessionMs !== Infinity && alreadyCompletedMiles > 0) {
+    // Get UTC Monday of a date (no timezone needed — plan dates are in rough UTC)
+    const getUTCMonday = (d: Date): number => {
+      const dow = d.getUTCDay(); // 0=Sun
+      const daysBack = dow === 0 ? 6 : dow - 1;
+      return d.getTime() - daysBack * 86_400_000;
+    };
+    const planMonday = getUTCMonday(new Date(earliestSessionMs));
+    const todayMonday = getUTCMonday(new Date());
+    if (planMonday > todayMonday) effectiveCompleted = 0;
+  }
+
   // The correct week total = planned sessions + miles already completed this week.
   // For weekly_recap / initial_plan callers, alreadyCompletedMiles is 0.
-  const correctTotal = Math.round((plannedMiles + alreadyCompletedMiles) * 10) / 10;
+  const correctTotal = Math.round((plannedMiles + effectiveCompleted) * 10) / 10;
   const plannedRounded = Math.round(plannedMiles * 10) / 10;
 
   // Patterns that state a weekly total — replace the number if wrong
@@ -500,10 +531,10 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
       if (Math.abs(stated - correctTotal) <= 0.4) return full;
       // Stated matches already-completed miles — Claude is correctly reporting current
       // week-to-date mileage (not a projected total). Leave it alone.
-      if (alreadyCompletedMiles > 0.5 && Math.abs(stated - alreadyCompletedMiles) <= 0.4) return full;
+      if (effectiveCompleted > 0.5 && Math.abs(stated - effectiveCompleted) <= 0.4) return full;
       // Stated matches plan-only total but ignores already-completed miles — correct it
-      if (alreadyCompletedMiles > 0.5 && Math.abs(stated - plannedRounded) <= 0.4) {
-        console.warn(`[correctMileageTotal] stated ${stated}mi = plan only; full week total is ${correctTotal}mi (${plannedRounded} planned + ${alreadyCompletedMiles} completed) — correcting`);
+      if (effectiveCompleted > 0.5 && Math.abs(stated - plannedRounded) <= 0.4) {
+        console.warn(`[correctMileageTotal] stated ${stated}mi = plan only; full week total is ${correctTotal}mi (${plannedRounded} planned + ${effectiveCompleted} completed) — correcting`);
         return `${pre}${correctTotal}${post}`;
       }
       // Stated is wrong outright — correct to full week total

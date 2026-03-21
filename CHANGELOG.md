@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-21 — Fix next-week plan total inflated by current-week miles
+
+**Type:** Bug Fix
+**Reported by:** Jake (wife's account)
+**User feedback:** "she has 4 runs, with 15 miles total, but Dean said it was 25 miles"
+**Root cause:** `correctMileageTotal` is called with `alreadyCompletedMiles = weekMileageSoFar` to handle mid-week plan corrections (e.g. Ian's bug where Dean forgot to add completed runs to the stated total). But when the user asks "what's next week's plan?", the response contains sessions dated to the following week. `correctMileageTotal` computed `correctTotal = plannedMiles (15) + alreadyCompletedMiles (10) = 25`, then saw Dean's "15 mi total" and "corrected" it to 25. The function had no concept of which week the plan was for.
+**Fix / Change:** `correctMileageTotal` now parses the month/day from each session line (`Mon 3/23 · ...`) to find the earliest session date. If the plan's Monday is in a future week relative to today, it sets `effectiveCompleted = 0` (the future week starts at 0 miles). Added dynamic test cases in `test-dedup-mileage.mjs` that compute next-week dates from `new Date()` so they stay valid over time.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `scripts/test-dedup-mileage.mjs`
+
+---
+
 ## 2026-03-21 — Fix weekly mileage double-counting from manual/Strava race condition
 
 **Type:** Bug Fix
