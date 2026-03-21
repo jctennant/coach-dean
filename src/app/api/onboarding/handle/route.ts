@@ -280,9 +280,11 @@ Rules:
   }
 
   // Goal detected — run remaining parallel enrichment calls.
-  const [immediateAnswer, raceInfo] = await Promise.all([
+  const otherNotes = extra.other_notes as string | null;
+  const [immediateAnswer, raceInfo, constraintAck] = await Promise.all([
     detectAndAnswerImmediate(message, parsed.goal),
     generateRaceAcknowledgment(message),
+    otherNotes ? generateConstraintAcknowledgment(otherNotes, formatGoalInline(parsed.goal)) : Promise.resolve(null),
   ]);
 
   // Multi-distance race: web search found several options and athlete didn't specify which.
@@ -334,8 +336,8 @@ Rules:
   let acknowledgment: string;
   if (raceInfo.ack) {
     // Specific named race found — use the conversational acknowledgment directly.
-    // The generated text already handles tone; no scripted prefix needed.
-    acknowledgment = raceInfo.ack;
+    // Append constraint acknowledgment if one was generated.
+    acknowledgment = constraintAck ? `${raceInfo.ack} ${constraintAck}` : raceInfo.ack;
   } else if (parsed.goal === "injury_recovery") {
     acknowledgment = `Got it${name ? `, ${name}` : ""} — coming back from injury safely is exactly what I'm here for. I'll build a return-to-run plan around your recovery, not a generic training schedule.`;
   } else if (parsed.goal === "return_to_running") {
@@ -350,6 +352,8 @@ Rules:
       : `I'll put together a tailored plan, track your training via Strava, and adjust things as your fitness builds.`;
     acknowledgment = `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal. ${whatDeanDoes}`;
   }
+
+  if (constraintAck && !raceInfo.ack) acknowledgment += ` ${constraintAck}`;
 
   const question = nextStep ? getStepQuestion(nextStep, mergedData, user.id) : "";
 
@@ -1352,6 +1356,25 @@ interface RaceInfo {
   secondaryGoal: string | null;
 }
 
+/**
+ * Generate a short natural acknowledgment of a training constraint or context
+ * (e.g. stroller running, night shifts, bad knees) to weave into the goal response.
+ */
+async function generateConstraintAcknowledgment(otherNotes: string, goalLabel: string): Promise<string | null> {
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 80,
+      system: `You are Coach Dean, an AI running coach. The athlete mentioned a training constraint or context alongside their goal. Write ONE short sentence (max 15 words) acknowledging it warmly and naturally — sound like a real coach, not a system confirming a data entry. No markdown, no asterisks.`,
+      messages: [{ role: "user", content: `Goal: ${goalLabel}. Context they mentioned: ${otherNotes}` }],
+    });
+    const text = response.content[0].type === "text" ? response.content[0].text.trim() : "";
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
   const empty: RaceInfo = { ack: null, raceDate: null, distanceOptions: null, secondaryGoal: null };
   try {
@@ -1469,7 +1492,7 @@ Rules:
 - injury_mentioned: true if any injury or physical limitation is mentioned.
 - injury_notes: brief description of injury type, severity, and recovery status if an injury is mentioned (e.g. "IT band syndrome, recovering, avoiding back-to-back days"). null if no injury.
 - crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
-- other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, etc. null if nothing else.
+- other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, stroller running, etc. null if nothing else.
 - secondary_goal: if the athlete mentions a second distinct race or goal beyond the primary one (e.g. "and then a marathon in the fall", "plus Boston next year", "also want to do a crit series"). Short plain-text description. null if only one goal is mentioned.
 - goal_time_minutes: ONLY include this field if the athlete EXPLICITLY states a specific finish-time goal (e.g. "sub 3:05" → 185, "under 2 hours" → 120, "1:55" → 115, "around 23 minutes" → 23). Convert to total minutes as a number. OMIT THIS FIELD ENTIRELY if no specific finish time is mentioned — do NOT set it to null. Never infer a time goal that wasn't explicitly stated.
 - ultra_race_history: if the athlete explicitly describes their trail or ultra race background (e.g. "done two 100Ks", "finished a 50-miler last year", "ran Western States in 2022", "completed three 50Ks"). Short plain-text summary. null if not mentioned. IMPORTANT: do NOT set this from lottery attempts, general hiking, or non-race experience — it must describe actual races completed.
@@ -1555,7 +1578,7 @@ Rules:
 - experience_years: years running/training. "new" → 0, "a few months" → 0.3, "a year" → 1, "5+ years" → 5
 - weekly_miles: total weekly running mileage. If stated as a per-day or per-weekday average (e.g. "I average 5-6 miles a day", "5-6 miles weekdays"), multiply by the number of days implied (weekdays = 5, "every day" = 7) to get a weekly total. Convert km × 0.621.
 - crosstraining_tools: normalized array e.g. ["cycling", "swimming", "gym"]. null if none mentioned.
-- other_notes: any other relevant info not captured above (target time goals, lifestyle constraints, etc.)
+- other_notes: any other relevant info not captured above (target time goals, lifestyle constraints, stroller running, etc.)
 - Return all fields, using null for those not present`,
     messages: [{ role: "user", content: message }],
   });
@@ -1775,19 +1798,24 @@ async function checkOffTopic(
 
 Read the athlete's message and decide: is it ATTEMPTING to address the topic (even partially, vaguely, or incompletely), or is it COMPLETELY UNRELATED?
 
-On-topic — return only this JSON: {"on_topic": true}
+Always respond with valid JSON in exactly one of these two formats:
+On-topic: {"on_topic": true}
+Off-topic: {"on_topic": false, "response": "Your warm 1-sentence reply + re-ask question. No markdown, no asterisks."}
+
+ON-TOPIC (return {"on_topic": true}):
 - Any answer to the question, even partial or brief
 - Saying they don't know, aren't sure, or don't have the info
 - Simple acknowledgments like "yeah", "not really", "not sure"
 - Anything that touches on the subject even loosely
+- Comments about their fitness level, training history, or running experience
+- Pushback on training volume, intensity, or plan structure ("I've been running for years", "I think I can handle more mileage", "that seems too easy for me")
+- Requests to adjust the plan based on their experience
 
-Off-topic — write a plain text response as Coach Dean:
+OFF-TOPIC (return {"on_topic": false, "response": "..."}):
 - Questions about Dean's services or capabilities (e.g. "do you coach cycling?")
-- Meta-questions about the onboarding process ("how many more questions?", "how long does this take?", "are we almost done?") — answer briefly (e.g. "Just this one!") then re-ask
-- Advice-seeking questions about the topic rather than answering it ("What is a realistic finish time for a 30K?", "How many days a week should I train?") — answer briefly, then re-ask whether they have a personal answer
-- Random chit-chat with no relation to the topic
-- Completely unrelated statements or questions
-If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. No markdown, no asterisks.`,
+- Meta-questions about the onboarding process ("how many more questions?", "how long does this take?")
+- Pure advice-seeking with no personal answer ("What is a realistic finish time for a 30K?")
+- Random chit-chat with no relation to the topic or to running/training`,
     messages: [{ role: "user", content: message }],
   });
 
@@ -1797,17 +1825,15 @@ If off-topic: answer warmly in 1 sentence, then re-ask your question naturally. 
   try {
     const parsed = JSON.parse(extractJSON(text));
     if (parsed.on_topic === true) return { offTopic: false };
-    // Claude returned JSON but with on_topic !== true — it should have written plain text.
-    // Strip any JSON objects from the text to recover any plain-text portion, or
-    // treat as on-topic (safe default) if nothing remains.
-    const stripped = text.replace(/\{[^{}]*\}/g, "").trim();
-    if (!stripped) return { offTopic: false };
-    return { offTopic: true, response: stripped };
+    if (parsed.on_topic === false && typeof parsed.response === "string" && parsed.response.trim()) {
+      return { offTopic: true, response: parsed.response.trim() };
+    }
+    // Malformed JSON (missing response field, unexpected shape) — safe default: treat as on-topic
+    return { offTopic: false };
   } catch {
-    // Not JSON — Claude wrote a plain-text off-topic response (expected path)
+    // Not valid JSON — safe default: treat as on-topic so we never silently drop a message
+    return { offTopic: false };
   }
-
-  return { offTopic: true, response: text };
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-21 — Fix four coaching issues found in user conversations
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (user d7aac841, f2a0b924)
+
+### Issue 2 — Contradictory Strava connection state
+**User feedback:** Within one day: "I don't see Strava data" → "Your Strava is already connected" → "I don't have Strava connected yet"
+**Root cause:** `hasStrava` was injected into `buildUserMessage` for plan formatting only. System prompt never explicitly stated the connection status — Claude inferred it from whether activity data was present, which fails when Strava is connected but import hasn't finished.
+**Fix:** Added `- Strava: connected / not connected` as an explicit line in ATHLETE HISTORY, derived from `user.strava_athlete_id`. Claude now reads a factual boolean rather than inferring from data presence.
+
+### Issue 3 — JSON leakage + off-topic classifier false negative
+**User feedback:** `{"on_topic": false} "That's awesome..."` appeared in a coach message. Athlete pushback on beginner plan was classified as off-topic and ignored.
+**Root cause:** (1) `checkOffTopic` asked Claude to return either JSON or plain text — ambiguous format that leaked when Claude mixed formats. (2) Classifier prompt didn't include "fitness/training pushback" as explicitly on-topic, so "I've been running consistently, I think I can handle more mileage" was classified as off-topic during `awaiting_schedule`.
+**Fix:** Restructured `checkOffTopic` to always return structured JSON (`{"on_topic": true}` or `{"on_topic": false, "response": "..."}`). Added athlete fitness/training pushback and plan correction explicitly to the on-topic list. Parsing now reads the `response` field directly — no string stripping that could leak.
+
+### Issue 4 — Half marathon becomes marathon, goal pace fabricated
+**Root cause:** When `goal_time_minutes` is not stored, `goalPaceStr` is empty — nothing in the prompt explicitly says "no goal pace". The GOAL PACE rule told Claude to use "the pre-calculated value", but Claude hallucinated one when it wasn't there. Also no guardrail against substituting a different race distance.
+**Fix:** Added `" — no goal time on file"` to the goal line when undefined, so the absence is explicit. Added rule to GOAL PACE section: if "goal pace" doesn't appear in ATHLETE HISTORY, do not invent one — use effort-based language instead.
+
+### Issue 5 — Stroller running noted but dropped
+**Root cause:** `other_notes` (including stroller context) was being extracted and saved to the DB, but the `handleGoal` acknowledgment was built from canned templates that never referenced it — so the athlete got no acknowledgment in the moment.
+**Fix:** Added `generateConstraintAcknowledgment` (Haiku, 80 tokens) that fires in parallel with the existing enrichment calls when `other_notes` is present. Appends a Claude-generated natural sentence to the acknowledgment for both named-race and standard-goal paths. Also added "stroller running" as an explicit example in both extraction prompts to ensure reliable capture.
+
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-21 — Surface Coach Dean start date in system prompt
 
 **Type:** Feature

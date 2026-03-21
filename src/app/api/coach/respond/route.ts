@@ -1420,9 +1420,10 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 - The same applies to hilly trail workouts: if a trail segment averages 8-10% grade, the athlete's pace will and should be much slower than their flat easy pace. Don't flag this as "slow" — it's correct.
 
 ATHLETE HISTORY:
-${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}${allTimeInfo}- Sport: ${sportType}
+${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}- Strava: ${user.strava_athlete_id ? "connected" : "not connected"}
+${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}
-- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
+- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}
 ⚠️ RACE DATA RULE: The athlete's goal race is exactly as shown above. When referencing their race, use the exact goal type and distance above — do NOT substitute a different distance, format, or race type from memory or inference. If it says "50-mile ultra", it is 50 miles, not 50K. If it says "10K", it is a 10K. These values come from the athlete's profile and are authoritative.
 ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
@@ -2093,6 +2094,7 @@ USE STRAVA DATA — this is critical:
 
 GOAL PACE — never compute this yourself:
 - The athlete's goal pace (per mile and per km) is pre-calculated and shown in ATHLETE HISTORY as "goal pace: X:XX/mi". Use exactly that number. Do not recalculate it.
+- If "goal pace" does NOT appear in ATHLETE HISTORY, there is no goal pace on file. Do not invent one, do not estimate it from race distance alone, and do not reference it in training prescriptions. Use effort-based language instead (e.g. "comfortably hard", "race-effort segments") until a goal time is provided.
 
 RACE TIMELINE — never compute this yourself:
 - The days and weeks until the race are pre-calculated in DATE CONTEXT above (e.g. "Race date: YYYY-MM-DD (X days / ~Y weeks away)"). Use those exact numbers. Do not compute the timeline yourself and do not convert between units (do not say "7.5 months" if DATE CONTEXT says "32 weeks"). If you reference the timeline at all, use the weeks figure from DATE CONTEXT verbatim.
