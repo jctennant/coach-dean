@@ -433,6 +433,97 @@ const rangeBugResult = correctMileageTotal(rangeBugMsg, 0);
 // With the fix ((?<!-) lookbehind), "36" is preceded by "-" → not replaced.
 assert("Range-typo bug: '34-26' not produced", !rangeBugResult.includes("34-26"), true);
 
+// ─── computeProjectedWeekMiles() ─────────────────────────────────────────────
+
+console.log("\ncomputeProjectedWeekMiles()");
+
+function computeProjectedWeekMiles(sessions, weekMileageSoFar) {
+  if (!sessions || sessions.length === 0) return null;
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const activeSessions = sessions.filter(s => {
+    const [m, d] = s.date.split("/").map(Number);
+    if (isNaN(m) || isNaN(d)) return true;
+    const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), m - 1, d));
+    return sessionDate.getTime() >= todayUTC.getTime();
+  });
+  if (activeSessions.length === 0) return weekMileageSoFar;
+  let remainingMiles = 0;
+  for (const s of activeSessions) {
+    const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
+      || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
+    const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    const mMatch = explicitTotal || firstMi;
+    if (mMatch) remainingMiles += parseFloat(mMatch[1]);
+  }
+  return weekMileageSoFar + remainingMiles;
+}
+
+function correctProjectedTotal(message, projectedWeekMiles) {
+  if (!projectedWeekMiles || projectedWeekMiles <= 0) return message;
+  const projected = Math.round(projectedWeekMiles * 10) / 10;
+  const patterns = [
+    /(on\s+track\s+for\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(on\s+pace\s+for\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(projected\s+(?:(?:to\s+hit|total)[:\s]+)?~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+  ];
+  let corrected = message;
+  for (const pattern of patterns) {
+    corrected = corrected.replace(pattern, (full, pre, num, post) => {
+      const stated = parseFloat(num);
+      if (Math.abs(stated - projected) <= 0.4) return full;
+      return `${pre}${projected}${post}`;
+    });
+  }
+  return corrected;
+}
+
+{
+  const now = new Date();
+  // Build a date string for tomorrow (future session)
+  const tomorrow = new Date(now.getTime() + 86_400_000);
+  const in2days = new Date(now.getTime() + 2 * 86_400_000);
+  const yesterday = new Date(now.getTime() - 86_400_000);
+  const fmt = (d) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  const dayName = (d) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()];
+
+  // Two upcoming sessions (4mi + 3mi), 5.1 done → projection = 12.1
+  const sessions = [
+    { day: dayName(tomorrow), date: fmt(tomorrow), label: "Long run 4mi easy" },
+    { day: dayName(in2days), date: fmt(in2days), label: "Easy 3mi @ 9:30/mi" },
+  ];
+  const projected = computeProjectedWeekMiles(sessions, 5.1);
+  assertClose("computeProjectedWeekMiles: 5.1 + 4 + 3 = 12.1", projected, 12.1, 0.05);
+
+  // Past sessions only → returns weekMileageSoFar
+  const pastSessions = [
+    { day: dayName(yesterday), date: fmt(yesterday), label: "Easy 4mi" },
+  ];
+  const projectedPast = computeProjectedWeekMiles(pastSessions, 5.1);
+  assertClose("computeProjectedWeekMiles: all past → returns done miles", projectedPast, 5.1, 0.05);
+
+  // No sessions → null
+  assert("computeProjectedWeekMiles: no sessions → null", computeProjectedWeekMiles(null, 5.1), null);
+
+  // correctProjectedTotal: wrong "on track for" → corrected
+  const postRunMsg = "Saw it — 2.5mi easy. You're at 5.1 mi this week, on track for 15 mi total. Sat long run (4mi) and Mon easy (3mi) are up next.";
+  const fixedMsg = correctProjectedTotal(postRunMsg, 12.1);
+  assert("correctProjectedTotal: 15 mi → 12.1 mi when projection is 12.1", fixedMsg.includes("on track for 12.1 mi"), true);
+  assert("correctProjectedTotal: 15 removed", !fixedMsg.includes("on track for 15"), true);
+
+  // correctProjectedTotal: correct value → unchanged
+  const correctPostRun = "You're at 5.1 mi this week, on track for 12.1 mi total.";
+  const notFixed = correctProjectedTotal(correctPostRun, 12.1);
+  assert("correctProjectedTotal: correct value unchanged", notFixed === correctPostRun, true);
+
+  // correctProjectedTotal: no projection → no-op
+  const noProjection = "Nice easy 3mi today. Rest day tomorrow.";
+  assert("correctProjectedTotal: no 'on track for' → no-op", correctProjectedTotal(noProjection, 12.1), noProjection);
+
+  // correctProjectedTotal: null projection → no-op
+  assert("correctProjectedTotal: null projection → no-op", correctProjectedTotal(postRunMsg, null), postRunMsg);
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────────
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

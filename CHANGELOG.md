@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-21 — Fix post_run "on track for X mi" using wrong projected total
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "You're at 5.1 mi this week, on track for 15 mi total. Sat long run (4mi) and Mon easy (3mi) are up next." — 5.1 + 4 + 3 = 12.1, not 15.
+**Root cause:** For `post_run` responses, `correctMileageTotal` was skipped entirely (correct — there's no session list in the response). But Dean still reads the `UPCOMING SESSIONS THIS WEEK` block from the training state and sometimes computes a projected total himself, citing "on track for X mi". If Dean only mentions the next 1–2 upcoming sessions in his reply but cites the full-week projected total, the math looks inconsistent to the user. There was no post-processing step to validate Dean's stated projection against the system-computed value.
+**Fix / Change:** Added two new helpers: `computeProjectedWeekMiles(sessions, weekMileageSoFar)` — mirrors the projection logic in `buildCurrentTrainingState` and returns the authoritative projected total. `correctProjectedTotal(message, projectedWeekMiles)` — corrects "on track for X mi" / "on pace for X mi" / "projected X mi" patterns when Dean's stated value diverges from the system-computed projection. For `post_run`, the response now passes through `correctProjectedTotal` instead of being returned raw. Added 8 test cases in `test-dedup-mileage.mjs`.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `scripts/test-dedup-mileage.mjs`
+
+---
+
 ## 2026-03-21 — Fix next-week plan total inflated by current-week miles
 
 **Type:** Bug Fix

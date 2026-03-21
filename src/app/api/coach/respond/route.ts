@@ -300,17 +300,29 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const strippedRaw = rawText.replace(/\[NO_REPLY\]/gi, "").trim();
   // correctMileageTotal catches math errors where Claude states a weekly total that
   // doesn't match the sum of session distances in the response.
-  // - post_run: skip — no session plan in the response and the user message already has
-  //   the authoritative ⚠️ WEEK-TO-DATE figure; running the correction would interfere.
+  // - post_run: uses correctProjectedTotal instead — no session plan in the response
+  //   but still need to fix "on track for X mi" when Dean's number diverges from the
+  //   system-computed projection (see computeProjectedWeekMiles).
   // - user_message: run with weekMileageSoFar — catches cases like Ian's where Dean
   //   removes a session from the list but forgets to recalculate the stated total.
   // - weekly_recap / initial_plan: run with alreadyCompletedMiles=0 — full week being planned.
   // - all other triggers (reminders, morning_plan): run with weekMileageSoFar.
   const alreadyCompletedMiles =
     trigger === "initial_plan" || trigger === "weekly_recap" ? 0 : weekMileageSoFar;
+  const stripped = stripMarkdown(strippedRaw);
+  // post_run: skip full session-list correction (no session plan in the response)
+  // but still correct "on track for X mi" using the system-computed projection —
+  // Dean sometimes mentions only the next 1-2 sessions while citing the full-week
+  // projected total, making the math look wrong to the user.
   const coachMessage = trigger === "post_run"
-    ? stripMarkdown(strippedRaw)
-    : correctMileageTotal(stripMarkdown(strippedRaw), alreadyCompletedMiles);
+    ? correctProjectedTotal(
+        stripped,
+        computeProjectedWeekMiles(
+          (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? null,
+          weekMileageSoFar
+        )
+      )
+    : correctMileageTotal(stripped, alreadyCompletedMiles);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -442,6 +454,61 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
  * Strip markdown formatting that Claude occasionally generates despite instructions.
  * SMS renders all characters literally — asterisks, hashes, etc. appear as-is.
  */
+/**
+ * Compute the system-authoritative projected week total from stored sessions + done miles.
+ * Mirrors the logic in buildCurrentTrainingState so they stay in sync.
+ */
+function computeProjectedWeekMiles(
+  sessions: Array<{ day: string; date: string; label: string }> | null,
+  weekMileageSoFar: number
+): number | null {
+  if (!sessions || sessions.length === 0) return null;
+  const now = new Date();
+  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const activeSessions = sessions.filter(s => {
+    const [m, d] = s.date.split("/").map(Number);
+    if (isNaN(m) || isNaN(d)) return true;
+    const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), m - 1, d));
+    return sessionDate.getTime() >= todayUTC.getTime();
+  });
+  if (activeSessions.length === 0) return weekMileageSoFar;
+  let remainingMiles = 0;
+  for (const s of activeSessions) {
+    const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
+      || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
+    const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    const mMatch = explicitTotal || firstMi;
+    if (mMatch) remainingMiles += parseFloat(mMatch[1]);
+  }
+  return weekMileageSoFar + remainingMiles;
+}
+
+/**
+ * Correct "on track for X mi" / "projected X mi" in post_run responses.
+ * Dean computes this himself from the session list, but may only mention a subset
+ * of upcoming sessions while citing the full projection — making the math look wrong.
+ * Replace with the system-computed value when they diverge.
+ */
+function correctProjectedTotal(message: string, projectedWeekMiles: number | null): string {
+  if (!projectedWeekMiles || projectedWeekMiles <= 0) return message;
+  const projected = Math.round(projectedWeekMiles * 10) / 10;
+  const patterns: RegExp[] = [
+    /(on\s+track\s+for\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(on\s+pace\s+for\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(projected\s+(?:(?:to\s+hit|total)[:\s]+)?~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+  ];
+  let corrected = message;
+  for (const pattern of patterns) {
+    corrected = corrected.replace(pattern, (full, pre, num, post) => {
+      const stated = parseFloat(num);
+      if (Math.abs(stated - projected) <= 0.4) return full;
+      console.warn(`[correctProjectedTotal] stated ${stated}mi projected, system says ${projected}mi — correcting`);
+      return `${pre}${projected}${post}`;
+    });
+  }
+  return corrected;
+}
+
 /**
  * Post-processing guard: if the message contains a session list and a stated
  * weekly mileage total, verify the total matches the sum of running sessions
