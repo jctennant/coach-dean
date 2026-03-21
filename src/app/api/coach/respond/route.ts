@@ -31,6 +31,7 @@ interface ActivityRow {
   start_date: string;
   average_cadence: number | null;
   gear_name: string | null;
+  source: string | null;
 }
 
 interface CoachingSignals {
@@ -99,7 +100,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     supabase
       .from("activities")
       .select(
-        "activity_type, distance_meters, moving_time_seconds, average_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name"
+        "activity_type, distance_meters, moving_time_seconds, average_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source"
       )
       .eq("user_id", userId)
       .order("start_date", { ascending: false })
@@ -617,14 +618,19 @@ function computeWeekRunCount(activities: ActivityRow[], timezone: string): numbe
 }
 
 /**
- * Remove near-duplicate activities (same run stored twice with different strava_activity_ids,
- * e.g. watch auto-sync + manual GPX upload). Two activities are considered duplicates when:
- *   - Start times are within 2 minutes of each other
- *   - Distance is within 15% of each other
- * When duplicates are found, the richer record (has HR data) is kept; otherwise the
- * later-created one is dropped.
+ * Remove near-duplicate activities. Two passes:
+ *
+ * Pass 1 — Strava near-dupes: same run stored twice with different strava_activity_ids
+ *   (e.g. watch auto-sync + manual GPX upload). Start times within ±2 min, distance within 15%.
+ *   Keep the richer record (has HR); otherwise keep the first seen.
+ *
+ * Pass 2 — Manual/conversation shadow of a Strava activity: user texted Dean about a run
+ *   before or after Strava synced it. The Strava webhook tries to delete these but can miss
+ *   (e.g. time-of-day causes UTC date shift). Same UTC date, same activity type, distance
+ *   within 15% → discard the manual/conversation record, keep the Strava one.
  */
 function deduplicateActivities(activities: ActivityRow[]): ActivityRow[] {
+  // Pass 1: near-dupe by start time (±2 min)
   const kept: ActivityRow[] = [];
   for (const a of activities) {
     const aMs = new Date(a.start_date).getTime();
@@ -645,7 +651,31 @@ function deduplicateActivities(activities: ActivityRow[]): ActivityRow[] {
     }
     // else: existing is richer or equivalent — discard incoming
   }
-  return kept;
+
+  // Pass 2: drop manual/conversation activities that have a Strava counterpart on the same UTC
+  // date with similar distance. The Strava webhook tries to delete these, but can miss when the
+  // run happens late at night and crosses a UTC day boundary.
+  const stravaDates = new Map<string, number[]>(); // UTC date → [distance_meters, ...]
+  for (const a of kept) {
+    if (a.source === "strava" || (a.source == null)) {
+      const dateKey = a.start_date.slice(0, 10); // UTC date
+      if (!stravaDates.has(dateKey)) stravaDates.set(dateKey, []);
+      stravaDates.get(dateKey)!.push(a.distance_meters || 0);
+    }
+  }
+
+  return kept.filter((a) => {
+    if (a.source !== "manual" && a.source !== "conversation") return true;
+    const dateKey = a.start_date.slice(0, 10);
+    const stravaMiles = stravaDates.get(dateKey);
+    if (!stravaMiles) return true;
+    const aDist = a.distance_meters || 0;
+    // If any Strava activity on this UTC date has similar distance → discard manual shadow
+    return !stravaMiles.some((d) => {
+      const larger = Math.max(d, aDist);
+      return larger > 0 && Math.abs(d - aDist) / larger < 0.15;
+    });
+  });
 }
 
 /**

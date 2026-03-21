@@ -35,6 +35,7 @@ function assertClose(label, actual, expected, tolerance = 0.05) {
 // ─── deduplicateActivities ────────────────────────────────────────────────────
 
 function deduplicateActivities(activities) {
+  // Pass 1: near-dupe by start time (±2 min)
   const kept = [];
   for (const a of activities) {
     const aMs = new Date(a.start_date).getTime();
@@ -52,7 +53,29 @@ function deduplicateActivities(activities) {
       kept[dupeIndex] = a;
     }
   }
-  return kept;
+
+  // Pass 2: drop manual/conversation activities that have a Strava counterpart on the same UTC
+  // date with similar distance.
+  const stravaDates = new Map();
+  for (const a of kept) {
+    if (a.source === "strava" || a.source == null) {
+      const dateKey = a.start_date.slice(0, 10);
+      if (!stravaDates.has(dateKey)) stravaDates.set(dateKey, []);
+      stravaDates.get(dateKey).push(a.distance_meters || 0);
+    }
+  }
+
+  return kept.filter((a) => {
+    if (a.source !== "manual" && a.source !== "conversation") return true;
+    const dateKey = a.start_date.slice(0, 10);
+    const stravaMiles = stravaDates.get(dateKey);
+    if (!stravaMiles) return true;
+    const aDist = a.distance_meters || 0;
+    return !stravaMiles.some((d) => {
+      const larger = Math.max(d, aDist);
+      return larger > 0 && Math.abs(d - aDist) / larger < 0.15;
+    });
+  });
 }
 
 console.log("\ndeduplicateActivities()");
@@ -109,6 +132,50 @@ const bikeRunSameTime = [
   { id: "N", start_date: "2026-03-15T14:00:30Z", distance_meters: 6500, average_heartrate: 140,  activity_type: "Ride" },
 ];
 assert("Cross-type (Run + Ride) not deduped even if distance/time match", deduplicateActivities(bikeRunSameTime).length, 2);
+
+// ─── Pass 2: manual/conversation shadow of a Strava activity ─────────────────
+
+console.log("\ndeduplicateActivities() — Pass 2: manual shadow removal");
+
+// Jake's exact case: manual activity at noon UTC (from earlier SMS), Strava activity
+// at actual run time (hours apart). Strava webhook race condition left both in DB.
+const jakeShadow = [
+  { id: "P1", start_date: "2026-03-21T00:24:33Z", distance_meters: 4911,  average_heartrate: 138.5, activity_type: "Run", source: "strava" },
+  { id: "P2", start_date: "2026-03-21T12:00:00Z", distance_meters: 4828,  average_heartrate: null,  activity_type: "Run", source: "manual" },
+];
+const jakeShadowResult = deduplicateActivities(jakeShadow);
+assert("Manual shadow on same UTC date → manual removed", jakeShadowResult.length, 1);
+assert("Strava record kept", jakeShadowResult[0].source, "strava");
+
+// Manual on different UTC date than Strava → both kept (no false positive)
+const differentDayManual = [
+  { id: "Q1", start_date: "2026-03-21T00:24:33Z", distance_meters: 4911, average_heartrate: 138.5, activity_type: "Run", source: "strava" },
+  { id: "Q2", start_date: "2026-03-20T12:00:00Z", distance_meters: 4828, average_heartrate: null,  activity_type: "Run", source: "manual" },
+];
+assert("Manual on different UTC date → both kept", deduplicateActivities(differentDayManual).length, 2);
+
+// Manual with very different distance → kept (not a shadow)
+const differentDistanceManual = [
+  { id: "R1", start_date: "2026-03-21T13:00:00Z", distance_meters: 8000, average_heartrate: 145, activity_type: "Run", source: "strava" },
+  { id: "R2", start_date: "2026-03-21T12:00:00Z", distance_meters: 4800, average_heartrate: null, activity_type: "Run", source: "manual" },
+];
+assert("Manual with >15% distance diff → both kept", deduplicateActivities(differentDistanceManual).length, 2);
+
+// Two Strava activities on same day with similar distance → NOT deduped by Pass 2 (different sources)
+const twoStravasSameDay = [
+  { id: "S1", start_date: "2026-03-21T07:00:00Z", distance_meters: 4800, average_heartrate: null, activity_type: "Run", source: "strava" },
+  { id: "S2", start_date: "2026-03-21T18:00:00Z", distance_meters: 4900, average_heartrate: null, activity_type: "Run", source: "strava" },
+];
+assert("Two Strava runs same day, similar distance → both kept (legitimate double workout)", deduplicateActivities(twoStravasSameDay).length, 2);
+
+// Conversation source treated same as manual
+const conversationShadow = [
+  { id: "T1", start_date: "2026-03-19T14:00:00Z", distance_meters: 5000, average_heartrate: 150, activity_type: "Run", source: "strava" },
+  { id: "T2", start_date: "2026-03-19T12:00:00Z", distance_meters: 4900, average_heartrate: null, activity_type: "Run", source: "conversation" },
+];
+const convResult = deduplicateActivities(conversationShadow);
+assert("Conversation shadow on same UTC date → removed", convResult.length, 1);
+assert("Strava record kept over conversation shadow", convResult[0].source, "strava");
 
 // ─── correctMileageTotal ──────────────────────────────────────────────────────
 

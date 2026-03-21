@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-21 — Fix weekly mileage double-counting from manual/Strava race condition
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "I'm only at like 4.5. I think it double counted my run that was 3.05 miles that just come in still."
+**Root cause:** Race condition between a `user_message` handler (which extracts and stores a manual activity when the user texts Dean about a run) and the Strava webhook (which tries to delete manual dupes before firing `coach/respond`). If the user_message INSERT completes after the webhook's DELETE query, the manual activity survives and is counted alongside the Strava activity — doubling the mileage for that run. The `deduplicateActivities` function only caught same-start-time pairs (±2 min), so a manual activity stored at noon UTC and a Strava activity at the actual run time (hours apart) were both counted.
+**Fix / Change:** Added Pass 2 to `deduplicateActivities`: after the existing time-based dedup, build a map of Strava activity (UTC date → [distance_meters]). Then filter out any `source = 'manual'` or `source = 'conversation'` activity whose UTC date and distance (within 15%) match a Strava counterpart. Since `deduplicateActivities` runs inside `processCoachRequest` (in `after()`), this runs after all DB writes have completed — it catches any manual that survived the webhook's earlier deletion attempt. Also added `source` to the `ActivityRow` interface and select query so the field is available for dedup logic. Added 6 test cases to `test-dedup-mileage.mjs` covering the shadow removal, false-positive guard (different date), distance-mismatch guard, two-Strava-same-day non-dedup, and conversation source.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `scripts/test-dedup-mileage.mjs`
+
+---
+
 ## 2026-03-20 — Four onboarding plan quality fixes from pressure-test run
 
 **Type:** Bug Fix
