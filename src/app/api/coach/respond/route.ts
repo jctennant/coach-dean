@@ -1186,6 +1186,15 @@ function buildSystemPrompt(
     })
     .join("\n");
 
+  // Coach Dean start date + weeks
+  const coachStartDate = user.created_at ? new Date(user.created_at as string) : null;
+  const coachStartFormatted = coachStartDate
+    ? coachStartDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+    : null;
+  const weeksWithDean = coachStartDate
+    ? Math.floor((Date.now() - coachStartDate.getTime()) / (7 * 24 * 60 * 60 * 1000))
+    : null;
+
   // All-time, YTD, and recent stats from Strava
   let allTimeInfo = "";
   if (stravaStats) {
@@ -1378,7 +1387,7 @@ ${
     ? `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
 ⚠️ WEEK 1 VOLUME CAP (no history): Since no mileage data exists, Week 1 must not exceed 10 mi total. Start extremely conservatively — 3 short sessions of 2–3 mi each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.`
     : avgWeeklyMileage < 10
-    ? `FITNESS TIER: LOW VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This athlete is in early base-building. Prioritize easy aerobic volume and consistency. Hold off on structured quality sessions (tempo, intervals) until they have 4–6 weeks of steady easy running. Protect them from overtraining — it's the most common reason early runners quit or get hurt.
+    ? `FITNESS TIER: LOW VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
 ⚠️ WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${avgWeeklyMileage.toFixed(1)} mi/week. Week 1 MUST NOT exceed ${Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6).toFixed(0)} mi total (current volume × 1.30, floor 6 mi). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. For example, if they run 5 mi/week, prescribing 15 mi is a 200% jump and is wrong. A safe Week 1 for 5 mi/week is 6–7 mi spread across 3 sessions (e.g., 2mi / 2mi / 2.5mi). Do not exceed this cap under any circumstances, regardless of race goals or timelines.`
     : avgWeeklyMileage < 30
     ? `FITNESS TIER: MODERATE VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.`
@@ -1411,7 +1420,7 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 - The same applies to hilly trail workouts: if a trail segment averages 8-10% grade, the athlete's pace will and should be much slower than their flat easy pace. Don't flag this as "slow" — it's correct.
 
 ATHLETE HISTORY:
-${allTimeInfo}- Sport: ${sportType}
+${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}
 - Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : ""}
 ⚠️ RACE DATA RULE: The athlete's goal race is exactly as shown above. When referencing their race, use the exact goal type and distance above — do NOT substitute a different distance, format, or race type from memory or inference. If it says "50-mile ultra", it is 50 miles, not 50K. If it says "10K", it is a 10K. These values come from the athlete's profile and are authoritative.
@@ -1541,7 +1550,7 @@ TONE WHEN ATHLETE DOES A DIFFERENT WORKOUT THAN PRESCRIBED:
 
 MEMORY AND DATA LIMITATIONS:
 - You only have access to: the last 15 conversation messages, the athlete's activity history (visible in RECENT WORKOUTS), their profile, and today's date context. Nothing else.
-- Never state when the athlete first reached out, when they signed up, or what was said in conversations not shown above. You don't have that information.
+- You have their Coach Dean start date (shown in ATHLETE HISTORY above) — use it when asked how long they've been training with Dean or when they started. For everything else (what was said in earlier conversations, mileage from before your activity window), you don't have that information.
 - If asked about something outside your data window, be honest: "I don't have that far back in our conversation history" is fine. Fabricating a confident answer is not — it destroys trust when the athlete knows you're wrong.
 - When in doubt about a historical fact, omit it or flag uncertainty. Never invent specifics.
 - ⚠️ HISTORICAL MILEAGE RULE: When citing a specific prior week's mileage, use ONLY the values shown in "WEEKLY MILEAGE (completed weeks)" above. If a particular week is not in that table, say "I don't have exact data for that week" — never estimate or fabricate a specific number. Inventing a mileage figure (e.g. saying "last week you ran 6.8 miles" when the actual number was 12.8) erodes trust immediately when the athlete knows their own training.

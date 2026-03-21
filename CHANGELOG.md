@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-21 — Surface Coach Dean start date in system prompt
+
+**Type:** Feature
+**Reported by:** User feedback (Jake)
+**User feedback:** "my wife also was curious what her last X weeks of training looked like and dean didn't seem to have an accurate recollection of when she started training with Dean... Example: How many weeks have I been training with you? What was my start date?"
+**Root cause:** `user.created_at` existed in the DB but wasn't surfaced in the system prompt. The MEMORY AND DATA LIMITATIONS section explicitly told Dean "never state when the athlete first signed up" — so he'd correctly admit he didn't know, even though the data was available.
+**Fix / Change:** Compute start date and weeks-with-Dean from `user.created_at` inside `buildSystemPrompt`. Inject into ATHLETE HISTORY as "Started with Coach Dean: [date] (X weeks ago)". Updated MEMORY AND DATA LIMITATIONS to tell Dean he does have this info and should use it.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
+## 2026-03-21 — Removed hard quality-session ban for low-volume athletes
+
+**Type:** Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "my wife has been running for a long time and is wondering why she isn't getting intervals / tempo"
+**Root cause:** The LOW VOLUME fitness tier (avg < 10 mi/week) contained a hard rule: "Hold off on structured quality sessions (tempo, intervals) until they have 4–6 weeks of steady easy running." This fired regardless of all-time experience or race goal — an experienced runner returning from a break or training for a 5K/mile would get base-only plans. Also flagged: no 5K-specific section existed, and the LOW VOLUME block was fighting Claude's contextual judgment rather than guiding it.
+**Fix / Change:** Replaced the hard ban with a directional nudge: include at least 1 quality session/week for all non-true-beginners, calibrated to all-time experience (visible in Strava stats) and race goal. Left the WEEK 1 VOLUME CAP intact. The "No data" tier remains base-only — that's the correct guardrail for true beginners. Deliberately chose to loosen the restriction rather than add carve-outs (5K exception, experienced runner exception) to keep the prompt lean and trust Claude's judgment.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## [Unreleased]
 
 ---
