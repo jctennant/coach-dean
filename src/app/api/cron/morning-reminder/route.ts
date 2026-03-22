@@ -81,40 +81,44 @@ export async function GET(request: Request) {
     }
 
     // Determine whether to include a check-in on yesterday's workout.
-    // Only for users without Strava (Strava users get post-run feedback via webhook).
-    // Skip if: Strava is connected, yesterday wasn't a training day, yesterday was a skip,
-    // or the user already messaged about their workout (post_run or any inbound user_message
-    // in the last 30 hours — means they already reported in).
+    // - Non-Strava users: ask how it went (we have no data either way)
+    // - Strava users: if yesterday was a training day but no run came through the webhook,
+    //   check in to see if they got the workout in and offer to reschedule if not.
+    // In both cases, skip if the user already messaged about their workout in the last 30 hours.
     let includeWorkoutCheckin = false;
-    if (!user.strava_access_token) {
-      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const yesterdayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
-        .format(yesterday).toLowerCase();
-      const yesterdayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(yesterday);
-      const hadWorkoutYesterday = trainingDays.includes(yesterdayDay) && !skipDates.includes(yesterdayDateStr);
+    let missedRunCheckin = false;
 
-      if (hadWorkoutYesterday) {
-        const thirtyHoursAgo = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString();
-        const { data: recentMsgs } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("user_id", profile.user_id)
-          .in("message_type", ["post_run", "user_message"])
-          .gte("created_at", thirtyHoursAgo)
-          .limit(1);
-        // Only check in if there's been no post_run feedback AND no inbound message from the user
-        const noRecentActivity = !recentMsgs || recentMsgs.length === 0;
-        // user_message rows include both sent and received — filter to athlete's own messages
-        // by checking role = 'user'
-        if (noRecentActivity) {
-          const { data: userMsgs } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("user_id", profile.user_id)
-            .eq("role", "user")
-            .gte("created_at", thirtyHoursAgo)
-            .limit(1);
-          includeWorkoutCheckin = !userMsgs || userMsgs.length === 0;
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const yesterdayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
+      .format(yesterday).toLowerCase();
+    const yesterdayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(yesterday);
+    const hadWorkoutYesterday = trainingDays.includes(yesterdayDay) && !skipDates.includes(yesterdayDateStr);
+
+    if (hadWorkoutYesterday) {
+      const thirtyHoursAgo = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString();
+      const { data: postRunMsg } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", profile.user_id)
+        .eq("message_type", "post_run")
+        .gte("created_at", thirtyHoursAgo)
+        .limit(1);
+      const { data: userMsgs } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", profile.user_id)
+        .eq("role", "user")
+        .gte("created_at", thirtyHoursAgo)
+        .limit(1);
+      const noRecentActivity = (!postRunMsg || postRunMsg.length === 0) && (!userMsgs || userMsgs.length === 0);
+
+      if (noRecentActivity) {
+        if (user.strava_access_token) {
+          // Strava connected but no run came through — they likely skipped or forgot to sync
+          missedRunCheckin = true;
+        } else {
+          // No Strava — we simply don't know if they ran
+          includeWorkoutCheckin = true;
         }
       }
     }
@@ -127,6 +131,7 @@ export async function GET(request: Request) {
           userId: profile.user_id,
           trigger: "morning_reminder",
           ...(includeWorkoutCheckin ? { includeWorkoutCheckin: true } : {}),
+          ...(missedRunCheckin ? { missedRunCheckin: true } : {}),
         }),
       });
 

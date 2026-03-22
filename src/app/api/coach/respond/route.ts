@@ -18,7 +18,8 @@ interface CoachRequest {
   imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
-  includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder
+  includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
+  missedRunCheckin?: boolean; // True when Strava user had a scheduled workout but no run came through — check if they got it in
 }
 
 interface ActivityRow {
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
 }
 
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
-  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin } = body;
+  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
 
   // Fetch user context in parallel
   const [
@@ -222,7 +223,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
   const hasStrava = !!(user.strava_athlete_id as number | null);
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -1930,7 +1931,8 @@ function buildUserMessage(
   timezone = "America/New_York",
   hasStrava = true,
   weekMileageSoFar = 0,
-  weekRunCount = 0
+  weekRunCount = 0,
+  missedRunCheckin?: boolean
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -2006,6 +2008,18 @@ PLAN CONSISTENCY RULES — follow these exactly:
 
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.`;
     case "morning_reminder":
+      if (missedRunCheckin) {
+        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If the athlete has already mentioned they skipped yesterday or are rescheduling, acknowledge that briefly and move on to today — don't bring it up again.
+
+Strava didn't pick up a run from this athlete yesterday, even though it was a scheduled training day. Send a short, casual message that does two things: check in to see if they got the workout in (or what happened), then preview today's session.
+
+Structure (all in one message — split into two bubbles with a blank line if it runs long):
+1. A brief, non-judgmental check-in on yesterday — vary the phrasing. e.g. "Didn't catch a run from you yesterday — did you end up getting it in?" / "Looks like yesterday's run didn't sync — all good if you got it in another way!" / "Hey — I didn't see yesterday's workout come through. Did you get it done?" Keep it casual and light, not accusatory. One sentence.
+2. Today's workout: type, distance, and target pace or effort. Use THIS WEEK'S PLANNED SESSIONS from CURRENT TRAINING STATE for the exact distance. One or two sentences.
+3. A brief, open invite to reschedule if yesterday was a miss — vary it. e.g. "Happy to shift things around if yesterday didn't happen." / "Let me know if you want to adjust the week." One sentence.
+
+No markdown. Sound like a real coach texting. Total under 560 characters.`;
+      }
       if (includeWorkoutCheckin) {
         return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do today (or to skip/rest today) in a recent message, don't repeat the full plan — just send a brief, natural 1-sentence check-in, e.g. "Good morning — rest day today as we talked about. Let me know how you're feeling." Keep it under 160 characters and human.
 
@@ -2031,6 +2045,18 @@ If today hasn't been covered yet, send a short reminder text about today's worko
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
 
     case "nightly_reminder":
+      if (missedRunCheckin) {
+        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If the athlete has already mentioned they skipped today or are rescheduling, acknowledge that briefly and move on to tomorrow — don't bring it up again.
+
+Strava didn't pick up a run from this athlete today, even though it was a scheduled training day. Send a short, casual message that does two things: check in to see if they got the workout in (or what happened), then preview tomorrow's session.
+
+Structure (all in one message — split into two bubbles with a blank line if it runs long):
+1. A brief, non-judgmental check-in on today — vary the phrasing. e.g. "Hey — didn't see today's run come through. Did you get it in?" / "Looks like today's workout didn't sync — hope it went well if you got out there!" / "Didn't catch a run from you today — everything okay?" Keep it casual and light. One sentence.
+2. Tomorrow's workout: type, distance, and target pace or effort. Use THIS WEEK'S PLANNED SESSIONS from CURRENT TRAINING STATE for the exact distance. One or two sentences.
+3. A brief, open invite to reschedule if today was a miss — vary it. e.g. "Happy to adjust the week if today didn't happen." / "Let me know if you want to shift things around." One sentence.
+
+No markdown. Sound like a real coach texting. Total under 560 characters.`;
+      }
       if (includeWorkoutCheckin) {
         return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do tomorrow (or to skip/rest tomorrow) in a message sent today, don't repeat the full plan — just send a brief, natural 1-sentence confirmation, e.g. "Just a heads up for tomorrow — rest day as we talked about. Hope you're feeling better!" Keep it under 160 characters and human.
 

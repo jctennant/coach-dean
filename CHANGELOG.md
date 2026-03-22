@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-22 — Don't assume Strava users ran if no activity came through
+
+**Type:** Bug Fix
+**Reported by:** Elise
+**User feedback:** "Dean assumed I ran on Friday and Saturday even though I didn't — it didn't give me any chance to reschedule"
+**Root cause:** Both morning-reminder and nightly-reminder crons only included a workout check-in for users *without* Strava, on the assumption that Strava users get post-run feedback via webhook. But if no run happened, there's no webhook, so Dean silently assumed the workout occurred and sent the next-day reminder as normal.
+**Fix / Change:** Both crons now also check for Strava users: if yesterday/today was a scheduled training day and no `post_run` conversation arrived in the relevant window (and the user hasn't already texted in), a new `missedRunCheckin: true` flag is passed to `coach/respond`. This triggers a separate prompt branch with a casual, non-judgmental check-in ("Didn't see a run from you yesterday — did you get it in?") followed by today's session and an open invite to reschedule.
+**Files changed:** src/app/api/cron/morning-reminder/route.ts, src/app/api/cron/nightly-reminder/route.ts, src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-21 — Fix four coaching issues found in user conversations
 
 **Type:** Bug Fix

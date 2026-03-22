@@ -76,15 +76,24 @@ export async function GET(request: Request) {
       continue;
     }
 
-    // Determine whether to include a check-in on today's workout.
-    // Only for users without Strava (Strava users get post-run feedback via webhook).
-    // Skip if today wasn't a training day, today was a skip, or the user already
-    // messaged about their workout (post_run or any inbound user_message in the last 18 hours).
+    // Determine whether to include a check-in on a workout.
+    //
+    // TODAY (non-Strava only): ask how it went since we have no data.
+    //   Strava users are NOT checked for today — the nightly fires at ~6pm and many users
+    //   run after work. "I didn't catch a run from you" at 6pm would fire before they head out.
+    //
+    // YESTERDAY (Strava only): for users who only get nightly reminders (no morning cron),
+    //   the nightly is the only chance to follow up on a missed workout. By 6pm, yesterday
+    //   is fully over and safe to call out. Uses a 40-hour lookback to cover any run time
+    //   during the previous day.
     let includeWorkoutCheckin = false;
+    let missedRunCheckin = false;
+
+    const todayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
+      .format(now).toLowerCase();
+    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+
     if (!user.strava_access_token) {
-      const todayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
-        .format(now).toLowerCase();
-      const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
       const hadWorkoutToday = trainingDays.includes(todayDay) && !skipDates.includes(todayDateStr);
 
       if (hadWorkoutToday) {
@@ -97,7 +106,6 @@ export async function GET(request: Request) {
           .gte("created_at", eighteenHoursAgo)
           .limit(1);
         if (!postRunMsg || postRunMsg.length === 0) {
-          // Also check if the athlete already texted in about their workout today
           const { data: userMsgs } = await supabase
             .from("conversations")
             .select("id")
@@ -107,6 +115,33 @@ export async function GET(request: Request) {
             .limit(1);
           includeWorkoutCheckin = !userMsgs || userMsgs.length === 0;
         }
+      }
+    } else {
+      // Strava user — check if yesterday was a training day with no run recorded.
+      // 40-hour lookback covers any run time during the previous calendar day.
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const yesterdayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
+        .format(yesterday).toLowerCase();
+      const yesterdayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(yesterday);
+      const hadWorkoutYesterday = trainingDays.includes(yesterdayDay) && !skipDates.includes(yesterdayDateStr);
+
+      if (hadWorkoutYesterday) {
+        const fortyHoursAgo = new Date(Date.now() - 40 * 60 * 60 * 1000).toISOString();
+        const { data: postRunMsg } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("user_id", profile.user_id)
+          .eq("message_type", "post_run")
+          .gte("created_at", fortyHoursAgo)
+          .limit(1);
+        const { data: userMsgs } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("user_id", profile.user_id)
+          .eq("role", "user")
+          .gte("created_at", fortyHoursAgo)
+          .limit(1);
+        missedRunCheckin = (!postRunMsg || postRunMsg.length === 0) && (!userMsgs || userMsgs.length === 0);
       }
     }
 
@@ -118,6 +153,7 @@ export async function GET(request: Request) {
           userId: profile.user_id,
           trigger: "nightly_reminder",
           ...(includeWorkoutCheckin ? { includeWorkoutCheckin: true } : {}),
+          ...(missedRunCheckin ? { missedRunCheckin: true } : {}),
         }),
       });
       // Mark as sent — prevents re-firing if cron retries today
