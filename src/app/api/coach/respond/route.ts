@@ -1618,13 +1618,15 @@ ${!isReminder && !isPostRun ? `STRENGTH, MOBILITY & CROSS-TRAINING — include o
 ` : ""}
 
 PROACTIVE INJURY & CONCERN FOLLOW-UP:
-If the athlete has injury notes or reported physical concerns (see "Injury / constraints" in ATHLETE HISTORY above), reference them proactively — but read recent conversation first.
+If the athlete has injury notes or reported physical concerns (see "Injury / constraints" in ATHLETE HISTORY above), reference them proactively — but read the notes and recent conversation first.
 
-STOP ASKING RULE: Before mentioning any injury or concern, scan RECENT CONVERSATION. If the athlete has said it's fine, not bothering them, no issues, or resolved in any of the last 6 messages — do NOT ask about it. Take their word for it. If they've said this twice or more across recent messages, treat it as cleared and don't bring it up at all until they mention it again or a significant amount of time passes. Repeating the same injury question after the athlete has already said it's fine is annoying and erodes trust.
+RESOLVED INJURIES: If "Injury / constraints" starts with "Past (resolved):", the athlete has confirmed this is no longer an issue. Do NOT check in on it, do NOT ask how it's feeling, do NOT mention it in reminders. It's in the record as historical context only. Only bring it up if the athlete raises it again themselves.
 
-- Post-run feedback: briefly check in on how the affected area held up — but only if the athlete hasn't already said it's fine in recent messages. One short sentence is enough.
-- Morning/nightly reminders: when the upcoming session is longer or harder, add a one-liner about what to watch for — only if it's still an active concern.
-- Weekly recap: note whether the injury/concern appears to be trending. If the athlete has said it's resolved or fine multiple times recently, acknowledge it's been improving rather than asking again.
+STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSATION before asking. If the athlete has said it's fine, not bothering them, or no issues in any of the last 6 messages — do NOT ask about it again in this response. If they've said this twice or more across recent messages, treat it as fading and skip the check-in entirely. Repeating the same injury question after the athlete has already said they're fine is annoying and erodes trust.
+
+- Post-run feedback: briefly check in on how the affected area held up — only if it's still an active concern and not already cleared in recent messages. One short sentence is enough.
+- Morning/nightly reminders: add a one-liner about what to watch for — only for active concerns on longer or harder sessions.
+- Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine repeatedly, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
 
 ${weatherBlock || ""}${coachingSignals ? buildCoachingSignalsBlock(coachingSignals) : ""}
@@ -1760,6 +1762,7 @@ function formatGoalLabel(goal: string): string {
 
 type ExtractedProfileData = {
   injury_notes?: string | null;
+  injury_resolved?: boolean | null;
   injury_body_part?: string | null;
   new_crosstraining?: string[] | null;
   other_notes?: string | null;
@@ -1799,6 +1802,7 @@ async function extractProfileData(message: string, timezone?: string): Promise<E
 
 Extract ONLY explicitly stated NEW information:
 - A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week") AND injury_body_part (the primary body part: one normalized lowercase term, e.g. "knee", "ankle", "shin", "glute", "hamstring", "calf", "foot", "hip", "back", "it_band"). Only set injury_body_part if the pain/soreness is clearly related to running (not e.g. a cold).
+- Athlete explicitly states a previously mentioned injury or concern is now resolved, healed, or no longer an issue (e.g. "my knee is all better now", "the cramp is gone", "no more issues with my hip", "it's resolved") → injury_resolved: true. Do NOT set this for one-run reports ("it didn't hurt today") — only when they're clearly saying it's gone for good.
 - New cross-training activities or equipment access mentioned (pool, bike, gym, yoga, etc.) → new_crosstraining (array of normalized strings)
 - New training preferences, goals, or constraints (e.g. "I want more hill work", "please add strength training", "I can't run Tuesdays anymore") → other_notes
 - A PR or recent race time → recent_race_distance_km + recent_race_time_minutes. Distances: 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If given as a pace (e.g. "5K PR pace is 5:40/mi"), compute total time: pace_sec/mile × distance_in_miles / 60 (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
@@ -1816,7 +1820,7 @@ Extract ONLY explicitly stated NEW information:
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip or swap.
 
-Output: {"injury_notes": string | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -1844,6 +1848,7 @@ async function persistProfileUpdates(
   void timezone; // received but not used in persistence logic
   try {
     const hasInjury = !!extracted.injury_notes;
+    const hasInjuryResolved = extracted.injury_resolved === true;
     const hasCrosstraining = Array.isArray(extracted.new_crosstraining) && extracted.new_crosstraining.length > 0;
     const hasOtherNotes = !!extracted.other_notes;
     const hasRaceData = !!(extracted.recent_race_distance_km && extracted.recent_race_time_minutes);
@@ -1856,7 +1861,7 @@ async function persistProfileUpdates(
 
     const hasInjuryBodyPart = !!extracted.injury_body_part;
     const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
-    if (!hasInjury && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays) return;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -1875,6 +1880,12 @@ async function persistProfileUpdates(
     // Build profile update
     const profileUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (hasInjury) profileUpdate.injury_notes = extracted.injury_notes;
+    if (hasInjuryResolved && profile?.injury_notes) {
+      const existing = profile.injury_notes as string;
+      if (!existing.startsWith("Past (resolved):")) {
+        profileUpdate.injury_notes = `Past (resolved): ${existing}`;
+      }
+    }
     if (hasInjuryBodyPart) {
       const existingParts = (profile?.injury_body_parts as string[]) || [];
       if (!existingParts.includes(extracted.injury_body_part as string)) {

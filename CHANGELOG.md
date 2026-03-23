@@ -4,6 +4,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-23 — Auto-resolve injury notes when athlete confirms they're better
+
+**Type:** Feature
+**Reported by:** Internal observation (follow-on to injury nagging fix)
+**User feedback:** N/A
+**Root cause:** Even with a prompt-level "stop asking" rule, the underlying `injury_notes` in the DB still said e.g. "side cramp" — so after every plan reset or new conversation context, the injury would reappear as an active concern. The resolved state existed only in recent conversation history, which fades.
+**Fix / Change:**
+- Added `injury_resolved` field to `ExtractedProfileData` and the Haiku extraction prompt. When an athlete explicitly says their injury is gone/resolved/no longer an issue, Haiku sets `injury_resolved: true`. One-run reports ("didn't hurt today") do not trigger this — only clear "it's healed" statements do.
+- In `persistProfileUpdates`: if `injury_resolved === true` and `injury_notes` exists and doesn't already start with "Past (resolved):", the notes are rewritten to `"Past (resolved): [original]"`. This persists to the DB so the status survives across all future conversations.
+- PROACTIVE INJURY section in system prompt now has a RESOLVED INJURIES rule: if notes start with "Past (resolved):", treat as historical context only — don't check in, don't mention in reminders, only surface if the athlete brings it up again.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-03-23 — Stop repeating injury questions; reduce conversational message length
 
 **Type:** Bug Fix / Improvement
