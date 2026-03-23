@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-23 — Pin goal race to top of system prompt to prevent distance hallucination
+
+**Type:** Bug Fix
+**Reported by:** User b1b308cf
+**User feedback:** "It's a 50 mile race and not 50k"
+**Root cause:** Coach Dean spontaneously wrote "50K" mid-conversation (in a gear advice response) despite the profile correctly storing the race as a 50-mile ultra. The model made an initial slip, which then lived in conversation history. Subsequent calls to buildSystemPrompt fed that "50K" assistant turn back as context, and the model anchored to its own prior output rather than the profile data. The RACE DATA RULE existed but was buried in the ATHLETE HISTORY block (~57 lines into the prompt) and didn't account for the model trusting its own prior conversation turns over profile data.
+**Fix / Change:** Goal race is now the very first thing in the system prompt — before the role description, output rules, or any other context. Format: `ATHLETE: / GOAL: [distance] on [date]` followed immediately by a warning that prior conversation messages may contain errors and the profile is authoritative. Removed the redundant RACE DATA RULE from the ATHLETE HISTORY block.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-22 — Fix three user-reported coaching issues (Curtis, Isaac x2)
 
 **Type:** Bug Fix + Improvement

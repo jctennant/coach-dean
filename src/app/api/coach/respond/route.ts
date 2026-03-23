@@ -1368,7 +1368,11 @@ function buildSystemPrompt(
   const goalDisplay = raceName
     ? `${raceName}${exactDistanceSuffix}`
     : (profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness");
-  return `You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
+  return `${profile?.race_date ? `ATHLETE: ${user.name || "this athlete"}
+GOAL: ${goalDisplay} on ${profile.race_date}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : ""}
+⚠️ This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.
+
+` : ""}You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
 
 CRITICAL — OUTPUT RULES:
 Your response is sent directly to the athlete as an SMS text message. Never include any of the following in your output:
@@ -1425,7 +1429,6 @@ ${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${we
 ${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}
 - Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}
-⚠️ RACE DATA RULE: The athlete's goal race is exactly as shown above. When referencing their race, use the exact goal type and distance above — do NOT substitute a different distance, format, or race type from memory or inference. If it says "50-mile ultra", it is 50 miles, not 50K. If it says "10K", it is a 10K. These values come from the athlete's profile and are authoritative.
 ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
