@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-22 — Fix "Week 2" labeling bug and push Sunday recap to 6pm PT
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Ian
+**User feedback:** (1) "It's not week 2, I've been using Coach Dean for a while — I think this should be week 4." (2) Asked if the weekly recap cron is accidentally on UTC — it ran during his run.
+**Root cause:** (1) Weekly recap prompt had no guard against week numbering. Claude inferred "Week 2" from the training context (low mileage + building volume) rather than from any authoritative source. (2) Sunday recap was `0 22 * * 0` = 22:00 UTC = 3pm PDT / 6pm EDT — firing mid-afternoon PT and catching east-coast evening runners mid-run.
+**Fix / Change:** (1) Added a WEEK NUMBERING rule to the weekly_recap prompt: do not use "Week N" labels — use "this week" / "next week" or describe the phase by intent instead. (2) Moved sunday-recap cron from `0 22 * * 0` (22:00 UTC Sunday = 3pm PDT) to `0 1 * * 1` (01:00 UTC Monday = 6pm PDT / 9pm EDT Sunday), giving most US runners time to finish their Sunday run.
+**Files changed:** src/app/api/coach/respond/route.ts, vercel.json, src/app/api/cron/sunday-recap/route.ts
+
+---
+
 ## 2026-03-22 — Fix Claude reasoning leaking into SMS for reminder triggers
 
 **Type:** Bug Fix

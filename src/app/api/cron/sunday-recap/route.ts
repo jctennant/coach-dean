@@ -5,7 +5,9 @@ import type { Json } from "@/lib/database.types";
 
 /**
  * GET /api/cron/sunday-recap
- * Triggered weekly on Sunday by Vercel cron. Sends weekly recap to all active users.
+ * Triggered weekly at 01:00 UTC Monday (= Sunday 6pm PDT / 9pm EDT).
+ * Fires after most US runners have finished their Sunday run.
+ * Sends weekly recap + coming week plan to all active users.
  */
 export async function GET(request: Request) {
   // Verify cron secret to prevent unauthorized triggers
