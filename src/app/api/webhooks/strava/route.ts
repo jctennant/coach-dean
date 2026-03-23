@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getActivity } from "@/lib/strava";
 
@@ -22,13 +22,30 @@ export async function GET(request: Request) {
 /**
  * POST /api/webhooks/strava
  * Receives Strava webhook events for activity create/update/delete and athlete deauthorize.
+ * Returns 200 immediately (Strava requires a response within 2 seconds), then processes
+ * the event asynchronously via after() to avoid timeout errors on slow DB/API calls.
  */
 export async function POST(request: Request) {
   const body = await request.json();
-  const { object_type, aspect_type, object_id, owner_id } = body;
 
-  // Acknowledge immediately — Strava expects a 200 within 2 seconds
-  // Process asynchronously in practice; for MVP we handle inline.
+  after(async () => {
+    try {
+      await processStravaEvent(body);
+    } catch (err) {
+      console.error("[strava-webhook] unhandled error in after():", err);
+    }
+  });
+
+  return NextResponse.json({ ok: true });
+}
+
+async function processStravaEvent(body: {
+  object_type: string;
+  aspect_type: string;
+  object_id: number;
+  owner_id: number;
+}) {
+  const { object_type, aspect_type, object_id, owner_id } = body;
 
   if (object_type === "athlete" && aspect_type === "deauthorize") {
     await supabase
@@ -38,8 +55,7 @@ export async function POST(request: Request) {
         strava_refresh_token: null,
       })
       .eq("strava_athlete_id", owner_id);
-
-    return NextResponse.json({ ok: true });
+    return;
   }
 
   if (object_type === "activity" && aspect_type === "create") {
@@ -223,6 +239,4 @@ export async function POST(request: Request) {
       console.error("Error processing Strava activity webhook:", err);
     }
   }
-
-  return NextResponse.json({ ok: true });
 }

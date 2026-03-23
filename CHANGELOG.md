@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-23 — Test suite, Strava webhook async fix, cron N+1 query batching
+
+**Type:** Infra + Performance
+**Reported by:** Internal — pre-launch reliability review
+**User feedback:** N/A
+**Root cause:** (1) No automated tests meant breakage could only be caught manually. (2) The Strava webhook processed activities synchronously — `getValidAccessToken` + `getActivity` HTTP calls + multiple DB writes could take 3–5 seconds, exceeding Strava's 2-second response window and triggering retries. (3) The morning and nightly reminder crons made 2–3 individual DB queries per user (checking for recent post_run and user messages), scaling as O(n) with user count.
+**Fix / Change:**
+- Added vitest test suite: 54 tests across 6 files covering VDOT pace calculations, timezone inference, typing indicator timing, signup flow (validation, duplicate detection, SMS send), Strava webhook (deauth, new activity, onboarding guard, dedup), and Linq webhook (opt-out keywords, opt-in restart, routing to onboarding vs coaching vs discard).
+- Wrapped Strava activity processing in `after()` so the webhook always returns 200 to Strava immediately, then processes asynchronously.
+- Refactored morning and nightly reminder crons to batch conversation lookups: a two-pass approach pre-computes which users need checks (no DB), then does 2 batch queries for all users combined, replacing O(n×2–3) queries with O(2). Per-user `fetch` calls now run in parallel via `Promise.allSettled`.
+**Files changed:** vitest.config.ts, package.json, tsconfig.json, src/__tests__/**, src/app/api/webhooks/strava/route.ts, src/app/api/cron/morning-reminder/route.ts, src/app/api/cron/nightly-reminder/route.ts
+
+---
+
 ## 2026-03-23 — Pin goal race to top of system prompt to prevent distance hallucination
 
 **Type:** Bug Fix

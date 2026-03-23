@@ -31,7 +31,66 @@ export async function GET(request: Request) {
 
   const now = new Date();
   const todayUTC = now.toISOString().slice(0, 10); // dedup key
+  const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString();
+  const thirtyHoursAgo = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString();
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  // ── First pass: identify which users need each type of conversation lookup.
+  // We can determine this from the profile data (training days, timezones, skip dates)
+  // without any additional DB queries.
+  const mondayUserIds: string[] = [];
+  const needsActivityCheckIds: string[] = [];
+
+  for (const profile of profiles) {
+    if (profile.last_morning_reminder_date === todayUTC) continue; // already deduped
+    const user = profile.users as unknown as { timezone: string | null; strava_access_token: string | null };
+    const tz = user.timezone || "America/New_York";
+    const trainingDays = (profile.training_days as string[]) || [];
+    const skipDates = (profile.skip_dates as string[]) || [];
+
+    const todayWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now);
+    const todayDay = todayWeekday.toLowerCase();
+    if (!trainingDays.includes(todayDay)) continue;
+
+    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+    if (skipDates.includes(todayDateStr)) continue;
+
+    if (todayWeekday === "Monday") mondayUserIds.push(profile.user_id);
+
+    const yesterdayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
+      .format(yesterday).toLowerCase();
+    const yesterdayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(yesterday);
+    if (trainingDays.includes(yesterdayDay) && !skipDates.includes(yesterdayDateStr)) {
+      needsActivityCheckIds.push(profile.user_id);
+    }
+  }
+
+  // ── Batch queries: one round-trip per time window instead of O(n) queries.
+  const [recapRows, activityRows] = await Promise.all([
+    mondayUserIds.length > 0
+      ? supabase
+          .from("conversations")
+          .select("user_id")
+          .in("user_id", mondayUserIds)
+          .eq("message_type", "weekly_recap")
+          .gte("created_at", eighteenHoursAgo)
+      : Promise.resolve({ data: [] }),
+    needsActivityCheckIds.length > 0
+      ? supabase
+          .from("conversations")
+          .select("user_id")
+          .in("user_id", needsActivityCheckIds)
+          .or("message_type.eq.post_run,role.eq.user")
+          .gte("created_at", thirtyHoursAgo)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const usersWithRecentRecap = new Set((recapRows.data || []).map((r) => r.user_id));
+  const usersWithRecentActivity = new Set((activityRows.data || []).map((r) => r.user_id));
+
+  // ── Main loop: now purely local decisions + one fetch + one DB update per user.
   let sent = 0;
+  const tasks: Array<Promise<void>> = [];
 
   for (const profile of profiles) {
     const user = profile.users as unknown as { timezone: string | null; onboarding_step: string | null; strava_access_token: string | null };
@@ -44,35 +103,16 @@ export async function GET(request: Request) {
       continue;
     }
 
-    // Skip Monday morning reminder if a weekly recap was sent last night (Sunday) —
-    // the recap already covered Monday's session and closed with a check-in invite.
-    const todayWeekdayCheck = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now);
-    if (todayWeekdayCheck === "Monday") {
-      const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString();
-      const { data: recentRecap } = await supabase
-        .from("conversations")
-        .select("id")
-        .eq("user_id", profile.user_id)
-        .eq("message_type", "weekly_recap")
-        .gte("created_at", eighteenHoursAgo)
-        .limit(1);
-      if (recentRecap && recentRecap.length > 0) {
-        console.log(`[morning-reminder] skipping ${profile.user_id} — weekly recap sent last night covers Monday`);
-        continue;
-      }
+    // Skip Monday morning reminder if a weekly recap was sent last night (Sunday)
+    const todayWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now);
+    if (todayWeekday === "Monday" && usersWithRecentRecap.has(profile.user_id)) {
+      console.log(`[morning-reminder] skipping ${profile.user_id} — weekly recap sent last night covers Monday`);
+      continue;
     }
 
-    // Find today's day name in the user's timezone
-    const todayWeekday = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      weekday: "long",
-    }).format(now);
     const todayDay = todayWeekday.toLowerCase();
-
-    // Only send if today is a scheduled training day
     if (!trainingDays.includes(todayDay)) continue;
 
-    // Skip if the user has marked today as a one-off skip
     const skipDates = (profile.skip_dates as string[]) || [];
     const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
     if (skipDates.includes(todayDateStr)) {
@@ -80,71 +120,50 @@ export async function GET(request: Request) {
       continue;
     }
 
-    // Determine whether to include a check-in on yesterday's workout.
-    // - Non-Strava users: ask how it went (we have no data either way)
-    // - Strava users: if yesterday was a training day but no run came through the webhook,
-    //   check in to see if they got the workout in and offer to reschedule if not.
-    // In both cases, skip if the user already messaged about their workout in the last 30 hours.
     let includeWorkoutCheckin = false;
     let missedRunCheckin = false;
 
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const yesterdayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
       .format(yesterday).toLowerCase();
     const yesterdayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(yesterday);
     const hadWorkoutYesterday = trainingDays.includes(yesterdayDay) && !skipDates.includes(yesterdayDateStr);
 
-    if (hadWorkoutYesterday) {
-      const thirtyHoursAgo = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString();
-      const { data: postRunMsg } = await supabase
-        .from("conversations")
-        .select("id")
-        .eq("user_id", profile.user_id)
-        .eq("message_type", "post_run")
-        .gte("created_at", thirtyHoursAgo)
-        .limit(1);
-      const { data: userMsgs } = await supabase
-        .from("conversations")
-        .select("id")
-        .eq("user_id", profile.user_id)
-        .eq("role", "user")
-        .gte("created_at", thirtyHoursAgo)
-        .limit(1);
-      const noRecentActivity = (!postRunMsg || postRunMsg.length === 0) && (!userMsgs || userMsgs.length === 0);
-
-      if (noRecentActivity) {
-        if (user.strava_access_token) {
-          // Strava connected but no run came through — they likely skipped or forgot to sync
-          missedRunCheckin = true;
-        } else {
-          // No Strava — we simply don't know if they ran
-          includeWorkoutCheckin = true;
-        }
+    if (hadWorkoutYesterday && !usersWithRecentActivity.has(profile.user_id)) {
+      if (user.strava_access_token) {
+        missedRunCheckin = true;
+      } else {
+        includeWorkoutCheckin = true;
       }
     }
 
-    try {
-      await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: profile.user_id,
-          trigger: "morning_reminder",
-          ...(includeWorkoutCheckin ? { includeWorkoutCheckin: true } : {}),
-          ...(missedRunCheckin ? { missedRunCheckin: true } : {}),
-        }),
-      });
+    tasks.push(
+      (async () => {
+        try {
+          await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: profile.user_id,
+              trigger: "morning_reminder",
+              ...(includeWorkoutCheckin ? { includeWorkoutCheckin: true } : {}),
+              ...(missedRunCheckin ? { missedRunCheckin: true } : {}),
+            }),
+          });
 
-      await supabase
-        .from("training_profiles")
-        .update({ last_morning_reminder_date: todayUTC })
-        .eq("user_id", profile.user_id);
+          await supabase
+            .from("training_profiles")
+            .update({ last_morning_reminder_date: todayUTC })
+            .eq("user_id", profile.user_id);
 
-      sent++;
-    } catch (err) {
-      console.error(`[morning-reminder] failed for user ${profile.user_id}:`, err);
-    }
+          sent++;
+        } catch (err) {
+          console.error(`[morning-reminder] failed for user ${profile.user_id}:`, err);
+        }
+      })()
+    );
   }
+
+  await Promise.allSettled(tasks);
 
   return NextResponse.json({ ok: true, sent });
 }

@@ -44,31 +44,82 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, sent: 0, skipped: "sunday_recap_day" });
   }
 
+  const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString();
+  const fortyHoursAgo = new Date(Date.now() - 40 * 60 * 60 * 1000).toISOString();
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  // ── First pass: identify which users need conversation lookups — no DB calls.
+  const needsCheckinTodayIds: string[] = [];  // non-Strava users with a workout today
+  const needsMissedRunIds: string[] = [];     // Strava users with a workout yesterday
+
+  for (const profile of profiles) {
+    if (profile.last_nightly_reminder_date === todayUTC) continue;
+    const user = profile.users as unknown as { timezone: string | null; strava_access_token: string | null };
+    const tz = user.timezone || "America/New_York";
+    const trainingDays = (profile.training_days as string[]) || [];
+    const skipDates = (profile.skip_dates as string[]) || [];
+
+    const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrow);
+    if (!trainingDays.includes(tomorrowWeekday.toLowerCase())) continue;
+    const tomorrowDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(tomorrow);
+    if (skipDates.includes(tomorrowDateStr)) continue;
+
+    if (!user.strava_access_token) {
+      const todayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now).toLowerCase();
+      const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+      if (trainingDays.includes(todayDay) && !skipDates.includes(todayDateStr)) {
+        needsCheckinTodayIds.push(profile.user_id);
+      }
+    } else {
+      const yesterdayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(yesterday).toLowerCase();
+      const yesterdayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(yesterday);
+      if (trainingDays.includes(yesterdayDay) && !skipDates.includes(yesterdayDateStr)) {
+        needsMissedRunIds.push(profile.user_id);
+      }
+    }
+  }
+
+  // ── Batch queries: 2 round-trips instead of O(n).
+  const [checkinRows, missedRunRows] = await Promise.all([
+    needsCheckinTodayIds.length > 0
+      ? supabase
+          .from("conversations")
+          .select("user_id")
+          .in("user_id", needsCheckinTodayIds)
+          .or("message_type.eq.post_run,role.eq.user")
+          .gte("created_at", eighteenHoursAgo)
+      : Promise.resolve({ data: [] }),
+    needsMissedRunIds.length > 0
+      ? supabase
+          .from("conversations")
+          .select("user_id")
+          .in("user_id", needsMissedRunIds)
+          .or("message_type.eq.post_run,role.eq.user")
+          .gte("created_at", fortyHoursAgo)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const usersWithRecentCheckinActivity = new Set((checkinRows.data || []).map((r) => r.user_id));
+  const usersWithRecentMissedRunActivity = new Set((missedRunRows.data || []).map((r) => r.user_id));
+
+  // ── Main loop: purely local decisions + one fetch + one DB update per user.
   let sent = 0;
+  const tasks: Array<Promise<void>> = [];
 
   for (const profile of profiles) {
     const user = profile.users as unknown as { timezone: string | null; onboarding_step: string | null; strava_access_token: string | null };
     const tz = user.timezone || "America/New_York";
     const trainingDays = (profile.training_days as string[]) || [];
 
-    // Skip if we already sent a reminder for this user today — guards against
-    // Vercel cron retries and any double-fire scenarios.
     if (profile.last_nightly_reminder_date === todayUTC) {
       console.log(`[nightly-reminder] skipping ${profile.user_id} — already sent today (${todayUTC})`);
       continue;
     }
 
-    // Find tomorrow's day name in the user's timezone
-    const tomorrowWeekday = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      weekday: "long",
-    }).format(tomorrow);
+    const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrow);
     const tomorrowDay = tomorrowWeekday.toLowerCase();
-
-    // Only send if tomorrow is a scheduled training day
     if (!trainingDays.includes(tomorrowDay)) continue;
 
-    // Skip if the user has marked tomorrow as a one-off skip
     const skipDates = (profile.skip_dates as string[]) || [];
     const tomorrowDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(tomorrow);
     if (skipDates.includes(tomorrowDateStr)) {
@@ -76,96 +127,47 @@ export async function GET(request: Request) {
       continue;
     }
 
-    // Determine whether to include a check-in on a workout.
-    //
-    // TODAY (non-Strava only): ask how it went since we have no data.
-    //   Strava users are NOT checked for today — the nightly fires at ~6pm and many users
-    //   run after work. "I didn't catch a run from you" at 6pm would fire before they head out.
-    //
-    // YESTERDAY (Strava only): for users who only get nightly reminders (no morning cron),
-    //   the nightly is the only chance to follow up on a missed workout. By 6pm, yesterday
-    //   is fully over and safe to call out. Uses a 40-hour lookback to cover any run time
-    //   during the previous day.
     let includeWorkoutCheckin = false;
     let missedRunCheckin = false;
 
-    const todayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
-      .format(now).toLowerCase();
-    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
-
     if (!user.strava_access_token) {
-      const hadWorkoutToday = trainingDays.includes(todayDay) && !skipDates.includes(todayDateStr);
-
-      if (hadWorkoutToday) {
-        const eighteenHoursAgo = new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString();
-        const { data: postRunMsg } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("user_id", profile.user_id)
-          .eq("message_type", "post_run")
-          .gte("created_at", eighteenHoursAgo)
-          .limit(1);
-        if (!postRunMsg || postRunMsg.length === 0) {
-          const { data: userMsgs } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("user_id", profile.user_id)
-            .eq("role", "user")
-            .gte("created_at", eighteenHoursAgo)
-            .limit(1);
-          includeWorkoutCheckin = !userMsgs || userMsgs.length === 0;
-        }
+      // Non-Strava: check if we should ask how today's workout went
+      if (needsCheckinTodayIds.includes(profile.user_id) && !usersWithRecentCheckinActivity.has(profile.user_id)) {
+        includeWorkoutCheckin = true;
       }
     } else {
-      // Strava user — check if yesterday was a training day with no run recorded.
-      // 40-hour lookback covers any run time during the previous calendar day.
-      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const yesterdayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
-        .format(yesterday).toLowerCase();
-      const yesterdayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(yesterday);
-      const hadWorkoutYesterday = trainingDays.includes(yesterdayDay) && !skipDates.includes(yesterdayDateStr);
-
-      if (hadWorkoutYesterday) {
-        const fortyHoursAgo = new Date(Date.now() - 40 * 60 * 60 * 1000).toISOString();
-        const { data: postRunMsg } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("user_id", profile.user_id)
-          .eq("message_type", "post_run")
-          .gte("created_at", fortyHoursAgo)
-          .limit(1);
-        const { data: userMsgs } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("user_id", profile.user_id)
-          .eq("role", "user")
-          .gte("created_at", fortyHoursAgo)
-          .limit(1);
-        missedRunCheckin = (!postRunMsg || postRunMsg.length === 0) && (!userMsgs || userMsgs.length === 0);
+      // Strava: check if yesterday was a training day with no run recorded
+      if (needsMissedRunIds.includes(profile.user_id) && !usersWithRecentMissedRunActivity.has(profile.user_id)) {
+        missedRunCheckin = true;
       }
     }
 
-    try {
-      await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: profile.user_id,
-          trigger: "nightly_reminder",
-          ...(includeWorkoutCheckin ? { includeWorkoutCheckin: true } : {}),
-          ...(missedRunCheckin ? { missedRunCheckin: true } : {}),
-        }),
-      });
-      // Mark as sent — prevents re-firing if cron retries today
-      await supabase
-        .from("training_profiles")
-        .update({ last_nightly_reminder_date: todayUTC })
-        .eq("user_id", profile.user_id);
-      sent++;
-    } catch (err) {
-      console.error(`[nightly-reminder] failed for user ${profile.user_id}:`, err);
-    }
+    tasks.push(
+      (async () => {
+        try {
+          await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: profile.user_id,
+              trigger: "nightly_reminder",
+              ...(includeWorkoutCheckin ? { includeWorkoutCheckin: true } : {}),
+              ...(missedRunCheckin ? { missedRunCheckin: true } : {}),
+            }),
+          });
+          await supabase
+            .from("training_profiles")
+            .update({ last_nightly_reminder_date: todayUTC })
+            .eq("user_id", profile.user_id);
+          sent++;
+        } catch (err) {
+          console.error(`[nightly-reminder] failed for user ${profile.user_id}:`, err);
+        }
+      })()
+    );
   }
+
+  await Promise.allSettled(tasks);
 
   return NextResponse.json({ ok: true, sent });
 }
