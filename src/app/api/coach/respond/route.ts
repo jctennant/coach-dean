@@ -5,6 +5,8 @@ import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
+import { buildPeriodization, computePhase } from "@/lib/periodization";
+import type { PeriodizationContext } from "@/lib/periodization";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
@@ -201,6 +203,14 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }
   }
 
+  // Compute the training week, phase, and deload/progression targets for this plan.
+  const periodization: PeriodizationContext = buildPeriodization(
+    trigger,
+    (state?.current_week as number | null) ?? null,
+    (profile?.race_date as string | null) ?? null,
+    avgWeeklyMileage ?? null
+  );
+
   const systemPrompt = buildSystemPrompt(
     user,
     profile,
@@ -217,13 +227,14 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     coachingSignals,
     weatherBlock,
     computedVdot,
-    trigger
+    trigger,
+    periodization
   );
 
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
   const hasStrava = !!(user.strava_athlete_id as number | null);
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -396,14 +407,27 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
-    // Clear taper_peak_miles so a fresh training cycle re-locks the peak when
-    // the next taper window is entered (prevents stale peak from a previous race).
-    void supabase.from("training_state").update({ taper_peak_miles: null }).eq("user_id", userId);
+    // Persist week counter, phase, and computed target. Clear taper_peak_miles so the
+    // next taper window re-locks the peak from scratch.
+    void supabase.from("training_state").update({
+      current_week: periodization.effectiveWeek,
+      current_phase: periodization.phase,
+      taper_peak_miles: null,
+      ...(periodization.suggestedWeeklyMiles != null ? { weekly_mileage_target: periodization.suggestedWeeklyMiles } : {}),
+      updated_at: new Date().toISOString(),
+    }).eq("user_id", userId);
     // Extract and store the specific planned sessions so all subsequent messages
     // (post_run, reminders) use the exact same distances — not independently recalculated.
     void extractAndStorePlanSessions(userId, coachMessage);
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
+    // Advance week counter and phase; update mileage target to this week's computed value.
+    void supabase.from("training_state").update({
+      current_week: periodization.effectiveWeek,
+      current_phase: periodization.phase,
+      ...(periodization.suggestedWeeklyMiles != null ? { weekly_mileage_target: periodization.suggestedWeeklyMiles } : {}),
+      updated_at: new Date().toISOString(),
+    }).eq("user_id", userId);
     void extractAndStorePlanSessions(userId, coachMessage);
   }
 
@@ -1161,7 +1185,8 @@ function buildSystemPrompt(
   coachingSignals?: CoachingSignals,
   weatherBlock?: string,
   freshVdot?: number | null,
-  trigger?: TriggerType
+  trigger?: TriggerType,
+  periodization?: PeriodizationContext
 ): string {
   // Which trigger-conditional sections to include.
   const isReminder = trigger === "morning_reminder" || trigger === "nightly_reminder";
@@ -1407,7 +1432,7 @@ ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within th
 
 3. VDOT-CALIBRATED PACING (Jack Daniels): Use the stored training paces from CURRENT TRAINING STATE — these are pre-computed from the athlete's race times using Jack Daniels' formula. Never calculate or look up VDOT yourself. Never assign arbitrary paces. Pace zones should reflect the stored values, not aspirational targets.
 
-4. PERIODIZATION (Base → Build → Peak → Taper): Structure training in phases appropriate to the athlete's tier. Progressive overload: increase weekly mileage by no more than 10%/week. Every 4th week is a recovery week (reduce volume 25-30%). Long runs progress ~1 mile/week. Taper 2 weeks before target races.
+4. PERIODIZATION (Base → Build → Peak → Taper): Phase, recovery week scheduling, and mileage progression targets are code-driven — see CURRENT TRAINING STATE for the authoritative week number, phase, and whether this is a recovery week. If CURRENT TRAINING STATE says "RECOVERY WEEK", follow the recovery week rules exactly. Long runs progress ~1 mile/week. Taper is handled by code-computed targets injected below.
 
 5. DURABILITY VIA STRENGTH (Roche / SWAP Running): Runners break down not from mileage but from muscles that can't absorb the load. Prioritize hip stability, glute activation, and single-leg exercises. Recommend 2x/week strength when the athlete has capacity or injury history.
 
@@ -1491,8 +1516,18 @@ ${(() => {
     }
     return done;
   })();
-  return `- Week ${state?.current_week || 1} of training, phase: ${state?.current_phase || "base"}
-- Weekly mileage target: ${targetMiles ? mi(targetMiles) : "TBD"}
+  const useMetricInner = profile?.preferred_units === "metric";
+  const miInner = (miles: number) => useMetricInner ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
+  const effectiveWeekDisplay = periodization?.effectiveWeek ?? (state?.current_week as number | null) ?? 1;
+  const phaseDisplay = (periodization?.phase ?? (state?.current_phase as string | null) ?? "base");
+  const phaseLabel = phaseDisplay.charAt(0).toUpperCase() + phaseDisplay.slice(1);
+  const deloadBlock = periodization?.isDeloadWeek
+    ? `⚠️ RECOVERY WEEK — MANDATORY: Week ${effectiveWeekDisplay} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${miInner(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances. Recovery weeks are when adaptation happens — do not skip this.\n` : "";
+  const progressionLine = !periodization?.isDeloadWeek && periodization?.suggestedWeeklyMiles != null && phaseDisplay !== "taper"
+    ? `- Progression target this week: ~${miInner(periodization.suggestedWeeklyMiles)} (~${phaseDisplay === "peak" ? "5%" : "8%"} step up from recent avg)\n`
+    : "";
+  return `- Week ${effectiveWeekDisplay} of training, phase: ${phaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""}
+${deloadBlock}${progressionLine}- Weekly mileage target (athlete baseline): ${targetMiles ? mi(targetMiles) : "TBD"}
 ⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${mileageLine}. The "done so far" figure is the ONLY number that reflects completed runs. Never say the athlete "is at" the projected total — they haven't run those sessions yet. When discussing current mileage use the "done" figure; when discussing the week plan use the "projected" figure.
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
@@ -1935,7 +1970,8 @@ function buildUserMessage(
   hasStrava = true,
   weekMileageSoFar = 0,
   weekRunCount = 0,
-  missedRunCheckin?: boolean
+  missedRunCheckin?: boolean,
+  periodization?: PeriodizationContext
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -2108,7 +2144,12 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
     case "weekly_recap": {
       const weekMilesStr = weekMileageSoFar.toFixed(1);
       const weekMileageContext = `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself.\n\n`;
-      return `${weekMileageContext}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+      const deloadInstruction = periodization?.isDeloadWeek
+        ? `\n⚠️ RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${periodization.suggestedWeeklyMiles.toFixed(1)} mi.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.\n`
+        : periodization?.suggestedWeeklyMiles != null
+        ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${periodization.suggestedWeeklyMiles.toFixed(1)} mi (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
+        : "";
+      return `${weekMileageContext}${deloadInstruction}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
 PROGRESSION — be a proactive coach, not a scheduler:
 If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly plan must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.

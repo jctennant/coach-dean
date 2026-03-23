@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-23 — Code-driven periodization: week counter, phase, and deload scheduling
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** `current_week` and `current_phase` were initialized during onboarding but never updated. Every user was perpetually on "Week 1, phase: base" regardless of how long they'd been training. Recovery weeks existed only as a vague coaching principle in the system prompt — Claude had no way to know when to actually deload.
+**Fix / Change:**
+- Added `src/lib/periodization.ts` with `computePhase()` and `buildPeriodization()` — single source of truth for week counting, phase, deload detection, and mileage progression targets.
+- `computePhase()`: when a race date exists, phase is derived backwards from race day (base → build → peak → taper). Without a race, phases cycle on a 12-week calendar (6 base, 6 build).
+- `buildPeriodization()`: computes `effectiveWeek` (initial_plan resets to 1; weekly_recap increments; others read as-is), `isDeloadWeek` (every 4th week, never during taper), and `suggestedWeeklyMiles` (−30% on deload, +8% on base/build, +5% on peak, null during taper).
+- After each `initial_plan` or `weekly_recap`, `current_week`, `current_phase`, and `weekly_mileage_target` are persisted to the DB so all subsequent messages reference the correct values.
+- System prompt now injects the computed week/phase/deload into CURRENT TRAINING STATE. On deload weeks, a mandatory `⚠️ RECOVERY WEEK` block tells Claude exactly what to do (25–30% volume reduction, no new quality sessions).
+- `weekly_recap` user message prompt injects a deload instruction block or progression target based on the computed context.
+- 21 new unit tests covering phase cycling, deload detection, taper override, and mileage targets.
+**Files changed:** src/lib/periodization.ts (new), src/app/api/coach/respond/route.ts, src/__tests__/lib/periodization.test.ts (new)
+
 ## 2026-03-23 — Training arc overview and workout "why" across all message types
 
 **Type:** Improvement
