@@ -4,6 +4,31 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-22 — Fix three user-reported coaching issues (Curtis, Isaac x2)
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Curtis, Isaac
+
+**Issue 1 — Curtis: dead silence after initial plan (awaiting_cadence stall)**
+**User feedback:** "After I set it up, I wasn't getting any sort of messages. Dead silence. I thought it must just be way less chatty than I expected. Then, I realized that I never replied to the final setup message. It said something like, 'I'll send you a weekly plan. How does that sound'. I think because I never said 'okay,' the conversation stopped completely."
+**Root cause:** `coach/respond` sets `onboarding_step = 'awaiting_cadence'` after the initial plan fires. The reengagement cron's query filtered `.is("onboarding_step", null)`, making these users completely invisible — no proactive messages, no nudges, nothing.
+**Fix:** Extended the reengagement cron query to include `awaiting_cadence` users. If the initial plan was sent >3 days ago with no reply, the cron defaults the user to `nightly_reminders`, sets `onboarding_step = null`, and sends a nudge explaining the default.
+**Files changed:** src/app/api/cron/reengagement/route.ts
+
+**Issue 2 — Isaac: Strava elapsed time causing false "break" analysis**
+**User feedback:** "The AI coach has started to comment on strava stats like total moving time, which are very misleading to it. For example, i didn't stop and save my strava and perhaps let it be on pause for a while, and it interpreted that pretty poorly… The moving time was 1:54 but elapsed over 2 hours, so looks like there were breaks built in."
+**Root cause:** `activityForClaude` spread all DB fields including `elapsed_time_seconds`. Claude compared it to `moving_time_seconds` and inferred breaks. Separately, the paused-device final split (72:30/mi) passed through unfiltered.
+**Fix:** Excluded `elapsed_time_seconds` from `activityForClaude`. Added a filter on splits to drop any with pace >20 min/mile (clearly device-paused, not running).
+**Files changed:** src/app/api/coach/respond/route.ts
+
+**Issue 3 — Isaac: passive coaching, no goal discussion**
+**User feedback:** "It doesn't feel like it's pushing/coaching me at all. Just saying good job and suggesting week after week of about the same total mileage, and asking about how my legs feel. It never talks about goals either."
+**Root cause:** The `post_run` prompt only said "analyze their performance" with no instruction to connect runs to race goals or push for progression. The `weekly_recap` prompt had no guidance to introduce quality sessions or explain the training arc.
+**Fix:** Added a COACHING FORWARD section to the `post_run` prompt: explicitly instructs Claude to connect runs to race prep, name improvements, and suggest quality sessions if the athlete has a time goal and is stuck in all-easy volume. Added a PROGRESSION section to `weekly_recap`: if the athlete has a time goal and recent weeks are all easy, this week's plan must introduce tempo or interval work with a rationale sentence.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-22 — Fix "Week 2" labeling bug and push Sunday recap to 6pm PT
 
 **Type:** Bug Fix + Improvement

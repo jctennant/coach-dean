@@ -1951,13 +1951,27 @@ function buildUserMessage(
       const activityForClaude = activityData
         ? {
             ...activityData,
+            // Exclude elapsed_time_seconds — it includes pauses/stops and causes Claude
+            // to infer "breaks were built in" when the athlete just forgot to stop their watch.
+            // moving_time_seconds is the meaningful figure for coaching.
+            elapsed_time_seconds: undefined,
             elevation_gain_feet: activityData.elevation_gain != null
               ? Math.round((activityData.elevation_gain as number) * 3.28084)
               : null,
             elevation_gain: undefined,
             summary: rawSummary
               ? {
-                  splits: rawSummary.splits?.map(s => transformSplitForClaude(s as Record<string, unknown>)),
+                  // Filter out paused-device splits (pace > 20 min/mile = clearly not running).
+                  // These appear when the athlete forgets to stop Strava, creating a wildly-slow
+                  // final partial split that Claude then flags as a concerning anomaly.
+                  splits: rawSummary.splits
+                    ?.map(s => transformSplitForClaude(s as Record<string, unknown>))
+                    .filter(s => {
+                      const pace = s.pace as string | null;
+                      if (!pace) return true;
+                      const mins = parseInt(pace.split(":")[0], 10);
+                      return isNaN(mins) || mins < 20;
+                    }),
                   laps: rawSummary.laps?.map(s => transformSplitForClaude(s as Record<string, unknown>)),
                 }
               : null,
@@ -1995,6 +2009,14 @@ Details:
 ${JSON.stringify(activityForClaude, null, 2)}
 
 Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.
+
+COACHING FORWARD — this is the most important instruction:
+You are a proactive coach, not a performance logger. Don't just describe what the athlete did — tell them what it means for where they're going.
+- If the athlete has a race goal (check ATHLETE HISTORY and DATE CONTEXT): connect this run to their race prep. Are they building the right base? Is it time to add a quality session? Are they on track for their goal pace?
+- If the athlete has been running only easy volume for several weeks with a time goal: this is the moment to mention adding tempo or interval work. Don't wait for them to ask.
+- If the athlete is improving week-over-week: name it. Specific progress ("your easy pace has dropped 20 sec/mile over the last month") is more motivating than generic praise.
+- If something needs to change in the plan: say it now, don't defer it to the next weekly recap.
+Keep it concise — one coaching-forward observation is enough. Don't lecture.
 
 MILEAGE ACCURACY — CRITICAL: The ⚠️ AUTHORITATIVE WEEK-TO-DATE MILEAGE in CURRENT TRAINING STATE is what the athlete has ALREADY RUN this week — it already includes the activity shown above. Use it as the current/completed figure. If you mention a projected end-of-week total, always add the word "on track for" or "projected" to make clear it's not yet achieved. Never say "you're at X miles this week" when X includes future sessions.
 
@@ -2084,6 +2106,13 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       const weekMilesStr = weekMileageSoFar.toFixed(1);
       const weekMileageContext = `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself.\n\n`;
       return `${weekMileageContext}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+
+PROGRESSION — be a proactive coach, not a scheduler:
+If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly plan must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.
+- If recent weeks have been all easy miles with no quality work: this week should introduce or propose a tempo or interval session. Name it specifically ("Let's add a 3-mile tempo at 8:30/mi on Wednesday").
+- If the athlete is several weeks out from their race: the plan should be building toward race-specific fitness (threshold work, goal-pace miles), not just accumulating easy volume.
+- If the athlete has been consistent: acknowledge the trend and explain what comes next and why ("You've built a solid base over the last month — time to start sharpening with some quality sessions").
+One sentence of rationale per phase change is enough. Don't over-explain.
 
 WEEK NUMBERING: Do NOT refer to weeks as "Week 2", "Week 3", etc. You do not have a reliable count of how many training weeks this athlete has been through. Use "this week" and "next week" instead. If you want to signal a training phase, describe it by feel or intent — e.g. "another building week", "recovery week", "adding a quality session this week" — not a number.
 

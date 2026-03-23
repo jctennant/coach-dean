@@ -8,6 +8,7 @@ export const maxDuration = 60;
 const NUDGE_1_DAYS = 14;   // nightly_reminders user: nudge after 14 days silence
 const NUDGE_2_DAYS = 30;   // weekly_only user: final message after 30 days silence
 const DOWNGRADE_DAYS = 3;  // days after nudge #1 with no reply before switching to weekly_only
+const CADENCE_STALL_DAYS = 3; // days stuck in awaiting_cadence with no reply before auto-completing
 
 const NUDGE_1_MESSAGE =
   "Hey — I haven't heard from you in a couple weeks! Still training? " +
@@ -35,10 +36,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Also include users stuck in awaiting_cadence — they got their initial plan but
+  // never replied to the cadence question, so no proactive messages fire for them.
   const { data: users, error } = await supabase
     .from("users")
-    .select("id, phone_number, reengagement_sent_at, created_at")
-    .is("onboarding_step", null)
+    .select("id, phone_number, reengagement_sent_at, created_at, onboarding_step")
+    .or("onboarding_step.is.null,onboarding_step.eq.awaiting_cadence")
     .eq("messaging_opted_out", false)
     .not("phone_number", "is", null);
 
@@ -57,6 +60,48 @@ export async function GET(request: Request) {
 
   for (const user of users) {
     try {
+      // --- awaiting_cadence stall: user got their initial plan but never replied ---
+      // Default their cadence to nightly_reminders and complete onboarding so
+      // proactive messages start firing. Fires after CADENCE_STALL_DAYS with no reply.
+      if (user.onboarding_step === "awaiting_cadence") {
+        const { data: lastInbound } = await supabase
+          .from("conversations")
+          .select("created_at")
+          .eq("user_id", user.id)
+          .eq("role", "user")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+        const { data: initialPlanMsg } = await supabase
+          .from("conversations")
+          .select("created_at")
+          .eq("user_id", user.id)
+          .eq("message_type", "initial_plan")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+        // Only act if the initial plan was sent >CADENCE_STALL_DAYS ago
+        const planSentAt = initialPlanMsg?.created_at ? new Date(initialPlanMsg.created_at) : null;
+        const daysSincePlan = planSentAt ? (now - planSentAt.getTime()) / (1000 * 60 * 60 * 24) : null;
+        const repliedSincePlan = lastInbound?.created_at && planSentAt
+          ? new Date(lastInbound.created_at) > planSentAt
+          : false;
+        if (daysSincePlan !== null && daysSincePlan >= CADENCE_STALL_DAYS && !repliedSincePlan) {
+          const nudgeMsg =
+            "Hey — just making sure you got your plan! I've defaulted to sending you an evening reminder before each session. " +
+            "Reply anytime to switch to morning reminders or a weekly-only Sunday recap instead.";
+          await Promise.all([
+            supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", user.id),
+            supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
+          ]);
+          await sendNudge(user.id, user.phone_number as string, nudgeMsg);
+          void trackEvent(user.id, "cadence_stall_resolved", { days_since_plan: Math.round(daysSincePlan) });
+          console.log(`[reengagement] resolved awaiting_cadence stall for ${user.id} after ${Math.round(daysSincePlan)}d`);
+          nudged++;
+        }
+        continue; // don't run normal reengagement checks for onboarding-incomplete users
+      }
+
       // Fetch last inbound message and cadence in parallel
       const [inboundResult, profileResult] = await Promise.all([
         supabase
