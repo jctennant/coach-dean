@@ -2090,9 +2090,9 @@ MONDAY: Make sure Monday's session is clearly included in the sessions list. Clo
 YTD MILESTONES: Check "Year-to-date" in ATHLETE HISTORY. If the athlete has crossed a round-number milestone this week (100, 200, 250, 300, 500, 1000 miles) or is within striking distance of one in the coming week, call it out naturally — one short sentence woven into the recap, not a separate announcement. e.g. "You also just crossed 500 miles on the year — that's a real number." Keep it earned, not forced. Skip it if the number isn't notable.
 
 SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
-⚠️ CROSS-TRAINING DAY PROTECTION: Before placing any run, check "Athlete preferences / notes" in ATHLETE HISTORY. If the athlete has said they do a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), verify that exact count appears in the plan.
+⚠️ CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.
 
-TRAINING DAY COUNT VALIDATION — CRITICAL: Before finalizing the week plan, count the number of running sessions you've scheduled and verify it matches the athlete's stated days/week preference ("Training days" in ATHLETE HISTORY). If the athlete wants 5 days of running, you must schedule exactly 5 running sessions — not 4, not 6. Count the items explicitly before writing. If the count is wrong, fix the plan before sending. This is one of the most common plan errors.
+TRAINING DAY COUNT VALIDATION — CRITICAL: The number of running sessions in your plan must exactly match the athlete's stated days/week preference ("Training days" in ATHLETE HISTORY). If the athlete wants 5 days of running, the plan must have exactly 5 running sessions — not 4, not 6. If the count is wrong, fix the plan. This is one of the most common plan errors.
 
 For the sessions text, put each session on its own line using this compact format, sorted chronologically by date — never group by type:
 Mon 3/2 · Easy 5mi @ 9:30/mi
@@ -2104,7 +2104,7 @@ SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
 
-MILEAGE ACCURACY: Before writing any weekly mileage total, silently sum every running session distance to verify it. Strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match, correct the sessions or the stated total before writing — never show the calculation in your response. If you're not listing every session, omit the total entirely.`;
+MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.`;
     }
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
@@ -2113,7 +2113,7 @@ MILEAGE ACCURACY: Before writing any weekly mileage total, silently sum every ru
       return `This athlete just finished onboarding. Send them an initial week plan — framed as a starting point, not a finished prescription. The goal is to get something in front of them quickly and invite them to shape it.
 
 USE STRAVA DATA — this is critical:
-- Look at WEEKLY MILEAGE, PACE ANALYSIS, and RECENT WORKOUTS before writing a single word of the plan.
+- All plan decisions must be grounded in WEEKLY MILEAGE, PACE ANALYSIS, and RECENT WORKOUTS — use these as your primary inputs, not the athlete's stated goal alone.
 - If Strava data exists, reference it specifically: "I can see you've been running X miles/week with some efforts down to Y pace" — this tells the athlete you actually looked at their history.
 - Set all training paces based on observed fitness from Strava, not just the goal time. If their recent fast efforts are faster than goal pace, acknowledge that — it tells you they have the speed and the plan should focus on execution and sharpening, not building fitness from scratch.
 - If no Strava data exists, proceed without it — but don't pretend to have data you don't have.
@@ -2166,10 +2166,10 @@ SPORT-SPECIFIC GUIDANCE:
 - Cyclists: rides with duration and effort. Include any supplemental work they mentioned.
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
 
-MILEAGE ACCURACY: Before writing any weekly mileage total, silently sum every running session distance to verify it. Strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match, correct the sessions or the stated total before writing — never show the calculation in your response. If you're not listing every session, omit the total entirely.
+MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
 
 SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days if the athlete has requested them.
-⚠️ CROSS-TRAINING DAY PROTECTION: Before placing any run, check "Athlete preferences / notes" in ATHLETE HISTORY. If the athlete has said they do a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), verify that exact count appears in the plan.
+⚠️ CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.
 
 DATES AND DAY LABELS:
 - CRITICAL: Use the day names from DATE CONTEXT above — do not compute weekdays yourself. DATE CONTEXT lists tomorrow and the next 7 days with correct day names. Copy them directly. "Wed, Mar 11" → use "Wed 3/11". Getting these wrong destroys trust.
