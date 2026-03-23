@@ -9,6 +9,11 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Type:** Bug Fix + Improvement
 **Reported by:** Curtis, Isaac
 
+**Issue 0 — Mid-onboarding drop-off (pre-plan stall, all users)**
+**Root cause:** The reengagement cron only ran for users with `onboarding_step IS NULL`. Users who started onboarding but dropped off mid-flow (at any of the 11 pre-plan steps: awaiting_goal, awaiting_race_date, etc.) were never contacted again.
+**Fix:** Cron query now fetches all users regardless of onboarding_step. New pre-plan stall check: if a user has been silent for >2 days on any pre-plan step and no nudge has been sent, they get a single resume nudge ("looks like we got cut off — just reply to pick up where you left off"). When they reply, `onboarding/handle` routes them from their current step automatically.
+**Files changed:** src/app/api/cron/reengagement/route.ts
+
 **Issue 1 — Curtis: dead silence after initial plan (awaiting_cadence stall)**
 **User feedback:** "After I set it up, I wasn't getting any sort of messages. Dead silence. I thought it must just be way less chatty than I expected. Then, I realized that I never replied to the final setup message. It said something like, 'I'll send you a weekly plan. How does that sound'. I think because I never said 'okay,' the conversation stopped completely."
 **Root cause:** `coach/respond` sets `onboarding_step = 'awaiting_cadence'` after the initial plan fires. The reengagement cron's query filtered `.is("onboarding_step", null)`, making these users completely invisible — no proactive messages, no nudges, nothing.

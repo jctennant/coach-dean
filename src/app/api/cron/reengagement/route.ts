@@ -5,10 +5,27 @@ import { trackEvent } from "@/lib/track";
 
 export const maxDuration = 60;
 
-const NUDGE_1_DAYS = 14;   // nightly_reminders user: nudge after 14 days silence
-const NUDGE_2_DAYS = 30;   // weekly_only user: final message after 30 days silence
-const DOWNGRADE_DAYS = 3;  // days after nudge #1 with no reply before switching to weekly_only
-const CADENCE_STALL_DAYS = 3; // days stuck in awaiting_cadence with no reply before auto-completing
+const NUDGE_1_DAYS = 14;        // nightly_reminders user: nudge after 14 days silence
+const NUDGE_2_DAYS = 30;        // weekly_only user: final message after 30 days silence
+const DOWNGRADE_DAYS = 3;       // days after nudge #1 with no reply before switching to weekly_only
+const CADENCE_STALL_DAYS = 3;   // days stuck in awaiting_cadence with no reply before auto-completing
+const PRE_PLAN_NUDGE_DAYS = 2;  // days stuck mid-onboarding before sending a resume nudge
+
+// All onboarding steps that exist before the initial plan is sent.
+// Users stuck here get a single "looks like we got cut off" nudge.
+const PRE_PLAN_STEPS = new Set([
+  "awaiting_goal",
+  "awaiting_race_date",
+  "awaiting_goal_time",
+  "awaiting_strava",
+  "awaiting_schedule",
+  "awaiting_mileage_baseline",
+  "awaiting_ultra_background",
+  "awaiting_injury_background",
+  "awaiting_timezone",
+  "awaiting_anything_else",
+  "awaiting_name",
+]);
 
 const NUDGE_1_MESSAGE =
   "Hey — I haven't heard from you in a couple weeks! Still training? " +
@@ -19,6 +36,9 @@ const NUDGE_1_MESSAGE =
 const NUDGE_2_MESSAGE =
   "Hey — since I haven't heard from you in a while, I've removed you from future reminders. " +
   "If you're still training and want to pick things back up, just text me and I'll be here.";
+
+const ONBOARDING_RESUME_MESSAGE =
+  "Hey — still interested in getting a training plan? Just reply and we'll finish setting you up, only takes a minute.";
 
 /**
  * GET /api/cron/reengagement
@@ -36,12 +56,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Also include users stuck in awaiting_cadence — they got their initial plan but
-  // never replied to the cadence question, so no proactive messages fire for them.
+  // Fetch all users with a phone number who haven't opted out — regardless of onboarding_step.
+  // The loop handles each state: pre-plan stall, awaiting_cadence stall, and fully onboarded.
   const { data: users, error } = await supabase
     .from("users")
     .select("id, phone_number, reengagement_sent_at, created_at, onboarding_step")
-    .or("onboarding_step.is.null,onboarding_step.eq.awaiting_cadence")
     .eq("messaging_opted_out", false)
     .not("phone_number", "is", null);
 
@@ -60,6 +79,37 @@ export async function GET(request: Request) {
 
   for (const user of users) {
     try {
+      // --- Pre-plan stall: user started onboarding but never finished ---
+      // Send one resume nudge after PRE_PLAN_NUDGE_DAYS of silence. When they reply,
+      // the onboarding/handle route picks up from their current step automatically.
+      // reengagement_sent_at is used as a dedup guard — only nudge once.
+      if (user.onboarding_step && PRE_PLAN_STEPS.has(user.onboarding_step as string)) {
+        if (!user.reengagement_sent_at) {
+          const { data: lastInbound } = await supabase
+            .from("conversations")
+            .select("created_at")
+            .eq("user_id", user.id)
+            .eq("role", "user")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+          const silenceBasis = lastInbound?.created_at
+            ? new Date(lastInbound.created_at)
+            : new Date(user.created_at as string);
+          const daysSilent = (now - silenceBasis.getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSilent >= PRE_PLAN_NUDGE_DAYS) {
+            await sendNudge(user.id, user.phone_number as string, ONBOARDING_RESUME_MESSAGE);
+            void trackEvent(user.id, "onboarding_resume_nudge_sent", {
+              step: user.onboarding_step,
+              days_silent: Math.round(daysSilent),
+            });
+            console.log(`[reengagement] onboarding resume nudge sent to ${user.id} (step: ${user.onboarding_step}, ${Math.round(daysSilent)}d silent)`);
+            nudged++;
+          }
+        }
+        continue; // never run post-onboarding checks for mid-onboarding users
+      }
+
       // --- awaiting_cadence stall: user got their initial plan but never replied ---
       // Default their cadence to nightly_reminders and complete onboarding so
       // proactive messages start firing. Fires after CADENCE_STALL_DAYS with no reply.
@@ -101,6 +151,9 @@ export async function GET(request: Request) {
         }
         continue; // don't run normal reengagement checks for onboarding-incomplete users
       }
+
+      // Only run post-onboarding reengagement for fully onboarded users
+      if (user.onboarding_step !== null) continue;
 
       // Fetch last inbound message and cadence in parallel
       const [inboundResult, profileResult] = await Promise.all([
