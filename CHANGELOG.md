@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-22 — Fix Claude reasoning leaking into SMS for reminder triggers
+
+**Type:** Bug Fix
+**Reported by:** Nathan (observed in conversation)
+**User feedback:** Nathan received messages containing Dean's internal reasoning ("Wait — I need to check the context first", "But hold on — let me re-read the data more carefully", "This is confusing. Let me check the actual situation") as literal SMS texts at 8:49 PM.
+**Root cause:** The reminder prompt variants all started with "CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above..." — this framing explicitly invited Claude to narrate its scanning process before producing the final message. Claude then used a `---` separator to divide reasoning from the answer, but `splitIntoMessages` has no concept of that separator and sent all of it. The system prompt's "do all reasoning silently" rule was overridden by the more specific user-message instruction to scan-before-writing.
+**Fix / Change:** Removed the "CONTEXT CHECK: Before writing, scan..." framing from all 6 reminder prompt variants (morning/nightly × plain/includeWorkoutCheckin/missedRunCheckin). Replaced with direct conditional rules: "If RECENT CONVERSATION already contains X, send ONE sentence only. Otherwise, [instructions]." No scanning invitation = no narration = no leakage.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-22 — Don't assume Strava users ran if no activity came through
 
 **Type:** Bug Fix

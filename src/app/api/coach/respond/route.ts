@@ -2009,9 +2009,9 @@ PLAN CONSISTENCY RULES — follow these exactly:
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.`;
     case "morning_reminder":
       if (missedRunCheckin) {
-        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If the athlete has already mentioned they skipped yesterday or are rescheduling, acknowledge that briefly and move on to today — don't bring it up again.
+        return `If RECENT CONVERSATION already shows the athlete mentioned skipping yesterday or rescheduling, skip the missed-run check-in and send today's workout reminder only (plain, under 480 characters).
 
-Strava didn't pick up a run from this athlete yesterday, even though it was a scheduled training day. Send a short, casual message that does two things: check in to see if they got the workout in (or what happened), then preview today's session.
+Otherwise: Strava didn't pick up a run from this athlete yesterday, even though it was a scheduled training day. Send a short, casual message that does two things: check in to see if they got the workout in (or what happened), then preview today's session.
 
 Structure (all in one message — split into two bubbles with a blank line if it runs long):
 1. A brief, non-judgmental check-in on yesterday — vary the phrasing. e.g. "Didn't catch a run from you yesterday — did you end up getting it in?" / "Looks like yesterday's run didn't sync — all good if you got it in another way!" / "Hey — I didn't see yesterday's workout come through. Did you get it done?" Keep it casual and light, not accusatory. One sentence.
@@ -2021,9 +2021,9 @@ Structure (all in one message — split into two bubbles with a blank line if it
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
       if (includeWorkoutCheckin) {
-        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do today (or to skip/rest today) in a recent message, don't repeat the full plan — just send a brief, natural 1-sentence check-in, e.g. "Good morning — rest day today as we talked about. Let me know how you're feeling." Keep it under 160 characters and human.
+        return `If RECENT CONVERSATION already contains a message from you covering today's plan or rest day, output ONE brief confirmation sentence under 160 characters — e.g. "Good morning — rest day today as we talked about. Let me know how you're feeling." No preamble, no explanation. Just the one sentence.
 
-If today hasn't been covered yet, send a short message that does two things: check in on yesterday's workout, then preview today's.
+Otherwise, send a short message that does two things: check in on yesterday's workout, then preview today's.
 
 Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
 1. A brief, casual check-in on yesterday — vary the phrasing each time. e.g. "How'd yesterday's run go?" / "Hope yesterday's session felt good —" / "How'd [day]'s workout treat you?" Keep it light, one sentence.
@@ -2032,9 +2032,9 @@ Structure (all in one message unless it runs long — split into two bubbles wit
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
-      return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do today (or to skip/rest today) in a recent message, don't repeat the full plan — just send a brief, natural 1-sentence check-in, e.g. "Good morning — rest day today as we discussed last night. Let me know how you're feeling." Keep it under 160 characters and human.
+      return `If RECENT CONVERSATION already contains a message from you covering today's workout or rest day, send ONE brief confirmation sentence under 160 characters only — e.g. "Good morning — rest day today as we discussed last night. Let me know how you're feeling." Output nothing else.
 
-If today hasn't been covered yet, send a short reminder text about today's workout. Three parts, all in one message:
+Otherwise, send a short reminder text about today's workout. Three parts, all in one message:
 
 1. A brief, natural opener — vary it each time. Options: "Today's workout:", "Here's what's on for today:", use their name casually, reference the day, etc.
 
@@ -2046,9 +2046,9 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
 
     case "nightly_reminder":
       if (missedRunCheckin) {
-        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If the athlete has already mentioned they skipped today or are rescheduling, acknowledge that briefly and move on to tomorrow — don't bring it up again.
+        return `If RECENT CONVERSATION already shows the athlete mentioned skipping today or rescheduling, skip the missed-run check-in and send tomorrow's workout reminder only (plain, under 480 characters).
 
-Strava didn't pick up a run from this athlete today, even though it was a scheduled training day. Send a short, casual message that does two things: check in to see if they got the workout in (or what happened), then preview tomorrow's session.
+Otherwise: Strava didn't pick up a run from this athlete today, even though it was a scheduled training day. Send a short, casual message that does two things: check in to see if they got the workout in (or what happened), then preview tomorrow's session.
 
 Structure (all in one message — split into two bubbles with a blank line if it runs long):
 1. A brief, non-judgmental check-in on today — vary the phrasing. e.g. "Hey — didn't see today's run come through. Did you get it in?" / "Looks like today's workout didn't sync — hope it went well if you got out there!" / "Didn't catch a run from you today — everything okay?" Keep it casual and light. One sentence.
@@ -2058,9 +2058,9 @@ Structure (all in one message — split into two bubbles with a blank line if it
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
       if (includeWorkoutCheckin) {
-        return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do tomorrow (or to skip/rest tomorrow) in a message sent today, don't repeat the full plan — just send a brief, natural 1-sentence confirmation, e.g. "Just a heads up for tomorrow — rest day as we talked about. Hope you're feeling better!" Keep it under 160 characters and human.
+        return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's plan or rest day, send ONE brief confirmation sentence under 160 characters only — e.g. "Just a heads up for tomorrow — rest day as we talked about. Hope you're feeling better!" Output nothing else.
 
-If tomorrow hasn't been covered yet, send a short message that does two things: check in on today's workout, then preview tomorrow's.
+Otherwise, send a short message that does two things: check in on today's workout, then preview tomorrow's.
 
 Structure (all in one message unless it runs long — split into two bubbles with a blank line if needed):
 1. A brief, casual check-in on today — vary the phrasing each time. e.g. "How'd today's run go?" / "Hope today's session felt good —" / "How did [day]'s workout go?" Keep it light, one sentence.
@@ -2069,9 +2069,9 @@ Structure (all in one message unless it runs long — split into two bubbles wit
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
-      return `CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If you've already explicitly told this athlete what to do tomorrow (or to skip/rest tomorrow) in a message sent today, don't repeat the full plan — just send a brief, natural 1-sentence confirmation, e.g. "Wednesday reminder — rest day tomorrow as we discussed. You're doing the right thing." Keep it under 160 characters and human.
+      return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's workout or rest day, output ONE brief confirmation sentence under 160 characters — e.g. "Wednesday reminder — rest day tomorrow as we discussed. You're doing the right thing." No preamble, no explanation. Just the one sentence.
 
-If tomorrow hasn't been covered yet, send a short reminder text about tomorrow's workout. Three parts, all in one message:
+Otherwise, send a short reminder text about tomorrow's workout. Three parts, all in one message:
 
 1. A brief, natural opener — vary it each time so it doesn't feel canned. Options: "Tomorrow's workout:", "Here's what's on for tomorrow:", use their name casually ("Hey [name], tomorrow:"), reference the day ("Wednesday's session:"), etc. Mix it up.
 
