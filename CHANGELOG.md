@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-23 — Stop repeating injury questions; reduce conversational message length
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback (Jake's wife texting Dean)
+**User feedback:** "he seems to be sending quite long texts, plus consistently asking about a side tenderness which is now better"
+**Root cause:** (1) The injury follow-up rule said "never silently skip injury notes" with no off-ramp — Claude kept asking about the cramp/tenderness every message even after being told twice it was fine. (2) `user_message` had no rule against re-mentioning tomorrow's session in an active back-and-forth, so Dean kept appending the schedule preview to every reply. (3) Length rule allowed 2–3 bubbles by default with no distinction between plans vs. Q&A conversations.
+**Fix / Change:**
+- Added STOP ASKING RULE to the injury section: scan last 6 messages — if athlete has said the injury is fine/resolved, do not ask again. If they've said it twice, treat it as cleared entirely.
+- Added NO REPEAT SCHEDULE PREVIEW to `user_message` prompt: if Dean already mentioned tomorrow's session or upcoming workouts earlier today, do not repeat it. Answer the question, then stop.
+- Added LENGTH IN CONVERSATION to `user_message` prompt: if there are 4+ messages today (active back-and-forth), 1 bubble max — 2 at most.
+- Tightened the global LENGTH rule to distinguish post-run/plans (2–3 bubbles OK) from Q&A (1 bubble almost always right).
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-03-23 — Code-driven periodization: week counter, phase, and deload scheduling
 
 **Type:** Feature
