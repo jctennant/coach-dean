@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-23 — Training arc overview and workout "why" across all message types
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Initial plan messages showed only the current week with no context about what's ahead. Quality sessions (tempo, intervals) had no explanation of their purpose. Users had no understanding of training phases or why they were doing specific workouts.
+**Fix / Change:**
+- `initial_plan`: First bubble now opens with a 1-2 sentence training arc orientation when a race date exists — briefly sketches the phases from base → quality → taper so the athlete knows where the whole journey is going, not just week 1. Then one sentence on why this specific week is structured the way it is.
+- `initial_plan` sessions list: Quality sessions (tempo, intervals, race-pace work) now include a brief inline purpose note — e.g. "Wed 3/12 · Tempo 4mi (2mi @ 8:45) — builds lactate threshold, the engine for your goal pace."
+- `weekly_recap`: PROGRESSION section now requires one rationale sentence every week, not just on phase changes — e.g. "Another building week — consistency is the work right now." Quality sessions in the sessions list also get the inline purpose note.
+- `morning_reminder` / `nightly_reminder`: Quality sessions now include one sentence explaining what they train and why it matters for the athlete's goal. Woven naturally after the workout description.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-23 — Test suite, Strava webhook async fix, cron N+1 query batching
 
 **Type:** Infra + Performance
