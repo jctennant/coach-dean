@@ -333,6 +333,10 @@ Rules:
     const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText, "awaiting_goal");
     const effectiveChatId = chatId ?? learnedChatId;
     if (effectiveChatId) void shareContactCard(effectiveChatId);
+    // Mark intro as sent so subsequent messages don't re-append the identity note
+    if (!introAlreadySent) {
+      void supabase.from("users").update({ onboarding_data: { ...onboardingData, intro_sent: true } as Json }).eq("id", user.id);
+    }
     return NextResponse.json({ ok: true });
   }
 

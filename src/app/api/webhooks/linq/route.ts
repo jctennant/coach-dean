@@ -144,14 +144,9 @@ async function handleInboundMessage(
   // reason to wait 1-2s for user lookup / creation before the indicator appears.
   if (payloadChatId) {
     void startTyping(payloadChatId);
-    // Keep refreshing every 4.5s — Linq auto-clears "..." after ~5-10s without a refresh.
-    // We fire 4 times to cover up to ~18s (goal step with web search can take that long).
-    void (async (id: string) => {
-      for (let i = 0; i < 4; i++) {
-        await new Promise((r) => setTimeout(r, 4500));
-        void startTyping(id);
-      }
-    })(payloadChatId);
+    // onboarding/handle and coach/respond each run their own keep-alive loop
+    // that stops when the message is sent. A continuation loop here would
+    // re-trigger typing *after* the response was already delivered.
   }
 
   // Deduplicate by external message ID

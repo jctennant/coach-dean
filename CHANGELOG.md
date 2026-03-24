@@ -4,6 +4,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Fixed typing bubbles persisting after message sent + "I'm Coach Dean" appearing mid-conversation
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal testing)
+**User feedback:** "after sending his intro message to me in the onboarding flow, the typing bubbles appeared on my end, even though I knew that Dean wasn't going to send another message" / "I'm Coach Dean, your AI running coach." appearing in the middle of Dean's response after the intro was already sent
+**Root cause (typing):** The Linq webhook fired `startTyping` immediately (correct) then ran a hardcoded 4-retry loop every 4.5s covering up to 18s. Both `onboarding/handle` and `coach/respond` have their own keep-alive loops that stop when the message is sent — but the webhook's loop ran independently and re-triggered the typing indicator *after* the response had already been delivered and cleared it.
+**Root cause (identity note):** For direct-text users (not web signup), `onboarding_data.intro_sent` was never written to the DB after sending the full intro in the `awaiting_goal` handler. So when the next message (with the actual goal) came in, `!intro_sent` was still true and the identity sentence was appended to the goal acknowledgment.
+**Fix / Change:** (1) Removed the 4-fire continuation loop from the webhook — the immediate `startTyping` call stays for instant feedback. (2) After sending the intro for direct-text users in `handleGoal`, write `intro_sent: true` to `onboarding_data` so it isn't appended again.
+**Files changed:** src/app/api/webhooks/linq/route.ts, src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-24 — Full multi-week training plan generation + /dashboard
 
 **Type:** Feature
