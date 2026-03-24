@@ -48,7 +48,7 @@ export default function Home() {
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
             <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              Personalized coaching, just a text away.
+              Your personal running coach, just a text away.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
               You signed up for a race. Now what?
