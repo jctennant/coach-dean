@@ -189,6 +189,47 @@ export type Database = {
         }
         Relationships: []
       }
+      training_plans: {
+        Row: {
+          created_at: string | null
+          goal: string | null
+          id: string
+          race_date: string | null
+          total_weeks: number
+          updated_at: string | null
+          user_id: string | null
+          weeks: Json
+        }
+        Insert: {
+          created_at?: string | null
+          goal?: string | null
+          id?: string
+          race_date?: string | null
+          total_weeks: number
+          updated_at?: string | null
+          user_id?: string | null
+          weeks?: Json
+        }
+        Update: {
+          created_at?: string | null
+          goal?: string | null
+          id?: string
+          race_date?: string | null
+          total_weeks?: number
+          updated_at?: string | null
+          user_id?: string | null
+          weeks?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "training_plans_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       training_profiles: {
         Row: {
           constraints: string | null
@@ -200,6 +241,7 @@ export type Database = {
           days_per_week: number | null
           fitness_level: string | null
           goal: string | null
+          goal_distance_miles: number | null
           goal_time_minutes: number | null
           id: string
           injury_body_parts: string[] | null
@@ -224,6 +266,7 @@ export type Database = {
           days_per_week?: number | null
           fitness_level?: string | null
           goal?: string | null
+          goal_distance_miles?: number | null
           goal_time_minutes?: number | null
           id?: string
           injury_body_parts?: string[] | null
@@ -248,6 +291,7 @@ export type Database = {
           days_per_week?: number | null
           fitness_level?: string | null
           goal?: string | null
+          goal_distance_miles?: number | null
           goal_time_minutes?: number | null
           id?: string
           injury_body_parts?: string[] | null
@@ -265,47 +309,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "training_profiles_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      training_plans: {
-        Row: {
-          id: string
-          user_id: string
-          created_at: string | null
-          updated_at: string | null
-          race_date: string | null
-          goal: string | null
-          total_weeks: number
-          weeks: Json
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          created_at?: string | null
-          updated_at?: string | null
-          race_date?: string | null
-          goal?: string | null
-          total_weeks: number
-          weeks?: Json
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          created_at?: string | null
-          updated_at?: string | null
-          race_date?: string | null
-          goal?: string | null
-          total_weeks?: number
-          weeks?: Json
-        }
-        Relationships: [
-          {
-            foreignKeyName: "training_plans_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "users"
