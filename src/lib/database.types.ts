@@ -272,6 +272,47 @@ export type Database = {
           },
         ]
       }
+      training_plans: {
+        Row: {
+          id: string
+          user_id: string
+          created_at: string | null
+          updated_at: string | null
+          race_date: string | null
+          goal: string | null
+          total_weeks: number
+          weeks: Json
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          created_at?: string | null
+          updated_at?: string | null
+          race_date?: string | null
+          goal?: string | null
+          total_weeks: number
+          weeks?: Json
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          created_at?: string | null
+          updated_at?: string | null
+          race_date?: string | null
+          goal?: string | null
+          total_weeks?: number
+          weeks?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "training_plans_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       training_state: {
         Row: {
           current_phase: string | null
@@ -331,6 +372,7 @@ export type Database = {
       users: {
         Row: {
           created_at: string | null
+          dashboard_token: string | null
           id: string
           linq_chat_id: string | null
           messaging_opted_out: boolean
@@ -344,9 +386,11 @@ export type Database = {
           strava_refresh_token: string | null
           strava_token_expires_at: string | null
           timezone: string | null
+          trial_started_at: string | null
         }
         Insert: {
           created_at?: string | null
+          dashboard_token?: string | null
           id?: string
           linq_chat_id?: string | null
           messaging_opted_out?: boolean
@@ -360,9 +404,11 @@ export type Database = {
           strava_refresh_token?: string | null
           strava_token_expires_at?: string | null
           timezone?: string | null
+          trial_started_at?: string | null
         }
         Update: {
           created_at?: string | null
+          dashboard_token?: string | null
           id?: string
           linq_chat_id?: string | null
           messaging_opted_out?: boolean
@@ -376,6 +422,7 @@ export type Database = {
           strava_refresh_token?: string | null
           strava_token_expires_at?: string | null
           timezone?: string | null
+          trial_started_at?: string | null
         }
         Relationships: []
       }

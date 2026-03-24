@@ -749,29 +749,62 @@ async function sendFeedbackEmail(opts: {
     return;
   }
 
-  const preview = opts.message.slice(0, 80).replace(/\n/g, " ");
-  const subject = opts.type === "REFUND"
+  const preview = opts.message.replace(/^FEEDBACK[:\s]*/i, "").trim().slice(0, 80);
+  const isRefund = opts.type === "REFUND";
+  const subject = isRefund
     ? `[REFUND REQUEST] ${opts.phone}`
     : `[FEEDBACK] ${opts.phone} — "${preview}"`;
 
-  const body = [
-    `Type: ${opts.type}`,
-    `Phone: ${opts.phone}`,
-    `User ID: ${opts.userId}`,
-    `Strava: ${opts.hasStrava ? "Connected" : "Not connected"}`,
-    `Timestamp: ${new Date().toISOString()}`,
-    ``,
-    `Message:`,
-    opts.message,
-  ].join("\n");
+  const badgeColor = isRefund ? "#dc2626" : "#2563eb";
+  const badgeLabel = isRefund ? "REFUND REQUEST" : "FEEDBACK";
+  const messageText = opts.message.replace(/^FEEDBACK[:\s]*/i, "").trim();
+  const timestamp = new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+
+  const html = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #1a1a1a;">
+      <h1 style="font-size: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; margin-bottom: 4px;">
+        Coach Dean · User ${badgeLabel}
+      </h1>
+      <p style="color: #6b7280; font-size: 13px; margin-top: 4px;">${timestamp}</p>
+
+      <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
+        <tr>
+          <td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600; width: 120px;">Type</td>
+          <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">
+            <span style="background: ${badgeColor}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">${badgeLabel}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600;">Phone</td>
+          <td style="padding: 8px 12px; border: 1px solid #e5e7eb; font-family: monospace;">${opts.phone}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600;">User ID</td>
+          <td style="padding: 8px 12px; border: 1px solid #e5e7eb; font-family: monospace; font-size: 12px; color: #6b7280;">${opts.userId}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-weight: 600;">Strava</td>
+          <td style="padding: 8px 12px; border: 1px solid #e5e7eb;">${opts.hasStrava ? "✓ Connected" : "Not connected"}</td>
+        </tr>
+      </table>
+
+      <h2 style="font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #374151;">Message</h2>
+      <blockquote style="margin: 0; padding: 12px 16px; background: #f9fafb; border-left: 4px solid ${badgeColor}; border-radius: 0 4px 4px 0; font-size: 15px; line-height: 1.6; color: #1a1a1a;">
+        ${messageText}
+      </blockquote>
+
+      <hr style="margin-top: 32px; border: none; border-top: 1px solid #e5e7eb;" />
+      <p style="color: #9ca3af; font-size: 11px;">Reply to this user via Linq · ${opts.phone}</p>
+    </div>
+  `;
 
   try {
     const resend = new Resend(resendApiKey);
     const { error } = await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || "Coach Dean <onboarding@resend.dev>",
+      from: process.env.RESEND_FROM_EMAIL || "Coach Dean <noreply@coachdean.ai>",
       to: [adminEmail],
       subject,
-      text: body,
+      html,
     });
     if (error) {
       console.error("[linq-webhook] feedback email failed:", error);

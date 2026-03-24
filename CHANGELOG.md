@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Full multi-week training plan generation + /dashboard
+
+**Type:** Feature
+**Reported by:** Internal observation (Jake)
+**User feedback:** "Dean seems to just create a weekly plan on a one-off basis and doesn't seem to follow a super structured 12-week arc or cadence up to a race... one thing that we'll want to do is be able to show the user or tell the user, from a high level, what their training plan is."
+**Root cause:** Dean generated each week's plan reactively at signup and on every Sunday recap, with no memory of the intended arc. Each week was effectively invented from scratch, leading to inconsistent progression and no way for users to see where they were headed.
+**Fix / Change:**
+- Added `training_plans` table to store the full pre-generated multi-week arc (base → build → peak → taper) with per-week mileage, long run, key workout, and coaching notes.
+- After `initial_plan` fires, `generateAndSaveFullPlan` computes the full arc using the existing periodization logic, calls Claude Haiku once to enrich each week with `key_workout` and `notes`, saves it, generates a `dashboard_token`, sets `trial_started_at`, and texts the athlete a link to their plan dashboard.
+- `weekly_recap` now fetches the stored plan week and injects it as `STORED TRAINING PLAN` context so Dean reflects on actual vs. planned — not inventing the plan from scratch.
+- New `/dashboard` page at `coachdean.ai/dashboard?token=xxx`: shows goal, race countdown, current week highlight card, and the full plan arc. Trial active (≤7 days): all weeks visible. Trial expired: future weeks beyond current+1 are blurred with "Unlock full plan" CTA (Stripe paywall placeholder).
+- New `/api/dashboard/request-link` route: accepts phone number, finds user, ensures token, texts the link — used by the dashboard fallback screen for users who lost their link.
+- Added `dashboard_token` and `trial_started_at` columns to `users` table (migration 020).
+**Files changed:** `supabase/migrations/020_training_plans.sql`, `src/lib/database.types.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`, `src/app/dashboard/request-link-form.tsx`, `src/app/api/dashboard/request-link/route.ts`
+
 ## 2026-03-24 — Fixed fire-and-forget DB writes being silently dropped in serverless
 
 **Type:** Bug Fix
