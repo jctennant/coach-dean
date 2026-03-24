@@ -176,6 +176,42 @@ describe("POST /api/onboarding/handle — loop detection", () => {
     );
   });
 
+  it("sends step-appropriate de-escalation for awaiting_race_date", async () => {
+    const raceDateRepeat = "When are you targeting for your race?";
+    const recentTime = new Date(Date.now() - 30 * 1000).toISOString();
+
+    mockTables({
+      users: {
+        data: {
+          id: "user-001", phone_number: "+12025551234", name: "Tomo",
+          onboarding_step: "awaiting_race_date", onboarding_data: { goal: "marathon", intro_sent: true },
+        },
+        error: null,
+      },
+      conversations: {
+        data: [
+          { content: raceDateRepeat, created_at: recentTime },
+          { content: raceDateRepeat, created_at: recentTime },
+        ],
+        error: null,
+      },
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "i dunno" });
+    await POST(req);
+
+    expect(sendSMS).toHaveBeenCalledOnce();
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025551234",
+      expect.stringMatching(/tangled on my end/i)
+    );
+    // Should NOT ask "what are you training for?" — that step is already done
+    expect(sendSMS).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringMatching(/what are you training for/i)
+    );
+  });
+
   it("stays silent (no SMS) when de-escalation was already the last message sent", async () => {
     const deEscalation = "Looks like something got confused on my end — sorry about that! I'm Coach Dean, your AI running coach. What are you training for?";
     const recentTime = new Date(Date.now() - 30 * 1000).toISOString();

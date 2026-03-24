@@ -90,10 +90,25 @@ export async function POST(request: Request) {
 
   // Loop detection: if the last 2+ assistant messages within 2 minutes are identical,
   // we're stuck in a response loop (debounce wasn't enough, or race condition).
-  // Break out with a single de-escalation message instead of repeating again.
-  // If the most recent message is already the de-escalation itself, stay silent —
-  // firing it again would just restart the same loop with different content.
-  const DEESCALATION_MSG = "Looks like something got confused on my end — sorry about that! I'm Coach Dean, your AI running coach. What are you training for?";
+  // The de-escalation message is step-aware so the re-prompt makes sense wherever in
+  // onboarding the loop occurred. If the de-escalation for this step was already sent,
+  // stay silent — firing it again would just restart the loop with different content.
+  const DEESCALATION_BY_STEP: Record<string, string> = {
+    "awaiting_goal":              "Looks like something got confused on my end — sorry about that! I'm Coach Dean, your AI running coach. What are you training for?",
+    "awaiting_race_date":         "Sorry, something got tangled on my end! When are you targeting for your race? A rough month and year works.",
+    "awaiting_schedule":          "Sorry, something got tangled on my end! How many days a week are you looking to train?",
+    "awaiting_ultra_background":  "Sorry, something got tangled on my end! Roughly how many miles a week are you currently running?",
+    "awaiting_injury_background": "Sorry, something got tangled on my end! Can you tell me a bit about the injury you're recovering from?",
+    "awaiting_anything_else":     "Sorry, something got tangled on my end! Anything else you'd like me to know before I put your plan together?",
+    "awaiting_name":              "Sorry, something got tangled on my end! What should I call you?",
+    "awaiting_goal_time":         "Sorry, something got tangled on my end! What's your goal time for the race?",
+    "awaiting_mileage_baseline":  "Sorry, something got tangled on my end! Roughly how many miles a week are you currently running?",
+    "awaiting_timezone":          "Sorry, something got tangled on my end! What time zone are you in?",
+    "awaiting_cadence":           "Sorry, something got tangled on my end! How often would you like check-ins from me?",
+  };
+  const deEscalationMsg = step && DEESCALATION_BY_STEP[step]
+    ? DEESCALATION_BY_STEP[step]
+    : "Sorry, something got a bit tangled on my end — let's try again.";
   {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const { data: recentMsgs } = await supabase
@@ -106,22 +121,24 @@ export async function POST(request: Request) {
       .limit(3);
 
     const loopDetected = recentMsgs && recentMsgs.length >= 2 && recentMsgs[0].content === recentMsgs[1].content;
-    const deEscalationAlreadySent = recentMsgs && recentMsgs[0]?.content === DEESCALATION_MSG;
+    const deEscalationAlreadySent = recentMsgs && recentMsgs[0]?.content === deEscalationMsg;
 
     if (loopDetected && !deEscalationAlreadySent) {
-      console.log("[onboarding] loop detected: identical response sent 2+ times, de-escalating for", userId);
+      console.log("[onboarding] loop detected: identical response sent 2+ times, de-escalating for", userId, "step:", step);
       keepTypingAlive = false;
-      // Mark intro_sent so subsequent non-goal messages get the shorter follow-up
-      // ("What are you training for?") rather than triggering the full intro again.
-      const updatedData = { ...onboardingData, intro_sent: true };
-      void supabase.from("users").update({ onboarding_data: updatedData as Json }).eq("id", userId);
-      await sendAndStore(user.id, user.phone_number, DEESCALATION_MSG, step ?? undefined);
+      // For awaiting_goal only: mark intro_sent so the next non-goal message gets
+      // the shorter "What are you training for?" follow-up, not the full intro again.
+      if (step === "awaiting_goal") {
+        const updatedData = { ...onboardingData, intro_sent: true };
+        void supabase.from("users").update({ onboarding_data: updatedData as Json }).eq("id", userId);
+      }
+      await sendAndStore(user.id, user.phone_number, deEscalationMsg, step ?? undefined);
       if (dry_run) dryRunUsers.delete(userId);
       return NextResponse.json({ ok: true });
     }
 
     if (loopDetected && deEscalationAlreadySent) {
-      console.log("[onboarding] loop detected but de-escalation already sent, staying silent for", userId);
+      console.log("[onboarding] loop detected but de-escalation already sent, staying silent for", userId, "step:", step);
       keepTypingAlive = false;
       if (dry_run) dryRunUsers.delete(userId);
       return NextResponse.json({ ok: true });

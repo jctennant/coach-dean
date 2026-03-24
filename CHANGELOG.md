@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Fixed fire-and-forget DB writes being silently dropped in serverless
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (discovered while debugging Catherine's mileage reset)
+**User feedback:** N/A
+**Root cause:** Several DB writes in `coach/respond` used `void` (fire-and-forget), which meant the promises weren't tracked by the enclosing `after()` callback. In Vercel's serverless environment, if the function instance exits before these promises resolve, the writes are silently dropped. This caused: (1) `weekly_recap` and `initial_plan` never advancing `current_week` / saving `weekly_mileage_target` — confirmed by Catherine's state being stuck at week 1 since March 9 despite multiple recaps running. (2) `persistProfileUpdates` (injuries, paces, race data, workout saves from user messages) and `maybeUpdatePlanSessions` (plan adjustments mid-week) also being dropped.
+**Fix / Change:** Changed `void` to `await` for: `training_state` updates on `initial_plan` and `weekly_recap`, `extractAndStorePlanSessions` calls, `persistProfileUpdates`, and `maybeUpdatePlanSessions`. Left `linq_chat_id` as `void` (low stakes — chatId is passed directly on each request). Left `taper_peak_miles` inside `buildSystemPrompt` as `void` — fixing it requires making `buildSystemPrompt` async, deferred.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-03-24 — Fixed infinite response loop on burst onboarding messages (P0)
 
 **Type:** Bug Fix

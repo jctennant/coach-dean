@@ -443,7 +443,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
     if (latestUserMsg) {
       if (pendingExtracted) {
-        void persistProfileUpdates(
+        await persistProfileUpdates(
           userId,
           pendingExtracted,
           originalProfile,
@@ -452,7 +452,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         );
       }
       const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
-      void maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage);
+      await maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage);
     }
   }
 
