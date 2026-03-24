@@ -456,6 +456,19 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }
   }
 
+  // Lock in taper_peak_miles the first time an athlete enters the taper window (≤21 days
+  // to race). Must happen here (not inside buildSystemPrompt) so the await is guaranteed.
+  if (!state?.taper_peak_miles && avgWeeklyMileage && avgWeeklyMileage > 0 && profile?.race_date) {
+    const raceDate = new Date((profile.race_date as string) + "T00:00:00");
+    const daysUntil = Math.ceil((raceDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    if (daysUntil > 0 && daysUntil <= 21) {
+      await supabase
+        .from("training_state")
+        .update({ taper_peak_miles: Math.round(avgWeeklyMileage * 10) / 10 })
+        .eq("user_id", userId);
+    }
+  }
+
   // Update training state if post_run.
   // Note: week_mileage_so_far is NOT updated here — it drifted indefinitely because it
   // was never reset on Mondays. The system prompt uses computeWeekMileage() (live Strava
@@ -1303,13 +1316,6 @@ function buildSystemPrompt(
     // If not yet stored, use avgWeeklyMileage and persist it as a side-effect.
     if (daysUntil > 0 && daysUntil <= 21 && avgWeeklyMileage && avgWeeklyMileage > 0) {
       const storedPeak = state?.taper_peak_miles as number | null;
-      if (!storedPeak) {
-        // First time entering the taper window — lock in the peak
-        void supabase
-          .from("training_state")
-          .update({ taper_peak_miles: Math.round(avgWeeklyMileage * 10) / 10 })
-          .eq("user_id", user.id as string);
-      }
       const peak = storedPeak ?? Math.round(avgWeeklyMileage * 10) / 10;
       const goal = profile?.goal as string | null;
       const isUltra = ["50k","100k","50mi","100mi"].includes(goal ?? "");
