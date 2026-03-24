@@ -102,6 +102,12 @@ export async function GET(request: Request) {
     ...(stravaState ? { strava_state: stravaState } : {}),
   };
 
+  // Only advance to awaiting_schedule if the user is currently on awaiting_strava.
+  // If they've already progressed past it (e.g. they texted during the Strava step
+  // and handleStrava advanced them), leave the step as-is — overwriting it would
+  // reset them backwards and repeat already-answered questions.
+  const shouldAdvanceToSchedule = !alreadyOnboarded && currentUser?.onboarding_step === "awaiting_strava";
+
   const { data: user, error } = await supabase
     .from("users")
     .update({
@@ -110,8 +116,7 @@ export async function GET(request: Request) {
       strava_refresh_token: refresh_token,
       strava_token_expires_at: new Date(expires_at * 1000).toISOString(),
       name: athlete.firstname || athlete.username || null,
-      // Don't reset onboarding_step for already-onboarded users
-      ...(!alreadyOnboarded ? { onboarding_step: "awaiting_schedule" } : {}),
+      ...(shouldAdvanceToSchedule ? { onboarding_step: "awaiting_schedule" } : {}),
       ...(timezone ? { timezone } : {}),
       onboarding_data: updatedOnboardingData as unknown as Json,
     })
@@ -158,6 +163,17 @@ export async function GET(request: Request) {
 
   const firstName = user.name ? ` ${user.name}` : "";
 
+  // Build a brief summary of what Dean can see from Strava so the user knows
+  // the connection worked and their history is being used.
+  const recentTotals = stats.recent_run_totals as Record<string, unknown> | undefined;
+  const recentMiles = recentTotals?.distance
+    ? Math.round((recentTotals.distance as number) / 1609.34)
+    : null;
+  const recentCount = recentTotals?.count as number | undefined;
+  const stravaSeenLine = recentMiles && recentCount
+    ? `I can see your recent runs — ${recentMiles} miles across ${recentCount} ${recentCount === 1 ? "run" : "runs"} in the last 4 weeks. That's great context.`
+    : `I can see your training history — that's going to help a lot.`;
+
   // Check whether the onboarding flow already sent a message in the last 3 minutes.
   // This prevents a double-message race: if the user texted while waiting for Strava to
   // connect, the onboarding handler fires (advancing to awaiting_schedule and asking
@@ -179,8 +195,8 @@ export async function GET(request: Request) {
   const smsMsg = alreadyOnboarded
     ? `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`
     : recentOnboardingMessage
-      ? `Strava connected${firstName}! Go ahead and answer that question above when you're ready.`
-      : `Strava connected${firstName} — I can see your training history, this is going to help a lot. A couple more quick questions: which days of the week work best for you? (e.g. Mon, Wed, Fri, Sun)`;
+      ? `Strava connected${firstName}! ${stravaSeenLine} Go ahead and answer that question above when you're ready.`
+      : `Strava connected${firstName}! ${stravaSeenLine} A couple more quick questions: which days of the week work best for you? (e.g. Mon, Wed, Fri, Sun)`;
 
   await Promise.all([
     sendSMS(user.phone_number, smsMsg),

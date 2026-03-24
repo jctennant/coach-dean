@@ -1806,7 +1806,9 @@ If the message contains a genuine question of any of these types:
 - Capability/service questions: whether Dean works with a certain type of athlete or sport ("do you work with cyclists?", "can you help with triathlon?", "do you coach beginners?")
 Answer it briefly and helpfully in 1-2 sentences. Be warm and specific. Plain text only — no markdown, no bullet points, no asterisks. Return only your answer.
 
-If there is no question — just goal-setting or background info — return only: {"no_question": true}`,
+IMPORTANT: Do NOT ask follow-up questions. Do NOT request more information from the athlete. If you would need to ask a question to answer properly, just return {"no_question": true} instead.
+
+If there is no question — just goal-setting, background info, or race/training context — return only: {"no_question": true}`,
     messages: [{ role: "user", content: message }],
   });
 

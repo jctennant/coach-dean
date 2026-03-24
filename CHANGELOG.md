@@ -13,6 +13,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Fix / Change:** Changed `void` to `await` for: `training_state` updates on `initial_plan` and `weekly_recap`, `extractAndStorePlanSessions` calls, `persistProfileUpdates`, and `maybeUpdatePlanSessions`. Left `linq_chat_id` as `void` (low stakes — chatId is passed directly on each request). Left `taper_peak_miles` inside `buildSystemPrompt` as `void` — fixing it requires making `buildSystemPrompt` async, deferred.
 **Files changed:** `src/app/api/coach/respond/route.ts`
 
+## 2026-03-24 — Fixed three onboarding flow issues (questions pile-up, Strava step regression, schedule repeat)
+
+**Type:** Bug Fix
+**Reported by:** Internal testing (Jake)
+**User feedback:** (1) "we ask a ton of questions in the first message" (2) "strava didn't seem to properly show up in the response" / Dean replied "I don't have access to external apps like Strava" (3) "repeat of a question on which days work for me"
+**Root cause:**
+1. `detectAndAnswerImmediate` prompt didn't prohibit generating questions — Haiku was returning things like "how much trail experience do you have? what's your mileage?" for messages with no actual question. These got prepended to the acknowledgment alongside the next step question, resulting in multiple questions in one message.
+2. & 3. Strava OAuth callback unconditionally set `onboarding_step: "awaiting_schedule"` for ANY non-fully-onboarded user. If the user texted during the `awaiting_strava` step (triggering `handleStrava` to advance them), then completed OAuth, the callback reset them backwards. Their next message hit `checkOffTopic` for `awaiting_schedule` — which had no Strava context and hallucinated "I don't have access to Strava". The schedule question also repeated.
+**Fix / Change:**
+1. Added "Do NOT ask follow-up questions" to `detectAndAnswerImmediate` prompt. If answering would require more info, return `{"no_question": true}` instead.
+2. & 3. Strava callback now only sets `onboarding_step: "awaiting_schedule"` when the user's current step is exactly `awaiting_strava`. If they've already progressed past it, the step is left unchanged. Also added a brief Strava stats summary to the callback SMS ("I can see your recent runs — X miles across Y runs in the last 4 weeks") so the user knows their data is being used.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/auth/strava/callback/route.ts`
+
 ## 2026-03-24 — Fixed infinite response loop on burst onboarding messages (P0)
 
 **Type:** Bug Fix
