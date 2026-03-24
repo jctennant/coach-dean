@@ -86,7 +86,7 @@ export default async function DashboardPage({
       .single(),
     supabase
       .from("training_profiles")
-      .select("goal, race_date")
+      .select("goal, race_date, goal_distance_miles")
       .eq("user_id", user.id)
       .single(),
   ]);
@@ -107,8 +107,24 @@ export default async function DashboardPage({
   const planWeeks = (planData.weeks as PlanWeek[] | null) ?? [];
   const totalWeeks = planData.total_weeks ?? planWeeks.length;
   const currentWeekNum = (stateData?.current_week as number | null) ?? 1;
-  const goal = profileData?.goal ?? planData.goal;
   const raceDate = profileData?.race_date ?? planData.race_date;
+
+  // Build a human-readable goal label: prefer specific race name over generic bucket
+  const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+  const raceName = (onboardingData.race_name as string | null) ?? null;
+  const goalDistanceMiles = profileData?.goal_distance_miles ?? null;
+  const goalBucket = profileData?.goal ?? planData.goal;
+  const GOAL_LABELS: Record<string, string> = {
+    mile: "Mile", "5k": "5K", "10k": "10K", half_marathon: "Half Marathon",
+    marathon: "Marathon", "30k": "30K", "50k": "50K", "50mi": "50 Miles",
+    "100k": "100K", "100mi": "100 Miles", general_fitness: "General Fitness",
+    return_to_running: "Return to Running", injury_recovery: "Injury Recovery",
+  };
+  const goalLabel = raceName
+    ? `${raceName}${goalDistanceMiles ? ` · ${goalDistanceMiles} mi` : ""}`
+    : goalDistanceMiles
+    ? `${goalDistanceMiles} mi race`
+    : GOAL_LABELS[goalBucket as string] ?? goalBucket;
   const raceDays = daysUntilRace(raceDate as string | null);
   const trialActive = isTrialActive(user.trial_started_at as string | null);
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
@@ -126,8 +142,8 @@ export default async function DashboardPage({
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
         {/* Hero: goal + meta */}
         <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
-          {goal && (
-            <p className="text-base font-semibold text-gray-900 leading-snug">{goal}</p>
+          {goalLabel && (
+            <p className="text-base font-semibold text-gray-900 leading-snug">{goalLabel}</p>
           )}
           <div className="flex flex-wrap gap-3 text-sm text-gray-500">
             {raceDate && (
@@ -229,22 +245,17 @@ function WeekCard({ week, isCurrent, isPast }: { week: PlanWeek; isCurrent: bool
           : "border-gray-200 bg-white"
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-gray-700">Week {week.week_number}</span>
-          {isCurrent && (
-            <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs font-medium text-white">Current</span>
-          )}
-          {isPast && (
-            <span className="text-xs text-gray-400">Done</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PHASE_COLORS[week.phase] ?? "bg-gray-100 text-gray-700"}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-semibold text-gray-700 shrink-0">Week {week.week_number}</span>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${PHASE_COLORS[week.phase] ?? "bg-gray-100 text-gray-700"}`}>
             {PHASE_LABELS[week.phase] ?? week.phase}
           </span>
-          <span className="text-sm font-semibold text-gray-900">{week.mileage_target} mi</span>
+          {isCurrent && (
+            <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs font-medium text-white shrink-0">Now</span>
+          )}
         </div>
+        <span className="text-sm font-semibold text-gray-900 shrink-0">{week.mileage_target} mi</span>
       </div>
       {week.key_workout && (
         <p className="mt-2 text-xs text-gray-500 leading-snug">{week.key_workout}</p>
