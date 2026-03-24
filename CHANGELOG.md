@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Fixed "10K plan" label when user specified a named race (e.g. Dipsea)
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal testing)
+**User feedback:** "it seems like even though I told Dean I'm going to do the Dipsea, which is a 7.4-mile race with a lot of climbing in Mill Valley, that he's prepping me for a 10K in onboarding"
+**Root cause:** `generateAnythingElseResponse` and `generateConstraintAcknowledgment` both received the generic goal bucket label ("10k") rather than the specific race name. The goal parser correctly stores `race_name: "Dipsea"` in `onboarding_data`, but it wasn't being passed to those Claude calls — so Dean would say "your 10k plan" instead of "the Dipsea".
+**Fix / Change:** In `generateAnythingElseResponse`, build the context string from `race_name` + `goal_distance_miles` when available, falling back to the generic label. In `generateConstraintAcknowledgment`, pass `race_name` instead of `formatGoalInline(goal)` when a named race is present.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-24 — Fixed typing bubbles persisting after message sent + "I'm Coach Dean" appearing mid-conversation
 
 **Type:** Bug Fix

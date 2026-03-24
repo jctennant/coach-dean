@@ -345,7 +345,7 @@ Rules:
   const [immediateAnswer, raceInfo, constraintAck] = await Promise.all([
     detectAndAnswerImmediate(message, parsed.goal),
     generateRaceAcknowledgment(message),
-    otherNotes ? generateConstraintAcknowledgment(otherNotes, formatGoalInline(parsed.goal)) : Promise.resolve(null),
+    otherNotes ? generateConstraintAcknowledgment(otherNotes, parsed.race_name ?? formatGoalInline(parsed.goal)) : Promise.resolve(null),
   ]);
 
   // Multi-distance race: web search found several options and athlete didn't specify which.
@@ -412,7 +412,8 @@ Rules:
     const whatDeanDoes = isNewer
       ? `I'll keep the plan manageable and build up at a pace that gets you to the start line healthy.`
       : `I'll put together a tailored plan, track your training via Strava, and adjust things as your fitness builds.`;
-    acknowledgment = `Love it${name ? `, ${name}` : ""} — a ${goalLabel} is a great goal. ${whatDeanDoes}`;
+    const raceLabel = parsed.race_name ? `the ${parsed.race_name}` : `a ${goalLabel}`;
+    acknowledgment = `Love it${name ? `, ${name}` : ""} — ${raceLabel} is a great goal. ${whatDeanDoes}`;
   }
 
   if (constraintAck && !raceInfo.ack) acknowledgment += ` ${constraintAck}`;
@@ -433,7 +434,7 @@ Rules:
         ? "Want me to put together a return-to-run plan? A few quick questions first."
         : (parsed.goal === "general_fitness" || parsed.goal === "return_to_running")
           ? "Would you like me to put together a training plan around your goals? I have just a few quick questions."
-          : `Would you like me to build you a proper ${goalLabel} training plan? I just have a few quick questions.`;
+          : `Would you like me to build you a proper ${parsed.race_name ?? goalLabel} training plan? I just have a few quick questions.`;
     responseText = `${immediateAnswer}\n\n${bridge}${question ? `\n\n${question}` : ""}`.trim();
   } else {
     responseText = `${acknowledgment}${question ? ` ${question}` : ""}`.trim();
@@ -1724,10 +1725,15 @@ async function generateAnythingElseResponse(
   onboardingData: Record<string, unknown>
 ): Promise<{ response: string | null; isDone: boolean }> {
   const goal = onboardingData.goal as string | null;
+  const raceName = onboardingData.race_name as string | null;
+  const goalDistanceMiles = onboardingData.goal_distance_miles as number | null;
   // Intentionally omit the raw race_date — passing "2025-10-19" caused Dean to hallucinate
-  // a wrong date ("October 1st") in conversational responses. Goal label is enough context.
-  const context = goal
-    ? `The athlete is training for a ${goal}.`
+  // a wrong date ("October 1st") in conversational responses.
+  // Prefer the specific race name + distance over the generic bucket label when available.
+  const context = raceName
+    ? `The athlete is training for the ${raceName}${goalDistanceMiles ? ` (${goalDistanceMiles} miles)` : ""}.`
+    : goal
+    ? `The athlete is training for a ${formatGoalInline(goal)}.`
     : "The athlete is in the process of setting up their training plan.";
 
   const response = await anthropic.messages.create({
