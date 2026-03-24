@@ -325,6 +325,33 @@ async function handleInboundMessage(
     .select("id")
     .single();
 
+  // Feedback / refund commands — intercept before onboarding and coaching
+  const isFeedback = /^FEEDBACK\b/i.test(body);
+  const isRefundRequest = /^REFUND\b/i.test(body);
+
+  if (isFeedback || isRefundRequest) {
+    void sendFeedbackEmail({
+      type: isRefundRequest ? "REFUND" : "FEEDBACK",
+      phone: senderPhone,
+      userId: user.id,
+      message: body,
+      hasStrava: !!user.strava_athlete_id,
+    });
+    void trackEvent(user.id, isRefundRequest ? "refund_requested" : "feedback_submitted");
+
+    if (isRefundRequest || user.onboarding_step) {
+      // Billing issue, or user is mid-onboarding — Dean can't action either.
+      // Send a simple ack and stop. Onboarding resumes on their next message.
+      const ack = isRefundRequest
+        ? "Got it — I've flagged your refund request and Jake will follow up with you within 24 hours."
+        : "Thanks for that — I'll pass it along!";
+      await sendAndStore(user.id, senderPhone, ack, messageId);
+      return;
+    }
+    // Fully-onboarded feedback — fall through to coaching so Dean can respond:
+    // coaching adjustment if actionable, graceful handoff if it's a product suggestion.
+  }
+
   if (user.onboarding_step) {
     // Debounce onboarding responses exactly like coaching: wait 10s so burst messages
     // (the user typing several quick lines before we've replied) collapse into one call.
@@ -355,29 +382,6 @@ async function handleInboundMessage(
       body: JSON.stringify({ userId: user.id, message: messageBody, chatId: resolvedChatId }),
     });
     return;
-  }
-
-  // Feedback / refund commands — intercept before coaching
-  const isFeedback = /^FEEDBACK\b/i.test(body);
-  const isRefundRequest = /^REFUND\b/i.test(body);
-
-  if (isFeedback || isRefundRequest) {
-    void sendFeedbackEmail({
-      type: isRefundRequest ? "REFUND" : "FEEDBACK",
-      phone: senderPhone,
-      userId: user.id,
-      message: body,
-      hasStrava: !!user.strava_athlete_id,
-    });
-    void trackEvent(user.id, isRefundRequest ? "refund_requested" : "feedback_submitted");
-
-    if (isRefundRequest) {
-      // Billing issue — Dean can't action this, send ack and stop
-      await sendAndStore(user.id, senderPhone, "Got it — I've flagged your refund request and Jake will follow up with you within 24 hours.", messageId);
-      return;
-    }
-    // Feedback — let it fall through to the coaching path so Dean can respond
-    // (coaching adjustment if actionable, graceful handoff if it's a product suggestion)
   }
 
   // Detect "connect strava" / "add strava" intent from fully-onboarded users
@@ -764,7 +768,7 @@ async function sendFeedbackEmail(opts: {
   try {
     const resend = new Resend(resendApiKey);
     const { error } = await resend.emails.send({
-      from: "Coach Dean <feedback@coachdean.ai>",
+      from: process.env.RESEND_FROM_EMAIL || "Coach Dean <onboarding@resend.dev>",
       to: [adminEmail],
       subject,
       text: body,
