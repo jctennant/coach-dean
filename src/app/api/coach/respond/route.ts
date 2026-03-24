@@ -204,11 +204,17 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
 
   // Compute the training week, phase, and deload/progression targets for this plan.
+  const hasStrava = !!(user.strava_athlete_id as number | null);
+  // For non-Strava users, avgWeeklyMileage is always null (no tracked activities).
+  // Fall back to the stored weekly_mileage_target (what Dean last prescribed) so the
+  // progression target doesn't silently drop to null and cause Dean to reset the plan.
+  const storedMileageTarget = (state?.weekly_mileage_target as number | null) ?? null;
+  const periodizationMileage = avgWeeklyMileage ?? (!hasStrava && storedMileageTarget ? storedMileageTarget : null);
   const periodization: PeriodizationContext = buildPeriodization(
     trigger,
     (state?.current_week as number | null) ?? null,
     (profile?.race_date as string | null) ?? null,
-    avgWeeklyMileage ?? null
+    periodizationMileage
   );
 
   const systemPrompt = buildSystemPrompt(
@@ -233,7 +239,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
-  const hasStrava = !!(user.strava_athlete_id as number | null);
   const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
@@ -1505,6 +1510,12 @@ ${(() => {
     };
   })();
   const mileageLine = (() => {
+    // For non-Strava users with no tracked activities, avoid showing "0 mi" which
+    // causes Dean to treat the week as quiet and reset to a conservative plan.
+    const hasStravaInner = !!(user.strava_athlete_id as number | null);
+    if (!hasStravaInner && weekMileageSoFar === 0 && weekRunCount === 0) {
+      return `not tracked (athlete not on Strava) — refer to RECENT CONVERSATION for what was reported`;
+    }
     const done = `${mi(weekMileageSoFar)} done so far this week (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`;
     // For post_run: suppress the projected total — the user message already has the
     // authoritative ⚠️ WEEK-TO-DATE figure. Showing a projected total here too is what
@@ -2162,7 +2173,13 @@ Otherwise, send a short reminder text about tomorrow's workout. Three parts, all
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
     case "weekly_recap": {
       const weekMilesStr = weekMileageSoFar.toFixed(1);
-      const weekMileageContext = `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself.\n\n`;
+      // For non-Strava users with no tracked data, do NOT tell Claude "0 miles" —
+      // that causes Dean to say "last week was quiet" and reset to a conservative plan.
+      // Instead, tell Claude the data is missing and to use the conversation.
+      const noStravaMileageData = !hasStrava && weekMileageSoFar === 0;
+      const weekMileageContext = noStravaMileageData
+        ? `⚠️ MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Check RECENT CONVERSATION to see what the athlete reported, and base your recap on that. If they mentioned runs, count them. If they didn't report, keep the recap brief and forward-looking.\n\n`
+        : `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself.\n\n`;
       const deloadInstruction = periodization?.isDeloadWeek
         ? `\n⚠️ RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${periodization.suggestedWeeklyMiles.toFixed(1)} mi.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.\n`
         : periodization?.suggestedWeeklyMiles != null

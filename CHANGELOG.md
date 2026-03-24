@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Fixed mileage reset for non-Strava users on weekly recap
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake's mom, Catherine)
+**User feedback:** "She noticed is that Dean initially gave her 12 or maybe 10 miles of easy running in a week, then gave her 12, then gave her 11, so the mileage started going down. She's starting to feel good, so she actually feels like she can do more. It feels like he's not pushing her enough... Instead, he's just kind of randomly decreasing mileage."
+**Root cause:** Catherine doesn't use Strava. Every Sunday when the `weekly_recap` cron fired, `recentActivities` was empty → `weekMileageSoFar = 0`, `avgWeeklyMileage = null`, `suggestedWeeklyMiles = null`. Claude was explicitly told "0.0 mi across 0 runs this week" and treated it as authoritative — generating messages like "Last week was quiet — 0 miles logged" and resetting to a beginner-conservative plan (6.5mi) even when Catherine had been running 10–12mi weeks.
+**Fix / Change:**
+Three changes to `coach/respond/route.ts`:
+1. **Periodization fallback**: For non-Strava users where `avgWeeklyMileage` is null, fall back to `state.weekly_mileage_target` (what Dean last prescribed) as the baseline for progression target computation. This ensures the `+8%` build target is anchored to the actual prescribed plan, not to nothing.
+2. **System prompt mileage line**: When the athlete has no Strava and 0 tracked miles, replace "0.0 mi done so far" with "not tracked (athlete not on Strava) — refer to RECENT CONVERSATION for what was reported". Prevents Claude from treating 0 as a real mileage figure.
+3. **Weekly recap user message**: When no Strava and 0 tracked miles, replace the authoritative "0.0 mi this week" context block with an explicit warning: data is missing, do NOT say "quiet week", check conversation for what was reported.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-03-23 — Auto-resolve injury notes when athlete confirms they're better
 
 **Type:** Feature
