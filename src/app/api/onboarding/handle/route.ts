@@ -369,7 +369,7 @@ Rules:
     sport_type: sportType,
     ...extra,
     ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
-    ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null } : {}),
+    ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null, race_date_confirmed: true } : {}),
     ...(raceInfo.secondaryGoal || extra.secondary_goal
       ? { secondary_goal: raceInfo.secondaryGoal ?? extra.secondary_goal }
       : {}),
@@ -480,8 +480,9 @@ Rules:
     console.error("[onboarding] race_date parse failed:", e);
   }
 
-  // Merge extra fields first, then apply the dedicated race_date parse result on top
-  const mergedData = { ...onboardingData, ...removeNulls(extra), race_date: parsed.race_date };
+  // Merge extra fields first, then apply the dedicated race_date parse result on top.
+  // Set race_date_confirmed so isStepSatisfied knows the user explicitly answered.
+  const mergedData = { ...onboardingData, ...removeNulls(extra), race_date: parsed.race_date, race_date_confirmed: true };
   const nextStep = findNextStep("awaiting_race_date", mergedData);
 
   const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
@@ -1269,8 +1270,10 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
     case "awaiting_race_date":
       // Skip for injury recovery and return_to_running — no race date needed
       if (data.goal === "injury_recovery" || data.goal === "return_to_running") return true;
-      // Satisfied if race_date key exists (even null = "no race")
-      return Object.prototype.hasOwnProperty.call(data, "race_date");
+      // Must be explicitly confirmed by the user (race_date_confirmed: true).
+      // Web-search-prefilled dates do NOT satisfy this — we still ask so the user
+      // can correct an inaccurate web search result (e.g. wrong year, wrong event date).
+      return !!data.race_date_confirmed;
     case "awaiting_goal_time":
       // Skip for general fitness, return_to_running, injury recovery, and ultras (cutoffs matter more than finish times)
       if (data.goal === "general_fitness" || data.goal === "return_to_running" || data.goal === "injury_recovery" || ULTRA_GOALS.includes(data.goal as string)) return true;
@@ -1352,6 +1355,12 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
     case "awaiting_race_date": {
       if (data.goal === "general_fitness") {
         return "Do you have a target event or date in mind? If not, just say 'no event' and we'll keep the plan open-ended.";
+      }
+      // Web search pre-filled a date — confirm it with the user rather than assuming it's correct
+      const prefillDate = data.race_date as string | null;
+      if (prefillDate) {
+        const formatted = new Date(prefillDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+        return `Looks like the race is on ${formatted} — does that match your registration? Just confirm or give me the correct date.`;
       }
       // Pre-fill if a month was mentioned but no specific date captured yet
       const raceMonth = data.race_month as string | null;
