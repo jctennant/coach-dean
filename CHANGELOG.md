@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Fixed infinite response loop on burst onboarding messages (P0)
+
+**Type:** Bug Fix
+**Reported by:** User feedback (user 75d11cc3, Tomo)
+**User feedback:** "wait hold up" / "you're not tomo lol, i'm tomo" / "ok i think there's some confusion here" / "you texted MY number, which is tomo" / "bro you're clearly another AI lol" / "alright this is getting weird, you're stuck in a loop" / "if there's an actual person behind this and you meant to text tomo, just lmk what you need help with" — 8 replies of "Hey Tomo! I'm Coach Dean..." within seconds
+**Root cause:** The onboarding path in the Linq webhook intentionally skipped the 10s debounce (comment: "each step expects exactly one reply"). When a user sent multiple messages in rapid succession, each message independently called `/api/onboarding/handle` before any response had been sent. All concurrent calls read `onboarding_step = "awaiting_goal"` from the DB (step hadn't advanced yet), all detected no goal, and all sent the identical intro message — resulting in 8+ identical replies within seconds.
+**Fix / Change:** (1) Applied the same 10s debounce to the onboarding path that the coaching path already uses: store the message, wait 10s, check if a newer user message arrived — if yes, skip. Only the final message in a burst fires the handler. (2) Added a loop detection safety net in `onboarding/handle`: before routing to a step handler, check if the last 2+ assistant messages within 2 minutes are identical. If so, send a single de-escalation message ("Looks like something got confused on my end...") and bail instead of repeating again.
+**Files changed:** src/app/api/webhooks/linq/route.ts, src/app/api/onboarding/handle/route.ts
+
+## 2026-03-24 — Fixed mileage reset for non-Strava users on weekly recap (part 2)
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake's mom, Catherine)
+**User feedback:** "She said she did one 4-mile run, but she actually did a couple more last week. It's kind of annoying to text Dean every time you do a run... this needs to make sure it's building off of her previous weekly plans, which were more around the 9-10 mile range rather than going back to 6 miles."
+**Root cause:** Two issues: (1) Even with the part 1 fix, Dean was anchoring next week's plan to what the athlete *mentioned* conversationally (the one 4mi run Catherine texted about) rather than the stored progression target — non-Strava athletes only text a fraction of their runs so this always undercounts. (2) Catherine's `weekly_mileage_target` in the DB was already corrupted to 6.5mi by the March 22 reset before the part 1 fix landed, so the progression target itself was wrong.
+**Fix / Change:**
+- Added explicit prompt instruction to `weekly_recap` for non-Strava users: "Non-Strava athletes only text a fraction of their runs — assume they completed most of their plan. Build next week from the PROGRESSION TARGET in CURRENT TRAINING STATE, not from reported mileage." Prevents Claude from anchoring to conversational reports which always undercount.
+- Manual DB fix needed for Catherine: set `training_state.weekly_mileage_target = 10` to restore the correct baseline before next cron.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-03-24 — SMS feedback and refund commands with admin email notification
 
 **Type:** Feature

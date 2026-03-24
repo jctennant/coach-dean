@@ -414,7 +414,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
     // Persist week counter, phase, and computed target. Clear taper_peak_miles so the
     // next taper window re-locks the peak from scratch.
-    void supabase.from("training_state").update({
+    await supabase.from("training_state").update({
       current_week: periodization.effectiveWeek,
       current_phase: periodization.phase,
       taper_peak_miles: null,
@@ -423,17 +423,17 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }).eq("user_id", userId);
     // Extract and store the specific planned sessions so all subsequent messages
     // (post_run, reminders) use the exact same distances — not independently recalculated.
-    void extractAndStorePlanSessions(userId, coachMessage);
+    await extractAndStorePlanSessions(userId, coachMessage);
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
-    void supabase.from("training_state").update({
+    await supabase.from("training_state").update({
       current_week: periodization.effectiveWeek,
       current_phase: periodization.phase,
       ...(periodization.suggestedWeeklyMiles != null ? { weekly_mileage_target: periodization.suggestedWeeklyMiles } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
-    void extractAndStorePlanSessions(userId, coachMessage);
+    await extractAndStorePlanSessions(userId, coachMessage);
   }
 
   // For user_message, persist any profile updates extracted above (injuries, cross-training,
@@ -2182,7 +2182,7 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       // Instead, tell Claude the data is missing and to use the conversation.
       const noStravaMileageData = !hasStrava && weekMileageSoFar === 0;
       const weekMileageContext = noStravaMileageData
-        ? `⚠️ MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Check RECENT CONVERSATION to see what the athlete reported, and base your recap on that. If they mentioned runs, count them. If they didn't report, keep the recap brief and forward-looking.\n\n`
+        ? `⚠️ MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
         : `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself.\n\n`;
       const deloadInstruction = periodization?.isDeloadWeek
         ? `\n⚠️ RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${periodization.suggestedWeeklyMiles.toFixed(1)} mi.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.\n`

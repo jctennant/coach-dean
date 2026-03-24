@@ -277,30 +277,78 @@ describe("POST /api/webhooks/linq — message routing", () => {
   });
 
   it("routes onboarding user message to onboarding/handle", async () => {
-    mockTables({
-      conversations: { data: null, error: null }, // no dedup
-      users: {
-        data: {
-          id: "user-001", onboarding_step: "awaiting_goal",
-          timezone: "America/New_York", linq_chat_id: "chat-abc",
-          messaging_opted_out: false, reengagement_sent_at: null, strava_athlete_id: null,
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        // conversations is called 3x: dedup check, insert (storedMsg), debounce latest-msg check
+        conversations: [
+          { data: null, error: null },                    // dedup → no existing
+          { data: { id: "conv-001" }, error: null },      // insert → storedMsg
+          { data: { id: "conv-001" }, error: null },      // debounce check → same id → proceed
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: "awaiting_goal",
+            timezone: "America/New_York", linq_chat_id: "chat-abc",
+            messaging_opted_out: false, reengagement_sent_at: null, strava_athlete_id: null,
+          },
+          error: null,
         },
-        error: null,
-      },
-    });
+      });
 
-    const req = makeRequest("+12025551234", "I want to run a marathon");
-    await POST(req);
-    await flush();
+      const req = makeRequest("+12025551234", "I want to run a marathon");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await flushPromise;
 
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("onboarding/handle"),
-      expect.objectContaining({ method: "POST" })
-    );
-    expect(global.fetch).not.toHaveBeenCalledWith(
-      expect.stringContaining("coach/respond"),
-      expect.anything()
-    );
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("onboarding/handle"),
+        expect.objectContaining({ method: "POST" })
+      );
+      expect(global.fetch).not.toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("onboarding burst debounce: skips when a newer message has arrived", async () => {
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        // conversations: dedup → null, insert → conv-001, debounce check → conv-002 (newer!)
+        conversations: [
+          { data: null, error: null },
+          { data: { id: "conv-001" }, error: null },
+          { data: { id: "conv-002" }, error: null }, // different id → newer message arrived
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: "awaiting_goal",
+            timezone: "America/New_York", linq_chat_id: "chat-abc",
+            messaging_opted_out: false, reengagement_sent_at: null, strava_athlete_id: null,
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", "wait hold up");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await flushPromise;
+
+      // A newer message arrived during the debounce window — this call should be skipped
+      expect(global.fetch).not.toHaveBeenCalledWith(
+        expect.stringContaining("onboarding/handle"),
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores messages from opted-out users (no fetch, no SMS)", async () => {

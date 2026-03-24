@@ -326,7 +326,29 @@ async function handleInboundMessage(
     .single();
 
   if (user.onboarding_step) {
-    // Onboarding: no debounce — each step expects exactly one reply
+    // Debounce onboarding responses exactly like coaching: wait 10s so burst messages
+    // (the user typing several quick lines before we've replied) collapse into one call.
+    // Without this, each message fires the same step handler independently and sends
+    // identical replies — the root cause of the Tomo infinite-loop incident (2026-03-24).
+    console.log("[linq-webhook] onboarding debounce: waiting 10s for user", user.id);
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+
+    if (storedMsg) {
+      const { data: latestMsg } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("role", "user")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (latestMsg && latestMsg.id !== storedMsg.id) {
+        console.log("[linq-webhook] onboarding debounce: newer message arrived, skipping for", storedMsg.id);
+        return;
+      }
+    }
+
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
