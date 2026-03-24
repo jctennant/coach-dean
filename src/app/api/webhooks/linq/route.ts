@@ -6,6 +6,7 @@ import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
 import type { Json } from "@/lib/database.types";
 import crypto from "crypto";
+import { Resend } from "resend";
 
 // Allow up to 60s for image fetch + Claude vision + coach response
 export const maxDuration = 60;
@@ -331,6 +332,26 @@ async function handleInboundMessage(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId: user.id, message: messageBody, chatId: resolvedChatId }),
     });
+    return;
+  }
+
+  // Feedback / refund commands — intercept before coaching
+  const isFeedback = /^FEEDBACK\b/i.test(body);
+  const isRefundRequest = /^REFUND\b/i.test(body);
+
+  if (isFeedback || isRefundRequest) {
+    const ackMsg = isRefundRequest
+      ? "Got it — I've flagged your refund request and Jake will follow up with you within 24 hours."
+      : "Thanks — I got your feedback and will follow up soon.";
+    await sendAndStore(user.id, senderPhone, ackMsg, messageId);
+    void sendFeedbackEmail({
+      type: isRefundRequest ? "REFUND" : "FEEDBACK",
+      phone: senderPhone,
+      userId: user.id,
+      message: body,
+      hasStrava: !!user.strava_athlete_id,
+    });
+    void trackEvent(user.id, isRefundRequest ? "refund_requested" : "feedback_submitted");
     return;
   }
 
@@ -683,4 +704,52 @@ async function sendAndStore(userId: string, phone: string, message: string, mess
       external_message_id: messageId,
     }),
   ]);
+}
+
+async function sendFeedbackEmail(opts: {
+  type: "FEEDBACK" | "REFUND";
+  phone: string;
+  message: string;
+  userId: string;
+  hasStrava: boolean;
+}) {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!resendApiKey || !adminEmail) {
+    console.warn("[linq-webhook] RESEND_API_KEY or ADMIN_EMAIL not set, skipping feedback email");
+    return;
+  }
+
+  const preview = opts.message.slice(0, 80).replace(/\n/g, " ");
+  const subject = opts.type === "REFUND"
+    ? `[REFUND REQUEST] ${opts.phone}`
+    : `[FEEDBACK] ${opts.phone} — "${preview}"`;
+
+  const body = [
+    `Type: ${opts.type}`,
+    `Phone: ${opts.phone}`,
+    `User ID: ${opts.userId}`,
+    `Strava: ${opts.hasStrava ? "Connected" : "Not connected"}`,
+    `Timestamp: ${new Date().toISOString()}`,
+    ``,
+    `Message:`,
+    opts.message,
+  ].join("\n");
+
+  try {
+    const resend = new Resend(resendApiKey);
+    const { error } = await resend.emails.send({
+      from: "Coach Dean <feedback@coachdean.ai>",
+      to: [adminEmail],
+      subject,
+      text: body,
+    });
+    if (error) {
+      console.error("[linq-webhook] feedback email failed:", error);
+    } else {
+      console.log("[linq-webhook] feedback email sent:", opts.type, opts.phone);
+    }
+  } catch (err) {
+    console.error("[linq-webhook] feedback email error:", err);
+  }
 }
