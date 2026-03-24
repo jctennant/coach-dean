@@ -14,14 +14,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Phone number required" }, { status: 400 });
   }
 
-  // Normalize: strip non-digits, then format as +1XXXXXXXXXX for US
+  // Normalize to E164 (+1XXXXXXXXXX) — that's what the DB stores.
+  // Accept: "5107084020", "15107084020", "+15107084020", "(510) 708-4020", etc.
   const digits = phone.replace(/\D/g, "");
-  // Try both with and without country code
-  const candidates = [
-    digits,
-    digits.length === 10 ? `+1${digits}` : null,
-    digits.startsWith("1") && digits.length === 11 ? `+${digits}` : null,
-  ].filter(Boolean) as string[];
+  const e164 = digits.length === 10
+    ? `+1${digits}`
+    : digits.length === 11 && digits.startsWith("1")
+    ? `+${digits}`
+    : phone.trim(); // pass through as-is if already formatted
+  // Also try the raw input in case the DB has an unusual format
+  const candidates = [...new Set([e164, phone.trim()])];
 
   let userData: { id: string; dashboard_token: string | null; phone_number: string } | null = null;
 
@@ -30,8 +32,7 @@ export async function POST(request: Request) {
       .from("users")
       .select("id, dashboard_token, phone_number")
       .eq("phone_number", candidate)
-      .is("onboarding_step", null) // only fully onboarded users
-      .single();
+      .maybeSingle();
     if (data) {
       userData = data;
       break;
