@@ -91,6 +91,9 @@ export async function POST(request: Request) {
   // Loop detection: if the last 2+ assistant messages within 2 minutes are identical,
   // we're stuck in a response loop (debounce wasn't enough, or race condition).
   // Break out with a single de-escalation message instead of repeating again.
+  // If the most recent message is already the de-escalation itself, stay silent —
+  // firing it again would just restart the same loop with different content.
+  const DEESCALATION_MSG = "Looks like something got confused on my end — sorry about that! I'm Coach Dean, your AI running coach. What are you training for?";
   {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const { data: recentMsgs } = await supabase
@@ -102,15 +105,24 @@ export async function POST(request: Request) {
       .order("created_at", { ascending: false })
       .limit(3);
 
-    if (recentMsgs && recentMsgs.length >= 2 && recentMsgs[0].content === recentMsgs[1].content) {
+    const loopDetected = recentMsgs && recentMsgs.length >= 2 && recentMsgs[0].content === recentMsgs[1].content;
+    const deEscalationAlreadySent = recentMsgs && recentMsgs[0]?.content === DEESCALATION_MSG;
+
+    if (loopDetected && !deEscalationAlreadySent) {
       console.log("[onboarding] loop detected: identical response sent 2+ times, de-escalating for", userId);
       keepTypingAlive = false;
-      await sendAndStore(
-        user.id,
-        user.phone_number,
-        "Looks like something got confused on my end — sorry about that! I'm Coach Dean, your AI running coach. What are you training for?",
-        step ?? undefined
-      );
+      // Mark intro_sent so subsequent non-goal messages get the shorter follow-up
+      // ("What are you training for?") rather than triggering the full intro again.
+      const updatedData = { ...onboardingData, intro_sent: true };
+      void supabase.from("users").update({ onboarding_data: updatedData as Json }).eq("id", userId);
+      await sendAndStore(user.id, user.phone_number, DEESCALATION_MSG, step ?? undefined);
+      if (dry_run) dryRunUsers.delete(userId);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (loopDetected && deEscalationAlreadySent) {
+      console.log("[onboarding] loop detected but de-escalation already sent, staying silent for", userId);
+      keepTypingAlive = false;
       if (dry_run) dryRunUsers.delete(userId);
       return NextResponse.json({ ok: true });
     }
