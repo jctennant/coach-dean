@@ -340,10 +340,6 @@ async function handleInboundMessage(
   const isRefundRequest = /^REFUND\b/i.test(body);
 
   if (isFeedback || isRefundRequest) {
-    const ackMsg = isRefundRequest
-      ? "Got it — I've flagged your refund request and Jake will follow up with you within 24 hours."
-      : "Thanks — I got your feedback and will follow up soon.";
-    await sendAndStore(user.id, senderPhone, ackMsg, messageId);
     void sendFeedbackEmail({
       type: isRefundRequest ? "REFUND" : "FEEDBACK",
       phone: senderPhone,
@@ -352,7 +348,14 @@ async function handleInboundMessage(
       hasStrava: !!user.strava_athlete_id,
     });
     void trackEvent(user.id, isRefundRequest ? "refund_requested" : "feedback_submitted");
-    return;
+
+    if (isRefundRequest) {
+      // Billing issue — Dean can't action this, send ack and stop
+      await sendAndStore(user.id, senderPhone, "Got it — I've flagged your refund request and Jake will follow up with you within 24 hours.", messageId);
+      return;
+    }
+    // Feedback — let it fall through to the coaching path so Dean can respond
+    // (coaching adjustment if actionable, graceful handoff if it's a product suggestion)
   }
 
   // Detect "connect strava" / "add strava" intent from fully-onboarded users

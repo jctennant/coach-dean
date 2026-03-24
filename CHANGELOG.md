@@ -10,8 +10,8 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Reported by:** Internal (pre-launch feedback loop design)
 **User feedback:** N/A
 **Root cause:** No way for users to submit feedback or request refunds through Coach Dean — they'd have to find a separate contact channel.
-**Fix / Change:** Added `FEEDBACK:` and `REFUND` SMS command handling in the Linq webhook. When an onboarded user sends a message starting with either keyword, Coach Dean auto-acks with a friendly reply and fires a structured email to the admin (via Resend) containing the user's phone, user ID, Strava connection status, timestamp, and full message. REFUND gets its own subject prefix and a "within 24 hours" SLA message. Both events are tracked in PostHog. Requires `RESEND_API_KEY` and `ADMIN_EMAIL` env vars.
-**Files changed:** `src/app/api/webhooks/linq/route.ts`
+**Fix / Change:** Added `FEEDBACK:` and `REFUND` SMS command handling in the Linq webhook. Both fire a structured admin email via Resend (phone, user ID, Strava status, timestamp, full message). REFUND sends an ack SMS and stops — Dean can't action billing. FEEDBACK falls through to the normal coaching path so Dean can respond: if it's coaching-actionable (e.g. "more intervals"), he acts on it directly without acknowledging the feedback label; if it's a product suggestion, he says "Got it — I'll pass that along." Dean's `user_message` prompt includes explicit rules for both paths. Requires `RESEND_API_KEY` and `ADMIN_EMAIL` env vars.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/app/api/coach/respond/route.ts`
 
 ## 2026-03-24 — Fixed mileage reset for non-Strava users on weekly recap
 
