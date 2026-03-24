@@ -393,8 +393,9 @@ Rules:
   let acknowledgment: string;
   if (raceInfo.ack) {
     // Specific named race found — use the conversational acknowledgment directly.
-    // Append constraint acknowledgment if one was generated.
-    acknowledgment = constraintAck ? `${raceInfo.ack} ${constraintAck}` : raceInfo.ack;
+    // Prefix with name when known (race acks are race-focused and don't include it naturally).
+    const namePrefix = name ? `Hey ${name} — ` : "";
+    acknowledgment = constraintAck ? `${namePrefix}${raceInfo.ack} ${constraintAck}` : `${namePrefix}${raceInfo.ack}`;
   } else if (parsed.goal === "injury_recovery") {
     acknowledgment = `Got it${name ? `, ${name}` : ""} — coming back from injury safely is exactly what I'm here for. I'll build a return-to-run plan around your recovery, not a generic training schedule.`;
   } else if (parsed.goal === "return_to_running") {
@@ -411,6 +412,12 @@ Rules:
   }
 
   if (constraintAck && !raceInfo.ack) acknowledgment += ` ${constraintAck}`;
+
+  // Direct-text users skip the web signup intro ("I'm Coach Dean — your AI running coach...").
+  // Append a one-line identity note so they know who they're texting.
+  if (!onboardingData.intro_sent) {
+    acknowledgment += ` I'm Coach Dean, your AI running coach.`;
+  }
 
   const question = nextStep ? getStepQuestion(nextStep, mergedData, user.id) : "";
 

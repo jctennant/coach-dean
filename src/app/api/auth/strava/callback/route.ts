@@ -174,29 +174,15 @@ export async function GET(request: Request) {
     ? `I can see your recent runs — ${recentMiles} miles across ${recentCount} ${recentCount === 1 ? "run" : "runs"} in the last 4 weeks. That's great context.`
     : `I can see your training history — that's going to help a lot.`;
 
-  // Check whether the onboarding flow already sent a message in the last 3 minutes.
-  // This prevents a double-message race: if the user texted while waiting for Strava to
-  // connect, the onboarding handler fires (advancing to awaiting_schedule and asking
-  // the schedule question) at nearly the same time as this callback — resulting in two
-  // consecutive messages both asking the same question.
-  let recentOnboardingMessage = false;
-  if (!alreadyOnboarded) {
-    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    const { data: recentMsgs } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "assistant")
-      .gte("created_at", threeMinutesAgo)
-      .limit(1);
-    recentOnboardingMessage = !!(recentMsgs && recentMsgs.length > 0);
-  }
-
+  // Connecting Strava IS the answer to "do you use Strava?" — so when the user was on
+  // awaiting_strava, ask the next question (schedule) rather than telling them to answer
+  // a question they just answered. If they've already progressed past awaiting_strava
+  // (shouldAdvanceToSchedule = false), just confirm the connection and stay out of the way.
   const smsMsg = alreadyOnboarded
     ? `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`
-    : recentOnboardingMessage
-      ? `Strava connected${firstName}! ${stravaSeenLine} Go ahead and answer that question above when you're ready.`
-      : `Strava connected${firstName}! ${stravaSeenLine} A couple more quick questions: which days of the week work best for you? (e.g. Mon, Wed, Fri, Sun)`;
+    : shouldAdvanceToSchedule
+      ? `Strava connected${firstName}! ${stravaSeenLine} Which days of the week work best for training? (e.g. Mon, Wed, Fri, Sun)`
+      : `Strava connected${firstName}! ${stravaSeenLine}`;
 
   await Promise.all([
     sendSMS(user.phone_number, smsMsg),
