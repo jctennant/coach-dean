@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Fix race_date null overwrite, race distance from web search, deload labeling, short-plan phase scaling
+
+**Type:** Bug Fix + Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "1) It doesn't seem like I actually have a taper built into my race right now. 2) I'm still getting the issue where I say I want to do the Dipsy race, which is 7.4 miles, but it says I'm doing a 10K at the top of my plan. 3) In onboarding, Dean did not ask which races are my A, B, or C races or which is my priority."
+**Root cause:**
+- **Root bug (causes issues 1 and 3):** In `handleRaceDate`, when the user says "yes" to confirm a web-search pre-filled race date, the Haiku parser returns `parsed.race_date = null` (no date literal in "yes"). The code then wrote `race_date: null` over the pre-filled value. This caused: (a) `awaiting_other_races` to be skipped (its `isStepSatisfied` check exits early when `!data.race_date`), meaning Dean never asked about A/B/C race priority; (b) `training_profiles.race_date = null`, causing `generateAndSaveFullPlan` to run with `hasRace=false` → 12-week base/build cycle with no taper instead of a race-specific arc with taper.
+- **Issue 2 (race distance label):** When user says just "Dipsea" without an explicit distance, the goal classifier correctly maps it to the "10k" bucket but sets `goal_distance_miles: null`. The web search finds the real distance (7.4 mi) in the acknowledgment but that value was never extracted or stored — so the dashboard fell back to the bucket label "10K".
+- **Deload weeks:** Always existed in the plan but were stored with the parent phase label (e.g. "Base"), making them invisible to the user.
+- **Short-plan phase thresholds:** With totalWeeks ≤ 16, `weeksFromEnd` is always < 14 so no "base" phase was ever assigned — everything collapsed into "build/peak/taper".
+**Fix / Change:**
+- `handleRaceDate`: `finalRaceDate = parsed.race_date ?? onboardingData.race_date ?? null` — preserves pre-filled date when user just confirms.
+- `generateRaceAcknowledgment`: Added `distanceMiles: number | null` to `RaceInfo`. Prompt now instructs Claude to return `distance_miles` when the race has a non-standard distance (e.g. 7.4 for Dipsea). Stored in `onboarding_data.goal_distance_miles` as fallback if the goal classifier didn't set one.
+- `computePhaseForPlan`: Thresholds now scale proportionally (`scale = totalWeeks / 24`) so 12-week plans get base → build → peak → taper phases.
+- Training plan loop: Deload weeks now stored with `phase: "deload"` instead of the parent phase label.
+- Dashboard: Added `deload` to `PHASE_LABELS` ("Deload") and `PHASE_COLORS` (green badge).
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/lib/training-plan.ts, src/app/dashboard/page.tsx
+
+---
+
 ## 2026-03-25 — Web search for race time research questions during goal-time onboarding step
 
 **Type:** Feature

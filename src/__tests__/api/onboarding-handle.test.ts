@@ -266,6 +266,115 @@ describe("POST /api/onboarding/handle — loop detection", () => {
   });
 });
 
+describe("POST /api/onboarding/handle — awaiting_race_date step", () => {
+  function raceDateUser(onboardingDataOverrides: Record<string, unknown> = {}) {
+    return {
+      id: "user-001",
+      phone_number: "+12025551234",
+      name: "Jake",
+      onboarding_step: "awaiting_race_date",
+      onboarding_data: {
+        goal: "10k",
+        race_name: "Dipsea Trail Race",
+        intro_sent: true,
+        ...onboardingDataOverrides,
+      },
+    };
+  }
+
+  // Claude call order for awaiting_race_date:
+  // 1. checkOffTopic (1 Haiku call) → {"on_topic": true}
+  // 2. handleRaceDate fires 3 parallel calls:
+  //    a. date parse Haiku → {"race_date": ...}
+  //    b. extractAdditionalFields Haiku → {}
+  //    c. acknowledgeSharedInfo Haiku → null
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("preserves pre-filled race_date when Haiku returns null (user said 'yes')", async () => {
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"on_topic": true}' }] })       // checkOffTopic
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"race_date": null}' }] })      // date parse
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "{}" }] })                       // extractAdditionalFields
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] });                    // acknowledgeSharedInfo
+
+    const usersChain = chain({ data: raceDateUser({ race_date: "2026-06-08" }), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Yes, that's right" });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    // Pre-filled date must be preserved — not overwritten with null
+    expect(stepUpdate[0].onboarding_data.race_date).toBe("2026-06-08");
+    expect(stepUpdate[0].onboarding_data.race_date_confirmed).toBe(true);
+  });
+
+  it("uses the new date when Haiku parses an explicit correction", async () => {
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"on_topic": true}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"race_date": "2026-06-15"}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "{}" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] });
+
+    const usersChain = chain({ data: raceDateUser({ race_date: "2026-06-08" }), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Actually it's June 15th" });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    // Explicit correction takes precedence over the pre-filled date
+    expect(stepUpdate[0].onboarding_data.race_date).toBe("2026-06-15");
+    expect(stepUpdate[0].onboarding_data.race_date_confirmed).toBe(true);
+  });
+
+  it("awaiting_other_races is NOT skipped when race_date is preserved", async () => {
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"on_topic": true}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"race_date": null}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "{}" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] });
+
+    const usersChain = chain({ data: raceDateUser({ race_date: "2026-06-08" }), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Yep" });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    // With race_date preserved, findNextStep should advance to awaiting_other_races
+    // (not skip it by treating race_date as null)
+    expect(stepUpdate[0].onboarding_step).toBe("awaiting_other_races");
+  });
+});
+
 describe("POST /api/onboarding/handle — awaiting_other_races step", () => {
   // Base user at the awaiting_other_races step with a marathon goal
   function otherRacesUser(onboardingDataOverrides: Record<string, unknown> = {}) {
