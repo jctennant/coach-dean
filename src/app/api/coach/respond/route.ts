@@ -650,15 +650,23 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
     }
     if (sessionDate.getTime() < earliestSessionMs) earliestSessionMs = sessionDate.getTime();
 
+    // Skip mileage counting for cross-training sessions regardless of what unit appears.
+    // Claude sometimes writes "60mi" meaning "60 minutes" for bike sessions — counting
+    // that as 60 miles inflates the total and defeats the correction.
+    const isCrossTraining = /\b(bike|biking|cycling|swim|swimming|strength|mobility|stretch|yoga|elliptical|cross.train)\b/i.test(desc);
+    if (isCrossTraining) continue;
+
     // Positive matching: only count sessions that have an explicit mileage marker.
     // Non-running sessions (strength, cross-training, swimming, cycling, rest) are
     // instructed in the prompt to NEVER include a distance in miles — so no mi marker
     // means it's a non-running session. This avoids a brittle exclusion keyword list.
     //   "≈7mi", "~7mi", "(7mi total)", "= 7mi" — these are intentionally placed totals.
     // Fall back to the first mileage figure for simple sessions ("Easy 5mi @ 9:30/mi" → 5).
-    const explicitTotal = desc.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
-      || desc.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
-    const firstMi = desc.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    // Use word boundaries on "mi" so "60 min" is not counted as 60 miles.
+    // \bmi\b matches "mi" and "mi" alone; "miles" is caught by the mi(?:les?)? variant.
+    const explicitTotal = desc.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?:les?)?\b/i)
+      || desc.match(/\((\d+(?:\.\d+)?)\s*mi(?:les?)?(?:\s+total)?\)/i);
+    const firstMi = desc.match(/(\d+(?:\.\d+)?)\s*mi(?:les?)?\b/i);
     const miMatch = explicitTotal || firstMi;
     if (miMatch) plannedMiles += parseFloat(miMatch[1]);
   }
@@ -1569,6 +1577,7 @@ Your response is sent directly to the athlete as an SMS text message. Never incl
 - Internal reasoning, calculations, or self-corrections ("Wait...", "Let me recalculate...", "Actually...", "Let me think about...")
 - Draft versions or abandoned attempts ("I was going to say X but actually Y")
 - Meta-commentary about the plan ("I need to be smart here", "Given his history...")
+- Any commentary about discrepancies between what the system prompt says and what you know ("The system says X but I know X is actually Y...") — if you notice a data issue, proceed with what's in the system prompt and say nothing about it
 Do all reasoning silently before writing your final response. Output only the message the athlete should receive.
 
 CRITICAL — TRAINING PACES:
@@ -2401,7 +2410,8 @@ SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
 
-MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.`;
+MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
+⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.`;
     }
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
@@ -2465,6 +2475,7 @@ SPORT-SPECIFIC GUIDANCE:
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
+⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.
 
 SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days if the athlete has requested them.
 ⚠️ CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.

@@ -1761,15 +1761,17 @@ If the race offers multiple distance options (e.g. 10K, 30K, 50K, 50 miles) AND 
 {"ack": "<1-2 sentence acknowledgment of the race without assuming distance>", "date": "YYYY-MM-DD" | null, "distance_options": ["10K", "30K", "50K", "50 miles"]}
 The "ack" in this case should mention the race name and terrain/character but NOT a specific distance.
 
+IMPORTANT — Multi-race messages: When an athlete mentions several races, identify their PRIMARY goal (usually the one they say is their "main objective", "A race", or the most important event). All fields below refer to that primary race only.
+
 If the race has only one distance, or the athlete clearly stated their distance:
 Write a conversational 1-3 sentence acknowledgment ("ack") that:
 - Mentions the race naturally with real course facts (distance, elevation, terrain) — not like a Wikipedia entry, more like "Behind the Rocks looks like a great one — 18 miles of slickrock with ~1,800ft of climbing"
+- If secondary races were mentioned, briefly acknowledge them in context (e.g. "Dipsea and Broken Arrow will serve as great tune-up races leading into CCC")
 - If the race is within 8 weeks of today, acknowledge the timeline naturally ("not a ton of runway, but totally doable" / "only X weeks out, so we'll keep it focused")
-- If the athlete mentioned any secondary goals (e.g. "plus a 100K this summer"), briefly acknowledge them ("and we can keep that 100K in mind as we build")
 - Tone: warm, direct, like a coach texting — no "Love it!" opener, no asterisks, no markdown
 - 2-3 sentences max, under 280 chars
 Output: {"ack": "...", "date": "YYYY-MM-DD" | null, "distance_options": null, "distance_miles": number | null, "secondary_goal": "brief description" | null}
-- distance_miles: the race's actual distance in miles as a number (e.g. 7.4 for Dipsea, 15.53 for 25K). null for standard distances like exact 5K, 10K, half, marathon, 50K, 100K, 100mi where the bucket label is accurate enough. Set this when the race has a non-standard or unusual distance that differs from a clean bucket.
+- distance_miles: the PRIMARY race's actual distance in miles. null for standard distances like exact 5K, 10K, half, marathon, 50K, 100K, 100mi where the bucket label is accurate enough. Set this only when the primary race has a non-standard or unusual distance (e.g. Dipsea = 7.4mi, a 25K = 15.53mi). CRITICAL: if the athlete mentions multiple races and their primary goal is a standard distance (e.g. 100K, 50K, marathon), return distance_miles: null — do NOT return the distance of a secondary race.
 - secondary_goal: if the athlete clearly mentions a second race/event/goal beyond the primary one (e.g. "and then a 100K this summer", "plus Boston next year"), capture it as a short plain-text description. null if none.
 
 CRITICAL RULES:

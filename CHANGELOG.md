@@ -4,6 +4,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Fix multi-race onboarding stealing wrong distance; fix bike "mi" inflating mileage; stop model reasoning leaking as SMS
+
+**Type:** Bug Fix (3 bugs)
+**Reported by:** Nathan's onboarding conversation
+**User feedback:** "adding 60 min of biking to run mileage - he's not actually doing 98 miles"; "his dashboard said his race was 7.4 miles"; "sounds like some of the reflection of the model is coming in too"
+
+**Bug 1 — Cross-training "60 min" counted as 60 running miles:**
+**Root cause:** Claude correctly wrote "Easy bike 60 min" but the mileage regex `/(\d+(?:\.\d+)?)\s*mi/i` has no word boundary — it matched "mi" as the first two letters of "min", counting the session as 60 miles. Session total became 38 running + 60 bike = 98. Since the stated total matched the (incorrectly) computed total, `correctMileageTotal` made no correction.
+**Fix:** Two-layer fix: (1) `correctMileageTotal` now skips mileage extraction entirely for sessions whose description contains cross-training keywords (bike, swim, strength, mobility, etc.); (2) the regex now uses `mi(?:les?)?\b` with a word boundary so "60 min" can never register as mileage even in a running session. Added explicit ⚠️ CROSS-TRAINING FORMAT prompt rule to reinforce using 'min' not 'mi'.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+**Bug 2 — CCC showing as "7.4 miles" (Dipsea's distance):**
+**Root cause:** `generateRaceAcknowledgment` received Nathan's full multi-race message (Dipsea ~7mi, Broken Arrow 23K, CCC 100K). The web-search LLM returned `distance_miles: 7.4` (Dipsea's non-standard distance) even though CCC was the primary goal. The fallback at `raceInfo.distanceMiles` stored 7.4 as `goal_distance_miles`. Since `|7.4 - 62.137| > 0.5`, the system prompt showed "CCC (7.4 miles)". Fixed Nathan's data: cleared `goal_distance_miles` to null in both `training_profiles` and `users.onboarding_data`.
+**Fix:** Updated `generateRaceAcknowledgment` prompt to identify the PRIMARY goal race and return `distance_miles` only for that race. Added explicit rule: if primary race is a standard bucket (100K, 50K, marathon, etc.), return null even if a secondary race has a non-standard distance.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+**Bug 3 — Model reasoning sent as SMS bubbles:**
+**Root cause:** System prompt said "CCC (7.4 miles)" (Bug 2). Model recognized CCC as a 100K, output its confusion as paragraphs, which `splitIntoMessages` turned into separate SMS bubbles.
+**Fix:** Strengthened OUTPUT RULES to explicitly prohibit any meta-commentary about discrepancies between system prompt data and what the model knows. Root fix is Bug 2 — removing the contradictory data prevents the confusion from arising.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-03-25 — Code-level plan validation: enforce volume caps and deduplicate sessions post-generation
 
 **Type:** Bug Fix
