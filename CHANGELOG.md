@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Add SMS commands FAQ entry to landing page
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Users had no way to discover commands like FEEDBACK and MY PLAN without being told out-of-band.
+**Fix / Change:** Added a new FAQ item "Are there any special commands I can text Dean?" listing FEEDBACK, MY PLAN, and STOP with brief descriptions of what each does.
+**Files changed:** src/app/page.tsx
+
+---
+
 ## 2026-03-25 — Add 15s timeout to race acknowledgment web search
 
 **Type:** Bug Fix

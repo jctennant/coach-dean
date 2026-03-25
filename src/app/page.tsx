@@ -301,8 +301,22 @@ export default function Home() {
                 a: "Just tell Dean. Seriously — text him like you'd text a coach. Whether you missed a run, got sick, or needed a mental break, Dean will adjust your upcoming week to account for it and keep you on track toward your goal. Life happens, and a good coach works around it rather than ignoring it.",
               },
               {
+                q: "Are there any special commands I can text Dean?",
+                a: (
+                  <>
+                    <p>Beyond just chatting, a few keywords trigger specific actions:</p>
+                    <ul className="mt-3 space-y-2">
+                      <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Dean got wrong.</li>
+                      <li><span className="font-mono font-semibold text-foreground">MY PLAN</span> — get a link to your training plan dashboard, where you can see your full season schedule.</li>
+                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — unsubscribe from all messages at any time. You can always restart by texting Dean again.</li>
+                    </ul>
+                    <p className="mt-3">Everything else is just plain conversation — ask questions, report a run, tell Dean your knee hurts. He handles it.</p>
+                  </>
+                ),
+              },
+              {
                 q: "Is my data private?",
-                a: "Your training data, pace information, and conversations with Dean are used solely to power your coaching experience — nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is read-only and only used to pull your workout history into Dean. You can request deletion of your data at any time by texting Dean or emailing jake.c.tennant@gmail.com.",
+                a: "Your training data, pace information, and conversations with Dean are used solely to power your coaching experience — nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is read-only and only used to pull your workout history into Dean. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
               },
             ].map(({ q, a }) => (
               <details key={q} className="group py-4">
