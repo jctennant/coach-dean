@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Fixed "I'm Coach Dean" re-introduction after intro already sent
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake)
+**User feedback:** "Still getting the weird 'I'm Coach Dean...' after he already did an intro"
+**Root cause:** The `intro_sent: true` DB update in `handleGoal` (no-goal branch) used `void` (fire-and-forget). On Vercel, the function can be killed after returning the HTTP response but before the unawaited promise resolves. When the user's next message arrived, `onboarding_data.intro_sent` was still falsy, so the goal-processing branch appended "I'm Coach Dean, your AI running coach." again. Secondary issue: the update used the original `onboardingData` snapshot, which didn't include any name extracted during the same invocation — overwriting `onboarding_data.name` on the next write.
+**Fix / Change:** Changed `void supabase.update(...)` to `await supabase.update(...)` so `intro_sent` is reliably persisted before the handler returns. Also merged any extracted name into the update payload to prevent the data-loss overwrite.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-25 — Reject short code / non-E.164 senders in Linq webhook
 
 **Type:** Bug Fix

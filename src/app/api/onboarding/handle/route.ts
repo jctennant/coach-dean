@@ -337,9 +337,17 @@ Rules:
     const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText, "awaiting_goal");
     const effectiveChatId = chatId ?? learnedChatId;
     if (effectiveChatId) void shareContactCard(effectiveChatId);
-    // Mark intro as sent so subsequent messages don't re-append the identity note
+    // Mark intro as sent so subsequent messages don't re-append the identity note.
+    // Must be awaited — void/fire-and-forget can be killed by Vercel before completing,
+    // leaving intro_sent unset and causing "I'm Coach Dean" to repeat on the next message.
+    // Also merge in any name extracted this message so it isn't overwritten.
     if (!introAlreadySent) {
-      void supabase.from("users").update({ onboarding_data: { ...onboardingData, intro_sent: true } as Json }).eq("id", user.id);
+      const mergedForIntro = {
+        ...onboardingData,
+        ...(nameFromMessage ? { name: nameFromMessage } : {}),
+        intro_sent: true,
+      };
+      await supabase.from("users").update({ onboarding_data: mergedForIntro as Json }).eq("id", user.id);
     }
     return NextResponse.json({ ok: true });
   }
