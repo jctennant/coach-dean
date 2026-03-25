@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Dean can adjust upcoming training plan weeks for illness/injury/travel
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** "Dean needs to be able to update the next week if needed to accommodate for illness, injury, travel, or change in priorities (maybe updating the quality workout for example). Or 'remove' a week from the plan for a full illness, etc."
+**Root cause:** Training plan arc was static after generation. Dean could give verbal advice about modifying training but had no way to actually update the stored plan.
+**Fix / Change:**
+- Extended plan fetch to also fire for `user_message` trigger (was `weekly_recap` only), pulling current + next week from `training_plans`
+- Injected next week context ("Week N: X mi target, key workout: ...") into Dean's `user_message` prompt so Dean can see what it's working with
+- Added `TRAINING PLAN ADJUSTMENT` instruction to Dean's prompt: when illness/injury/travel/priority change warrants it, Dean should commit to the change explicitly ("I've updated next week on your dashboard — dropping it to X miles...")
+- Added `maybeUpdateTrainingPlanWeeks` function: after each `user_message` response, if adjustment-relevant keywords are present (sick, injured, travel, etc.), runs a Haiku extraction to detect whether Dean committed to a plan change and extracts the new values (mileage_target, key_workout, notes). Patches those week objects in `training_plans.weeks` JSONB. Only fires on keyword match to avoid unnecessary calls.
+- "Remove a week" = Dean sets mileage_target to ~30% of original and key_workout to "Easy recovery — no quality work"
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-24 — Dashboard shows actual mileage and completion per week
 
 **Type:** Feature

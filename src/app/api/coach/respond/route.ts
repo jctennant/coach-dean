@@ -249,26 +249,34 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     upcomingRaces
   );
 
-  // For weekly_recap, fetch the stored training plan so Dean can reference what was planned
-  let storedPlanWeek: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null = null;
-  if (trigger === "weekly_recap") {
+  // For weekly_recap and user_message, fetch the stored training plan.
+  // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
+  // user_message: injects the next-week plan so Dean can propose and commit to adjustments.
+  type StoredPlanWeek = { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string };
+  let storedPlanWeek: StoredPlanWeek | null = null;
+  let storedNextPlanWeek: StoredPlanWeek | null = null;
+  let storedPlanAllWeeks: StoredPlanWeek[] = [];
+  let storedPlanId: string | null = null;
+  if (trigger === "weekly_recap" || trigger === "user_message") {
     const { data: planData } = await supabase
       .from("training_plans")
-      .select("weeks, total_weeks")
+      .select("id, weeks, total_weeks")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
     if (planData?.weeks && Array.isArray(planData.weeks)) {
       const currentWeekNum = periodization.effectiveWeek;
-      const planWeeks = planData.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>;
-      storedPlanWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? null;
+      storedPlanAllWeeks = planData.weeks as StoredPlanWeek[];
+      storedPlanId = planData.id as string;
+      storedPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
+      storedNextPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
     }
   }
 
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -484,6 +492,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       }
       const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
       await maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage);
+      if (storedPlanId && storedPlanAllWeeks.length > 0) {
+        await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
+      }
     }
   }
 
@@ -1210,6 +1221,69 @@ Rules:
     }
   } catch {
     // parse failed — leave sessions unchanged
+  }
+}
+
+/**
+ * After a user_message exchange, check if the coach committed to adjusting any
+ * upcoming training plan weeks (e.g. reducing mileage for illness, swapping the
+ * key workout for travel, marking a week as recovery). If so, patch those weeks
+ * in the stored training_plans.weeks JSONB array.
+ *
+ * Only fires when adjustment-relevant keywords are present — avoids a Haiku call
+ * on every conversational message.
+ */
+async function maybeUpdateTrainingPlanWeeks(
+  planId: string,
+  allWeeks: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>,
+  userMessage: string,
+  coachResponse: string
+): Promise<void> {
+  const adjustmentKeywords = /\b(sick|ill|illness|injury|injured|hurt|travel|traveling|travelling|busy|adjust|update.*plan|change.*plan|drop.*week|recovery week|rest week|modified|lighter week|easy week)\b/i;
+  if (!adjustmentKeywords.test(userMessage) && !adjustmentKeywords.test(coachResponse)) return;
+
+  // Only look ahead at upcoming weeks — don't allow retroactive changes to past weeks.
+  // We infer "current" as the lowest week_number not yet modified; practically just pass all weeks
+  // and let Haiku pick the right ones from the coach's response.
+  const upcomingWeeks = allWeeks.slice(0, 8); // limit context size
+
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 300,
+    system: `You are checking whether a coaching exchange committed to changing an upcoming training plan week.
+
+Upcoming plan weeks (JSON):
+${JSON.stringify(upcomingWeeks)}
+
+If the coach did NOT explicitly commit to changing a plan week, return: {"changed": false}
+If the coach DID commit (e.g. said "I've updated week X", "I've adjusted next week", "dropping week X to...", "I'll make it a recovery week"), return:
+{"changed": true, "weeks": [{"week_number": N, "mileage_target": X, "key_workout": "...", "notes": "..."}]}
+
+Rules:
+- Only return changed=true if the coach explicitly stated it is making a plan change — not just giving advice
+- week_number must match an existing week in the list above
+- For a recovery/rest week: mileage_target should be ~30% of the original, key_workout "Easy recovery — no quality work"
+- Only include fields that are actually changing; always include week_number
+- Return ONLY valid JSON, no other text`,
+    messages: [{ role: "user", content: `Athlete: ${userMessage}\n\nCoach: ${coachResponse}` }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+  try {
+    const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    if (!parsed.changed || !Array.isArray(parsed.weeks) || parsed.weeks.length === 0) return;
+
+    const updatedWeeks = allWeeks.map(w => {
+      const change = parsed.weeks.find((c: { week_number: number }) => c.week_number === w.week_number);
+      return change ? { ...w, ...change } : w;
+    });
+
+    await supabase
+      .from("training_plans")
+      .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
+      .eq("id", planId);
+  } catch {
+    // parse failed — leave plan unchanged
   }
 }
 
@@ -2060,7 +2134,8 @@ function buildUserMessage(
   weekRunCount = 0,
   missedRunCheckin?: boolean,
   periodization?: PeriodizationContext,
-  storedPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null
+  storedPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
+  storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -2153,10 +2228,15 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - Upcoming sessions: if THIS WEEK'S PLANNED SESSIONS is present in CURRENT TRAINING STATE, use those exact sessions and distances. Do not recalculate, substitute, or invent different numbers. Only omit sessions that have already been completed (i.e. activity date falls on or before today's date).
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
-    case "user_message":
+    case "user_message": {
+      const nextWeekContext = storedNextPlanWeek
+        ? `Week ${storedNextPlanWeek.week_number} (next week): ${storedNextPlanWeek.mileage_target} mi target, long run ${storedNextPlanWeek.long_run_target} mi, key workout: ${storedNextPlanWeek.key_workout}`
+        : null;
       return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
 
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.
+
+TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for a easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
 LENGTH IN CONVERSATION: Check RECENT CONVERSATION. If there are already 4+ messages from today (active back-and-forth), keep this reply to 1 bubble — 2 at most. Answer the question directly and stop. Don't pad with context that was already covered.
 
@@ -2165,6 +2245,7 @@ NO REPEAT SCHEDULE PREVIEW: If RECENT CONVERSATION already contains a message fr
 FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK:", they are submitting feedback. Decide which of two paths applies:
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
 - If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.`;
+    }
     case "morning_reminder":
       if (missedRunCheckin) {
         return `If RECENT CONVERSATION already shows the athlete mentioned skipping yesterday or rescheduling, skip the missed-run check-in and send today's workout reminder only (plain, under 480 characters).
