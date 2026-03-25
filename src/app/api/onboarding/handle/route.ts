@@ -533,8 +533,8 @@ async function handleOtherRaces(
   const [parseResponse, acknowledgment] = await Promise.all([
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 400,
-      system: `The athlete has stated their primary (A) race. Extract any OTHER races they mention in this message.
+      max_tokens: 500,
+      system: `The athlete was asked if a given race is their top priority, and may mention other races and re-prioritize.
 Return ONLY valid JSON, no other text.
 
 Output format: {
@@ -545,36 +545,72 @@ Output format: {
       "goal": "mile"|"5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|null,
       "priority": "B"|"C"
     }
-  ]
+  ],
+  "new_a_race": {
+    "name": string,
+    "goal": "mile"|"5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|null,
+    "date": "YYYY-MM-DD" | null
+  } | null
 }
 
-Priority rules:
-- "B": tune-up or secondary goal race — the athlete plans to race it meaningfully (e.g. "a half marathon 6 weeks before my marathon", "doing a 10K as a tune-up")
-- "C": low-key, for-fun, or treat-as-workout race (e.g. "just a local 5K with friends", "nothing serious")
+new_a_race rules:
+- Set this ONLY when the athlete explicitly signals a different race is their top priority (e.g. "the 100k is the top priority", "actually X is my A race", "X is more important"). null if the original A race remains the top priority.
+- If set, the original A race should appear in other_races with priority "B" (not "A").
+
+other_races rules (races other than the new A race, or other than the original A race if no promotion):
+- "B": tune-up or secondary goal race — the athlete plans to race it meaningfully
+- "C": low-key, for-fun, or treat-as-workout race (e.g. "just a local 5K with friends")
 - Default to "B" when priority is unclear for a non-trivial race
 - Default to "C" for very short races (5K or shorter) when no priority context is given
+- Do NOT include the new A race (if any) in other_races
 
 Date rules:
 - If only a month is given, assume current year (or next year if that month has passed)
 - Today is ${new Date().toISOString().split("T")[0]}
 
-If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: {"other_races": []}`,
+If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: {"other_races": [], "new_a_race": null}`,
       messages: [{ role: "user", content: message }],
     }),
     acknowledgeSharedInfo(message),
   ]);
 
   let otherRaces: Array<{ date: string; name: string | null; goal: string | null; priority: "B" | "C" }> = [];
+  let newARace: { name: string; goal: string | null; date: string | null } | null = null;
   try {
     const text = parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
     const parsed = JSON.parse(extractJSON(text));
     otherRaces = Array.isArray(parsed.other_races) ? parsed.other_races : [];
+    newARace = parsed.new_a_race && typeof parsed.new_a_race === "object" ? parsed.new_a_race : null;
   } catch (e) {
     console.error("[onboarding] other_races parse failed:", e);
   }
 
-  const mergedData = {
-    ...onboardingData,
+  // If the user promoted a different race to A, update the stored A race fields.
+  // The original A race becomes a B race (add to other_races if not already there).
+  let mergedData: Record<string, unknown> = { ...onboardingData };
+  if (newARace) {
+    const oldRaceName = onboardingData.race_name as string | null;
+    const oldGoal = onboardingData.goal as string | null;
+    const oldDate = onboardingData.race_date as string | null;
+    // Add the old A race to other_races as a B race if it's not already in the list
+    const alreadyIncluded = otherRaces.some(r =>
+      r.name && oldRaceName && r.name.toLowerCase().includes(oldRaceName.toLowerCase().split(" ")[0])
+    );
+    if (oldRaceName && !alreadyIncluded) {
+      otherRaces = [...otherRaces, { date: oldDate || "", name: oldRaceName, goal: oldGoal, priority: "B" }];
+    }
+    mergedData = {
+      ...mergedData,
+      race_name: newARace.name,
+      goal: newARace.goal ?? oldGoal,
+      race_date: newARace.date ?? null,
+      race_date_confirmed: false, // old confirmation was for the previous A race
+    };
+    console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}`);
+  }
+
+  mergedData = {
+    ...mergedData,
     other_races: otherRaces,
     other_races_answered: true,
   };
@@ -1566,8 +1602,11 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       return `Is ${raceRef} your main goal race this season — the one we're building the whole plan around? And do you have any others on the calendar I should know about?`;
     }
 
-    case "awaiting_goal_time":
-      return `Do you have a time goal for the race, or is it more about finishing strong and building your base? Either's totally valid — just helps me dial in the right pacing.`;
+    case "awaiting_goal_time": {
+      const raceName = data.race_name as string | null;
+      const raceRef = raceName ? `the ${raceName}` : "the race";
+      return `Do you have a time goal for ${raceRef}, or is it more about finishing strong and building your base? Either's totally valid — just helps me dial in the right pacing.`;
+    }
 
     case "awaiting_strava": {
       const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${userId || ""}`;

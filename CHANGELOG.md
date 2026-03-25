@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Fix A-race confusion when user re-prioritizes during other-races step
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake)
+**User feedback:** "I found this conversation in onboarding a bit confusing - I assumed it would ask more about my target race...rather than the first race I mentioned"
+**Root cause:** `handleOtherRaces` always treated the first-mentioned race as the A race regardless of priority signals. When Jake said "the 100k is top priority then dipsea," the system kept Dipsea as `race_name` and then asked about goal time for "the race" generically — so Jake answered thinking about the 100k while Coach Dean looked up Dipsea stats.
+**Fix / Change:** (1) `handleOtherRaces` parse prompt now detects A-race promotion via `new_a_race` field — when set, swaps `race_name`/`goal`/`race_date` to the newly promoted race, adds old A race to `other_races` as B, and clears `race_date_confirmed`. (2) `awaiting_goal_time` question now names the specific race: "Do you have a time goal for the Tahoe Rim Trail?" — removing the ambiguity entirely.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-25 — Fix cite-tag stripping swallowing words in race acknowledgment
 
 **Type:** Bug Fix
