@@ -134,7 +134,9 @@ export default async function DashboardPage({
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4">
         <div className="max-w-lg mx-auto flex items-center justify-between">
-          <span className="font-semibold text-gray-900 text-sm tracking-wide uppercase">Coach Dean</span>
+          <a href="/">
+            <img src="/heavy_logo.svg" alt="Coach Dean" style={{ height: 32 }} />
+          </a>
           <span className="text-xs text-gray-400">Your Training Plan</span>
         </div>
       </div>
