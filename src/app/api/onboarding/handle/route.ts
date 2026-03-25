@@ -774,6 +774,15 @@ async function handleStrava(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
+  // If the athlete is asking about Strava rather than skipping, answer them first.
+  const isStravaQuestion = /\?/.test(message) && /strava/i.test(message);
+  if (isStravaQuestion) {
+    const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+    const reply = `Yes, worth it — it's free and once connected I can automatically analyze every run without you having to report anything. Here's the link:\n\n${stravaUrl}\n\nAlready have it? Tap the link to connect. No Strava? Just reply "skip" and we'll go manual.`;
+    await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
+    return NextResponse.json({ ok: true });
+  }
+
   const isSkip = /skip|no strava|don.?t have|no thanks|nope|later|next/i.test(message);
 
   const mergedData = { ...onboardingData, strava_skipped: true };

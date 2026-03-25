@@ -4,6 +4,42 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Code-level plan validation: enforce volume caps and deduplicate sessions post-generation
+
+**Type:** Bug Fix
+**Reported by:** Internal — prompt-only fixes for Issues 1 and 5 not reliable enough
+**User feedback:** N/A
+**Root cause:** Prompt instructions ("HARD LIMIT", "non-negotiable") for volume caps were already present before Issue 1 occurred — the model violated them anyway. Same risk for duplicate session lines. Prompt text cannot be trusted for safety-critical constraints.
+**Fix / Change:** Created `src/lib/plan-validation.ts` with two pure, tested functions wired into the post-generation pipeline in `route.ts`:
+- `enforceVolumeCaps(message, weeklyCapMiles, longRunCapMiles)`: for low-volume athletes on `initial_plan`/`weekly_recap` triggers, parses all running session distances, caps any single session at `longRunCapMiles`, then floor-scales the total to `weeklyCapMiles` if still over. Uses floor (not round) to guarantee the sum never overshoots the cap. Also rewrites any stated weekly total in the text to match the corrected sessions.
+- `deduplicateSessionLines(message)`: removes exact duplicate `"DDD D/M · ..."` lines, keeping the first occurrence.
+Both functions are no-ops when caps are null or no session lines are present.
+**Files changed:** src/lib/plan-validation.ts (new), src/__tests__/lib/plan-validation.test.ts (new, 18 tests), src/app/api/coach/respond/route.ts
+
+## 2026-03-25 — Five coaching quality fixes: volume guardrail, interval math, goal dedup, Strava onboarding, plan dedup
+
+**Type:** Bug Fix
+**Reported by:** User feedback (users d7aac841, 479e43d6, 0a234882, a9b4016c)
+**User feedback:**
+- (d7aac841) "Coach Dean told me Week 1 is capped at 7 mi then immediately prescribed 18 mi including a 9 mi long run"
+- (479e43d6) "6x400m interval session stated as 7mi total — should be ~3.75mi"
+- (d7aac841) Coach Dean flagged goal confusion (marathon vs half) three times in a row even after athlete answered
+- (0a234882) Athlete asked "Should I get Strava?" during onboarding — Coach Dean ignored the question and advanced
+- (a9b4016c) Thu 3/26 session appeared twice identically in the same plan
+**Root cause:**
+1. System prompt had a volume cap but no long run cap, and the self-consistency check was missing — model stated a cap then violated it
+2. No interval math instructions; model hallucinated session totals
+3. Goal discrepancy flag had no dedup rule; fired on every message because stale DB goal was never updated when athlete corrected it
+4. handleStrava treated any reply as a skip without checking for questions
+5. No dedup instruction in plan output rules
+**Fix / Change:**
+1. Added ⚠️ LONG RUN CAP (35% of current weekly volume) to FITNESS TIER for low-volume athletes; added SELF-CONSISTENCY CHECK to VOLUME AND SAFETY section
+2. Added INTERVAL SESSION MATH rule to user_message prompt with explicit formula and example
+3. Added GOAL DISCREPANCY — RAISE ONCE ONLY rule to system prompt header; added goal_race_type field to extractProfileData and persistProfileUpdates so DB is updated when athlete corrects their goal
+4. handleStrava now detects questions containing "strava" + "?" and replies with a Strava pitch + link instead of silently skipping
+5. Added NO DUPLICATE ENTRIES rule to plan output session format instructions
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-25 — Add SMS commands FAQ entry to landing page
 
 **Type:** Improvement

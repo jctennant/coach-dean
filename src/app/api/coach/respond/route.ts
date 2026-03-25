@@ -8,6 +8,7 @@ import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan } from "@/lib/training-plan";
+import { enforceVolumeCaps, deduplicateSessionLines } from "@/lib/plan-validation";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
@@ -368,7 +369,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // but still correct "on track for X mi" using the system-computed projection —
   // Dean sometimes mentions only the next 1-2 sessions while citing the full-week
   // projected total, making the math look wrong to the user.
-  const coachMessage = trigger === "post_run"
+  const mileageCorrected = trigger === "post_run"
     ? correctProjectedTotal(
         stripped,
         computeProjectedWeekMiles(
@@ -377,6 +378,28 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         )
       )
     : correctMileageTotal(stripped, alreadyCompletedMiles);
+
+  // Enforce hard volume caps for plan-generating triggers when the athlete is
+  // in the low-volume tier (< 10 mi/week). Prompt instructions alone are not
+  // reliable enough for this safety-critical constraint.
+  const planTriggers = new Set<TriggerType>(["initial_plan", "weekly_recap"]);
+  const isLowVolume = avgWeeklyMileage != null && avgWeeklyMileage < 10;
+  const weeklyCapMiles =
+    planTriggers.has(trigger) && isLowVolume
+      ? Math.max(Math.ceil(avgWeeklyMileage! * 1.3), 6)
+      : null;
+  const longRunCapMiles =
+    planTriggers.has(trigger) && isLowVolume
+      ? Math.max(Math.ceil(avgWeeklyMileage! * 0.35), 3)
+      : null;
+  const { message: volumeChecked } = enforceVolumeCaps(
+    mileageCorrected,
+    weeklyCapMiles,
+    longRunCapMiles
+  );
+
+  // Remove exact duplicate session lines (e.g. same "Thu 3/26 · Easy 2mi" twice)
+  const coachMessage = deduplicateSessionLines(volumeChecked);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -1537,6 +1560,7 @@ function buildSystemPrompt(
   return `${profile?.race_date ? `ATHLETE: ${user.name || "this athlete"}
 GOAL: ${goalDisplay} on ${profile.race_date}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : ""}
 ⚠️ This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.
+⚠️ GOAL DISCREPANCY — RAISE ONCE ONLY: If there is a discrepancy between the stored goal above and something the athlete said, flag it at most once per conversation. Check RECENT CONVERSATION — if you (Coach Dean) have already asked "which race is it?" or flagged a goal mismatch in a prior message, do NOT raise it again. If the athlete has answered, treat their answer as ground truth and proceed. Repeating the same goal-conflict flag three times in a row when the athlete already answered is a serious trust failure.
 
 ` : ""}You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
 
@@ -1559,7 +1583,8 @@ ${
 ⚠️ WEEK 1 VOLUME CAP (no history): Since no mileage data exists, Week 1 must not exceed 10 mi total. Start extremely conservatively — 3 short sessions of 2–3 mi each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.`
     : avgWeeklyMileage < 10
     ? `FITNESS TIER: LOW VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
-⚠️ WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${avgWeeklyMileage.toFixed(1)} mi/week. Week 1 MUST NOT exceed ${Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6).toFixed(0)} mi total (current volume × 1.30, floor 6 mi). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. For example, if they run 5 mi/week, prescribing 15 mi is a 200% jump and is wrong. A safe Week 1 for 5 mi/week is 6–7 mi spread across 3 sessions (e.g., 2mi / 2mi / 2.5mi). Do not exceed this cap under any circumstances, regardless of race goals or timelines.`
+⚠️ WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${avgWeeklyMileage.toFixed(1)} mi/week. Week 1 MUST NOT exceed ${Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6).toFixed(0)} mi total (current volume × 1.30, floor 6 mi). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. For example, if they run 5 mi/week, prescribing 15 mi is a 200% jump and is wrong. A safe Week 1 for 5 mi/week is 6–7 mi spread across 3 sessions (e.g., 2mi / 2mi / 2.5mi). Do not exceed this cap under any circumstances, regardless of race goals or timelines.
+⚠️ LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3).toFixed(0)} mi (35% of current weekly volume, floor 3 mi). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. If the athlete currently runs 5 mi/week, a 9 mi long run is almost double their weekly volume and is wrong. State your long run distance, then verify it does not exceed this cap before sending.`
     : avgWeeklyMileage < 30
     ? `FITNESS TIER: MODERATE VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.`
     : `FITNESS TIER: HIGH VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.`
@@ -1921,6 +1946,7 @@ type ExtractedProfileData = {
   race_date?: string | null;
   goal_time_minutes?: number | null;
   updated_training_days?: string[] | null;
+  goal_race_type?: string | null;
   workout?: {
     activity_type: string;
     distance_meters: number | null;
@@ -1966,8 +1992,9 @@ Extract ONLY explicitly stated NEW information:
 - A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th") → race_date as "YYYY-MM-DD". Only set when athlete clearly states a specific race date. If month only, use first day of that month. Today is ${todayDateStr}.
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip or swap.
+- A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -2008,7 +2035,8 @@ async function persistProfileUpdates(
 
     const hasInjuryBodyPart = !!extracted.injury_body_part;
     const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays) return;
+    const hasGoalRaceType = !!(extracted.goal_race_type);
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -2058,6 +2086,7 @@ async function persistProfileUpdates(
     if (hasRaceDate) profileUpdate.race_date = extracted.race_date;
     if (hasGoalTime) profileUpdate.goal_time_minutes = extracted.goal_time_minutes;
     if (hasTrainingDays) profileUpdate.training_days = extracted.updated_training_days;
+    if (hasGoalRaceType) profileUpdate.goal = extracted.goal_race_type;
 
     // Build onboarding_data update
     const updatedOnboardingData = { ...onboardingData };
@@ -2242,6 +2271,8 @@ LENGTH IN CONVERSATION: Check RECENT CONVERSATION. If there are already 4+ messa
 
 NO REPEAT SCHEDULE PREVIEW: If RECENT CONVERSATION already contains a message from you today that mentioned tomorrow's session, next session, or upcoming workouts — do NOT mention it again in this reply. The athlete already has that information. Answer what they asked, then stop. Only re-mention the schedule if they specifically asked about it.
 
+INTERVAL SESSION MATH: When converting interval sessions to time or total distance, always calculate explicitly — never estimate or guess. Formula: (number of reps × rep distance) + warmup + recovery jogs + cooldown = session total. Example: 6×400m = 6 × 0.25 mi = 1.5 mi of fast work. Add warmup (~1 mi), recovery jogs between reps (~0.75 mi for 5 jogs × ~150m each), and cooldown (~0.5 mi) → ~3.75 mi total. Do NOT output a range that spans 4+ miles (e.g. "3.5–7 mi") — that is internally contradictory and wrong. Output a single coherent total. If you are unsure of warmup/cooldown lengths, use reasonable defaults (1 mi warmup, 0.5 mi cooldown, ~150m jog between reps) and state them explicitly.
+
 FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK:", they are submitting feedback. Decide which of two paths applies:
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
 - If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.`;
@@ -2365,6 +2396,7 @@ Tue 3/3 · Strength + mobility 20 min
 Wed 3/4 · Tempo 4mi (2mi @ 8:45)
 Sat 3/7 · Long run 8mi easy
 Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
+NO DUPLICATE ENTRIES: Each date must appear at most once per session type. Before sending, scan your session list — if the same date and session description appear more than once, remove the duplicate. A plan with "Thu 3/26 · Easy 2mi" listed twice is wrong and confusing.
 SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 5mi"). Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 30 min", "Zwift ride 60 min", "Master's swim"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
@@ -2391,7 +2423,8 @@ RACE TIMELINE — never compute this yourself:
 - The days and weeks until the race are pre-calculated in DATE CONTEXT above (e.g. "Race date: YYYY-MM-DD (X days / ~Y weeks away)"). Use those exact numbers. Do not compute the timeline yourself and do not convert between units (do not say "7.5 months" if DATE CONTEXT says "32 weeks"). If you reference the timeline at all, use the weeks figure from DATE CONTEXT verbatim.
 
 VOLUME AND SAFETY:
-- ⚠️ CRITICAL: The FITNESS TIER section in your system prompt contains a "⚠️ WEEK 1 VOLUME CAP" with a specific hard maximum for this athlete. You MUST respect that cap — it is calculated from their actual current mileage. Prescribing 2–3× their current volume is a documented injury risk and directly contradicts the "no more than 10% weekly increase" guideline. If the cap says Week 1 max is 7 mi, do not write a plan with 15 mi.
+- ⚠️ CRITICAL: The FITNESS TIER section in your system prompt contains a "⚠️ WEEK 1 VOLUME CAP" and a "⚠️ LONG RUN CAP" — both are hard limits calculated from the athlete's actual current mileage. You MUST respect both caps. Prescribing 2–3× current volume is a documented injury risk. If the cap says Week 1 max is 7 mi, do not write a plan with 15 mi. If the long run cap is 2 mi, do not prescribe a 9 mi long run.
+- SELF-CONSISTENCY CHECK: Before sending any plan, verify that (1) the sum of running session distances matches your stated weekly total, and (2) no single session exceeds the long run cap from FITNESS TIER. If you state a safety cap in one sentence and prescribe a plan that violates it in the next sentence, that is a direct contradiction and must be corrected before sending.
 - For high-volume athletes, start at their current level — don't sandbagging them with a beginner week.
 - For athletes coming back from injury, returning after a long break, or with low current mileage: start shorter than you might think. It's easier to add than to walk back an overambitious first week.
 - Address any injury or physical limitation directly in the plan itself — briefly note how the plan accounts for it. Do NOT ask a follow-up question about it.
