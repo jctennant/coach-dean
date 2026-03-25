@@ -115,6 +115,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Reject short codes, alphanumeric senders, and anything that isn't a
+  // standard E.164 phone number or email address. Linq delivers these as
+  // inbound messages but we can't reply to them, so processing would just
+  // produce errors. Emails are allowed because iMessage users may appear with
+  // their Apple ID email as the sender handle.
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderPhone);
+  const isPhone = /^\+?[\d\s\-().]{7,}$/.test(senderPhone) && senderPhone.replace(/\D/g, "").length >= 7;
+  if (!isEmail && !isPhone) {
+    console.warn("[linq-webhook] non-E164/non-email sender, skipping:", senderPhone);
+    return NextResponse.json({ ok: true });
+  }
+
   if (!body && !imageUrl) {
     console.warn("[linq-webhook] no text or image found in message, skipping");
     return NextResponse.json({ ok: true });

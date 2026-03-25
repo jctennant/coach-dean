@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Reject short code / non-E.164 senders in Linq webhook
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Vercel logs)
+**User feedback:** N/A
+**Root cause:** Linq delivers inbound messages from short codes (e.g. `32099`) and other non-standard senders as webhook events. The handler would attempt to create a user row and send a welcome SMS to the sender, which Linq then rejected with error 1005 ("recipient must be a valid E.164 phone number").
+**Fix / Change:** Added an early-exit guard after `senderPhone` is extracted — if the sender doesn't match a phone-like pattern (≥7 digits) or a valid email address, the webhook returns 200 immediately without DB writes or SMS sends. Emails are allowed through because iMessage users may appear with their Apple ID email as the sender handle.
+**Files changed:** src/app/api/webhooks/linq/route.ts
+
+---
+
 ## 2026-03-24 — Dean can adjust upcoming training plan weeks for illness/injury/travel
 
 **Type:** Feature
