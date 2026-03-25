@@ -16,9 +16,9 @@ const valueProps = [
     screenshot: "/screenshot-1.png",
   },
   {
-    title: "Smart adjustments for injury prevention",
+    title: "Instant coaching after every run",
     description:
-      "Dean tracks how your body responds over time. Mention a nagging pain or flagging energy and he'll pull back your volume, adjust intensity, and keep you training rather than sidelined.",
+      "Connect Strava and Dean analyzes every activity the moment it syncs — pace trends, effort, whether you went out too hard. Real coaching feedback on your actual runs, not a generic \"great job\" notification.",
     screenshot: "/screenshot-2.png",
   },
   {
@@ -52,7 +52,7 @@ export default function Home() {
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
               You signed up for a race. Now what?
-              Dean builds a plan based on your goals and training history, texts you exactly what to do next, and adjusts when life gets in the way.
+              Dean builds a plan, analyzes every run, and adjusts when life gets in the way — all over text. The guidance of a professional coach, for a fraction of the price.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -103,6 +103,94 @@ export default function Home() {
         );
       })}
 
+      {/* Full season plan arc */}
+      <section className="border-t px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-10 text-center">
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              Your full season, laid out before you start
+            </h2>
+            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
+              Every phase from base building to race-day taper, visible in one view. Dean texts you the specifics each week and updates the plan as your training evolves.
+            </p>
+          </div>
+
+          {/* Plan arc visualization */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 md:p-8">
+            {/* Race header */}
+            <div className="mb-6 flex items-end justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-0.5">Sample plan</p>
+                <p className="text-base font-semibold text-gray-900">Dipsea Trail Race · 7.4 mi</p>
+                <p className="text-sm text-gray-500 mt-0.5">June 14, 2026</p>
+              </div>
+              <div className="text-right">
+                <p className="text-3xl font-bold text-gray-900 leading-none">81</p>
+                <p className="text-xs text-gray-400 mt-0.5">days to go</p>
+              </div>
+            </div>
+
+            {/* Week blocks */}
+            <div className="mb-4 grid grid-cols-12 gap-1 md:gap-1.5">
+              {[
+                { phase: "base" },
+                { phase: "base" },
+                { phase: "base" },
+                { phase: "deload" },
+                { phase: "base", current: true },
+                { phase: "build" },
+                { phase: "build" },
+                { phase: "deload" },
+                { phase: "peak" },
+                { phase: "taper" },
+                { phase: "taper" },
+                { phase: "taper" },
+              ].map((w, i) => {
+                const colors: Record<string, string> = {
+                  base: "bg-sky-200",
+                  build: "bg-orange-200",
+                  deload: "bg-green-200",
+                  peak: "bg-red-200",
+                  taper: "bg-purple-200",
+                };
+                return (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <div
+                      className={`h-8 w-full rounded md:h-10 ${colors[w.phase]} ${w.current ? "ring-2 ring-gray-900 ring-offset-1" : ""}`}
+                    />
+                    <span className="text-[9px] text-gray-400 leading-none hidden md:block">
+                      W{i + 1}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legend + current week callout */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { label: "Base", color: "bg-sky-200" },
+                  { label: "Build", color: "bg-orange-200" },
+                  { label: "Deload", color: "bg-green-200" },
+                  { label: "Peak", color: "bg-red-200" },
+                  { label: "Taper", color: "bg-purple-200" },
+                ].map(({ label, color }) => (
+                  <span key={label} className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <span className={`inline-block h-2.5 w-2.5 rounded-sm ${color}`} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+              <span className="text-xs text-gray-400 flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm ring-2 ring-gray-900 ring-offset-1 bg-sky-200" />
+                You are here
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Training philosophy */}
       <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
@@ -146,6 +234,63 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Comparison: Dean vs alternatives */}
+      <section className="border-t px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-12 text-center">
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              A professional coach for 1/10 of the price
+            </h2>
+            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
+              Most runners are stuck choosing between a $15/month app that can&apos;t adapt and a $200/month coach they can&apos;t afford. Dean is the middle ground.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            {/* Training app */}
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Training apps</p>
+                <p className="font-serif text-lg font-normal text-gray-700">Runna, TrainingPeaks, others</p>
+              </div>
+              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
+                You get a plan, a calendar, and pace zones. But the app can&apos;t see that you barely slept, can&apos;t adjust when you get sick, and has no one to ask when your knee starts acting up.
+              </p>
+              <p className="text-sm font-medium text-gray-500">~$15–20 / month</p>
+            </div>
+
+            {/* Coach Dean — featured */}
+            <div className="rounded-2xl bg-gray-900 p-6 flex flex-col gap-4 text-white md:-mt-4 md:-mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">The alternative</p>
+                <p className="font-serif text-lg font-normal">Coach Dean</p>
+              </div>
+              <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Personalized plan built around your race and fitness</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Real coaching feedback on every Strava activity</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Adapts when you&apos;re sick, traveling, or overtrained</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Full season plan visible on your dashboard</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Text any question, get a specific answer</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> No app to download. No calls to schedule.</li>
+              </ul>
+              <p className="text-sm font-medium text-gray-300">Free during beta</p>
+            </div>
+
+            {/* Human coach */}
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Human coach</p>
+                <p className="font-serif text-lg font-normal text-gray-700">The gold standard</p>
+              </div>
+              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
+                Truly personalized, deeply experienced, and available for real conversation. But at $150–300/month, a 30-minute weekly check-in, and a whole lot of scheduling, most runners never get access to one.
+              </p>
+              <p className="text-sm font-medium text-gray-500">$150–300 / month</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* FAQ */}
       <section className="border-t px-6 py-16 md:py-24">
         <div className="mx-auto max-w-2xl">
@@ -158,8 +303,9 @@ export default function Home() {
                 q: "How is Coach Dean different from Runna or using ChatGPT to plan my workouts?",
                 a: (
                   <>
-                    <p>Runna gives you a great static plan, but it doesn't know that you had a rough week, skipped two workouts, or ran your long run way too fast. Coach Dean lives in your text messages and adapts in real time — just reply with how a workout went and he'll adjust.</p>
-                    <p className="mt-3">ChatGPT can answer running questions, but it has no memory of your training history, no structured plan, and no one checking in on you. Dean combines the personalization of a real coach with the convenience of SMS — no app to open, no dashboard to check in on.</p>
+                    <p>Runna builds a solid plan, but it&apos;s static. It doesn&apos;t know you ran your long run too hard, skipped a week because of travel, or have a 100K six weeks after your target race. Dean sees all of that — and adjusts.</p>
+                    <p className="mt-3">The biggest difference people notice: connect Strava and Dean sends you coaching feedback within minutes of every run finishing. Not a generic notification — actual analysis of your pace, effort, and how it fits your training. That alone is something no app does.</p>
+                    <p className="mt-3">ChatGPT has no memory of your training, no structured plan, and no one proactively checking in. Dean combines a real plan with real-time adaptation and an always-available coaching voice — all over text, no app required.</p>
                   </>
                 ),
               }, 

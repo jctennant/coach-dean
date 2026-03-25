@@ -10,7 +10,7 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Reported by:** User feedback (Jake)
 **User feedback:** "I found this conversation in onboarding a bit confusing - I assumed it would ask more about my target race...rather than the first race I mentioned"
 **Root cause:** `handleOtherRaces` always treated the first-mentioned race as the A race regardless of priority signals. When Jake said "the 100k is top priority then dipsea," the system kept Dipsea as `race_name` and then asked about goal time for "the race" generically — so Jake answered thinking about the 100k while Coach Dean looked up Dipsea stats.
-**Fix / Change:** (1) `handleOtherRaces` parse prompt now detects A-race promotion via `new_a_race` field — when set, swaps `race_name`/`goal`/`race_date` to the newly promoted race, adds old A race to `other_races` as B, and clears `race_date_confirmed`. (2) `awaiting_goal_time` question now names the specific race: "Do you have a time goal for the Tahoe Rim Trail?" — removing the ambiguity entirely.
+**Fix / Change:** (1) `handleOtherRaces` parse prompt now detects A-race promotion via `new_a_race` field — when set, swaps `race_name`/`goal`/`race_date` to the newly promoted race, adds old A race to `other_races` as B, and clears `race_date_confirmed`. After promotion, `nextStep` is forced to `awaiting_race_date` so the new A race date gets confirmed before continuing (bypassing the normal forward-only step scan). (2) `awaiting_goal_time` question now names the specific race: "Do you have a time goal for the Tahoe Rim Trail?" — removing the ambiguity entirely.
 **Files changed:** src/app/api/onboarding/handle/route.ts
 
 ## 2026-03-25 — Fix cite-tag stripping swallowing words in race acknowledgment
@@ -21,6 +21,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Root cause:** Claude's web_search tool sometimes wraps cited words inside `<cite>text</cite>` tags. The regex `/<cite[^>]*>[\s\S]*?<\/cite>/g` was stripping the entire tag including its inner content, so "Suicide <cite>Steps</cite>" became "Suicide " — dropping the word "Steps" and creating a run-on.
 **Fix / Change:** Changed all three cite-stripping regexes in `onboarding/handle/route.ts` to preserve inner content: `replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, "$1")`.
 **Files changed:** src/app/api/onboarding/handle/route.ts
+
+## 2026-03-25 — Landing page: plan arc visualization, comparison section, Strava angle
+
+**Type:** Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "should we showcase the dashboard on the landing page? I'm thinking about things to differentiate from Runna — 'a professional running coach for 1/10 of the price'. One thing we should emphasize is real time feedback on all your Strava activities, that has been really cool."
+**Root cause:** Landing page didn't mention the dashboard, didn't anchor the price angle, and undersold the real-time Strava feedback feature.
+**Fix / Change:**
+- Hero subtext updated: "analyzes every run" and "a fraction of the price" added
+- Value prop 2 changed from "Smart adjustments for injury prevention" to "Instant coaching after every run" — centers the Strava real-time feedback as a key differentiator
+- New "Your full season, laid out before you start" section: code-rendered 12-week plan arc showing base/build/deload/peak/taper blocks with a current-week indicator and legend — no screenshot dependency
+- New "A professional coach for 1/10 of the price" comparison section: three cards (Training apps ~$15/mo, Coach Dean featured dark card, Human coach $150–300/mo) clearly positioning Dean in the middle
+- Runna FAQ answer sharpened: leads with the Strava post-run feedback angle ("actual analysis of your pace, effort...that alone is something no app does"), then covers ChatGPT
+**Files changed:** src/app/page.tsx
+
+---
+
+## 2026-03-25 — Dashboard link SMS now explains what the plan page is for
+
+**Type:** Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "I think another thing that may be helpful in onboarding is to have a sentence about the purpose of the dashboard when we send it"
+**Root cause:** The plan-ready SMS just said "Your full 12-week training plan is ready to view: <url>" with no context about what to expect next.
+**Fix / Change:** Added a second sentence: "I'll send you the specifics each week and keep this updated as your training progresses." Separated by a newline so it reads as two distinct thoughts.
+**Files changed:** src/lib/training-plan.ts
+
+---
 
 ## 2026-03-25 — Dashboard hero: race name, countdown, and week progress bar
 

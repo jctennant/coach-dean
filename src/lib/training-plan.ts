@@ -167,7 +167,7 @@ No other text.`,
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const planUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
     try {
-      await sendSMS(phoneNumber, `Your full ${totalWeeks}-week training plan is ready to view: ${planUrl}`);
+      await sendSMS(phoneNumber, `Your full ${totalWeeks}-week training plan is ready: ${planUrl}\n\nI'll send you the specifics each week and keep this updated as your training progresses.`);
     } catch (err) {
       console.error("[generateAndSaveFullPlan] dashboard link SMS failed (non-fatal):", err);
     }

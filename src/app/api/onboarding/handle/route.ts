@@ -614,7 +614,11 @@ If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: 
     other_races: otherRaces,
     other_races_answered: true,
   };
-  const nextStep = findNextStep("awaiting_other_races", mergedData);
+  // If the A race was just promoted, we need to confirm its date before moving on.
+  // awaiting_race_date is earlier in STEP_ORDER so findNextStep won't reach it — override manually.
+  const nextStep = newARace && !mergedData.race_date_confirmed
+    ? "awaiting_race_date"
+    : findNextStep("awaiting_other_races", mergedData);
 
   await supabase
     .from("users")
