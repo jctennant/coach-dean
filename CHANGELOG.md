@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Fix cite-tag stripping swallowing words in race acknowledgment
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake)
+**User feedback:** "seems like this message had a piece that got cut-off? ...shortcuts like Suicide You're going after one of the toughest trail races out there"
+**Root cause:** Claude's web_search tool sometimes wraps cited words inside `<cite>text</cite>` tags. The regex `/<cite[^>]*>[\s\S]*?<\/cite>/g` was stripping the entire tag including its inner content, so "Suicide <cite>Steps</cite>" became "Suicide " — dropping the word "Steps" and creating a run-on.
+**Fix / Change:** Changed all three cite-stripping regexes in `onboarding/handle/route.ts` to preserve inner content: `replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, "$1")`.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-25 — Dashboard hero: race name, countdown, and week progress bar
 
 **Type:** Improvement

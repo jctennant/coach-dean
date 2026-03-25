@@ -650,7 +650,7 @@ CRITICAL RULES:
     const text = lastBlock?.type === "text" ? lastBlock.text.trim() : "";
     if (!text) return null;
     // Strip citation tags that sometimes leak through
-    return text.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim() || null;
+    return text.replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, "$1").replace(/<cite[^>]*\/>/g, "").trim() || null;
   } catch {
     return null;
   }
@@ -1750,7 +1750,7 @@ CRITICAL RULES:
       })() : null;
       const secondaryGoal = (typeof parsed?.secondary_goal === "string" && parsed.secondary_goal) ? parsed.secondary_goal : null;
       const rawAck = parsed?.ack ?? null;
-      const ack = rawAck ? rawAck.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim() : null;
+      const ack = rawAck ? rawAck.replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, "$1").replace(/<cite[^>]*\/>/g, "").trim() : null;
       // Validate raceDate is actually in the future — discard if in the past (hallucinated date)
       let raceDate = parsed?.date ?? null;
       if (raceDate && raceDate < today) raceDate = null;
@@ -1760,7 +1760,7 @@ CRITICAL RULES:
       return { ack, raceDate, distanceOptions, distanceMiles, secondaryGoal };
     } catch {
       // Fallback: treat as plain-text ack if JSON parse fails
-      const cleanText = text.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim();
+      const cleanText = text.replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, "$1").replace(/<cite[^>]*\/>/g, "").trim();
       return { ack: cleanText, raceDate: null, distanceOptions: null, distanceMiles: null, secondaryGoal: null };
     }
   } catch {
