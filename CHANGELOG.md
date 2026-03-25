@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Multi-race support (A/B/C priority) + 52-week plan cap
+
+**Type:** Feature
+**Reported by:** Internal — design review of training plan limitations
+**User feedback:** N/A
+**Root cause:** Training plans were capped at 24 weeks (races >6 months away got a truncated arc). No model for B/C tune-up races — coaching had no awareness of secondary events on the calendar.
+**Fix / Change:**
+- New `races` table with A/B/C priority, backfilled from existing training_profiles
+- New `awaiting_other_races` onboarding step (after race date confirmed): asks if this is their A race and captures any other races on the calendar
+- `completeOnboarding` now writes all races (A + B/C) to the races table
+- `coach/respond` queries the races table and injects B/C race guidance into the system prompt: mini-taper protocol for B races within 14 days, workout-mode note for C races within 7 days
+- Plan generation cap raised from 24 → 52 weeks; Haiku enrichment tokens raised from 1500 → 2500 to handle longer arcs
+**Files changed:** supabase/migrations/021_races_table.sql, src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts, src/lib/training-plan.ts
+
 ## 2026-03-24 — Fixed flaky periodization tests failing on boundary dates in CI
 
 **Type:** Bug Fix

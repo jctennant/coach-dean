@@ -112,7 +112,10 @@ export default async function DashboardPage({
   // Build a human-readable goal label: prefer specific race name over generic bucket
   const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
   const raceName = (onboardingData.race_name as string | null) ?? null;
-  const goalDistanceMiles = profileData?.goal_distance_miles ?? null;
+  // onboarding_data.goal_distance_miles is only set when the parser extracted a non-standard
+  // distance (e.g. 7.4 mi for Dipsea). training_profiles.goal_distance_miles is backfilled
+  // with the standard bucket distance (e.g. 6.214 for 10k) — don't use that for display.
+  const specificDistanceMiles = (onboardingData.goal_distance_miles as number | null) ?? null;
   const goalBucket = profileData?.goal ?? planData.goal;
   const GOAL_LABELS: Record<string, string> = {
     mile: "Mile", "5k": "5K", "10k": "10K", half_marathon: "Half Marathon",
@@ -120,14 +123,16 @@ export default async function DashboardPage({
     "100k": "100K", "100mi": "100 Miles", general_fitness: "General Fitness",
     return_to_running: "Return to Running", injury_recovery: "Injury Recovery",
   };
-  // For the distance suffix on a named race: prefer the standard label (e.g. "10K") over
-  // raw miles. Only show miles when the goal bucket has no standard label (non-standard distance).
   const standardLabel = GOAL_LABELS[goalBucket as string] ?? null;
-  const distanceSuffix = standardLabel ?? (goalDistanceMiles ? `${goalDistanceMiles} mi` : null);
+  // For named races: show the actual distance (e.g. "7.4 mi") if it was explicitly parsed,
+  // otherwise fall back to the standard bucket label (e.g. "Marathon" for Boston).
+  const distanceSuffix = raceName
+    ? (specificDistanceMiles ? `${specificDistanceMiles} mi` : standardLabel)
+    : standardLabel;
   const goalLabel = raceName
     ? `${raceName}${distanceSuffix ? ` · ${distanceSuffix}` : ""}`
     : standardLabel
-    ?? (goalDistanceMiles ? `${goalDistanceMiles} mi race` : goalBucket);
+    ?? (specificDistanceMiles ? `${specificDistanceMiles} mi race` : goalBucket);
   const raceDays = daysUntilRace(raceDate as string | null);
   const trialActive = isTrialActive(user.trial_started_at as string | null);
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];

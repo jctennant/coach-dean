@@ -45,7 +45,7 @@ export async function generateAndSaveFullPlan(
     const now = new Date();
     const race = new Date(raceDate + "T12:00:00Z");
     const weeksUntil = Math.ceil((race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000));
-    totalWeeks = Math.max(4, Math.min(24, weeksUntil));
+    totalWeeks = Math.max(4, Math.min(52, weeksUntil));
   }
 
   // Base mileage: current avg or a sensible default
@@ -107,7 +107,7 @@ export async function generateAndSaveFullPlan(
   try {
     const enrichResponse = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1500,
+      max_tokens: 2500,
       system: `You are a running coach generating a structured training plan arc.
 For each week provide:
 - key_workout: the defining session for that week (1 line). Examples: "6×800m @ 5K pace", "4mi tempo @ threshold", "12mi long run with 2mi @ goal pace", "Base building — easy aerobic miles", "Race simulation 5mi @ goal pace". Pure base/easy weeks get a motivating description, not a pacing prescription.

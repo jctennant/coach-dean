@@ -82,6 +82,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     conversationsResult,
     recentActivitiesResult,
     raceHistoryResult,
+    upcomingRacesResult,
   ] = await Promise.all([
     supabase.from("users").select("*").eq("id", userId).single(),
     supabase
@@ -116,6 +117,13 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .eq("workout_type", 1)
       .order("start_date", { ascending: false })
       .limit(20),
+    supabase
+      .from("races")
+      .select("race_date, race_name, goal, priority, goal_time_minutes, goal_distance_miles")
+      .eq("user_id", userId)
+      .gte("race_date", new Date().toISOString().split("T")[0])
+      .order("race_date", { ascending: true })
+      .limit(10),
   ]);
 
   const user = userResult.data;
@@ -127,6 +135,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   );
   const raceHistory =
     (raceHistoryResult.data as Array<Record<string, unknown>> | null) || [];
+  const upcomingRaces =
+    (upcomingRacesResult.data as Array<Record<string, unknown>> | null) || [];
 
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -235,7 +245,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     weatherBlock,
     computedVdot,
     trigger,
-    periodization
+    periodization,
+    upcomingRaces
   );
 
   // For weekly_recap, fetch the stored training plan so Dean can reference what was planned
@@ -1224,7 +1235,8 @@ function buildSystemPrompt(
   weatherBlock?: string,
   freshVdot?: number | null,
   trigger?: TriggerType,
-  periodization?: PeriodizationContext
+  periodization?: PeriodizationContext,
+  upcomingRaces?: Array<Record<string, unknown>>
 ): string {
   // Which trigger-conditional sections to include.
   const isReminder = trigger === "morning_reminder" || trigger === "nightly_reminder";
@@ -1373,6 +1385,30 @@ function buildSystemPrompt(
         dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. Race week: ${w1}mi total. Easy miles only — no hard workouts. Shakeout run (15-30 min easy) the day before is optional.\n`;
       }
       } // end non-mile taper block
+    }
+  }
+
+  // B/C race context: list upcoming secondary races, inject coaching guidance when close.
+  const nonARaces = (upcomingRaces ?? []).filter(r => r.priority === "B" || r.priority === "C");
+  if (nonARaces.length > 0) {
+    for (const race of nonARaces) {
+      const bRaceDate = new Date((race.race_date as string) + "T12:00:00Z");
+      const daysUntilBRace = Math.ceil((bRaceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+      const weeksUntilBRace = Math.round(daysUntilBRace / 7);
+      const bRaceLabel = (race.race_name as string | null) ?? (race.goal ? formatGoalLabel(race.goal as string) : "race");
+      if (race.priority === "B") {
+        if (daysUntilBRace <= 14) {
+          dateContext += `- B RACE (tune-up): ${bRaceLabel} on ${race.race_date} (${daysUntilBRace} days away). Reduce total volume 10-15% this week. Race at a strong controlled effort — this is a tune-up, not an all-out peak. Resume normal training 2-3 days after.\n`;
+        } else {
+          dateContext += `- Upcoming B race (tune-up): ${bRaceLabel} on ${race.race_date} (~${weeksUntilBRace} weeks away). Keep in mind when scheduling hard sessions — leave a light day or two before it.\n`;
+        }
+      } else {
+        if (daysUntilBRace <= 7) {
+          dateContext += `- C RACE (for-fun): ${bRaceLabel} on ${race.race_date} (${daysUntilBRace} days away). No taper — treat it as a quality workout day. Normal training week otherwise.\n`;
+        } else {
+          dateContext += `- Upcoming C race (for-fun/workout): ${bRaceLabel} on ${race.race_date} (~${weeksUntilBRace} weeks away).\n`;
+        }
+      }
     }
   }
 

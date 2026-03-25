@@ -96,6 +96,7 @@ export async function POST(request: Request) {
   const DEESCALATION_BY_STEP: Record<string, string> = {
     "awaiting_goal":              "Looks like something got confused on my end — sorry about that! I'm Coach Dean, your AI running coach. What are you training for?",
     "awaiting_race_date":         "Sorry, something got tangled on my end! When are you targeting for your race? A rough month and year works.",
+    "awaiting_other_races":       "Sorry, something got tangled on my end! Is your stated race your main goal race this season, and do you have any other races on the calendar?",
     "awaiting_schedule":          "Sorry, something got tangled on my end! How many days a week are you looking to train?",
     "awaiting_ultra_background":  "Sorry, something got tangled on my end! Roughly how many miles a week are you currently running?",
     "awaiting_injury_background": "Sorry, something got tangled on my end! Can you tell me a bit about the injury you're recovering from?",
@@ -152,6 +153,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_race_date":
       result = await handleRaceDate(user, message, onboardingData);
+      break;
+    case "awaiting_other_races":
+      result = await handleOtherRaces(user, message, onboardingData);
       break;
     case "awaiting_schedule":
       result = await handleSchedule(user, message, onboardingData);
@@ -496,6 +500,87 @@ Rules:
     const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
     await sendAndStore(user.id, user.phone_number, reply, nextStep);
   }
+  return NextResponse.json({ ok: true });
+}
+
+/**
+ * awaiting_other_races: after confirming their primary (A) race date, ask if they
+ * have any other races on the calendar and whether this is truly their A race.
+ * Parses any B/C races mentioned and stores them in onboarding_data.other_races.
+ */
+async function handleOtherRaces(
+  user: { id: string; phone_number: string },
+  message: string,
+  onboardingData: Record<string, unknown>
+) {
+  const [parseResponse, acknowledgment] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      system: `The athlete has stated their primary (A) race. Extract any OTHER races they mention in this message.
+Return ONLY valid JSON, no other text.
+
+Output format: {
+  "other_races": [
+    {
+      "date": "YYYY-MM-DD",
+      "name": string | null,
+      "goal": "mile"|"5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|null,
+      "priority": "B"|"C"
+    }
+  ]
+}
+
+Priority rules:
+- "B": tune-up or secondary goal race — the athlete plans to race it meaningfully (e.g. "a half marathon 6 weeks before my marathon", "doing a 10K as a tune-up")
+- "C": low-key, for-fun, or treat-as-workout race (e.g. "just a local 5K with friends", "nothing serious")
+- Default to "B" when priority is unclear for a non-trivial race
+- Default to "C" for very short races (5K or shorter) when no priority context is given
+
+Date rules:
+- If only a month is given, assume current year (or next year if that month has passed)
+- Today is ${new Date().toISOString().split("T")[0]}
+
+If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: {"other_races": []}`,
+      messages: [{ role: "user", content: message }],
+    }),
+    acknowledgeSharedInfo(message),
+  ]);
+
+  let otherRaces: Array<{ date: string; name: string | null; goal: string | null; priority: "B" | "C" }> = [];
+  try {
+    const text = parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
+    const parsed = JSON.parse(extractJSON(text));
+    otherRaces = Array.isArray(parsed.other_races) ? parsed.other_races : [];
+  } catch (e) {
+    console.error("[onboarding] other_races parse failed:", e);
+  }
+
+  const mergedData = {
+    ...onboardingData,
+    other_races: otherRaces,
+    other_races_answered: true,
+  };
+  const nextStep = findNextStep("awaiting_other_races", mergedData);
+
+  await supabase
+    .from("users")
+    .update({ onboarding_step: nextStep, onboarding_data: mergedData as unknown as Json })
+    .eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_step_completed", {
+    step: "other_races",
+    other_race_count: otherRaces.length,
+  });
+
+  if (nextStep) {
+    const nextQuestion = getStepQuestion(nextStep, mergedData, user.id);
+    const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
+    await sendAndStore(user.id, user.phone_number, reply, nextStep);
+  } else {
+    await completeOnboarding(user, mergedData);
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -1185,6 +1270,40 @@ async function completeOnboarding(
 
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
 
+  // Write all races (A + any B/C) to the races table.
+  // Delete first so re-onboarding or plan resets don't accumulate duplicates.
+  if (raceDate && goal) {
+    await supabase.from("races").delete().eq("user_id", user.id);
+
+    const racesToInsert = [
+      // A race — always from the primary goal
+      {
+        user_id: user.id,
+        race_date: raceDate,
+        race_name: (data.race_name as string | null) ?? null,
+        goal,
+        priority: "A" as const,
+        goal_time_minutes: (data.goal_time_minutes as number | null) ?? null,
+        goal_distance_miles: goalDistanceMiles,
+      },
+      // B/C races captured in awaiting_other_races
+      ...((data.other_races as Array<{ date: string; name: string | null; goal: string | null; priority: "B" | "C" }> | null) ?? [])
+        .filter(r => r.date && r.goal)
+        .map(r => ({
+          user_id: user.id,
+          race_date: r.date,
+          race_name: r.name ?? null,
+          goal: r.goal!,
+          priority: r.priority,
+          goal_time_minutes: null,
+          goal_distance_miles: null,
+        })),
+    ];
+
+    const { error: racesError } = await supabase.from("races").insert(racesToInsert);
+    if (racesError) console.error("[onboarding] races insert failed:", racesError);
+  }
+
   // No wrap-up SMS — the initial_plan IS the response, addressed by name.
   const isDryRun = dryRunUsers.has(user.id);
   if (isDryRun) {
@@ -1251,6 +1370,7 @@ function getSportType(goal: string): "running" | "triathlon" | "cycling" | "gene
  */
 const STEP_ORDER = [
   "awaiting_race_date",
+  "awaiting_other_races",         // confirm A race + capture any B/C races; skipped for non-race goals
   "awaiting_goal_time",           // only shown for race goals (not general fitness or ultras)
   "awaiting_strava",              // offer Strava connect; satisfied once strava_connected=true or user skips
   "awaiting_schedule",
@@ -1274,6 +1394,13 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       // Web-search-prefilled dates do NOT satisfy this — we still ask so the user
       // can correct an inaccurate web search result (e.g. wrong year, wrong event date).
       return !!data.race_date_confirmed;
+    case "awaiting_other_races":
+      // Skip for non-race goals — no primary race to compare against
+      if (data.goal === "general_fitness" || data.goal === "return_to_running" || data.goal === "injury_recovery") return true;
+      // Skip if no race date confirmed (can't ask about "other races" without a primary)
+      if (!data.race_date) return true;
+      // Satisfied once the user has explicitly answered this question
+      return !!data.other_races_answered;
     case "awaiting_goal_time":
       // Skip for general fitness, return_to_running, injury recovery, and ultras (cutoffs matter more than finish times)
       if (data.goal === "general_fitness" || data.goal === "return_to_running" || data.goal === "injury_recovery" || ULTRA_GOALS.includes(data.goal as string)) return true;
@@ -1344,6 +1471,13 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
   const isCycling = sport === "cycling";
 
   switch (step) {
+    case "awaiting_other_races": {
+      const raceName = data.race_name as string | null;
+      const raceGoal = data.goal as string | null;
+      const raceRef = raceName ? `the ${raceName}` : raceGoal ? `your ${formatGoalInline(raceGoal)}` : "your race";
+      return `Is ${raceRef} your main goal race this season — the one we're building the whole plan around? And do you have any others on the calendar I should know about?`;
+    }
+
     case "awaiting_goal_time":
       return `Do you have a time goal for the race, or is it more about finishing strong and building your base? Either's totally valid — just helps me dial in the right pacing.`;
 
