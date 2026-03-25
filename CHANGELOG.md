@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Web search for race time research questions during goal-time onboarding step
+
+**Type:** Feature
+**Reported by:** User feedback (Jake)
+**User feedback:** "Can you check on the race what times usually finish in the top 35 (to get a black shirt)?" — Dean kept deflecting with "what's your goal time?" instead of actually looking it up.
+**Root cause:** `handleGoalTime` used `claude-haiku` with no tools — purely a time extractor. When the athlete asked a research question instead of stating a time, it had no way to answer and just fell through to the normal re-ask.
+**Fix / Change:** Added `isGoalTimeResearchQuestion()` regex check and `searchGoalTimeInfo()` helper that fires Sonnet + `web_search_20250305` when the athlete asks about race times/competitive standards instead of stating a goal. On a research question, Dean searches for historical results, answers conversationally, and re-asks for the athlete's personal goal time — staying on `awaiting_goal_time` so the flow isn't skipped.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-25 — Fixed "I'm Coach Dean" re-introduction after intro already sent
 
 **Type:** Bug Fix

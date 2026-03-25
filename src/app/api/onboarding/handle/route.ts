@@ -389,8 +389,14 @@ Rules:
     // This lets the coaching system display "25K Marin Headlands" instead of just "30K trail race".
     ...(parsed.race_name ? { race_name: parsed.race_name } : {}),
     // Store exact distance in miles when classifier extracted a non-standard value.
+    // Fall back to web-search-extracted distance (e.g. Dipsea = 7.4mi) when the goal message
+    // didn't include an explicit distance for the classifier to parse.
     // completeOnboarding will fall back to the bucket standard if this is null.
-    ...(parsed.goal_distance_miles != null ? { goal_distance_miles: parsed.goal_distance_miles } : {}),
+    ...(parsed.goal_distance_miles != null
+      ? { goal_distance_miles: parsed.goal_distance_miles }
+      : raceInfo.distanceMiles != null
+        ? { goal_distance_miles: raceInfo.distanceMiles }
+        : {}),
   };
 
   const nextStep = findNextStep("awaiting_goal", mergedData);
@@ -494,7 +500,10 @@ Rules:
 
   // Merge extra fields first, then apply the dedicated race_date parse result on top.
   // Set race_date_confirmed so isStepSatisfied knows the user explicitly answered.
-  const mergedData = { ...onboardingData, ...removeNulls(extra), race_date: parsed.race_date, race_date_confirmed: true };
+  // When Haiku returns null (user said "yes"/"that's right" to confirm a pre-filled date),
+  // fall back to the existing race_date from onboarding_data so it isn't overwritten with null.
+  const finalRaceDate = parsed.race_date ?? (onboardingData.race_date as string | null) ?? null;
+  const mergedData = { ...onboardingData, ...removeNulls(extra), race_date: finalRaceDate, race_date_confirmed: true };
   const nextStep = findNextStep("awaiting_race_date", mergedData);
 
   const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
@@ -593,8 +602,65 @@ If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: 
 }
 
 /**
+ * Returns true if the message looks like a research question about race times/pacing
+ * rather than a direct answer stating a goal time.
+ */
+function isGoalTimeResearchQuestion(message: string): boolean {
+  const lower = message.toLowerCase();
+  // Contains a question mark or explicit research/lookup keywords
+  if (lower.includes("?")) return true;
+  if (/\b(check|look\s*up|search|find|what.*(time|pace|finish|place|rank)|how\s*fast|top\s*\d+|black\s*shirt|podium|qualify|qualify|competitive)\b/.test(lower)) return true;
+  return false;
+}
+
+/**
+ * Uses web search to answer a research question about race times/competitive standards,
+ * then ends with a re-ask for the athlete's personal goal time.
+ * Returns null if search fails or is not applicable.
+ */
+async function searchGoalTimeInfo(
+  question: string,
+  raceName: string,
+  raceDate: string | null
+): Promise<string | null> {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const dateContext = raceDate ? ` on ${raceDate}` : "";
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 400,
+      tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
+      system: `You are Coach Dean, an AI running coach. An athlete is signing up and asked a research question about the ${raceName}${dateContext}. Today is ${today}.
+
+Search for historical results for the ${raceName} to answer their question accurately. Focus on recent years' finish times, competitive standards, or placement cutoffs they asked about.
+
+Write a direct, conversational reply (2-4 sentences) with the real information you find. Sound like a coach texting — no markdown, no asterisks. After answering, end with a single short question asking what their personal goal time is (e.g. "So what are you aiming for?").
+
+CRITICAL RULES:
+- Do NOT narrate your search process. Output nothing until you have the final answer.
+- Your ENTIRE response must be the plain-text reply to send via SMS. No JSON, no formatting.
+- Strip any citation tags from your output.
+- If you can't find reliable data, say so honestly and still ask for their goal time.`,
+      messages: [{ role: "user", content: question }],
+    });
+
+    // Take the last text block (intermediate search narration may appear before it)
+    const textBlocks = response.content.filter(b => b.type === "text");
+    const lastBlock = textBlocks[textBlocks.length - 1];
+    const text = lastBlock?.type === "text" ? lastBlock.text.trim() : "";
+    if (!text) return null;
+    // Strip citation tags that sometimes leak through
+    return text.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * awaiting_goal_time: ask if athlete has a specific finish time goal.
  * Parses time expressions like "sub-2", "1:55", "under 4:30", or "just want to finish".
+ * If the athlete asks a research question (e.g. "what time do I need for top 35?"),
+ * does a web search and answers before re-asking.
  * Stores goal_time_minutes (number or null) and advances.
  */
 async function handleGoalTime(
@@ -622,6 +688,20 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
     goalTimeMinutes = typeof parsed.goal_time_minutes === "number" ? parsed.goal_time_minutes : null;
   } catch {
     // Parsing failed — treat as no goal
+  }
+
+  // If no time was extracted and the message looks like a research question,
+  // do a web search and stay on this step so the athlete can answer after seeing the info.
+  if (goalTimeMinutes === null && isGoalTimeResearchQuestion(message)) {
+    const raceName = onboardingData.race_name as string | null;
+    if (raceName) {
+      const raceDate = onboardingData.race_date as string | null;
+      const researchReply = await searchGoalTimeInfo(message, raceName, raceDate);
+      if (researchReply) {
+        await sendAndStore(user.id, user.phone_number, researchReply, "awaiting_goal_time");
+        return NextResponse.json({ ok: true });
+      }
+    }
   }
 
   const mergedData = { ...onboardingData, goal_time_minutes: goalTimeMinutes };
@@ -1572,6 +1652,8 @@ interface RaceInfo {
   raceDate: string | null;
   /** Non-null when the race offers multiple distances and the athlete hasn't specified which one */
   distanceOptions: string[] | null;
+  /** Actual race distance in miles as found by web search (e.g. 7.4 for Dipsea) */
+  distanceMiles: number | null;
   /** Secondary goal mentioned alongside the primary (e.g. "100K this summer") */
   secondaryGoal: string | null;
 }
@@ -1596,7 +1678,7 @@ async function generateConstraintAcknowledgment(otherNotes: string, goalLabel: s
 }
 
 async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
-  const empty: RaceInfo = { ack: null, raceDate: null, distanceOptions: null, secondaryGoal: null };
+  const empty: RaceInfo = { ack: null, raceDate: null, distanceOptions: null, distanceMiles: null, secondaryGoal: null };
   try {
     const today = new Date().toISOString().split("T")[0];
     const response = await anthropic.messages.create({
@@ -1619,7 +1701,8 @@ Write a conversational 1-3 sentence acknowledgment ("ack") that:
 - If the athlete mentioned any secondary goals (e.g. "plus a 100K this summer"), briefly acknowledge them ("and we can keep that 100K in mind as we build")
 - Tone: warm, direct, like a coach texting — no "Love it!" opener, no asterisks, no markdown
 - 2-3 sentences max, under 280 chars
-Output: {"ack": "...", "date": "YYYY-MM-DD" | null, "distance_options": null, "secondary_goal": "brief description" | null}
+Output: {"ack": "...", "date": "YYYY-MM-DD" | null, "distance_options": null, "distance_miles": number | null, "secondary_goal": "brief description" | null}
+- distance_miles: the race's actual distance in miles as a number (e.g. 7.4 for Dipsea, 15.53 for 25K). null for standard distances like exact 5K, 10K, half, marathon, 50K, 100K, 100mi where the bucket label is accurate enough. Set this when the race has a non-standard or unusual distance that differs from a clean bucket.
 - secondary_goal: if the athlete clearly mentions a second race/event/goal beyond the primary one (e.g. "and then a 100K this summer", "plus Boston next year"), capture it as a short plain-text description. null if none.
 
 CRITICAL RULES:
@@ -1671,11 +1754,14 @@ CRITICAL RULES:
       // Validate raceDate is actually in the future — discard if in the past (hallucinated date)
       let raceDate = parsed?.date ?? null;
       if (raceDate && raceDate < today) raceDate = null;
-      return { ack, raceDate, distanceOptions, secondaryGoal };
+      const distanceMiles = (typeof parsed?.distance_miles === "number" && parsed.distance_miles > 0)
+        ? parsed.distance_miles
+        : null;
+      return { ack, raceDate, distanceOptions, distanceMiles, secondaryGoal };
     } catch {
       // Fallback: treat as plain-text ack if JSON parse fails
       const cleanText = text.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<cite[^>]*\/>/g, "").trim();
-      return { ack: cleanText, raceDate: null, distanceOptions: null, secondaryGoal: null };
+      return { ack: cleanText, raceDate: null, distanceOptions: null, distanceMiles: null, secondaryGoal: null };
     }
   } catch {
     return empty;

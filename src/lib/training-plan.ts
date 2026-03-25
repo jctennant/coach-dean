@@ -6,6 +6,9 @@ import type { Json } from "@/lib/database.types";
 /**
  * Compute training phase for a pre-generated plan arc, based on position
  * within the plan rather than the actual calendar date.
+ *
+ * For race plans, thresholds scale proportionally so short plans (e.g. 12 weeks)
+ * still have all four phases instead of collapsing everything into "build".
  */
 export function computePhaseForPlan(weekNumber: number, totalWeeks: number, hasRace: boolean): string {
   if (!hasRace) {
@@ -13,9 +16,15 @@ export function computePhaseForPlan(weekNumber: number, totalWeeks: number, hasR
     return cyclePos < 6 ? "base" : "build";
   }
   const weeksFromEnd = totalWeeks - weekNumber;
+  // Fixed: always 3-week taper
   if (weeksFromEnd < 3) return "taper";
-  if (weeksFromEnd < 7) return "peak";
-  if (weeksFromEnd < 14) return "build";
+  // Scale peak/build thresholds down for shorter plans so a 12-week plan still
+  // has base → build → peak → taper instead of just build → taper.
+  const scale = Math.min(1, totalWeeks / 24);
+  const peakThreshold = Math.max(4, Math.round(7 * scale));
+  const buildThreshold = Math.max(peakThreshold + 2, Math.round(14 * scale));
+  if (weeksFromEnd < peakThreshold) return "peak";
+  if (weeksFromEnd < buildThreshold) return "build";
   return "base";
 }
 
@@ -89,9 +98,12 @@ export async function generateAndSaveFullPlan(
     const longRunFactor = phase === "taper" ? 0.30 : phase === "peak" ? 0.38 : 0.32;
     const longRunTarget = Math.round(weekMileage * longRunFactor * 2) / 2;
 
+    // Label deload weeks explicitly so the dashboard can surface them distinctly.
+    // The phase value is used for mileage logic above; displayPhase is what gets stored.
+    const displayPhase = isDeload ? "deload" : phase;
     planWeeks.push({
       week_number: week,
-      phase,
+      phase: displayPhase,
       mileage_target: weekMileage,
       long_run_target: longRunTarget,
       key_workout: "",

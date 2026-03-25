@@ -28,6 +28,7 @@ const PHASE_LABELS: Record<string, string> = {
   build: "Build",
   peak: "Peak",
   taper: "Taper",
+  deload: "Deload",
 };
 
 const PHASE_COLORS: Record<string, string> = {
@@ -35,6 +36,7 @@ const PHASE_COLORS: Record<string, string> = {
   build: "bg-orange-100 text-orange-700",
   peak: "bg-red-100 text-red-700",
   taper: "bg-purple-100 text-purple-700",
+  deload: "bg-green-100 text-green-700",
 };
 
 function formatRaceDate(dateStr: string | null): string | null {
