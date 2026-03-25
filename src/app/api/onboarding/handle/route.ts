@@ -320,7 +320,7 @@ Rules:
       // Intro not yet sent — include it now, personalized with name if known
       responseText = name
         ? `Hey ${name}! I'm Coach Dean — your AI running coach, entirely over text. I can build you a personalized training plan, analyze your runs via Strava, incorporate strength and mobility work to keep you injury-free, and discuss race strategy and pacing.\n\nWhat are you training for?`
-        : `I'm Coach Dean — your AI running coach, entirely over text. I can build you a personalized training plan, analyze your runs via Strava, incorporate strength and mobility work to keep you injury-free, and discuss race strategy and pacing.\n\nWhat are you training for?`;
+        : `I'm Coach Dean — your AI running coach, entirely over text. I can build you a personalized training plan, analyze your runs via Strava, incorporate strength and mobility work to keep you injury-free, and discuss race strategy and pacing.\n\nWhat's your name and what are you training for?`;
     } else if (name) {
       // Intro already sent, name known — just ask the question
       responseText = `Hey ${name}! What are you training for — a race, general fitness, something else?`;
@@ -1121,7 +1121,20 @@ async function handleName(
   const mergedData = name ? { ...onboardingData, name } : onboardingData;
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "name" });
-  await completeOnboarding(user, mergedData, chatId);
+
+  const nextStep = findNextStep("awaiting_name", mergedData);
+  if (!nextStep) {
+    await completeOnboarding(user, mergedData, chatId);
+    return NextResponse.json({ ok: true });
+  }
+
+  const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
+  if (name) updatePayload.name = name;
+  await supabase.from("users").update(updatePayload).eq("id", user.id);
+
+  const question = getStepQuestion(nextStep, mergedData, user.id);
+  const nameGreeting = name ? `Nice to meet you, ${name}! ` : "";
+  await sendAndStore(user.id, user.phone_number, `${nameGreeting}${question}`, nextStep);
   return NextResponse.json({ ok: true });
 }
 
@@ -1497,6 +1510,7 @@ function getSportType(goal: string): "running" | "triathlon" | "cycling" | "gene
  * findNextStep walks this list and returns the first unsatisfied step.
  */
 const STEP_ORDER = [
+  "awaiting_name",                // ask for name if not yet captured — first thing after goal
   "awaiting_race_date",
   "awaiting_other_races",         // confirm A race + capture any B/C races; skipped for non-race goals
   "awaiting_goal_time",           // only shown for race goals (not general fitness or ultras)
@@ -1722,9 +1736,10 @@ async function generateConstraintAcknowledgment(otherNotes: string, goalLabel: s
 
 async function generateRaceAcknowledgment(message: string): Promise<RaceInfo> {
   const empty: RaceInfo = { ack: null, raceDate: null, distanceOptions: null, distanceMiles: null, secondaryGoal: null };
+  const timeout = new Promise<RaceInfo>((resolve) => setTimeout(() => resolve(empty), 15000));
   try {
     const today = new Date().toISOString().split("T")[0];
-    const response = await anthropic.messages.create({
+    const responsePromise = anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 400,
       tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
@@ -1758,6 +1773,12 @@ CRITICAL RULES:
 - If no specific named event is mentioned (just generic categories), return only: null`,
       messages: [{ role: "user", content: message }],
     });
+    const result = await Promise.race([responsePromise.then(r => ({ ok: true as const, r })), timeout.then(() => ({ ok: false as const }))]);
+    if (!result.ok) {
+      console.warn("[onboarding] generateRaceAcknowledgment timed out after 15s, using empty ack");
+      return empty;
+    }
+    const response = result.r;
 
     // Only take the LAST text block — intermediate blocks are Claude's between-search narration.
     const textBlocks = response.content.filter(b => b.type === "text");

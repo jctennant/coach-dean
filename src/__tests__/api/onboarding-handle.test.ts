@@ -457,3 +457,107 @@ describe("POST /api/onboarding/handle — awaiting_other_races step", () => {
     expect(stepUpdate[0].onboarding_data.other_races_answered).toBe(true);
   });
 });
+
+describe("POST /api/onboarding/handle — awaiting_name step", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("goal message without a name routes to awaiting_name first", async () => {
+    // Call order in handleGoal (complete goal, no named race, no otherNotes):
+    // 1. goal parse (Sonnet)
+    // 2. extractAdditionalFields (Haiku) → no name
+    // 3. detectAndAnswerImmediate (Haiku) → null
+    // 4. generateRaceAcknowledgment (Sonnet) → null
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"marathon","race_name":null,"goal_distance_miles":null}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] });
+
+    const usersChain = chain({
+      data: { id: "user-001", phone_number: "+12025551234", name: null, onboarding_step: "awaiting_goal", onboarding_data: { intro_sent: true } },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Training for a marathon in October" });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    expect(stepUpdate[0].onboarding_step).toBe("awaiting_name");
+  });
+
+  it("goal message that includes a name skips awaiting_name and goes to awaiting_race_date", async () => {
+    // extractAdditionalFields returns a name → awaiting_name is satisfied → next is awaiting_race_date
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"marathon","race_name":null,"goal_distance_miles":null}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"name":"Jake"}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] });
+
+    const usersChain = chain({
+      data: { id: "user-001", phone_number: "+12025551234", name: null, onboarding_step: "awaiting_goal", onboarding_data: { intro_sent: true } },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Hey it's Jake, training for a marathon" });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    expect(stepUpdate[0].onboarding_step).toBe("awaiting_race_date");
+  });
+
+  it("handleName advances to awaiting_race_date and greets by name", async () => {
+    // extractName (Haiku) returns "Jake"
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "Jake" }] });
+
+    const usersChain = chain({
+      data: {
+        id: "user-001", phone_number: "+12025551234", name: null,
+        onboarding_step: "awaiting_name",
+        onboarding_data: { goal: "marathon", intro_sent: true },
+      },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Jake" });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    expect(stepUpdate[0].name).toBe("Jake");
+    expect(stepUpdate[0].onboarding_step).toBe("awaiting_race_date");
+
+    // Should greet by name in the transition message
+    const smsCalls = vi.mocked(sendSMS).mock.calls;
+    const transitionSMS = smsCalls[smsCalls.length - 1];
+    expect(transitionSMS[1]).toContain("Jake");
+  });
+});

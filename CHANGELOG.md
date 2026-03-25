@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Add 15s timeout to race acknowledgment web search
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake)
+**User feedback:** "I didn't get a response after I told him the race... oh wait, it just landed - took about 3 min"
+**Root cause:** `generateRaceAcknowledgment` does a web search with `claude-sonnet-4-5-20250929` for named races. Occasionally this hangs or runs very slowly (3min observed for Dipsea). The function had no timeout, so if the web search stalled the whole `handleGoal` call stalled with it.
+**Fix / Change:** Wrapped the `anthropic.messages.create` call in a `Promise.race` against a 15-second timeout. If it times out, logs a warning and falls back to `empty` (no race-specific ack, no date, no distance — the goal is still captured and onboarding continues normally).
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+## 2026-03-25 — Fix Dean never asking for user's name during onboarding
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake)
+**User feedback:** "Dean didn't ask for my name"
+**Root cause:** `awaiting_name` was missing from `STEP_ORDER` entirely, so `findNextStep` never returned it. The step handler, satisfier, and question all existed — the step just wasn't reachable.
+**Fix / Change:** (1) Intro message (signup API + handleGoal direct-text path) now asks "What's your name and what are you training for?" so name and goal are collected together upfront. (2) Added `"awaiting_name"` as the first entry in `STEP_ORDER` as a fallback — if the user answers goal but skips their name, Dean asks for it before moving to race date. Satisfied automatically when name was already captured. (3) Fixed `handleName` which was hard-coded to call `completeOnboarding` (written when name was the last step) — now calls `findNextStep` and continues through remaining steps, greeting by name on transition.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-25 — Fix A-race confusion when user re-prioritizes during other-races step
 
 **Type:** Bug Fix
