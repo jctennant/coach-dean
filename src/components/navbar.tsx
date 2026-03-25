@@ -26,7 +26,11 @@ export function Navbar({ smsUrl }: { smsUrl: string }) {
         </a>
 
         {/* CTA */}
-        <div className="group relative w-fit">
+        <div className="flex items-center gap-4">
+          <a href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            Sign in
+          </a>
+          <div className="group relative w-fit">
           <a href={smsUrl}>
             <Button size="sm" className="h-auto rounded-full px-6 py-3 text-[15px]">
               Get started
@@ -40,6 +44,7 @@ export function Navbar({ smsUrl }: { smsUrl: string }) {
               </p>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </header>
