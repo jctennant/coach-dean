@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Fixed flaky periodization tests failing on boundary dates in CI
+
+**Type:** Bug Fix
+**Reported by:** Jake (CI failure on GitHub Actions)
+**User feedback:** "my previous PR failed the tests on github actions"
+**Root cause:** `computePhase` used `Math.ceil(daysUntil / 7)` for `weeksUntil`. The test helper `weeksFromNow(N)` creates a date-only string N×7 days out, but `computePhase` parses it as noon UTC. When tests run before noon UTC on GitHub Actions, the difference is N×7 days + a few hours → `Math.ceil` rounds up to N×7+1 days → `Math.ceil((N×7+1)/7)` = N+1 weeks → wrong phase at every boundary.
+**Fix / Change:** Changed `Math.ceil(daysUntil / 7)` to `Math.floor(daysUntil / 7)` in `computePhase`. Boundary dates (e.g. exactly 21 days out) correctly land in the lower-or-equal phase rather than the next one up.
+**Files changed:** src/lib/periodization.ts
+
 ## 2026-03-24 — Fixed "10K plan" label when user specified a named race (e.g. Dipsea)
 
 **Type:** Bug Fix

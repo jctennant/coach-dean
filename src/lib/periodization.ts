@@ -25,7 +25,7 @@ export function computePhase(currentWeek: number, raceDate: string | null): stri
     const now = new Date();
     const race = new Date(raceDate + "T12:00:00Z");
     const daysUntil = Math.ceil((race.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-    const weeksUntil = Math.ceil(daysUntil / 7);
+    const weeksUntil = Math.floor(daysUntil / 7);
     if (weeksUntil <= 3) return "taper";
     if (weeksUntil <= 7) return "peak";
     if (weeksUntil <= 14) return "build";
