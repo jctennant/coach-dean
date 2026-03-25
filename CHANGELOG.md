@@ -40,6 +40,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Fix / Change:** Changed all three cite-stripping regexes in `onboarding/handle/route.ts` to preserve inner content: `replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, "$1")`.
 **Files changed:** src/app/api/onboarding/handle/route.ts
 
+## 2026-03-25 — Landing page: remove training science section, sharpen FAQ with Strava angle
+
+**Type:** Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "Do we think the 'Built on proven training science' section should be folded into an FAQ? Also let's update the FAQs to reference the Strava integration — 'How does Coach Dean know what paces to assign?' could reference pulling Strava history."
+**Root cause:** Training science section felt secondary next to the comparison and plan arc sections. FAQ answers for paces and Strava underplayed the Strava integration as a selling point. Coach names/methodology had no FAQ home after removal.
+**Fix / Change:** Removed the training science section entirely. Updated "How does Coach Dean know what paces?" to lead with Strava history as the best path, then cover the no-Strava fallback. Updated "Do I need Strava?" to explain what Strava unlocks ("the feature testers have found most valuable"). Added a new "What training philosophy does Coach Dean follow?" FAQ to preserve the methodology credibility signal (80/20, Lydiard, VDOT, Roche).
+**Files changed:** src/app/page.tsx
+
+---
+
 ## 2026-03-25 — Landing page: plan arc visualization, comparison section, Strava angle
 
 **Type:** Improvement

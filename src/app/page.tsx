@@ -67,6 +67,63 @@ export default function Home() {
 
       <RaceMarquee />
 
+      {/* Comparison: Dean vs alternatives */}
+      <section className="border-t px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-12 text-center">
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              A professional coach for 1/10 of the price
+            </h2>
+            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
+              Most runners are stuck choosing between a $15/month app that can&apos;t adapt and a $200/month coach they can&apos;t afford. Dean is the middle ground.
+            </p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            {/* Training app */}
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Training apps</p>
+                <p className="font-serif text-lg font-normal text-gray-700">Runna, TrainingPeaks, others</p>
+              </div>
+              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
+                You get a plan, a calendar, and pace zones. But the app can&apos;t see that you barely slept, can&apos;t adjust when you get sick, and has no one to ask when your knee starts acting up.
+              </p>
+              <p className="text-sm font-medium text-gray-500">~$15–20 / month</p>
+            </div>
+
+            {/* Coach Dean — featured */}
+            <div className="rounded-2xl bg-gray-900 p-6 flex flex-col gap-4 text-white md:-mt-4 md:-mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">The alternative</p>
+                <p className="font-serif text-lg font-normal">Coach Dean</p>
+              </div>
+              <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Personalized plan built around your race and fitness</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Real coaching feedback on every Strava activity</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Adapts when you&apos;re sick, traveling, or overtrained</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Full season plan visible on your dashboard</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Text any question, get a specific answer</li>
+                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> No app to download. No calls to schedule.</li>
+              </ul>
+              <p className="text-sm font-medium text-gray-300">Free during beta</p>
+            </div>
+
+            {/* Human coach */}
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Human coach</p>
+                <p className="font-serif text-lg font-normal text-gray-700">The gold standard</p>
+              </div>
+              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
+                Truly personalized, deeply experienced, and available for real conversation. But at $150–300/month, a 30-minute weekly check-in, and a whole lot of scheduling, most runners never get access to one.
+              </p>
+              <p className="text-sm font-medium text-gray-500">$150–300 / month</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Value props — alternating layout */}
       {valueProps.map((prop, i) => {
         const reversed = i % 2 === 1;
@@ -191,106 +248,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Training philosophy */}
-      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-12 text-center">
-            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Built on proven training science
-            </h2>
-            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Dean applies a series of evidence-based principles — the same ones elite coaches have used for decades, adapted to your life and fitness level.
-            </p>
-          </div>
-          <div className="grid gap-10 md:grid-cols-3 md:items-start">
-            {[
-              {
-                number: "01",
-                title: "Easy means easy.",
-                body: "Elite athletes spend ~80% of their training at conversational effort. Medium intensity is the gray zone: too hard to recover from, not hard enough to drive adaptation. Easy runs are truly easy. Hard days are genuinely hard.",
-                credit: "80/20 training · Stephen Seiler · Matt Fitzgerald",
-              },
-              {
-                number: "02",
-                title: "Aerobic base first.",
-                body: "Before tempo runs, intervals, or race-specific work, Dean builds your aerobic foundation. Athletes who rush into hard training plateau faster and get injured more often. Build patiently and fitness compounds.",
-                credit: "Lydiard periodization · Jack Daniels VDOT · Uphill Athlete",
-              },
-              {
-                number: "03",
-                title: "Strength keeps you in the game.",
-                body: "Runners break down not because they ran too far, but because specific muscles weren't strong enough to absorb the load. Targeted hip, glute, and single-leg work reduces injury rates — Dean builds it into your plan from day one.",
-                credit: "David & Megan Roche · SWAP Running",
-              },
-            ].map(({ number, title, body, credit }) => (
-              <div key={number} className="flex flex-col gap-3">
-                <span className="font-mono text-sm text-muted-foreground">{number}</span>
-                <h3 className="font-serif text-lg font-normal">{title}</h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">{body}</p>
-                <p className="text-xs italic text-muted-foreground/60">{credit}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Comparison: Dean vs alternatives */}
-      <section className="border-t px-6 py-16 md:py-24">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-12 text-center">
-            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              A professional coach for 1/10 of the price
-            </h2>
-            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Most runners are stuck choosing between a $15/month app that can&apos;t adapt and a $200/month coach they can&apos;t afford. Dean is the middle ground.
-            </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            {/* Training app */}
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Training apps</p>
-                <p className="font-serif text-lg font-normal text-gray-700">Runna, TrainingPeaks, others</p>
-              </div>
-              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
-                You get a plan, a calendar, and pace zones. But the app can&apos;t see that you barely slept, can&apos;t adjust when you get sick, and has no one to ask when your knee starts acting up.
-              </p>
-              <p className="text-sm font-medium text-gray-500">~$15–20 / month</p>
-            </div>
-
-            {/* Coach Dean — featured */}
-            <div className="rounded-2xl bg-gray-900 p-6 flex flex-col gap-4 text-white md:-mt-4 md:-mb-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">The alternative</p>
-                <p className="font-serif text-lg font-normal">Coach Dean</p>
-              </div>
-              <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Personalized plan built around your race and fitness</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Real coaching feedback on every Strava activity</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Adapts when you&apos;re sick, traveling, or overtrained</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Full season plan visible on your dashboard</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Text any question, get a specific answer</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> No app to download. No calls to schedule.</li>
-              </ul>
-              <p className="text-sm font-medium text-gray-300">Free during beta</p>
-            </div>
-
-            {/* Human coach */}
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Human coach</p>
-                <p className="font-serif text-lg font-normal text-gray-700">The gold standard</p>
-              </div>
-              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
-                Truly personalized, deeply experienced, and available for real conversation. But at $150–300/month, a 30-minute weekly check-in, and a whole lot of scheduling, most runners never get access to one.
-              </p>
-              <p className="text-sm font-medium text-gray-500">$150–300 / month</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* FAQ */}
       <section className="border-t px-6 py-16 md:py-24">
         <div className="mx-auto max-w-2xl">
@@ -315,15 +272,29 @@ export default function Home() {
               },
               {
                 q: "How does Coach Dean know what paces to assign my workouts?",
-                a: "During onboarding, Dean asks for your recent race times or your comfortable conversational pace. From there he uses established training pace formulas to calculate your personal zones — easy, tempo, threshold, and interval — and builds every workout around those numbers. As you train and share feedback, Dean refines those paces over time. No guesswork, no one-size-fits-all pace charts.",
+                a: (
+                  <>
+                    <p>The best way is to connect Strava during onboarding. Dean pulls your full activity history — recent paces, long run efforts, workout splits — and uses that to build a real picture of your current fitness before your first plan is written. No questionnaire can replace actual data.</p>
+                    <p className="mt-3">If you don&apos;t use Strava, Dean asks for a recent race time or your comfortable conversational pace and calculates your training zones from there using established pace formulas (the same ones elite coaches use). As you train and share feedback over text, those zones get refined over time.</p>
+                  </>
+                ),
               },
               {
                 q: "Do I need a GPS watch or Strava to use Coach Dean?",
-                a: "Nope. All you need is a phone number. Coach Dean works entirely over SMS — no app to download, no account to create, no device required.",
+                a: (
+                  <>
+                    <p>No — all you need is a phone number. Dean works entirely over SMS with no app, account, or device required.</p>
+                    <p className="mt-3">That said, connecting Strava unlocks the best version of Dean. He&apos;ll analyze your history to build a sharper plan from day one, and send you coaching feedback within minutes of every run finishing — pace trends, effort level, whether the workout matched the intent. It&apos;s the feature testers have found most valuable.</p>
+                  </>
+                ),
               },
               {
                 q: "How much does Coach Dean cost?",
                 a: "Coach Dean is currently free during beta. We're focused on building something genuinely useful before charging for it. When pricing is introduced, early beta users will be the first to know — and we plan to take care of the people who believed in Dean early.",
+              },
+              {
+                q: "What training philosophy does Coach Dean follow?",
+                a: "Dean applies evidence-based principles used by elite coaches — polarized 80/20 training (easy runs truly easy, hard days genuinely hard), Lydiard-style aerobic base building before race-specific work, and Jack Daniels VDOT pacing for accurate zone calculation. He also incorporates targeted strength and mobility work — single-leg and hip exercises that keep runners healthy and absorbing load through a full season. The specifics are always adapted to your fitness level, schedule, and goal race.",
               },
               {
                 q: "What happens if I miss a workout or need to take a week off?",
