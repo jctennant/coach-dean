@@ -1,5 +1,18 @@
+import type { Metadata } from "next";
 import { supabase } from "@/lib/supabase";
 import RequestLinkForm from "./request-link-form";
+
+export const metadata: Metadata = {
+  title: "Your Training Plan — Coach Dean",
+  description: "View your personalized running training plan from Coach Dean.",
+  openGraph: {
+    title: "Your Training Plan — Coach Dean",
+    description: "View your personalized running training plan from Coach Dean.",
+    url: "https://coachdean.ai/dashboard",
+    siteName: "Coach Dean",
+    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Coach Dean" }],
+  },
+};
 
 type PlanWeek = {
   week_number: number;

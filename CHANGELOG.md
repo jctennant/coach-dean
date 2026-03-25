@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Fix iMessage link preview for dashboard
+
+**Type:** Bug Fix
+**Reported by:** User observation
+**User feedback:** "I'm seeing the preview link to the dashboard that dean sends in iMessage not have a preview in imessage, makes it feel a bit suspicious"
+**Root cause:** The dashboard page had no page-level metadata export, so it relied on the root layout's generic OG tags. Next.js App Router may not reliably propagate those for dynamic pages with query params (`?token=`), resulting in no preview.
+**Fix / Change:** Added a static `metadata` export to `src/app/dashboard/page.tsx` with a dashboard-specific title ("Your Training Plan — Coach Dean"), description, and the existing `og-image.png`. iMessage will now show the Coach Dean logo and a recognizable title.
+**Files changed:** src/app/dashboard/page.tsx
+
+---
+
 ## 2026-03-24 — Multi-race support (A/B/C priority) + 52-week plan cap
 
 **Type:** Feature

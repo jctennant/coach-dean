@@ -41,6 +41,7 @@ vi.mock("next/server", () => ({
 import { POST } from "@/app/api/onboarding/handle/route";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
+import { anthropic } from "@/lib/anthropic";
 
 // ---------- Helpers ----------
 
@@ -262,5 +263,88 @@ describe("POST /api/onboarding/handle — loop detection", () => {
       expect.anything(),
       expect.stringMatching(/confused on my end/i)
     );
+  });
+});
+
+describe("POST /api/onboarding/handle — awaiting_other_races step", () => {
+  // Base user at the awaiting_other_races step with a marathon goal
+  function otherRacesUser(onboardingDataOverrides: Record<string, unknown> = {}) {
+    return {
+      id: "user-001",
+      phone_number: "+12025551234",
+      name: "Tomo",
+      onboarding_step: "awaiting_other_races",
+      onboarding_data: {
+        goal: "marathon",
+        race_date: "2026-10-15",
+        race_date_confirmed: true,
+        intro_sent: true,
+        ...onboardingDataOverrides,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("stores empty other_races and advances when athlete says no other races", async () => {
+    // handleOtherRaces makes 2 parallel Claude calls: parse + acknowledgeSharedInfo
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"other_races":[]}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] });
+
+    const usersChain = chain({ data: otherRacesUser(), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Nope, just the one!" });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    expect(stepUpdate[0].onboarding_data.other_races).toEqual([]);
+    expect(stepUpdate[0].onboarding_data.other_races_answered).toBe(true);
+    // Next step after other_races for marathon (non-ultra, no goal_time yet) is awaiting_goal_time
+    expect(stepUpdate[0].onboarding_step).toBe("awaiting_goal_time");
+  });
+
+  it("stores B/C races parsed from the message and advances", async () => {
+    const parsedRaces = [
+      { date: "2026-06-14", name: "Spring Half", goal: "half_marathon", priority: "B" },
+      { date: "2026-04-05", name: "Local 5K", goal: "5k", priority: "C" },
+    ];
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: JSON.stringify({ other_races: parsedRaces }) }],
+      })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "Nice — some solid tune-up races in there." }] });
+
+    const usersChain = chain({ data: otherRacesUser(), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({
+      userId: "user-001",
+      message: "Yeah — a half marathon in June as a tune-up, and a local 5K in April just for fun",
+    });
+    await POST(req);
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => "onboarding_step" in payload
+    );
+    expect(stepUpdate).toBeDefined();
+    expect(stepUpdate[0].onboarding_data.other_races).toHaveLength(2);
+    expect(stepUpdate[0].onboarding_data.other_races[0].priority).toBe("B");
+    expect(stepUpdate[0].onboarding_data.other_races[1].priority).toBe("C");
+    expect(stepUpdate[0].onboarding_data.other_races_answered).toBe(true);
   });
 });
