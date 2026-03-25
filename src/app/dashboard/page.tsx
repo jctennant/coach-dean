@@ -83,8 +83,8 @@ export default async function DashboardPage({
     return <NoTokenScreen expired />;
   }
 
-  // Fetch training plan and current state in parallel
-  const [{ data: planData }, { data: stateData }, { data: profileData }] = await Promise.all([
+  // Fetch training plan, current state, and activities in parallel
+  const [{ data: planData }, { data: stateData }, { data: profileData }, { data: activities }] = await Promise.all([
     supabase
       .from("training_plans")
       .select("*")
@@ -102,6 +102,11 @@ export default async function DashboardPage({
       .select("goal, race_date, goal_distance_miles")
       .eq("user_id", user.id)
       .single(),
+    supabase
+      .from("activities")
+      .select("start_date, distance_meters, activity_type")
+      .eq("user_id", user.id)
+      .order("start_date", { ascending: true }),
   ]);
 
   if (!planData) {
@@ -120,6 +125,26 @@ export default async function DashboardPage({
   const planWeeks = (planData.weeks as PlanWeek[] | null) ?? [];
   const totalWeeks = planData.total_weeks ?? planWeeks.length;
   const currentWeekNum = (stateData?.current_week as number | null) ?? 1;
+
+  // Compute actual mileage per plan week from activities.
+  // Week 1 starts on the Monday of the week the plan was created.
+  const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+  const planCreatedAt = new Date(planData.created_at as string);
+  const dayOfWeek = planCreatedAt.getUTCDay(); // 0=Sun, 1=Mon...
+  const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const week1Monday = new Date(planCreatedAt);
+  week1Monday.setUTCDate(week1Monday.getUTCDate() + daysToMonday);
+  week1Monday.setUTCHours(0, 0, 0, 0);
+
+  const actualMilesByWeek: Record<number, number> = {};
+  for (const activity of activities ?? []) {
+    if (!RUN_TYPES.has(activity.activity_type as string)) continue;
+    const actMs = new Date(activity.start_date as string).getTime();
+    const weekNum = Math.floor((actMs - week1Monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    if (weekNum >= 1 && weekNum <= totalWeeks) {
+      actualMilesByWeek[weekNum] = (actualMilesByWeek[weekNum] ?? 0) + (activity.distance_meters as number) / 1609.34;
+    }
+  }
   const raceDate = profileData?.race_date ?? planData.race_date;
 
   // Build a human-readable goal label: prefer specific race name over generic bucket
@@ -243,6 +268,7 @@ export default async function DashboardPage({
                   week={week}
                   isCurrent={isCurrent}
                   isPast={isPast}
+                  actualMiles={actualMilesByWeek[week.week_number] ?? null}
                 />
               );
             })}
@@ -257,31 +283,53 @@ export default async function DashboardPage({
   );
 }
 
-function WeekCard({ week, isCurrent, isPast }: { week: PlanWeek; isCurrent: boolean; isPast: boolean }) {
+function WeekCard({ week, isCurrent, isPast, actualMiles }: { week: PlanWeek; isCurrent: boolean; isPast: boolean; actualMiles: number | null }) {
+  const completed = isPast && actualMiles !== null && actualMiles >= week.mileage_target * 0.8;
+  const attempted = isPast && actualMiles !== null && actualMiles > 0 && !completed;
+  const missed = isPast && (actualMiles === null || actualMiles === 0);
+
   return (
     <div
       className={`rounded-xl border p-4 ${
         isCurrent
           ? "border-gray-900 bg-white"
           : isPast
-          ? "border-gray-100 bg-gray-50 opacity-60"
+          ? "border-gray-100 bg-gray-50"
           : "border-gray-200 bg-white"
       }`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-semibold text-gray-700 shrink-0">Week {week.week_number}</span>
+          <span className={`text-sm font-semibold shrink-0 ${isPast ? "text-gray-400" : "text-gray-700"}`}>Week {week.week_number}</span>
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${PHASE_COLORS[week.phase] ?? "bg-gray-100 text-gray-700"}`}>
             {PHASE_LABELS[week.phase] ?? week.phase}
           </span>
           {isCurrent && (
             <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs font-medium text-white shrink-0">Now</span>
           )}
+          {completed && (
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 shrink-0">✓ Done</span>
+          )}
+          {attempted && (
+            <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 shrink-0">Partial</span>
+          )}
+          {missed && (
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-400 shrink-0">—</span>
+          )}
         </div>
-        <span className="text-sm font-semibold text-gray-900 shrink-0">{week.mileage_target} mi</span>
+        <div className="text-right shrink-0">
+          {isPast && actualMiles !== null && actualMiles > 0 ? (
+            <div className="flex items-baseline gap-1">
+              <span className={`text-sm font-semibold ${completed ? "text-green-700" : "text-yellow-700"}`}>{Math.round(actualMiles * 10) / 10}</span>
+              <span className="text-xs text-gray-400">/ {week.mileage_target} mi</span>
+            </div>
+          ) : (
+            <span className={`text-sm font-semibold ${isPast ? "text-gray-400" : "text-gray-900"}`}>{week.mileage_target} mi</span>
+          )}
+        </div>
       </div>
       {week.key_workout && (
-        <p className="mt-2 text-xs text-gray-500 leading-snug">{week.key_workout}</p>
+        <p className={`mt-2 text-xs leading-snug ${isPast ? "text-gray-400" : "text-gray-500"}`}>{week.key_workout}</p>
       )}
     </div>
   );

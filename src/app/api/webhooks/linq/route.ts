@@ -215,7 +215,7 @@ async function handleInboundMessage(
 
   const { data: user, error: lookupError } = await supabase
     .from("users")
-    .select("id, onboarding_step, timezone, linq_chat_id, messaging_opted_out, reengagement_sent_at, strava_athlete_id")
+    .select("id, onboarding_step, timezone, linq_chat_id, messaging_opted_out, reengagement_sent_at, strava_athlete_id, dashboard_token")
     .eq("phone_number", senderPhone)
     .maybeSingle();
 
@@ -388,6 +388,19 @@ async function handleInboundMessage(
     } else {
       const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
       await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start pulling in your activities:\n${stravaUrl}`, messageId);
+    }
+    return;
+  }
+
+  // Detect "my plan" / "my training plan" — exact match only to avoid false positives
+  const isDashboardIntent = /^(my plan|my training plan)$/i.test(body.trim());
+  if (isDashboardIntent) {
+    const token = user.dashboard_token as string | null;
+    if (!token) {
+      await sendAndStore(user.id, senderPhone, "Your training plan isn't ready yet — I'll send you a link once it's set up.", messageId);
+    } else {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+      await sendAndStore(user.id, senderPhone, `Here's your training plan:\n${appUrl}/dashboard?token=${token}`, messageId);
     }
     return;
   }

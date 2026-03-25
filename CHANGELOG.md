@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-24 — Dashboard shows actual mileage and completion per week
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** "the plan should progress and show progress for each week you've done (like 'complete' or a checkmark) and maybe show your actual mileage or key stats"
+**Root cause:** Dashboard showed only planned mileage; no indication of what was actually run each week.
+**Fix / Change:** Fetch all activities for the user in the dashboard query. Compute actual mileage per plan week by anchoring Week 1 to the Monday of `training_plans.created_at`, then binning each run activity into the appropriate week. WeekCard now shows: ✓ Done (green, ≥80% of target), Partial (yellow, >0 but <80%), — (gray, nothing logged). Actual vs target shown as "9.2 / 12 mi" for past weeks. Also narrowed the "my plan" SMS command to exact match only (`/^(my plan|my training plan)$/i`) to avoid false positives on conversational mentions.
+**Files changed:** src/app/dashboard/page.tsx, src/app/api/webhooks/linq/route.ts
+
+---
+
+## 2026-03-24 — "My plan" SMS command sends dashboard link
+
+**Type:** Feature
+**Reported by:** User feedback
+**User feedback:** "let's have that as a command" (re: texting Dean to get the dashboard link)
+**Root cause:** No keyword handler existed for users wanting to retrieve their plan link via SMS.
+**Fix / Change:** Added a regex keyword handler in the Linq webhook for phrases like "my plan", "my training plan", "dashboard", "plan link", "training plan link". Bypasses the coaching flow and immediately texts back the dashboard URL. Returns a friendly "not ready yet" message if the user has no plan/token. Also added `dashboard_token` to the user select in the webhook so it's available without a second query.
+**Files changed:** src/app/api/webhooks/linq/route.ts
+
+---
+
 ## 2026-03-24 — Fix iMessage link preview for dashboard
 
 **Type:** Bug Fix
