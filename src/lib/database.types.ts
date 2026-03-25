@@ -189,6 +189,53 @@ export type Database = {
         }
         Relationships: []
       }
+      races: {
+        Row: {
+          created_at: string | null
+          goal: string
+          goal_distance_miles: number | null
+          goal_time_minutes: number | null
+          id: string
+          priority: string
+          race_date: string
+          race_name: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          goal: string
+          goal_distance_miles?: number | null
+          goal_time_minutes?: number | null
+          id?: string
+          priority?: string
+          race_date: string
+          race_name?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          goal?: string
+          goal_distance_miles?: number | null
+          goal_time_minutes?: number | null
+          id?: string
+          priority?: string
+          race_date?: string
+          race_name?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "races_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       training_plans: {
         Row: {
           created_at: string | null
