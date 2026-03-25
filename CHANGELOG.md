@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Dashboard hero: race name, countdown, and week progress bar
+
+**Type:** Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "can we callout the race date / week a bit more prominently"
+**Root cause:** Hero card showed race date as small gray text and "X days to go" in the same size. Race name was `text-base`. No visual week progress indicator.
+**Fix / Change:** Race name bumped to `text-lg font-bold`. Race date and days-to-go split into a two-column row: date on the left, large bold countdown (`text-3xl`) on the right. Week progress shown as a thin progress bar under "Week X of Y" + phase badge.
+**Files changed:** src/app/dashboard/page.tsx
+
+---
+
 ## 2026-03-25 — Fix race_date null overwrite, race distance from web search, deload labeling, short-plan phase scaling
 
 **Type:** Bug Fix + Improvement

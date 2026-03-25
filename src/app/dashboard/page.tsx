@@ -190,28 +190,47 @@ export default async function DashboardPage({
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
-        {/* Hero: goal + meta */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
+        {/* Hero: goal + race countdown + week progress */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-4">
+          {/* Race name */}
           {goalLabel && (
-            <p className="text-base font-semibold text-gray-900 leading-snug">{goalLabel}</p>
+            <p className="text-lg font-bold text-gray-900 leading-snug">{goalLabel}</p>
           )}
-          <div className="flex flex-wrap gap-3 text-sm text-gray-500">
-            {raceDate && (
-              <span>Race: {formatRaceDate(raceDate as string)}</span>
-            )}
-            {raceDays && (
-              <span className="font-medium text-gray-700">{raceDays} days to go</span>
-            )}
-          </div>
-          <div className="pt-1">
-            <span className="text-sm font-medium text-gray-800">
-              Week {currentWeekNum} of {totalWeeks}
-            </span>
-            {currentWeek && (
-              <span className={`ml-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${PHASE_COLORS[currentWeek.phase] ?? "bg-gray-100 text-gray-700"}`}>
-                {PHASE_LABELS[currentWeek.phase] ?? currentWeek.phase} Phase
+
+          {/* Race date + countdown */}
+          {raceDate && (
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="text-xs text-gray-400 mb-0.5 uppercase tracking-wide">Race day</p>
+                <p className="text-sm font-medium text-gray-700">{formatRaceDate(raceDate as string)}</p>
+              </div>
+              {raceDays && (
+                <div className="text-right">
+                  <p className="text-3xl font-bold text-gray-900 leading-none">{raceDays}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">days to go</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Week progress bar */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-sm font-semibold text-gray-800">
+                Week {currentWeekNum} of {totalWeeks}
               </span>
-            )}
+              {currentWeek && (
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PHASE_COLORS[currentWeek.phase] ?? "bg-gray-100 text-gray-700"}`}>
+                  {PHASE_LABELS[currentWeek.phase] ?? currentWeek.phase} Phase
+                </span>
+              )}
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-1.5">
+              <div
+                className="bg-gray-900 h-1.5 rounded-full"
+                style={{ width: `${Math.min(100, (currentWeekNum / totalWeeks) * 100)}%` }}
+              />
+            </div>
           </div>
         </div>
 
