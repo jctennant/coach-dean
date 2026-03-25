@@ -120,11 +120,14 @@ export default async function DashboardPage({
     "100k": "100K", "100mi": "100 Miles", general_fitness: "General Fitness",
     return_to_running: "Return to Running", injury_recovery: "Injury Recovery",
   };
+  // For the distance suffix on a named race: prefer the standard label (e.g. "10K") over
+  // raw miles. Only show miles when the goal bucket has no standard label (non-standard distance).
+  const standardLabel = GOAL_LABELS[goalBucket as string] ?? null;
+  const distanceSuffix = standardLabel ?? (goalDistanceMiles ? `${goalDistanceMiles} mi` : null);
   const goalLabel = raceName
-    ? `${raceName}${goalDistanceMiles ? ` · ${goalDistanceMiles} mi` : ""}`
-    : goalDistanceMiles
-    ? `${goalDistanceMiles} mi race`
-    : GOAL_LABELS[goalBucket as string] ?? goalBucket;
+    ? `${raceName}${distanceSuffix ? ` · ${distanceSuffix}` : ""}`
+    : standardLabel
+    ?? (goalDistanceMiles ? `${goalDistanceMiles} mi race` : goalBucket);
   const raceDays = daysUntilRace(raceDate as string | null);
   const trialActive = isTrialActive(user.trial_started_at as string | null);
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
