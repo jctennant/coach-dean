@@ -470,7 +470,13 @@ async function handleRaceDate(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  const [parseResponse, extra, acknowledgment] = await Promise.all([
+  const raceName = onboardingData.race_name as string | null;
+  const existingDistanceMiles = onboardingData.goal_distance_miles as number | null;
+  // Look up the race distance when the A race was recently promoted (goal_distance_miles was
+  // cleared) but we have a name to search on. Run in parallel with date extraction.
+  const shouldLookupDistance = !!raceName && existingDistanceMiles === null;
+
+  const [parseResponse, extra, acknowledgment, raceInfo] = await Promise.all([
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 64,
@@ -487,6 +493,7 @@ Rules:
     }),
     extractAdditionalFields(message),
     acknowledgeSharedInfo(message),
+    shouldLookupDistance ? generateRaceAcknowledgment(raceName!) : Promise.resolve(null),
   ]);
 
   const parseText =
@@ -505,7 +512,14 @@ Rules:
   // When Haiku returns null (user said "yes"/"that's right" to confirm a pre-filled date),
   // fall back to the existing race_date from onboarding_data so it isn't overwritten with null.
   const finalRaceDate = parsed.race_date ?? (onboardingData.race_date as string | null) ?? null;
-  const mergedData = { ...onboardingData, ...removeNulls(extra), race_date: finalRaceDate, race_date_confirmed: true };
+  const lookedUpDistance = raceInfo?.distanceMiles ?? null;
+  const mergedData = {
+    ...onboardingData,
+    ...removeNulls(extra),
+    race_date: finalRaceDate,
+    race_date_confirmed: true,
+    ...(lookedUpDistance !== null ? { goal_distance_miles: lookedUpDistance } : {}),
+  };
   const nextStep = findNextStep("awaiting_race_date", mergedData);
 
   const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
@@ -607,6 +621,7 @@ If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: 
       goal: newARace.goal ?? oldGoal,
       race_date: newARace.date ?? null,
       race_date_confirmed: false, // old confirmation was for the previous A race
+      goal_distance_miles: null, // clear old race's distance — will be re-looked-up or fall back to bucket standard
     };
     console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}`);
   }

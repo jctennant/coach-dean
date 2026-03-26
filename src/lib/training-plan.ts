@@ -40,7 +40,7 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false }: { skipLinkSms?: boolean } = {},
+  { skipLinkSms = false, prescribedWeek1Miles }: { skipLinkSms?: boolean; prescribedWeek1Miles?: number } = {},
 ): Promise<string> {
   const raceDate = (profile?.race_date as string | null) ?? null;
   const goal = (profile?.goal as string | null) ?? null;
@@ -48,17 +48,21 @@ export async function generateAndSaveFullPlan(
   const daysPerWeek = (profile?.days_per_week as number | null) ?? 4;
   const hasRace = !!raceDate;
 
-  // Determine total weeks: race → cap 4–24 weeks; no race → 12-week cycle
+  // Determine total weeks: race → use Math.round so the arc week count matches what
+  // Dean computes in the plan text (which uses whole-week language like "~19 weeks").
   let totalWeeks = 12;
   if (raceDate) {
     const now = new Date();
     const race = new Date(raceDate + "T12:00:00Z");
-    const weeksUntil = Math.ceil((race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    const weeksUntil = Math.round((race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000));
     totalWeeks = Math.max(4, Math.min(52, weeksUntil));
   }
 
-  // Base mileage: current avg or a sensible default
-  const baseMileage = Math.max(5, Math.round((avgWeeklyMileage ?? 15) * 2) / 2);
+  // Base mileage: use the prescribed week 1 total if available (keeps arc week 1 in sync
+  // with what Dean actually sent), otherwise fall back to the Strava avg.
+  const baseMileage = prescribedWeek1Miles
+    ? Math.max(5, prescribedWeek1Miles)
+    : Math.max(5, Math.round((avgWeeklyMileage ?? 15) * 2) / 2);
 
   // Build the arc week by week.
   // `buildMileage` tracks the real progression level (deloads and tapers branch off it).

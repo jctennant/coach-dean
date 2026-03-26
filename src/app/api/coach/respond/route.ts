@@ -484,8 +484,12 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     // Extract and store the specific planned sessions so all subsequent messages
     // (post_run, reminders) use the exact same distances — not independently recalculated.
     await extractAndStorePlanSessions(userId, coachMessage);
+    // Parse the prescribed week 1 total from the plan text so the arc week 1 matches
+    // what Dean actually sent (not an independently recomputed estimate).
+    const prescribedWeek1Match = coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*mi/i);
+    const prescribedWeek1Miles = prescribedWeek1Match ? parseFloat(prescribedWeek1Match[1]) : null;
     // Generate and save the full multi-week training arc, then text the dashboard link.
-    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage);
+    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined });
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.

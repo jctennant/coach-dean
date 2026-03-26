@@ -4,6 +4,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Look up race distance when A race is promoted during onboarding
+
+**Type:** Feature / Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** Sierre Zinal showing as "30K" (bucket label) on dashboard — actual distance is ~31K
+**Root cause:** When a new A race is promoted in `handleOtherRaces`, `goal_distance_miles` is cleared. No distance lookup was happening for the new race — it just fell back to the bucket standard.
+**Fix / Change:** In `handleRaceDate`, when `goal_distance_miles` is null but `race_name` exists (i.e., a promoted A race without a looked-up distance), call `generateRaceAcknowledgment(raceName)` in parallel with the date extraction. If it finds a `distanceMiles`, store it in `onboarding_data`. This uses the same Sonnet + web search path that found Dipsea = 7.4mi in the initial goal step.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+## 2026-03-26 — Fixed three dashboard/plan discrepancies after initial plan generation
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** "the first week Dean sent me is 26 mi but on the dashboard it's 29 mi. Also the dash is labeled 7.4 miles (distance of the dipsea race). there was also a discrepancy between 19 and 20 weeks to the race"
+**Root cause (7.4 mi / Dipsea):** When the original A race was promoted in `handleOtherRaces` (Dipsea → Sierre Zinal), `goal_distance_miles = 7.4` from the Dipsea web search was left in `onboarding_data`. The dashboard reads `onboarding_data.goal_distance_miles` for the race distance display, so it showed Dipsea's distance even after the A race changed.
+**Root cause (26 vs 29 mi):** `generateAndSaveFullPlan` independently computes week 1 mileage as `avgWeeklyMileage × 1.07` (27 × 1.07 = 29). Dean separately prescribed 26mi. The dashboard shows the arc's `mileage_target`, not the actual prescribed sessions total.
+**Root cause (19 vs 20 weeks):** `generateAndSaveFullPlan` used `Math.ceil` on 19.3 weeks → 20, while Dean's plan text computed it as ~19. The dashboard SMS said "20-week training plan" while Dean said "~19 weeks."
+**Fix / Change:**
+1. Clear `goal_distance_miles` in `handleOtherRaces` when the A race is promoted — the old distance no longer applies.
+2. Parse the prescribed week 1 total from the corrected plan text (regex on "Total: ~26mi") and pass it to `generateAndSaveFullPlan` as `prescribedWeek1Miles`, which becomes the arc's `baseMileage`. This keeps arc week 1 in sync with what Dean actually sent.
+3. Changed `Math.ceil` → `Math.round` in `generateAndSaveFullPlan` so `totalWeeks` matches Dean's language.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts, src/lib/training-plan.ts
+
 ## 2026-03-26 — Fixed initial plan generation timeout (60s Vercel limit)
 
 **Type:** Bug Fix
