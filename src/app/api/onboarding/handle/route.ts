@@ -1279,17 +1279,10 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
 
   const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "nightly";
 
-  // If the message wasn't actually answering the cadence question, re-ask naturally.
-  // (checkOffTopic handles most off-topic cases before we get here; this is a
-  // safety net for ambiguous messages that slipped through.)
+  // If the message wasn't actually answering the cadence question, classify what it
+  // actually is (plan feedback vs coaching question) and respond appropriately.
   if (raw.startsWith("unclear")) {
-    await sendAndStore(
-      user.id,
-      user.phone_number,
-      "Just one last thing before your plan: would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?",
-      "awaiting_cadence"
-    );
-    return NextResponse.json({ ok: true });
+    return handleNonCadenceMessage(user, message);
   }
 
   const cadence = raw.startsWith("morning")
@@ -1312,6 +1305,104 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
   ]);
 
   void trackEvent(user.id, "cadence_preference_set", { cadence });
+  return NextResponse.json({ ok: true });
+}
+
+/**
+ * Called when the athlete sends something during awaiting_cadence that doesn't
+ * answer the reminder preference question. Handles two important cases:
+ *
+ * 1. Plan feedback ("I'd like to run less / cycle more") — acknowledge the change,
+ *    store the preference in conversation history, and re-trigger initial_plan so
+ *    Dean rebuilds the plan. The new plan will include the cadence question again.
+ *
+ * 2. Coaching question ("Should I run a half before the race?") — answer it
+ *    directly, then append the cadence question at the end.
+ */
+async function handleNonCadenceMessage(
+  user: { id: string; phone_number: string; name: string | null },
+  message: string
+): Promise<NextResponse> {
+  const cadenceQuestion = "One last thing — would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?";
+
+  // Classify what the athlete actually sent
+  const classifyResponse = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 16,
+    system: `The athlete just received their initial training plan and, instead of answering a reminder preference question, sent a different message.
+
+Classify it. Return only one word:
+- "plan_feedback" — athlete wants to change the plan (fewer/more runs, different sports, schedule adjustments, volume concerns)
+- "coaching_question" — athlete is asking a genuine training or race prep question
+- "other" — everything else`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const msgType = classifyResponse.content[0].type === "text"
+    ? classifyResponse.content[0].text.trim().toLowerCase()
+    : "other";
+
+  if (msgType.startsWith("plan_feedback")) {
+    // Acknowledge the change request, store the exchange in conversation history,
+    // then re-trigger initial_plan — Claude will see the user's preference in the
+    // conversation context and build a revised plan accordingly.
+    const ackResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 100,
+      system: `You are Coach Dean, an expert running and endurance coach. The athlete just asked to change their training plan. Acknowledge their request enthusiastically and specifically (e.g. confirm the exact change they asked for), and confirm you'll rebuild around those preferences. Keep it to 1-2 short sentences. Do NOT ask any questions.`,
+      messages: [{ role: "user", content: message }],
+    });
+
+    const ack = ackResponse.content[0].type === "text"
+      ? ackResponse.content[0].text.trim()
+      : "Absolutely — I'll rebuild your plan around those preferences.";
+
+    // Store the athlete's feedback as a user turn so initial_plan sees it in context
+    await supabase.from("conversations").insert({
+      user_id: user.id,
+      role: "user",
+      content: message,
+      message_type: "user_message",
+    });
+
+    // Send and store the acknowledgment, then re-trigger initial_plan
+    await sendAndStore(user.id, user.phone_number, ack, "awaiting_cadence");
+
+    // Re-trigger initial_plan — it will set awaiting_cadence and send a revised plan
+    // that incorporates the athlete's feedback from conversation history above.
+    void fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id, trigger: "initial_plan" }),
+    });
+
+    return NextResponse.json({ ok: true });
+  }
+
+  if (msgType.startsWith("coaching_question")) {
+    // Answer the question directly, then re-ask the cadence question at the end.
+    const answerResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 300,
+      system: `You are Coach Dean, an expert running and endurance coach. Answer the athlete's coaching question directly, concisely, and knowledgeably in 2-4 sentences. Do NOT ask any follow-up questions. After your answer, on a new line, add exactly: "${cadenceQuestion}"`,
+      messages: [{ role: "user", content: message }],
+    });
+
+    const answer = answerResponse.content[0].type === "text"
+      ? answerResponse.content[0].text.trim()
+      : cadenceQuestion;
+
+    await sendAndStore(user.id, user.phone_number, answer, "awaiting_cadence");
+    return NextResponse.json({ ok: true });
+  }
+
+  // Fallback: just re-ask the cadence question
+  await sendAndStore(
+    user.id,
+    user.phone_number,
+    "Just one last thing before your plan: would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?",
+    "awaiting_cadence"
+  );
   return NextResponse.json({ ok: true });
 }
 

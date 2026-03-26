@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Fixed awaiting_cadence ignoring plan feedback and coaching questions
+
+**Type:** Bug Fix
+**Reported by:** User feedback (two separate P1 incidents)
+**User feedback:**
+- "Do I need to be running this much? If possible, id like to only be running 1-2 times a week an cycling 4 days a week." → Coach Dean replied with the cadence question, ignored the plan change entirely.
+- "Should I try to run almost a half marathon at least / Before the actual race" → Coach Dean replied with the cadence question, ignored the coaching question entirely.
+**Root cause:** `handleCadence()` classified non-cadence responses as "unclear" and immediately re-asked the cadence question with no acknowledgment of what the athlete actually said. `awaiting_cadence` was excluded from the off-topic check (any response is valid), so nothing caught these cases before they hit the bare re-ask fallback.
+**Fix / Change:** Added `handleNonCadenceMessage()`. When the Haiku classifier returns "unclear" during `awaiting_cadence`, a second Haiku call classifies the message as `plan_feedback`, `coaching_question`, or `other`. Plan feedback: generates an enthusiastic acknowledgment, stores the athlete's message in conversation history (so Claude sees it), then re-triggers `initial_plan` to rebuild the plan with the new preferences (the new plan ends with the cadence question again). Coaching question: uses Sonnet to answer directly in 2-4 sentences and appends the cadence question at the end. Other: falls back to re-asking cadence as before.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-25 — Fixed Strava callback overwriting onboarding name with Strava profile name
 
 **Type:** Bug Fix
