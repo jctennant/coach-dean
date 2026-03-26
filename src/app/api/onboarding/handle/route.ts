@@ -752,7 +752,9 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
         messages: [{ role: "user", content: message }],
       });
       const answerText = answerResponse.content[0].type === "text" ? answerResponse.content[0].text.trim() : "";
-      if (answerText && !answerText.startsWith("{")) {
+      let isNoQuestion = false;
+      try { isNoQuestion = JSON.parse(extractJSON(answerText))?.no_question === true; } catch { /* plain text answer */ }
+      if (answerText && !isNoQuestion) {
         await sendAndStore(user.id, user.phone_number, `${answerText}\n\nDo you have a time goal in mind, or are you focused on finishing?`, "awaiting_goal_time");
         return NextResponse.json({ ok: true });
       }
@@ -789,8 +791,6 @@ async function handleStrava(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  // If the athlete is asking a question rather than skipping, answer it first.
-  // No "?" guard — detectAndAnswerImmediate handles detection and returns null for non-questions.
   const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
   if (/strava/i.test(message) && message.includes("?")) {
     // Strava-specific question — explain value and re-send the link
@@ -798,15 +798,18 @@ async function handleStrava(
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
-  // General coaching question (with or without "?") — answer it, then nudge about Strava
-  const questionAnswer = await detectAndAnswerImmediate(message, (onboardingData.goal as string) || "general fitness");
-  if (questionAnswer) {
-    const reply = `${questionAnswer}\n\nWhile you're here — connect Strava for automatic run tracking: ${stravaUrl}\n\nOr reply "skip" to continue without it.`;
-    await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
-    return NextResponse.json({ ok: true });
-  }
 
   const isSkip = /skip|no strava|don.?t have|no thanks|nope|later|next/i.test(message);
+
+  // Only call AI for non-skip messages that might contain a coaching question
+  if (!isSkip) {
+    const questionAnswer = await detectAndAnswerImmediate(message, (onboardingData.goal as string) || "general fitness");
+    if (questionAnswer) {
+      const reply = `${questionAnswer}\n\nWhile you're here — connect Strava for automatic run tracking: ${stravaUrl}\n\nOr reply "skip" to continue without it.`;
+      await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
+      return NextResponse.json({ ok: true });
+    }
+  }
 
   const mergedData = { ...onboardingData, strava_skipped: true };
   const nextStep = findNextStep("awaiting_strava", mergedData);
