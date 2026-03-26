@@ -31,13 +31,13 @@ describe("computePhase — no race date", () => {
 });
 
 describe("computePhase — with race date", () => {
-  it("returns taper when ≤3 weeks out", () => {
+  it("returns taper when ≤2 weeks out", () => {
+    expect(computePhase(5, weeksFromNow(1))).toBe("taper");
     expect(computePhase(5, weeksFromNow(2))).toBe("taper");
-    expect(computePhase(5, weeksFromNow(3))).toBe("taper");
   });
 
-  it("returns peak when 4–7 weeks out", () => {
-    expect(computePhase(5, weeksFromNow(4))).toBe("peak");
+  it("returns peak when 3–7 weeks out", () => {
+    expect(computePhase(5, weeksFromNow(3))).toBe("peak");
     expect(computePhase(5, weeksFromNow(7))).toBe("peak");
   });
 

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Reduced taper from 3 weeks to 2 weeks
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Vivian
+**User feedback:** Her 5-week aggressive half marathon plan had 3 weeks of taper, leaving only 2 weeks of actual training.
+**Root cause:** Taper was hardcoded at 3 weeks in both `training-plan.ts` (plan arc generation) and `periodization.ts` (weekly phase computation). On a 5-week plan that's 60% taper.
+**Fix / Change:** Reduced taper to 2 weeks in both places. Updated taper volume factors to 70% → 50% of peak (was 75% → 65% → 50%). Updated all tests accordingly.
+**Files changed:** src/lib/training-plan.ts, src/lib/periodization.ts, src/__tests__/lib/training-plan.test.ts, src/__tests__/lib/periodization.test.ts
+
+---
+
 ## 2026-03-25 — Fixed awaiting_cadence infinite loop (Vivian)
 
 **Type:** Bug Fix

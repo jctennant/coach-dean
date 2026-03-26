@@ -10,7 +10,7 @@ export interface PeriodizationContext {
  *
  * When a race date exists, phase is derived by counting weeks-to-race
  * (working backwards from race day):
- *   ≤ 3 weeks  → taper
+ *   ≤ 2 weeks  → taper
  *   ≤ 7 weeks  → peak
  *   ≤ 14 weeks → build
  *   > 14 weeks → base
@@ -26,7 +26,7 @@ export function computePhase(currentWeek: number, raceDate: string | null): stri
     const race = new Date(raceDate + "T12:00:00Z");
     const daysUntil = Math.ceil((race.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
     const weeksUntil = Math.floor(daysUntil / 7);
-    if (weeksUntil <= 3) return "taper";
+    if (weeksUntil <= 2) return "taper";
     if (weeksUntil <= 7) return "peak";
     if (weeksUntil <= 14) return "build";
     return "base";

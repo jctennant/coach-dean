@@ -34,14 +34,14 @@ describe("computePhaseForPlan — 12-week race plan", () => {
   // peakThreshold = max(4, round(7*0.5)) = max(4, 4) = 4
   // buildThreshold = max(6, round(14*0.5)) = max(6, 7) = 7
 
-  it("taper: last 3 weeks (weeks 10–12)", () => {
-    expect(computePhaseForPlan(10, 12, true)).toBe("taper"); // weeksFromEnd=2
+  it("taper: last 2 weeks (weeks 11–12)", () => {
     expect(computePhaseForPlan(11, 12, true)).toBe("taper"); // weeksFromEnd=1
     expect(computePhaseForPlan(12, 12, true)).toBe("taper"); // weeksFromEnd=0
   });
 
-  it("peak: week 9 (weeksFromEnd=3, which is < peakThreshold=4)", () => {
-    expect(computePhaseForPlan(9, 12, true)).toBe("peak");
+  it("peak: weeks 9–10 (weeksFromEnd 3–2, both < peakThreshold=4)", () => {
+    expect(computePhaseForPlan(9, 12, true)).toBe("peak");  // weeksFromEnd=3
+    expect(computePhaseForPlan(10, 12, true)).toBe("peak"); // weeksFromEnd=2
   });
 
   it("build: weeks 6–8 (weeksFromEnd 6–4, all < buildThreshold=7 but ≥ peakThreshold=4)", () => {
@@ -75,14 +75,14 @@ describe("computePhaseForPlan — 24-week race plan", () => {
   // peakThreshold = max(4, round(7)) = 7
   // buildThreshold = max(9, round(14)) = 14
 
-  it("taper: last 3 weeks (22–24)", () => {
-    expect(computePhaseForPlan(22, 24, true)).toBe("taper");
-    expect(computePhaseForPlan(24, 24, true)).toBe("taper");
+  it("taper: last 2 weeks (23–24)", () => {
+    expect(computePhaseForPlan(23, 24, true)).toBe("taper"); // weeksFromEnd=1
+    expect(computePhaseForPlan(24, 24, true)).toBe("taper"); // weeksFromEnd=0
   });
 
-  it("peak: weeks 18–21 (weeksFromEnd 6–3)", () => {
+  it("peak: weeks 18–22 (weeksFromEnd 6–2)", () => {
     expect(computePhaseForPlan(18, 24, true)).toBe("peak"); // weeksFromEnd=6
-    expect(computePhaseForPlan(21, 24, true)).toBe("peak"); // weeksFromEnd=3
+    expect(computePhaseForPlan(22, 24, true)).toBe("peak"); // weeksFromEnd=2
   });
 
   it("build: weeks 11–17 (weeksFromEnd 13–7)", () => {
@@ -97,20 +97,19 @@ describe("computePhaseForPlan — 24-week race plan", () => {
 });
 
 // ---------------------------------------------------------------------------
-// computePhaseForPlan — taper is always 3 weeks regardless of plan length
+// computePhaseForPlan — taper is always 2 weeks regardless of plan length
 // ---------------------------------------------------------------------------
-describe("computePhaseForPlan — taper is always 3 weeks", () => {
+describe("computePhaseForPlan — taper is always 2 weeks", () => {
   const lengths = [6, 8, 12, 16, 24, 40, 52];
 
   for (const total of lengths) {
-    it(`last 3 weeks of a ${total}-week plan are all taper`, () => {
+    it(`last 2 weeks of a ${total}-week plan are all taper`, () => {
       expect(computePhaseForPlan(total, total, true)).toBe("taper");
       expect(computePhaseForPlan(total - 1, total, true)).toBe("taper");
-      expect(computePhaseForPlan(total - 2, total, true)).toBe("taper");
     });
 
-    it(`week ${total - 3} of a ${total}-week plan is NOT taper`, () => {
-      const phase = computePhaseForPlan(total - 3, total, true);
+    it(`week ${total - 2} of a ${total}-week plan is NOT taper`, () => {
+      const phase = computePhaseForPlan(total - 2, total, true);
       expect(phase).not.toBe("taper");
     });
   }

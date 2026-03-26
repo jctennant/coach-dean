@@ -16,8 +16,8 @@ export function computePhaseForPlan(weekNumber: number, totalWeeks: number, hasR
     return cyclePos < 6 ? "base" : "build";
   }
   const weeksFromEnd = totalWeeks - weekNumber;
-  // Fixed: always 3-week taper
-  if (weeksFromEnd < 3) return "taper";
+  // 2-week taper max — 3 weeks is too long for short plans (e.g. 5-week half marathon)
+  if (weeksFromEnd < 2) return "taper";
   // Scale peak/build thresholds down for shorter plans so a 12-week plan still
   // has base → build → peak → taper instead of just build → taper.
   const scale = Math.min(1, totalWeeks / 24);
@@ -81,9 +81,9 @@ export async function generateAndSaveFullPlan(
 
     let weekMileage: number;
     if (phase === "taper") {
-      // 3-week taper: 75% → 65% → 50% of peak
-      const taperWeek = 3 - weeksFromEnd; // 1, 2, 3
-      const taperFactor = taperWeek >= 3 ? 0.50 : taperWeek === 2 ? 0.65 : 0.75;
+      // 2-week taper: 70% → 50% of peak
+      const taperWeek = 2 - weeksFromEnd; // 1, 2
+      const taperFactor = taperWeek >= 2 ? 0.50 : 0.70;
       weekMileage = Math.round(peakMileage * taperFactor * 2) / 2;
     } else if (isDeload) {
       weekMileage = Math.round(buildMileage * 0.70 * 2) / 2;
