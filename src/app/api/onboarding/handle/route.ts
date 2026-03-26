@@ -1828,7 +1828,9 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       const prefillDate = data.race_date as string | null;
       if (prefillDate) {
         const formatted = new Date(prefillDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-        return `Looks like the race is on ${formatted} — does that match your registration? Just confirm or give me the correct date.`;
+        const raceName = data.race_name as string | null;
+        const raceLabel = raceName ? `the ${raceName}` : "the race";
+        return `Looks like ${raceLabel} is on ${formatted} — does that match your registration? Just confirm or give me the correct date.`;
       }
       // Pre-fill if a month was mentioned but no specific date captured yet
       const raceMonth = data.race_month as string | null;

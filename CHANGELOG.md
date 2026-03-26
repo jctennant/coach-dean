@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Include race name in date confirmation question
+
+**Type:** Improvement
+**Reported by:** Jake (direct observation)
+**User feedback:** "feels like we may be able to actually callout the specific race we are asking about here to be clearer: Looks like the race is on June 14, 2026 — does that match your registration?"
+**Root cause:** The date confirmation message used the generic phrase "the race" even though the race name (`race_name`) was already stored in onboarding data.
+**Fix / Change:** Pull `race_name` from onboarding data and use it in the confirmation: "Looks like the Dipsea is on June 14, 2026 — does that match your registration?"
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-26 — Look up race distance when A race is promoted during onboarding
 
 **Type:** Feature / Bug Fix
