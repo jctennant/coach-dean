@@ -713,30 +713,33 @@ async function handleGoalTime(
   const [response, acknowledgment] = await Promise.all([
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 50,
+      max_tokens: 100,
       system: `Extract a race finish time goal from this message. Convert to total minutes.
 Examples: "sub-2 hours" → 120, "1:55" → 115, "under 4:30" → 270, "around 2:15" → 135, "23 minutes" → 23.
-If no specific time goal (e.g. "just finish", "no goal", "build fitness", "not sure") → null.
-Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
+If the athlete explicitly states they have no time goal (e.g. "just finish", "no goal", "no specific time", "perform my best", "build fitness") → {"goal_time_minutes": null, "has_answered": true}.
+If the athlete is uncertain or hasn't answered (e.g. "not sure", "I don't know", off-topic) → {"goal_time_minutes": null, "has_answered": false}.
+Return ONLY valid JSON: {"goal_time_minutes": number | null, "has_answered": boolean}`,
       messages: [{ role: "user", content: message }],
     }),
     acknowledgeSharedInfo(message),
   ]);
 
   let goalTimeMinutes: number | null = null;
+  let hasAnswered = false;
   try {
     const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
     const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
     goalTimeMinutes = typeof parsed.goal_time_minutes === "number" ? parsed.goal_time_minutes : null;
+    hasAnswered = goalTimeMinutes !== null || parsed.has_answered === true;
   } catch {
-    // Parsing failed — treat as no goal
+    // Parsing failed — treat as no goal, no answer
   }
 
-  // If no time was extracted, check if it's a question we should answer before re-asking.
+  // If no time was extracted, check if it's a question we should answer before advancing or re-asking.
   if (goalTimeMinutes === null) {
     const raceName = onboardingData.race_name as string | null;
     if (isGoalTimeResearchQuestion(message) && raceName) {
-      // Race-specific research question — answer with web search (better than Sonnet alone)
+      // Race-specific research question — answer with web search, then re-ask (they haven't answered yet)
       const raceDate = onboardingData.race_date as string | null;
       const researchReply = await searchGoalTimeInfo(message, raceName, raceDate);
       if (researchReply) {
@@ -744,7 +747,7 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
         return NextResponse.json({ ok: true });
       }
     } else if (!isGoalTimeResearchQuestion(message) && message.includes("?")) {
-      // General coaching question — use Sonnet for a quality answer, then re-ask for goal time
+      // They asked a coaching question — answer it, then either advance (if they already said no goal) or re-ask
       const answerResponse = await anthropic.messages.create({
         model: "claude-sonnet-4-5-20250929",
         max_tokens: 300,
@@ -755,7 +758,24 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
       let isNoQuestion = false;
       try { isNoQuestion = JSON.parse(extractJSON(answerText))?.no_question === true; } catch { /* plain text answer */ }
       if (answerText && !isNoQuestion) {
-        await sendAndStore(user.id, user.phone_number, `${answerText}\n\nDo you have a time goal in mind, or are you focused on finishing?`, "awaiting_goal_time");
+        if (hasAnswered) {
+          // They clearly stated no goal and asked a question — answer and advance
+          const mergedData = { ...onboardingData, goal_time_minutes: null };
+          const nextStep = findNextStep("awaiting_goal_time", mergedData);
+          await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: mergedData as unknown as Json }).eq("id", user.id);
+          void trackEvent(user.id, "onboarding_step_completed", { step: "goal_time", has_time_goal: false });
+          const nextQuestion = nextStep ? getStepQuestion(nextStep, mergedData, user.id) : null;
+          const reply = nextQuestion ? `${answerText}\n\n${nextQuestion}` : answerText;
+          if (nextStep) {
+            await sendAndStore(user.id, user.phone_number, reply, nextStep);
+          } else {
+            await sendAndStore(user.id, user.phone_number, answerText, "awaiting_goal_time");
+            await completeOnboarding(user, mergedData);
+          }
+        } else {
+          // They asked a question but haven't stated their goal — answer and re-ask
+          await sendAndStore(user.id, user.phone_number, `${answerText}\n\nDo you have a time goal in mind, or are you focused on finishing?`, "awaiting_goal_time");
+        }
         return NextResponse.json({ ok: true });
       }
     }
