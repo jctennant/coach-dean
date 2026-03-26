@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Fixed double-ask for goal time during onboarding
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** "I guess I just want to perform to the best of my ability; no current time goal. My top 5k is 17:23 but I'm probably a bit slower than that right now" → Coach Dean responded with coaching advice then re-asked "Do you have a time goal in mind, or are you focused on finishing?"
+**Root cause:** In `handleGoalTime`, when `goalTimeMinutes` was null, the code entered a "general coaching question" branch for any message that wasn't a research question. The user's message had no `?` but included 5K PR context, which Sonnet treated as a coaching question and answered — then re-appended the goal time question.
+**Fix / Change:** Added `message.includes("?")` guard to the coaching question branch. Messages without a `?` that don't extract a time goal are now treated as "no specific goal" answers and advance the onboarding step normally (with `acknowledgeSharedInfo` prepended to the next question).
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-26 — Fixed Dean adding multi-week mileage into the current week total
 
 **Type:** Bug Fix

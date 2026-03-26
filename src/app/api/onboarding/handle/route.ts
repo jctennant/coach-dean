@@ -743,7 +743,7 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
         await sendAndStore(user.id, user.phone_number, researchReply, "awaiting_goal_time");
         return NextResponse.json({ ok: true });
       }
-    } else if (!isGoalTimeResearchQuestion(message)) {
+    } else if (!isGoalTimeResearchQuestion(message) && message.includes("?")) {
       // General coaching question — use Sonnet for a quality answer, then re-ask for goal time
       const answerResponse = await anthropic.messages.create({
         model: "claude-sonnet-4-5-20250929",
