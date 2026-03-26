@@ -79,7 +79,7 @@ export async function POST(request: Request) {
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
   // Skip awaiting_anything_else, awaiting_name, awaiting_cadence, awaiting_timezone, awaiting_goal_time — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava") {
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava" && step !== "awaiting_cadence" && step !== "awaiting_timezone" && step !== "awaiting_goal_time") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;

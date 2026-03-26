@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Fixed awaiting_cadence infinite loop (Vivian)
+
+**Type:** Bug Fix
+**Reported by:** User observation (Vivian)
+**User feedback:** Dean kept asking the reminder cadence question ("morning, evening, or weekly?") in a loop even after Vivian replied "Morning" three times.
+**Root cause:** The `checkOffTopic` guard was missing `awaiting_cadence` (and `awaiting_timezone`, `awaiting_goal_time`) from its exclusion list, even though the comment above it explicitly said to skip those steps. When Vivian replied "Morning", the off-topic LLM interpreted it as a greeting rather than a preference answer and returned `on_topic: false` with a freshly-generated cadence question. The `handleCadence` function was never reached.
+**Fix / Change:** Added `step !== "awaiting_cadence"`, `step !== "awaiting_timezone"`, and `step !== "awaiting_goal_time"` to the off-topic check condition, matching the existing comment. These steps accept any response by design — their own handlers classify the input.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-25 — Fix multi-race onboarding stealing wrong distance; fix bike "mi" inflating mileage; stop model reasoning leaking as SMS
 
 **Type:** Bug Fix (3 bugs)
