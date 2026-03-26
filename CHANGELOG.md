@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Fixed Dean adding multi-week mileage into the current week total
+
+**Type:** Bug Fix
+**Reported by:** Rachel
+**User feedback:** "Dean told me I was at 11.5 miles this week and included '3.5mi Sunday from last week's carryover' in the total"
+**Root cause:** Dean was ignoring the authoritative `weekMileageSoFar` figure in the system prompt and instead computing its own week total by adding up individual run mentions from the conversation, including runs from previous weeks.
+**Fix / Change:** Strengthened the `⚠️ THIS WEEK'S MILEAGE` instruction to explicitly forbid Dean from computing its own mileage total, from including "carryover" runs from prior weeks, and to always use the Strava-computed "done so far" figure as-is.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-26 — Fixed coaching questions being ignored or weakly handled across all onboarding steps
 
 **Type:** Bug Fix
