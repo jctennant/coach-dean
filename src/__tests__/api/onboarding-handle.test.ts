@@ -684,8 +684,8 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
 
   // ── awaiting_strava expansion ─────────────────────────────────────────────
   // Previously only Strava-specific questions ("?" + /strava/i) were detected.
-  // General coaching questions were silently treated as a skip.
-  it("awaiting_strava: non-Strava coaching question is answered and Strava link is nudged", async () => {
+  // General coaching questions (with or without "?") were silently treated as a skip.
+  it("awaiting_strava: non-Strava coaching question (with ?) is answered and Strava link is nudged", async () => {
     // Claude call order:
     // 1. detectAndAnswerImmediate Haiku → answer text
     vi.mocked(anthropic.messages.create)
@@ -702,11 +702,31 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
 
     expect(sendSMS).toHaveBeenCalledOnce();
     const smsText = vi.mocked(sendSMS).mock.calls[0][1];
-    // Should contain the coaching answer
     expect(smsText).toMatch(/runs? per week|long run/i);
-    // Should include the Strava nudge (not silently treat message as a skip)
     expect(smsText).toMatch(/strava/i);
-    // Step should NOT have advanced to awaiting_schedule
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
+    expect(stepUpdate).toBeUndefined();
+  });
+
+  it("awaiting_strava: declarative coaching statement (no ?) is answered and Strava link is nudged", async () => {
+    // Previously treated as a skip. Now detectAndAnswerImmediate runs without a "?" guard.
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "Long runs are the backbone of half marathon training — they build aerobic base and fat-burning efficiency." }] });
+
+    const usersChain = chain({ data: { id: "user-001", phone_number: "+12025551234", name: null, onboarding_step: "awaiting_strava", onboarding_data: { goal: "half_marathon", intro_sent: true } }, error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Tell me more about how long runs work" });
+    await POST(req);
+
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    expect(smsText).toMatch(/long run|aerobic/i);
+    expect(smsText).toMatch(/strava/i);
     const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
     const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
     expect(stepUpdate).toBeUndefined();

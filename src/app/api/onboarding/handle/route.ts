@@ -744,10 +744,16 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
         return NextResponse.json({ ok: true });
       }
     } else if (!isGoalTimeResearchQuestion(message)) {
-      // General coaching question (no "?" that would trigger research path) — answer and re-ask
-      const questionAnswer = await detectAndAnswerImmediate(message, (onboardingData.goal as string) || "general fitness");
-      if (questionAnswer) {
-        await sendAndStore(user.id, user.phone_number, `${questionAnswer}\n\nDo you have a time goal in mind, or are you focused on finishing?`, "awaiting_goal_time");
+      // General coaching question — use Sonnet for a quality answer, then re-ask for goal time
+      const answerResponse = await anthropic.messages.create({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 300,
+        system: `You are Coach Dean, an expert running and endurance coach. Answer the athlete's coaching question directly and knowledgeably in 2-4 sentences. Plain text only — no markdown, no asterisks. If there is no genuine coaching question (e.g. the athlete said "not sure" or "I don't know"), return only: {"no_question": true}`,
+        messages: [{ role: "user", content: message }],
+      });
+      const answerText = answerResponse.content[0].type === "text" ? answerResponse.content[0].text.trim() : "";
+      if (answerText && !answerText.startsWith("{")) {
+        await sendAndStore(user.id, user.phone_number, `${answerText}\n\nDo you have a time goal in mind, or are you focused on finishing?`, "awaiting_goal_time");
         return NextResponse.json({ ok: true });
       }
     }
@@ -784,21 +790,20 @@ async function handleStrava(
   onboardingData: Record<string, unknown>
 ) {
   // If the athlete is asking a question rather than skipping, answer it first.
-  if (message.includes("?")) {
-    const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    if (/strava/i.test(message)) {
-      // Strava-specific question — explain value and re-send the link
-      const reply = `Yes, worth it — it's free and once connected I can automatically analyze every run without you having to report anything. Here's the link:\n\n${stravaUrl}\n\nAlready have it? Tap the link to connect. No Strava? Just reply "skip" and we'll go manual.`;
-      await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
-      return NextResponse.json({ ok: true });
-    }
-    // Non-Strava coaching question — answer it, then nudge about Strava
-    const questionAnswer = await detectAndAnswerImmediate(message, (onboardingData.goal as string) || "general fitness");
-    if (questionAnswer) {
-      const reply = `${questionAnswer}\n\nWhile you're here — connect Strava for automatic run tracking: ${stravaUrl}\n\nOr reply "skip" to continue without it.`;
-      await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
-      return NextResponse.json({ ok: true });
-    }
+  // No "?" guard — detectAndAnswerImmediate handles detection and returns null for non-questions.
+  const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+  if (/strava/i.test(message) && message.includes("?")) {
+    // Strava-specific question — explain value and re-send the link
+    const reply = `Yes, worth it — it's free and once connected I can automatically analyze every run without you having to report anything. Here's the link:\n\n${stravaUrl}\n\nAlready have it? Tap the link to connect. No Strava? Just reply "skip" and we'll go manual.`;
+    await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
+    return NextResponse.json({ ok: true });
+  }
+  // General coaching question (with or without "?") — answer it, then nudge about Strava
+  const questionAnswer = await detectAndAnswerImmediate(message, (onboardingData.goal as string) || "general fitness");
+  if (questionAnswer) {
+    const reply = `${questionAnswer}\n\nWhile you're here — connect Strava for automatic run tracking: ${stravaUrl}\n\nOr reply "skip" to continue without it.`;
+    await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
+    return NextResponse.json({ ok: true });
   }
 
   const isSkip = /skip|no strava|don.?t have|no thanks|nope|later|next/i.test(message);
