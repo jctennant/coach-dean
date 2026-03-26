@@ -4,6 +4,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Fixed initial plan generation timeout (60s Vercel limit)
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** Sent a detailed "anything else" response, waited 5 minutes with no reply, then sent "You still working on the plan?" — got the cadence question instead of the plan
+**Root cause:** `initial_plan` had web search enabled (`shouldUseWebSearch`), causing Sonnet + tool use + 800 tokens + large system prompt to exceed Vercel's 60s function limit. Plan generation timed out silently. The `onboarding_step = "awaiting_cadence"` is set at the START of plan generation (by design, as a safety net), so the next inbound SMS was routed to cadence handling instead of being treated as "user is confused."
+**Fix / Change:**
+1. Removed `initial_plan` from `shouldUseWebSearch` — race details are already looked up during onboarding; the plan doesn't need web search.
+2. Increased `maxDuration` from 60 to 120 seconds as a safety buffer.
+3. Added plan re-trigger in `handleCadence`: if no `initial_plan` message exists in conversations when the athlete answers the cadence question, re-trigger plan generation instead of saying "how does the plan look?" (which would reference a plan they never received).
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-26 — Added holding message before initial plan generation
 
 **Type:** Bug Fix / UX

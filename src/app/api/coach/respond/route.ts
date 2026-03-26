@@ -11,7 +11,7 @@ import { computePhaseForPlan, generateAndSaveFullPlan } from "@/lib/training-pla
 import { enforceVolumeCaps, deduplicateSessionLines } from "@/lib/plan-validation";
 import type { Json } from "@/lib/database.types";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image";
 
@@ -188,7 +188,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     if (forecast) weatherBlock = buildWeatherBlock(forecast, userTimezone);
   }
 
-  const shouldUseWebSearch = trigger === "user_message" || trigger === "initial_plan";
+  const shouldUseWebSearch = trigger === "user_message";
 
   // For user_message: extract race/pace data BEFORE building the system prompt so the
   // coach responds with accurate paces immediately (not one message later).

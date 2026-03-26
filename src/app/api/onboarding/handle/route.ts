@@ -1337,6 +1337,40 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
       ? "nightly_reminders"
       : "weekly_only";
 
+  // Check if the initial plan was ever sent — if plan generation timed out earlier,
+  // re-trigger it instead of referencing a plan the athlete never received.
+  const { data: planMessages } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("message_type", "initial_plan")
+    .limit(1);
+  const planAlreadySent = (planMessages?.length ?? 0) > 0;
+
+  await Promise.all([
+    supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", user.id),
+    supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
+  ]);
+
+  void trackEvent(user.id, "cadence_preference_set", { cadence });
+
+  if (!planAlreadySent) {
+    // Plan generation timed out earlier — send a holding message and re-trigger it.
+    await sendAndStore(user.id, user.phone_number, "Got it — and sorry for the delay! Let me get your plan together now.", "awaiting_cadence");
+    after(async () => {
+      try {
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, trigger: "initial_plan" }),
+        });
+      } catch (err) {
+        console.error("[onboarding] cadence plan re-trigger failed:", err);
+      }
+    });
+    return NextResponse.json({ ok: true });
+  }
+
   const confirmation =
     cadence === "morning_reminders"
       ? "Perfect — I'll text you the morning of each session. How does the plan look? Let me know if anything needs tweaking."
@@ -1344,13 +1378,7 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
         ? "Perfect — I'll send you a heads-up the evening before each session. How does the plan look? Let me know if anything needs tweaking."
         : "Got it — I'll send you a weekly plan overview every Sunday. How does the plan look? Happy to adjust anything.";
 
-  await Promise.all([
-    supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", user.id),
-    supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
-    sendAndStore(user.id, user.phone_number, confirmation, "awaiting_cadence"),
-  ]);
-
-  void trackEvent(user.id, "cadence_preference_set", { cadence });
+  await sendAndStore(user.id, user.phone_number, confirmation, "awaiting_cadence");
   return NextResponse.json({ ok: true });
 }
 
