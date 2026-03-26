@@ -398,8 +398,12 @@ describe("POST /api/onboarding/handle — awaiting_other_races step", () => {
   });
 
   it("stores empty other_races and advances when athlete says no other races", async () => {
-    // handleOtherRaces makes 2 parallel Claude calls: parse + acknowledgeSharedInfo
+    // Claude call order for awaiting_other_races:
+    // 1. checkOffTopic Haiku → {"on_topic": true}  (added when awaiting_other_races was added to stepContext)
+    // 2. handleOtherRaces parse Haiku → {"other_races": []}
+    // 3. acknowledgeSharedInfo Haiku → null
     vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"on_topic": true}' }] })
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"other_races":[]}' }] })
       .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] });
 
@@ -428,7 +432,12 @@ describe("POST /api/onboarding/handle — awaiting_other_races step", () => {
       { date: "2026-06-14", name: "Spring Half", goal: "half_marathon", priority: "B" },
       { date: "2026-04-05", name: "Local 5K", goal: "5k", priority: "C" },
     ];
+    // Claude call order:
+    // 1. checkOffTopic Haiku → {"on_topic": true}
+    // 2. handleOtherRaces parse Haiku → {"other_races": [...]}
+    // 3. acknowledgeSharedInfo Haiku → ack text
     vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"on_topic": true}' }] })
       .mockResolvedValueOnce({
         content: [{ type: "text", text: JSON.stringify({ other_races: parsedRaces }) }],
       })
@@ -559,5 +568,147 @@ describe("POST /api/onboarding/handle — awaiting_name step", () => {
     const smsCalls = vi.mocked(sendSMS).mock.calls;
     const transitionSMS = smsCalls[smsCalls.length - 1];
     expect(transitionSMS[1]).toContain("Jake");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coaching question handling — onboarding should answer questions at any step
+// rather than ignoring them or giving a 1-sentence non-answer.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboarding/handle — coaching questions during onboarding", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Prevent real fetch calls (e.g. plan_feedback → initial_plan re-trigger)
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
+  });
+
+  // ── Bug 5 regression ──────────────────────────────────────────────────────
+  // Athlete asks to change the plan during awaiting_cadence.
+  // Old behavior: bare cadence re-ask, plan never revised.
+  // Fixed: acknowledge change, store preference in conversation history,
+  //        re-trigger initial_plan so Dean rebuilds with the new preferences.
+  it("awaiting_cadence: plan change request triggers acknowledgment + initial_plan re-trigger", async () => {
+    // Claude call order:
+    // 1. handleCadence Haiku (classify cadence) → "unclear"
+    // 2. handleNonCadenceMessage Haiku (classify message type) → "plan_feedback"
+    // 3. handleNonCadenceMessage Sonnet (generate acknowledgment) → ack text
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "unclear" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "plan_feedback" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "Absolutely — rebuilding around 1-2 runs and 4 cycling days." }] });
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return chain({ data: { id: "user-001", phone_number: "+12025551234", name: "Alex", onboarding_step: "awaiting_cadence", onboarding_data: {} }, error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Do I need to run this much? I'd like to only run 1-2 times a week and cycle 4 days." });
+    await POST(req);
+
+    // Should send the acknowledgment, not the bare cadence re-ask
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    expect(smsText).toMatch(/rebuild|1-2|cycling/i);
+    expect(smsText).not.toBe("Just one last thing before your plan: would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?");
+
+    // initial_plan should be re-triggered to regenerate the plan with new preferences
+    const fetchMock = vi.mocked(global.fetch as ReturnType<typeof vi.fn>);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/coach/respond"),
+      expect.objectContaining({ body: expect.stringContaining("initial_plan") })
+    );
+  });
+
+  // ── Bug 6 regression ──────────────────────────────────────────────────────
+  // Athlete asks a coaching question during awaiting_cadence.
+  // Old behavior: question silently ignored, bare cadence re-ask sent.
+  // Fixed: question answered by Sonnet, cadence re-ask appended at end.
+  it("awaiting_cadence: coaching question is answered and cadence is re-asked at the end", async () => {
+    // Claude call order:
+    // 1. handleCadence Haiku → "unclear"
+    // 2. handleNonCadenceMessage Haiku → "coaching_question"
+    // 3. handleNonCadenceMessage Sonnet → answer + cadence question
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "unclear" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "coaching_question" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "For a first half marathon you don't need to run the full distance beforehand. Build up to 10-11 miles and race-day adrenaline carries you the rest.\n\nOne last thing — would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?" }] });
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return chain({ data: { id: "user-001", phone_number: "+12025551234", name: "Vivian", onboarding_step: "awaiting_cadence", onboarding_data: {} }, error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Should I try to run almost a half marathon before the actual race?" });
+    await POST(req);
+
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    // Should contain the coaching answer
+    expect(smsText).toMatch(/half marathon|training|adrenaline/i);
+    // Should still include the cadence question
+    expect(smsText).toMatch(/morning.*session|evening before|weekly.*Sunday/i);
+  });
+
+  // ── checkOffTopic improvement ─────────────────────────────────────────────
+  // Coaching questions at steps with off-topic check (e.g. awaiting_schedule)
+  // previously got a 1-sentence Haiku non-answer. Now get a real Sonnet answer.
+  it("awaiting_schedule: coaching question gets a real Sonnet answer and re-asks the schedule question", async () => {
+    // Claude call order:
+    // 1. checkOffTopic Haiku → {"on_topic": false, "type": "coaching_question"}
+    // 2. checkOffTopic Sonnet (generate answer) → answer + re-ask
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"on_topic": false, "type": "coaching_question"}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "Long runs build your aerobic base and train your body to use fat efficiently — they're the backbone of half marathon prep.\n\nHow many days a week are you looking to train?" }] });
+
+    const usersChain = chain({ data: { id: "user-001", phone_number: "+12025551234", name: "Sam", onboarding_step: "awaiting_schedule", onboarding_data: { goal: "half_marathon", intro_sent: true } }, error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "Why do I need to do long runs?" });
+    await POST(req);
+
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    // Should contain the Sonnet coaching answer (not a throwaway 1-sentence)
+    expect(smsText).toMatch(/long run|aerobic|base/i);
+    // Should include the schedule re-ask at the end
+    expect(smsText).toMatch(/how many days|days.*week/i);
+    // Step should NOT have advanced — no onboarding_step update on usersChain
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
+    expect(stepUpdate).toBeUndefined();
+  });
+
+  // ── awaiting_strava expansion ─────────────────────────────────────────────
+  // Previously only Strava-specific questions ("?" + /strava/i) were detected.
+  // General coaching questions were silently treated as a skip.
+  it("awaiting_strava: non-Strava coaching question is answered and Strava link is nudged", async () => {
+    // Claude call order:
+    // 1. detectAndAnswerImmediate Haiku → answer text
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "Aim for 3-4 runs per week with one long run at the weekend for a half marathon." }] });
+
+    const usersChain = chain({ data: { id: "user-001", phone_number: "+12025551234", name: null, onboarding_step: "awaiting_strava", onboarding_data: { goal: "half_marathon", intro_sent: true } }, error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      return chain({ data: null, error: null });
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "How many runs per week should I be doing?" });
+    await POST(req);
+
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    // Should contain the coaching answer
+    expect(smsText).toMatch(/runs? per week|long run/i);
+    // Should include the Strava nudge (not silently treat message as a skip)
+    expect(smsText).toMatch(/strava/i);
+    // Step should NOT have advanced to awaiting_schedule
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
+    expect(stepUpdate).toBeUndefined();
   });
 });

@@ -78,8 +78,10 @@ export async function POST(request: Request) {
 
   // Before routing to a step handler, check if the message is off-topic.
   // Skip awaiting_goal — handleGoal already handles all cases (greetings, partial, off-topic).
-  // Skip awaiting_anything_else, awaiting_name, awaiting_cadence, awaiting_timezone, awaiting_goal_time — any response is valid for those.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava" && step !== "awaiting_cadence" && step !== "awaiting_timezone" && step !== "awaiting_goal_time") {
+  // Skip awaiting_anything_else, awaiting_name, awaiting_cadence — any response is valid for those.
+  // Skip awaiting_strava — handleStrava has its own question detection that includes the Strava URL.
+  // Skip awaiting_goal_time — handleGoalTime has its own web-search path for research questions.
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava" && step !== "awaiting_cadence" && step !== "awaiting_goal_time") {
     const offTopicResult = await checkOffTopic(step, message);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -730,15 +732,22 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null}`,
     // Parsing failed — treat as no goal
   }
 
-  // If no time was extracted and the message looks like a research question,
-  // do a web search and stay on this step so the athlete can answer after seeing the info.
-  if (goalTimeMinutes === null && isGoalTimeResearchQuestion(message)) {
+  // If no time was extracted, check if it's a question we should answer before re-asking.
+  if (goalTimeMinutes === null) {
     const raceName = onboardingData.race_name as string | null;
-    if (raceName) {
+    if (isGoalTimeResearchQuestion(message) && raceName) {
+      // Race-specific research question — answer with web search (better than Sonnet alone)
       const raceDate = onboardingData.race_date as string | null;
       const researchReply = await searchGoalTimeInfo(message, raceName, raceDate);
       if (researchReply) {
         await sendAndStore(user.id, user.phone_number, researchReply, "awaiting_goal_time");
+        return NextResponse.json({ ok: true });
+      }
+    } else if (!isGoalTimeResearchQuestion(message)) {
+      // General coaching question (no "?" that would trigger research path) — answer and re-ask
+      const questionAnswer = await detectAndAnswerImmediate(message, (onboardingData.goal as string) || "general fitness");
+      if (questionAnswer) {
+        await sendAndStore(user.id, user.phone_number, `${questionAnswer}\n\nDo you have a time goal in mind, or are you focused on finishing?`, "awaiting_goal_time");
         return NextResponse.json({ ok: true });
       }
     }
@@ -774,13 +783,22 @@ async function handleStrava(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
-  // If the athlete is asking about Strava rather than skipping, answer them first.
-  const isStravaQuestion = /\?/.test(message) && /strava/i.test(message);
-  if (isStravaQuestion) {
+  // If the athlete is asking a question rather than skipping, answer it first.
+  if (message.includes("?")) {
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    const reply = `Yes, worth it — it's free and once connected I can automatically analyze every run without you having to report anything. Here's the link:\n\n${stravaUrl}\n\nAlready have it? Tap the link to connect. No Strava? Just reply "skip" and we'll go manual.`;
-    await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
-    return NextResponse.json({ ok: true });
+    if (/strava/i.test(message)) {
+      // Strava-specific question — explain value and re-send the link
+      const reply = `Yes, worth it — it's free and once connected I can automatically analyze every run without you having to report anything. Here's the link:\n\n${stravaUrl}\n\nAlready have it? Tap the link to connect. No Strava? Just reply "skip" and we'll go manual.`;
+      await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
+      return NextResponse.json({ ok: true });
+    }
+    // Non-Strava coaching question — answer it, then nudge about Strava
+    const questionAnswer = await detectAndAnswerImmediate(message, (onboardingData.goal as string) || "general fitness");
+    if (questionAnswer) {
+      const reply = `${questionAnswer}\n\nWhile you're here — connect Strava for automatic run tracking: ${stravaUrl}\n\nOr reply "skip" to continue without it.`;
+      await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
+      return NextResponse.json({ ok: true });
+    }
   }
 
   const isSkip = /skip|no strava|don.?t have|no thanks|nope|later|next/i.test(message);
@@ -2258,13 +2276,16 @@ async function checkOffTopic(
   step: string,
   message: string
 ): Promise<{ offTopic: false } | { offTopic: true; response: string }> {
-  const stepContext: Record<string, { topic: string }> = {
-    awaiting_race_date: { topic: "their race date or target event" },
-    awaiting_schedule: { topic: "their weekly training schedule and availability" },
-    awaiting_goal_time: { topic: "their finish time goal for the race (or whether they have one)" },
-    awaiting_ultra_background: { topic: "their ultra running background and previous race experience" },
-    awaiting_timezone: { topic: "what city or timezone they're in" },
-    awaiting_cadence: { topic: "whether they want morning-of reminders, evening-before reminders, or a weekly Sunday overview" },
+  const stepContext: Record<string, { topic: string; reAsk: string }> = {
+    awaiting_race_date:       { topic: "their race date or target event",                                reAsk: "When is your race?" },
+    awaiting_other_races:     { topic: "whether they have other goal races this season",                 reAsk: "Any other races on the calendar this season?" },
+    awaiting_schedule:        { topic: "their weekly training schedule and availability",                reAsk: "How many days a week are you looking to train?" },
+    awaiting_mileage_baseline:{ topic: "their current weekly running mileage",                          reAsk: "Roughly how many miles a week are you running right now?" },
+    awaiting_ultra_background:{ topic: "their ultra running background and previous race experience",    reAsk: "What's your ultra background — any previous ultras or long efforts?" },
+    awaiting_injury_background:{ topic: "their injury history and current physical status",             reAsk: "Can you tell me more about where things stand with the injury right now?" },
+    awaiting_goal_time:       { topic: "their finish time goal for the race (or whether they have one)", reAsk: "Do you have a time goal in mind, or are you focused on finishing?" },
+    awaiting_timezone:        { topic: "what city or timezone they're in",                              reAsk: "What city or state are you in?" },
+    awaiting_cadence:         { topic: "whether they want morning-of reminders, evening-before reminders, or a weekly Sunday overview", reAsk: "Would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?" },
   };
 
   const ctx = stepContext[step];
@@ -2277,24 +2298,28 @@ async function checkOffTopic(
 
 Read the athlete's message and decide: is it ATTEMPTING to address the topic (even partially, vaguely, or incompletely), or is it COMPLETELY UNRELATED?
 
-Always respond with valid JSON in exactly one of these two formats:
+Always respond with valid JSON in exactly one of these formats:
 On-topic: {"on_topic": true}
-Off-topic: {"on_topic": false, "response": "Your warm 1-sentence reply + re-ask question. No markdown, no asterisks."}
+Off-topic coaching question: {"on_topic": false, "type": "coaching_question"}
+Other off-topic: {"on_topic": false, "type": "other", "response": "Your warm 1-sentence reply + re-ask. No markdown, no asterisks."}
 
-ON-TOPIC (return {"on_topic": true}):
+ON-TOPIC ({"on_topic": true}):
 - Any answer to the question, even partial or brief
 - Saying they don't know, aren't sure, or don't have the info
 - Simple acknowledgments like "yeah", "not really", "not sure"
 - Anything that touches on the subject even loosely
-- Comments about their fitness level, training history, or running experience
-- Pushback on training volume, intensity, or plan structure ("I've been running for years", "I think I can handle more mileage", "that seems too easy for me")
+- Comments about fitness level, training history, or running experience
+- Pushback on training volume, intensity, or plan structure
 - Requests to adjust the plan based on their experience
 
-OFF-TOPIC (return {"on_topic": false, "response": "..."}):
-- Questions about Dean's services or capabilities (e.g. "do you coach cycling?")
+OFF-TOPIC coaching question ({"on_topic": false, "type": "coaching_question"}):
+- Questions about training methodology, race prep, pacing, nutrition, gear
+- Questions about Dean's services or capabilities ("do you coach cycling?")
+- Any genuine advice-seeking question unrelated to the current topic
+
+Other off-topic ({"on_topic": false, "type": "other", "response": "..."}):
 - Meta-questions about the onboarding process ("how many more questions?", "how long does this take?")
-- Pure advice-seeking with no personal answer ("What is a realistic finish time for a 30K?")
-- Random chit-chat with no relation to the topic or to running/training`,
+- Random chit-chat with no relation to running or training`,
     messages: [{ role: "user", content: message }],
   });
 
@@ -2304,13 +2329,31 @@ OFF-TOPIC (return {"on_topic": false, "response": "..."}):
   try {
     const parsed = JSON.parse(extractJSON(text));
     if (parsed.on_topic === true) return { offTopic: false };
-    if (parsed.on_topic === false && typeof parsed.response === "string" && parsed.response.trim()) {
-      return { offTopic: true, response: parsed.response.trim() };
+
+    if (parsed.on_topic === false) {
+      if (parsed.type === "coaching_question") {
+        // Generate a real coaching answer with Sonnet, then re-ask the current step question
+        const answerResponse = await anthropic.messages.create({
+          model: "claude-sonnet-4-5-20250929",
+          max_tokens: 300,
+          system: `You are Coach Dean, an expert running and endurance coach. Answer the athlete's question directly and knowledgeably in 2-4 sentences. Plain text only — no markdown, no asterisks. After your answer, on a new line, add: "${ctx.reAsk}"`,
+          messages: [{ role: "user", content: message }],
+        });
+        const answer = answerResponse.content[0].type === "text"
+          ? answerResponse.content[0].text.trim()
+          : ctx.reAsk;
+        return { offTopic: true, response: answer };
+      }
+
+      if (typeof parsed.response === "string" && parsed.response.trim()) {
+        return { offTopic: true, response: parsed.response.trim() };
+      }
     }
-    // Malformed JSON (missing response field, unexpected shape) — safe default: treat as on-topic
+
+    // Malformed JSON — safe default: treat as on-topic so we never silently drop a message
     return { offTopic: false };
   } catch {
-    // Not valid JSON — safe default: treat as on-topic so we never silently drop a message
+    // Not valid JSON — safe default
     return { offTopic: false };
   }
 }

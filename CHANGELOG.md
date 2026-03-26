@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Fixed coaching questions being ignored or weakly handled across all onboarding steps
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (follow-up to cadence bug)
+**User feedback:** N/A
+**Root cause:** Three separate gaps existed across onboarding steps: (1) `checkOffTopic` generated a 1-sentence Haiku acknowledgment for coaching questions rather than actually answering them, and was missing stepContext entries for `awaiting_other_races`, `awaiting_mileage_baseline`, and `awaiting_injury_background` so those steps fell through without any off-topic check at all. (2) `awaiting_timezone` was excluded from the off-topic check with no alternative question detection. (3) `handleStrava` only detected Strava-specific questions (regex for "?" + "strava") — other coaching questions were silently treated as skips. `handleGoalTime` only used a web search path for research questions (triggered by "?") — general coaching questions without "?" were silently treated as "no goal time" and advanced.
+**Fix / Change:** (1) Rewrote `checkOffTopic` to classify off-topic messages as `coaching_question` vs `other` — coaching questions now get a full Sonnet answer (2-4 sentences) followed by the step re-ask, instead of a throwaway Haiku sentence. Added missing stepContext entries with `reAsk` text for all steps. (2) Removed `awaiting_timezone` from the off-topic exclusion list so it now goes through `checkOffTopic`. (3) Expanded `handleStrava` to detect any coaching question containing "?" (not just Strava-specific) using `detectAndAnswerImmediate`, answering it and appending the Strava link re-ask. Added a coaching question fallback inside `handleGoalTime` for non-research-question cases.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/__tests__/api/onboarding-handle.test.ts
+
 ## 2026-03-26 — Fixed awaiting_cadence ignoring plan feedback and coaching questions
 
 **Type:** Bug Fix
