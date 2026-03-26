@@ -77,13 +77,20 @@ export async function GET(request: Request) {
   // Fetch current user state to merge onboarding_data and check if already onboarded
   const { data: currentUser } = await supabase
     .from("users")
-    .select("onboarding_data, onboarding_step")
+    .select("onboarding_data, onboarding_step, name")
     .eq("id", userId)
     .single();
 
   const onboardingData =
     (currentUser?.onboarding_data as Record<string, unknown>) || {};
   const alreadyOnboarded = currentUser?.onboarding_step === null;
+
+  // Don't overwrite a name already captured during onboarding (e.g. "Hi, I'm Shaun")
+  // with the Strava athlete profile name (e.g. "Spicy") — only fall back to Strava
+  // if we have no name yet.
+  const existingName = (onboardingData.name as string | null) ?? currentUser?.name ?? null;
+  const nameFromStrava = (athlete.firstname as string | null) || (athlete.username as string | null) || null;
+  const resolvedName = existingName || nameFromStrava;
 
   // Extract city and state from Strava athlete profile for timezone confirmation step
   const stravaCity = (athlete.city as string | null) || null;
@@ -115,7 +122,7 @@ export async function GET(request: Request) {
       strava_access_token: access_token,
       strava_refresh_token: refresh_token,
       strava_token_expires_at: new Date(expires_at * 1000).toISOString(),
-      name: athlete.firstname || athlete.username || null,
+      name: resolvedName,
       ...(shouldAdvanceToSchedule ? { onboarding_step: "awaiting_schedule" } : {}),
       ...(timezone ? { timezone } : {}),
       onboarding_data: updatedOnboardingData as unknown as Json,

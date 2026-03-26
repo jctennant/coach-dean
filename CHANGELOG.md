@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-25 — Fixed Strava callback overwriting onboarding name with Strava profile name
+
+**Type:** Bug Fix
+**Reported by:** User (Shaun's friend)
+**User feedback:** "I think Dean may have just called my friend Shaun, Spicy instead?"
+**Root cause:** The Strava OAuth callback unconditionally overwrote `users.name` with `athlete.firstname` from Strava. If the user had a different display name in their Strava profile (e.g. "Spicy"), it replaced the name already captured during onboarding (e.g. "Shaun" from "Hi Dean, I'm Shaun").
+**Fix / Change:** Fetch the existing name (from `onboarding_data.name` or `users.name`) before the update. Only fall back to the Strava athlete firstname if no name has been captured yet. This preserves the name the user introduced themselves with.
+**Files changed:** src/app/api/auth/strava/callback/route.ts
+
 ## 2026-03-25 — Reduced taper from 3 weeks to 2 weeks
 
 **Type:** Bug Fix / Improvement
