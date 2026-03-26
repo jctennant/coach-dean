@@ -615,15 +615,22 @@ If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: 
     if (oldRaceName && !alreadyIncluded) {
       otherRaces = [...otherRaces, { date: oldDate || "", name: oldRaceName, goal: oldGoal, priority: "B" }];
     }
+    // If the promoted race has no date from parsing, try a web search for it
+    const promotedDate = newARace.date ?? (newARace.name ? await lookupRaceDate(newARace.name) : null);
+    // goal_time_minutes must be deleted (not set to null) — the satisfaction check uses hasOwnProperty,
+    // so null would incorrectly mark the step as answered and skip re-asking for the new race.
+    const { goal_time_minutes: _gmt, ...mergedWithoutGoalTime } = mergedData;
     mergedData = {
-      ...mergedData,
+      ...mergedWithoutGoalTime,
       race_name: newARace.name,
       goal: newARace.goal ?? oldGoal,
-      race_date: newARace.date ?? null,
+      race_date: promotedDate ?? null,
       race_date_confirmed: false, // old confirmation was for the previous A race
-      goal_distance_miles: null, // clear old race's distance — will be re-looked-up or fall back to bucket standard
+      race_month: null,           // clear old A race's month
+      goal_distance_miles: null,  // will be re-looked-up in handleRaceDate
+      secondary_goal: null,       // was set when old race was A; now stale
     };
-    console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}`);
+    console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}, looked-up date: ${promotedDate}`);
   }
 
   mergedData = {
@@ -2022,6 +2029,38 @@ CRITICAL RULES:
     }
   } catch {
     return empty;
+  }
+}
+
+/**
+ * Looks up a race's date via web search. Used when the A race is promoted mid-onboarding
+ * and we don't yet have a confirmed date for the new primary race.
+ */
+async function lookupRaceDate(raceName: string): Promise<string | null> {
+  const today = new Date().toISOString().split("T")[0];
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000));
+  try {
+    const responsePromise = anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 100,
+      tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
+      system: `Search for the next upcoming date of the "${raceName}" race. Today is ${today}.
+Output ONLY a JSON object: {"date": "YYYY-MM-DD"} if you find a confirmed future date, or {"date": null} if not found.
+Do NOT output anything else — no explanation, no markdown.`,
+      messages: [{ role: "user", content: raceName }],
+    });
+    const result = await Promise.race([responsePromise.then(r => ({ ok: true as const, r })), timeout.then(() => ({ ok: false as const }))]);
+    if (!result.ok) return null;
+    const textBlocks = result.r.content.filter(b => b.type === "text");
+    const last = textBlocks[textBlocks.length - 1];
+    const text = last?.type === "text" ? last.text.trim() : "";
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    const date = typeof parsed?.date === "string" ? parsed.date : null;
+    return date && date > today ? date : null;
+  } catch {
+    return null;
   }
 }
 

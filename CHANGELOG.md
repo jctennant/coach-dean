@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Look up date for promoted A race; clear stale race_month on promotion
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** "seems like Dean is getting confused between Dipsea and Sierre Zinal here, we should have him either look up the date of Sierre Zinal or ask for it, this is a bit confusing about June"
+**Root cause:** Two issues when a race is promoted to A-race mid-onboarding: (1) `race_month` from the old A race ("June" for Dipsea) was never cleared, so the `awaiting_race_date` question asked "You mentioned June" even though we were now asking about Sierre Zinal. (2) The Haiku parser that handles `other_races` returned `date: null` for Sierre Zinal since it can't do web search — no date lookup was triggered for the promoted race.
+**Fix / Change:** In `handleOtherRaces`, when `newARace` is promoted and has no date from parsing, call a new `lookupRaceDate(raceName)` function that uses web search to find the upcoming race date. Also explicitly clear `race_month: null` in the merged data so stale month context from the old A race doesn't bleed through.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-03-26 — Include race name in date confirmation question
 
 **Type:** Improvement
