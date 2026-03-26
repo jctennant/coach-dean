@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Added holding message before initial plan generation
+
+**Type:** Bug Fix / UX
+**Reported by:** Jake (direct observation)
+**User feedback:** "I sent this message and haven't heard back in about a minute which feels too long"
+**Root cause:** When `handleAnythingElse` determines the athlete is done (isDone: true), it immediately calls `completeOnboarding` which triggers plan generation via `after()`. Plan generation takes 30–90 seconds. No feedback was sent in the interim — the athlete sees silence.
+**Fix / Change:** Send "Perfect — I've got everything I need. Give me a moment and I'll send over your plan." immediately before kicking off `completeOnboarding`. The initial_plan message opens with athlete-specific context (not "Got it"), so there's no double-acknowledgment.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-26 — Fixed double-ask for goal time during onboarding
 
 **Type:** Bug Fix

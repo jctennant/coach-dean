@@ -1148,9 +1148,9 @@ async function handleAnythingElse(
   void trackEvent(user.id, "onboarding_step_completed", { step: "anything_else" });
 
   if (!nextStep) {
-    // Athlete is done — complete onboarding.
-    // Don't send an extra ack here; the initial_plan message opens with natural
-    // context so a separate "Got it" would produce an awkward double-acknowledgment.
+    // Athlete is done — send a brief holding message so they know something is happening,
+    // then kick off plan generation (which can take 30–60 seconds).
+    await sendAndStore(user.id, user.phone_number, "Perfect — I've got everything I need. Give me a moment and I'll send over your plan.", "awaiting_anything_else");
     await completeOnboarding(user, merged, chatId);
     return NextResponse.json({ ok: true });
   }
