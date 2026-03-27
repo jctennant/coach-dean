@@ -697,10 +697,23 @@ If no other races mentioned AND no previously mentioned races context, return: {
       r.name && oldRaceName && r.name.toLowerCase().includes(oldRaceName.toLowerCase().split(" ")[0])
     );
     if (oldRaceName && !alreadyIncluded) {
-      otherRaces = [...otherRaces, { date: oldDate || "", name: oldRaceName, goal: oldGoal, priority: "B" }];
+      // Look up date for old A race if it doesn't have one — empty string would be filtered out at insert.
+      const oldRaceDate = oldDate || (await lookupRaceDate(oldRaceName));
+      otherRaces = [...otherRaces, { date: oldRaceDate || "", name: oldRaceName, goal: oldGoal, priority: "B" }];
     }
-    // If the promoted race has no date from parsing, try a web search for it
-    const promotedDate = newARace.date ?? (newARace.name ? await lookupRaceDate(newARace.name) : null);
+    // Remove any entries in other_races that match the new A race — Haiku sometimes includes
+    // the promoted race in other_races despite being told not to.
+    const newARaceFirstWord = newARace.name.toLowerCase().split(/\s+/)[0]!;
+    otherRaces = otherRaces.filter(r =>
+      !(r.name && r.name.toLowerCase().includes(newARaceFirstWord))
+    );
+    // If the promoted race has no date from parsing, try a web search for it.
+    // Track whether the date came from the user (confirmed) vs web search (needs confirmation).
+    const userProvidedDate = newARace.date ?? null;
+    const promotedDate = userProvidedDate ?? (newARace.name ? await lookupRaceDate(newARace.name) : null);
+    // Only mark confirmed when the user explicitly provided the date — web-search fallbacks
+    // should still go through awaiting_race_date so the user can correct wrong dates.
+    const promotedDateConfirmed = !!userProvidedDate;
     // goal_time_minutes must be deleted (not set to null) — the satisfaction check uses hasOwnProperty,
     // so null would incorrectly mark the step as answered and skip re-asking for the new race.
     const { goal_time_minutes: _gmt, ...mergedWithoutGoalTime } = mergedData;
@@ -709,13 +722,13 @@ If no other races mentioned AND no previously mentioned races context, return: {
       race_name: newARace.name,
       goal: newARace.goal ?? oldGoal,
       race_date: promotedDate ?? null,
-      // Confirmed if the user gave a date for the promoted race inline; otherwise ask separately
-      race_date_confirmed: !!promotedDate,
+      // Only confirmed if the user explicitly gave a date — web search pre-fills ask for confirmation
+      race_date_confirmed: promotedDateConfirmed,
       race_month: null,           // clear old A race's month
       goal_distance_miles: null,  // will be re-looked-up in handleRaceDate
       secondary_goal: null,       // was set when old race was A; now stale
     };
-    console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}, date: ${promotedDate}, confirmed: ${!!promotedDate}`);
+    console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}, date: ${promotedDate}, user-confirmed: ${promotedDateConfirmed}`);
   } else if (confirmedARaceDate) {
     // Original A race confirmed — apply the date (may be correction of the pre-fill)
     mergedData = { ...mergedData, race_date: confirmedARaceDate, race_date_confirmed: true };

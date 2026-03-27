@@ -13,6 +13,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Fix / Change:** Removed spurious `ON_TOPIC` first mock from all Group 1 and Group 2 tests in `multi-race-onboarding.test.ts`. Created `src/__tests__/lib/training-plan-generate.test.ts` with 11 tests covering `total_weeks` calculation from race date, `prescribedWeek1Miles`→`training_state` sync, `skipLinkSms` flag, and plan/text alignment. Redesigned the `completeOnboarding` races-table test to use `awaiting_anything_else` step (which correctly calls `completeOnboarding` when `isDone=true`). Added missing `parseTimezoneFromMessage` mock to both `awaiting_cadence` tests in `onboarding-handle.test.ts`.
 **Files changed:** src/__tests__/api/multi-race-onboarding.test.ts, src/__tests__/api/onboarding-handle.test.ts, src/__tests__/lib/training-plan-generate.test.ts (new)
 
+## 2026-03-27 — Fix 4 onboarding/plan bugs: date ordering, week count, race dedup, weekly total regex
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct testing)
+**User feedback:** "(1) Sierre Zinal shows 19 weeks away but Dean said 22 — because Dean stored Aug 31 instead of the date I gave. (2) dates in the plan text are not chronological. (3) both upcoming races on dashboard are labeled Sierre Zinal, no A Basin. (4) dashboard says 29.5mi weekly target but plan text said 26 miles."
+**Root cause:**
+1. When user promotes a new A race and the date comes from `lookupRaceDate` (web search) rather than the user's message, code was setting `race_date_confirmed: true` — so `awaiting_race_date` was skipped. The web search date (Aug 31) was stored without the user ever confirming it.
+2. `initial_plan` prompt said "sorted chronologically" but model sorted by day-of-week order, producing Sat 3/28 and Sun 3/29 after Thu 4/2 near a month boundary.
+3. Two bugs: (a) Old A race (Dipsea) demoted to B with `date: oldDate || ""` — empty string is falsy, filtered at insert. (b) Haiku sometimes includes the promoted A race in `other_races` despite the rule — code wasn't deduplicating.
+4. `prescribedWeek1Miles` regex didn't match `"That's 26 miles for the week."` — fell back to Strava avg (29.5mi).
+**Fix / Change:**
+1. Track user-provided vs web-search dates separately. Only `race_date_confirmed: true` for user-provided — web search prefills loop to `awaiting_race_date`.
+2. Explicit instruction: sort by actual calendar date, with month-boundary callout (Sat 3/28 before Tue 3/31).
+3. (a) Call `lookupRaceDate` for old A race when it has no stored date. (b) Strip any `other_races` entry matching the new A race's first word.
+4. Added patterns for `"That's ~26 miles for the week"` and `"26 miles for the week"`.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
 ## 2026-03-27 — Move timezone/location question to post-plan, alongside reminder cadence ask
 
 **Type:** Improvement

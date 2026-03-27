@@ -489,10 +489,16 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     await extractAndStorePlanSessions(userId, coachMessage);
     // Parse the prescribed week 1 total from the plan text so the arc week 1 matches
     // what Dean actually sent (not an independently recomputed estimate).
-    // Match "Total: ~18mi" OR "~18 miles this week" (the more common format Dean uses)
+    // Match various formats Dean uses for the week total:
+    //   "Total: ~18mi" / "Total: 18 miles"
+    //   "~18 miles this week"
+    //   "That's 26 miles for the week" / "That's ~26 miles for the week"
+    //   "26 miles total for the week"
     const prescribedWeek1Match =
       coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*mi/i) ||
-      coachMessage.match(/~(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+this\s+week/i);
+      coachMessage.match(/~(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+this\s+week/i) ||
+      coachMessage.match(/[Tt]hat'?s\s+~?(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+for\s+the\s+week/i) ||
+      coachMessage.match(/(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+(?:total\s+)?for\s+the\s+week/i);
     const prescribedWeek1Miles = prescribedWeek1Match ? parseFloat(prescribedWeek1Match[1]) : null;
     // Generate and save the full multi-week training arc, then text the dashboard link.
     // Pass B/C races so the arc enrichment Haiku can label those weeks appropriately.
@@ -2509,7 +2515,7 @@ Write as 2 short iMessage texts separated by a blank line. Each under 480 charac
 
 First bubble: 3-4 sentences max. If the athlete has a race date, open with a 1-2 sentence training arc orientation — briefly sketch the shape of the journey from now to race day (e.g. "You've got ~18 weeks — first 6 or so we're building your aerobic base, then we'll layer in quality work and sharpen into goal pace in the final month before the taper"). This tells them where they're going, not just what's happening this week. Then one sentence on why this specific first week is structured the way it is — e.g. "Starting with all easy miles to build your aerobic base before introducing quality work" or "Keeping volume conservative given the hip — easier to add than to walk back a flare-up." If no race date, skip the arc and just explain the week's rationale. Do NOT open with "Got it" or any generic acknowledgment phrase. Do NOT restate their goal back to them.
 
-Second bubble: this week's sessions, one per line, sorted chronologically by date — never group by type (runs first, then strength):
+Second bubble: this week's sessions, one per line, sorted strictly by calendar date ascending — never group by type (runs first, then strength). CRITICAL: if your training days span a month boundary (e.g. Sat 3/28, Sun 3/29, then Tue 3/31, Wed 4/1), the earlier calendar dates MUST appear first regardless of day name. Do not sort by day-of-week order — sort by the actual date.
 Mon 3/2 · Easy 3mi @ easy effort
 Tue 3/3 · Strength + mobility 20 min
 Wed 3/4 · Tempo 4mi (2mi @ 8:45) — builds lactate threshold, the engine for your goal pace
