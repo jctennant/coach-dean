@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-27 — Fix race ack implying wrong hierarchy when multiple races mentioned
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct testing)
+**User feedback:** "Dean said 'Sierre-Zinal and A-Basin should set you up nicely for building into that June race' — but Dipsea is actually the first race, not the A race"
+**Root cause:** `generateRaceAcknowledgment` was instructed to "briefly acknowledge secondary races in context (e.g. 'Dipsea and Broken Arrow will serve as great tune-up races leading into CCC')". The example implies a clear A race, but when multiple races are mentioned without a stated priority, the model guessed the first-mentioned race (Dipsea) as primary and framed the others as leading into it — which is wrong and contradicts the A race question that immediately follows.
+**Fix / Change:** Changed the prompt instruction for secondary race acknowledgment: instead of implying a hierarchy, just note that the other races are on the calendar without framing any as "building towards" another. The A race question that follows is where that relationship gets established.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-27 — Fix dashboard rest days, B/C race display, and B race plan awareness
 
 **Type:** Bug Fix + Feature

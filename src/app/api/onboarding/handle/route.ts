@@ -2086,7 +2086,7 @@ IMPORTANT — Multi-race messages: When an athlete mentions several races, ident
 If the race has only one distance, or the athlete clearly stated their distance:
 Write a conversational 1-3 sentence acknowledgment ("ack") that:
 - Mentions the race naturally with real course facts (distance, elevation, terrain) — not like a Wikipedia entry, more like "Behind the Rocks looks like a great one — 18 miles of slickrock with ~1,800ft of climbing"
-- If secondary races were mentioned, briefly acknowledge them in context (e.g. "Dipsea and Broken Arrow will serve as great tune-up races leading into CCC")
+- If secondary races were mentioned, briefly acknowledge them — but DO NOT frame them as "leading into" or "building towards" the primary race. We don't yet know which is the A race, so don't imply a hierarchy. Just note them naturally: "You've also got Sierre Zinal and A Basin on the calendar" or similar.
 - If the race is within 8 weeks of today, acknowledge the timeline naturally ("not a ton of runway, but totally doable" / "only X weeks out, so we'll keep it focused")
 - Tone: warm, direct, like a coach texting — no "Love it!" opener, no asterisks, no markdown
 - 2-3 sentences max, under 280 chars

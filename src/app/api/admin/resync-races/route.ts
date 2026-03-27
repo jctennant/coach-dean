@@ -4,17 +4,20 @@ import { supabase } from "@/lib/supabase";
 /**
  * POST /api/admin/resync-races
  *
- * Re-syncs the races table for a user from their onboarding_data.other_races.
- * Useful when races were captured in onboarding_data but not inserted into the
- * races table (e.g. Haiku returned null dates that were filtered out at insert time).
+ * Two modes:
  *
- * Body:
- *   secret   string   — must match ADMIN_SECRET
- *   userId   string   — user UUID from the users table
- *   dry_run  boolean  — if true, returns what would be inserted without writing (default false)
+ * MODE 1 — Add explicit races (add_races is provided):
+ *   Appends the provided races to the existing races table without touching A race.
+ *   Useful when B/C races were never captured in onboarding_data.
+ *   Body: { secret, userId, add_races: [{ race_date, race_name, goal, priority, goal_distance_miles? }], dry_run? }
+ *
+ * MODE 2 — Resync from onboarding_data (no add_races):
+ *   Re-syncs the entire races table from onboarding_data.other_races.
+ *   Replaces all races for the user. Requires race_date + goal in onboarding_data.
+ *   Body: { secret, userId, dry_run? }
  */
 export async function POST(request: Request) {
-  const { secret, userId, dry_run = false } = await request.json();
+  const { secret, userId, add_races, dry_run = false } = await request.json();
 
   if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,6 +25,30 @@ export async function POST(request: Request) {
 
   if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
 
+  // MODE 1: Explicit race insertion — just append the given races, leave A race alone.
+  if (Array.isArray(add_races) && add_races.length > 0) {
+    const racesToInsert = add_races.map((r: { race_date: string; race_name?: string | null; goal: string; priority: string; goal_distance_miles?: number | null }) => ({
+      user_id: userId,
+      race_date: r.race_date,
+      race_name: r.race_name ?? null,
+      goal: r.goal,
+      priority: r.priority,
+      goal_time_minutes: null,
+      goal_distance_miles: r.goal_distance_miles ?? null,
+    }));
+
+    if (dry_run) {
+      return NextResponse.json({ dry_run: true, would_insert: racesToInsert });
+    }
+
+    const { error: insertErr } = await supabase.from("races").insert(racesToInsert);
+    if (insertErr) {
+      return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, inserted: racesToInsert });
+  }
+
+  // MODE 2: Resync from onboarding_data.
   const { data: user, error: userErr } = await supabase
     .from("users")
     .select("id, onboarding_data")
@@ -42,8 +69,9 @@ export async function POST(request: Request) {
 
   if (!raceDate || !goal) {
     return NextResponse.json({
-      error: "No A race in onboarding_data — cannot resync",
-      onboarding_data_keys: Object.keys(data),
+      error: "No A race in onboarding_data — use add_races mode instead",
+      hint: 'Pass add_races: [{ race_date, race_name, goal, priority }] to insert B/C races directly without touching the A race',
+      onboarding_data: data,
     }, { status: 400 });
   }
 
@@ -70,27 +98,17 @@ export async function POST(request: Request) {
     }));
 
   const dropped = otherRaces.filter(r => !r.date || !r.goal);
-
   const racesToInsert = [aRace, ...bCRaces];
 
   if (dry_run) {
-    return NextResponse.json({
-      dry_run: true,
-      would_insert: racesToInsert,
-      dropped_missing_date_or_goal: dropped,
-    });
+    return NextResponse.json({ dry_run: true, would_insert: racesToInsert, dropped });
   }
 
   await supabase.from("races").delete().eq("user_id", userId);
   const { error: insertErr } = await supabase.from("races").insert(racesToInsert);
-
   if (insertErr) {
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    ok: true,
-    inserted: racesToInsert,
-    dropped_missing_date_or_goal: dropped,
-  });
+  return NextResponse.json({ ok: true, inserted: racesToInsert, dropped });
 }
