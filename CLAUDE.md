@@ -24,6 +24,19 @@ After completing **any meaningful change** to the codebase, always append a new 
 **Files changed:** (list the key files modified)
 ```
 
+## Test Rule
+
+**Always run `npm test` before committing any code change** — including route handlers, lib files, cron jobs, and prompts. If tests fail after a code change, fix or update the tests before committing.
+
+### When tests need to be updated (not just the code):
+- Adding a new LLM call to an existing handler changes the mock call sequence — update the corresponding test to add the extra mock
+- Changing what a function returns or which DB tables it touches may require updating assertions
+- Changing intentional behavior (e.g. "web-search dates no longer auto-confirm") means updating the test's expected values and description to match the new contract
+
+The GH Actions workflow runs `npm test` on every push. A commit that breaks tests will block every PR until fixed.
+
+---
+
 ## Database Schema Rule
 
 Whenever a DB migration is needed (new column, table, index, etc.):
