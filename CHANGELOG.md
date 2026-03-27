@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Don't assume race distance in acknowledgments; ask which distance for multi-option races
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** "it seems like in this scenario, Dean could have asked which race distance I was doing (if there are multiple based on a web search)" — Dean said "a legendary vertical kilometer in the Alps!" for Sierre Zinal when the user was actually doing the 31K.
+**Root cause:** Two separate issues: (1) `acknowledgeSharedInfo` was called in `handleRaceDate` with the user's date confirmation message (e.g. "Sierre Zinal is on August 8th!") and used its training knowledge about Sierre Zinal to characterize it as a VK — no web search, just hallucinated characterization. (2) `generateRaceAcknowledgment`'s prompt didn't explicitly call out that a VK and a longer trail race at the same event are distinct distance options that should trigger the "which distance?" clarification.
+**Fix / Change:** (1) Added explicit instruction to `acknowledgeSharedInfo` to NOT use training knowledge about races/events and to treat "[race name] is on [date]" messages as bare answers returning null. (2) Added a rule to `generateRaceAcknowledgment` that a Vertical Kilometer is always a separate race from longer distances at the same event, and that the ack must not mention a specific distance when multiple options exist.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-26 — Look up date for promoted A race; clear stale race_month on promotion
 
 **Type:** Bug Fix

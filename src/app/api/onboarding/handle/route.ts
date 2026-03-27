@@ -1969,7 +1969,8 @@ CRITICAL RULES:
 - If results are ambiguous or conflicting, set "ack" to null.
 - Only include "date" if you find a specific confirmed upcoming date from a reliable source — do not guess or infer from relative expressions like "5 months from now".
 - Never include timeline or countdown language ("X weeks out", "not much runway", "plenty of time") in the ack unless you set a confirmed "date" from web search — if you don't know the date, don't reference the timeline.
-- For distance_options: ONLY list distinct, officially separate entry categories (e.g. a race that lets athletes register for a 10K OR a 50K as separate events). Do NOT list measurement variants of the same course — if one source says "7.46 miles" and another says "12K", that is the SAME course measured in different units, not two different options. distance_options must be null for any race where all participants run the same course. When uncertain, set distance_options: null.
+- For distance_options: ONLY list distinct, officially separate entry categories (e.g. a race that lets athletes register for a 10K OR a 50K as separate events). Do NOT list measurement variants of the same course — if one source says "7.46 miles" and another says "12K", that is the SAME course measured in different units, not two different options. distance_options must be null for any race where all participants run the same course. When uncertain, set distance_options: null. NOTE: a Vertical Kilometer (VK) is always a completely separate race from a longer trail distance (e.g. 31K, 50K) even if offered at the same event — always list them as separate distance_options.
+- NEVER assume a specific distance in the ack when the athlete hasn't stated which distance they're doing. If the race has multiple options and the athlete hasn't specified, the ack must not mention any distance.
 - If no specific named event is mentioned (just generic categories), return only: null`,
       messages: [{ role: "user", content: message }],
     });
@@ -2235,7 +2236,9 @@ Count these as substantive:
 - Privacy concerns or hesitation, even while complying ("I'll skip — I'm a privacy person") — acknowledge and respect the choice
 - Any question or concern worth noting
 
-Return only the word: null if the message is a truly bare answer with no extra context — e.g. just a date, a number, "nope", "no", "I'm good", "Skip", "Yes", "Yeah that's right".
+Return only the word: null if the message is a truly bare answer with no extra context — e.g. just a date, a number, "nope", "no", "I'm good", "Skip", "Yes", "Yeah that's right", or a race name with a date ("Sierre Zinal is on August 8th").
+
+CRITICAL: Do NOT use your knowledge of races, events, or places to characterize them (e.g. do not say "legendary vertical kilometer" or "iconic trail race"). Only reflect what the athlete explicitly said about themselves, their feelings, or their personal context.
 
 Plain text only — no markdown, no asterisks.`,
     messages: [{ role: "user", content: message }],
