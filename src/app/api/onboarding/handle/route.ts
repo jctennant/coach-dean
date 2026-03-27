@@ -287,6 +287,13 @@ Rules:
     console.error("[onboarding] goal parse failed:", e);
   }
 
+  // Whitelist check: if the LLM returned an invalid bucket, treat as no goal detected
+  if (parsed.goal && !VALID_GOAL_BUCKETS.has(parsed.goal)) {
+    console.warn("[onboarding] invalid goal bucket from classifier:", parsed.goal);
+    parsed.goal = null;
+    parsed.complete = false;
+  }
+
   if (!parsed.complete || !parsed.goal) {
     // No goal detected (pure greeting, self-intro without a goal, etc.)
     // If we extracted a name, save it and send a personalized follow-up.
@@ -545,6 +552,13 @@ Return ONLY valid JSON: {"different_race": string | null}`,
       await sendAndStore(user.id, user.phone_number, `Got it — so that date is for ${differentRace}. What's the date for ${raceRef}?`, "awaiting_race_date");
       return NextResponse.json({ ok: true });
     }
+  }
+
+  // Reject any date in the past — either the user typo'd the year or the LLM hallucinated
+  const today = new Date().toISOString().split("T")[0];
+  if (parsed.race_date && parsed.race_date < today) {
+    console.warn("[onboarding] rejecting past race_date from user input:", parsed.race_date);
+    parsed.race_date = null;
   }
 
   // Merge extra fields first, then apply the dedicated race_date parse result on top.
@@ -866,7 +880,7 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null, "has_answered": boo
         [35, "50k"], [52, "50mi"], [80, "100k"], [200, "100mi"],
       ];
       const bucket = DISTANCE_TO_BUCKET.find(([threshold]) => miles <= threshold)?.[1] ?? "100mi";
-      mergedData.goal = bucket;
+      if (VALID_GOAL_BUCKETS.has(bucket)) mergedData.goal = bucket;
       console.log(`[onboarding] distance correction in goal_time: ${km}km → ${miles}mi → bucket: ${bucket}`);
     }
   }
@@ -1020,16 +1034,24 @@ Rules:
     return NextResponse.json({ ok: true });
   }
 
-  // Infer days_per_week from training_days if not provided
-  const trainingDays = parsed.training_days ?? ["tuesday", "thursday", "saturday", "sunday"];
-  const daysPerWeek = parsed.days_per_week ?? trainingDays.length;
+  // Normalize and validate training days — reject any value not in the canonical set
+  const VALID_DAYS = new Set(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]);
+  const rawDays = parsed.training_days ?? ["tuesday", "thursday", "saturday", "sunday"];
+  const trainingDays = rawDays
+    .map(d => d.toLowerCase().trim())
+    .filter(d => VALID_DAYS.has(d));
+  const finalDays = trainingDays.length > 0 ? trainingDays : ["tuesday", "thursday", "saturday", "sunday"];
+
+  // Clamp days_per_week to 1–7 (anything outside is a hallucination)
+  const rawDaysPerWeek = parsed.days_per_week ?? finalDays.length;
+  const daysPerWeek = Math.max(1, Math.min(7, Math.round(rawDaysPerWeek)));
 
   // Merge extra fields, then apply the dedicated schedule parse results on top
   const mergedData = {
     ...onboardingData,
     ...removeNulls(extra),
     days_per_week: daysPerWeek,
-    training_days: trainingDays,
+    training_days: finalDays,
   };
   const nextStep = findNextStep("awaiting_schedule", mergedData);
 
@@ -2581,6 +2603,12 @@ async function sendAndStore(userId: string, phone: string, message: string, step
 }
 
 const ULTRA_GOALS = ["30k", "50k", "50mi", "100k", "100mi"];
+
+const VALID_GOAL_BUCKETS = new Set([
+  "mile", "5k", "10k", "half_marathon", "marathon", "30k", "50k", "50mi", "100k", "100mi",
+  "sprint_tri", "olympic_tri", "70.3", "ironman", "cycling",
+  "general_fitness", "return_to_running", "injury_recovery",
+]);
 
 function assessFitnessLevel(experienceYears: number, weeklyMiles: number | null, weeklyHours: number | null, goal?: string, daysPerWeek?: number): string {
   // Use hours as primary signal for multi-sport athletes

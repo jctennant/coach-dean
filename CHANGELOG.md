@@ -15,6 +15,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Harden onboarding: code guards for goal bucket, schedule, and race date
+
+**Type:** Improvement / Bug prevention
+**Reported by:** Internal audit
+**User feedback:** N/A
+**Root cause:** Several onboarding LLM outputs were trusted unconditionally — an invalid goal bucket, non-canonical day name, out-of-range days_per_week, or past race date from Haiku would be silently stored and cascade into plan generation.
+**Fix / Change:**
+1. Added `VALID_GOAL_BUCKETS` constant. After goal classifier runs, invalid bucket values are nulled out (treated as no goal detected) rather than stored. Same guard on the `handleGoalTime` re-bucket path.
+2. In `handleSchedule`: training day names are lowercased and filtered against a canonical set (rejects typos like "Tuesaday"). `days_per_week` is clamped to 1–7.
+3. In `handleRaceDate`: user-provided dates in the past are rejected (the web-search path already did this; now consistent for user-entered dates too).
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-26 — Fix multi-race onboarding: wrong date assignment, correction detection, A race switching
 
 **Type:** Bug Fix
