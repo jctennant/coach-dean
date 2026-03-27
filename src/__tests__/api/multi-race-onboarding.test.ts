@@ -515,7 +515,10 @@ describe("handleOtherRaces — A race promotion", () => {
     expect(stepUpdate[0].onboarding_step).toBe("awaiting_race_date");
   });
 
-  it("does NOT loop back to awaiting_race_date when web search finds the promoted race date", async () => {
+  it("loops back to awaiting_race_date when web search finds the promoted race date (user must confirm)", async () => {
+    // Web-search pre-filled dates require confirmation — same as regular race date flow.
+    // race_date is pre-filled from the web search but race_date_confirmed stays false
+    // so the user gets sent to awaiting_race_date to verify the result.
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce(ON_TOPIC)
       .mockResolvedValueOnce(otherRacesResponse({
@@ -538,9 +541,10 @@ describe("handleOtherRaces — A race promotion", () => {
     const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
     const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
     const data = stepUpdate[0].onboarding_data;
+    // Date is pre-filled from web search but confirmation is required
     expect(data.race_date).toBe("2026-08-08");
-    expect(data.race_date_confirmed).toBe(true);
-    expect(stepUpdate[0].onboarding_step).not.toBe("awaiting_race_date");
+    expect(data.race_date_confirmed).toBe(false);
+    expect(stepUpdate[0].onboarding_step).toBe("awaiting_race_date");
   });
 });
 
