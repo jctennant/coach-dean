@@ -382,7 +382,9 @@ Rules:
     goal: parsed.goal,
     sport_type: sportType,
     ...extra,
-    ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
+    // Don't pre-fill the date when multiple races were mentioned — too risky of assigning
+    // the wrong race's date to the primary goal. Let awaiting_race_date ask explicitly.
+    ...(raceInfo.raceDate && !extra.race_date && !raceInfo.secondaryGoal ? { race_date: raceInfo.raceDate } : {}),
     ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null, race_date_confirmed: true } : {}),
     ...(raceInfo.secondaryGoal || extra.secondary_goal
       ? { secondary_goal: raceInfo.secondaryGoal ?? extra.secondary_goal }

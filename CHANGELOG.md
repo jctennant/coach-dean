@@ -25,7 +25,7 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 2. `handleRaceDate` treated any null date extraction as "user confirmed the pre-fill." When user said "Ah that's the date of Sierre Zinal", Haiku extracted no date → fell back to the wrong pre-filled date. No logic existed to detect race-date reassignment.
 3. `handleOtherRaces` Haiku prompt required "explicit signals" for A race switching, but "No Sierre Zinal is" is an implicit response to a yes/no question — not captured as a promotion.
 **Fix / Change:**
-1. Added rule to `generateRaceAcknowledgment`: if the athlete stated a month/season for the primary race, the returned date MUST fall in that window — don't return a secondary race's date.
+1. Added rule to `generateRaceAcknowledgment`: if the athlete stated a month/season for the primary race, the returned date MUST fall in that window — don't return a secondary race's date. Also added a code-level guard in `handleGoal`: when `raceInfo.secondaryGoal` is set (multiple races detected), skip the date pre-fill entirely and let `awaiting_race_date` ask explicitly. Deterministic: doesn't rely on the LLM attributing the date to the right race.
 2. Added a parallel Haiku call in `handleRaceDate` (only when there was an unconfirmed pre-fill) to detect "this date belongs to a different race" corrections. When detected, clears the pre-filled date and asks for the primary race's actual date.
 3. Added examples to `handleOtherRaces` Haiku prompt for implicit/truncated A race promotions: "No Sierre Zinal is", "No that one" → `new_a_race` set.
 **Files changed:** src/app/api/onboarding/handle/route.ts
