@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-27 — Dashboard: A/B/C race list + daily workout breakdown for current week
+
+**Type:** Feature
+**Reported by:** User feedback (Jake)
+**User feedback:** "(1) I think we should show A B or C races on the dashboard view (for example I have a race in 12 weeks, but my A race is in 18 weeks) (2) we should consider showing the whole week of workouts for the week that a user is currently on (rather than just the high level summary)"
+**Root cause:** Dashboard only showed the primary plan race date and a single key_workout summary for the current week — no visibility into other races the user had registered, and no day-by-day workout breakdown.
+**Fix / Change:** (1) Added an "Upcoming Races" card (between hero and This Week card) that fetches from the `races` table and renders all future races with A/B/C priority badges, dates, and days-until countdown. (2) Expanded the "This Week" card to show a full 7-day grid when `training_days` is available on the user's profile — assigns long run to last training day, key workout to a mid-week day, and easy runs to remaining days, with estimated distances. Falls back to the old key_workout summary when training_days is null.
+**Files changed:** src/app/dashboard/page.tsx
+
 ## 2026-03-26 — Fix plan re-generation when user confirms reminder preference
 
 **Type:** Bug Fix

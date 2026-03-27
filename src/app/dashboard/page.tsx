@@ -23,6 +23,55 @@ type PlanWeek = {
   notes: string;
 };
 
+type Race = {
+  id: string;
+  race_name: string | null;
+  race_date: string;
+  priority: string;
+  goal: string;
+  goal_distance_miles: number | null;
+};
+
+type DayWorkout = {
+  day: string;
+  shortDay: string;
+  type: "long" | "key" | "easy" | "rest";
+  label: string;
+  miles: number | null;
+};
+
+const DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAY_SHORT: Record<string, string> = {
+  Monday: "Mon", Tuesday: "Tue", Wednesday: "Wed", Thursday: "Thu",
+  Friday: "Fri", Saturday: "Sat", Sunday: "Sun",
+};
+
+function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
+  const sorted = [...trainingDays].sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
+  const longRunDay = sorted[sorted.length - 1];
+  const keyWorkoutDay = sorted.length > 2 ? sorted[Math.floor((sorted.length - 1) / 2)] : null;
+  const easyDays = sorted.filter(d => d !== longRunDay && d !== keyWorkoutDay);
+
+  const longRunMi = week.long_run_target;
+  const keyWorkoutMi = keyWorkoutDay ? Math.round(week.mileage_target * 0.20 * 2) / 2 : 0;
+  const totalEasy = Math.max(0, week.mileage_target - longRunMi - keyWorkoutMi);
+  const easyMi = easyDays.length > 0 ? Math.round((totalEasy / easyDays.length) * 10) / 10 : 0;
+
+  return DAY_ORDER.map(day => {
+    const shortDay = DAY_SHORT[day]!;
+    if (!sorted.includes(day)) return { day, shortDay, type: "rest", label: "Rest", miles: null };
+    if (day === longRunDay) return { day, shortDay, type: "long", label: "Long run", miles: longRunMi };
+    if (day === keyWorkoutDay) return { day, shortDay, type: "key", label: week.key_workout || "Key workout", miles: keyWorkoutMi };
+    return { day, shortDay, type: "easy", label: "Easy run", miles: easyMi };
+  });
+}
+
+const PRIORITY_COLORS: Record<string, string> = {
+  A: "bg-red-100 text-red-700",
+  B: "bg-orange-100 text-orange-700",
+  C: "bg-sky-100 text-sky-700",
+};
+
 const PHASE_LABELS: Record<string, string> = {
   base: "Base",
   build: "Build",
@@ -85,8 +134,8 @@ export default async function DashboardPage({
     return <NoTokenScreen expired />;
   }
 
-  // Fetch training plan, current state, and activities in parallel
-  const [{ data: planData }, { data: stateData }, { data: profileData }, { data: activities }] = await Promise.all([
+  // Fetch training plan, current state, activities, and races in parallel
+  const [{ data: planData }, { data: stateData }, { data: profileData }, { data: activities }, { data: racesData }] = await Promise.all([
     supabase
       .from("training_plans")
       .select("*")
@@ -101,7 +150,7 @@ export default async function DashboardPage({
       .single(),
     supabase
       .from("training_profiles")
-      .select("goal, race_date, goal_distance_miles")
+      .select("goal, race_date, goal_distance_miles, training_days")
       .eq("user_id", user.id)
       .single(),
     supabase
@@ -109,6 +158,12 @@ export default async function DashboardPage({
       .select("start_date, distance_meters, activity_type")
       .eq("user_id", user.id)
       .order("start_date", { ascending: true }),
+    supabase
+      .from("races")
+      .select("id, race_name, race_date, priority, goal, goal_distance_miles")
+      .eq("user_id", user.id)
+      .gte("race_date", new Date().toISOString().split("T")[0]!)
+      .order("race_date", { ascending: true }),
   ]);
 
   if (!planData) {
@@ -176,6 +231,11 @@ export default async function DashboardPage({
   const raceDays = daysUntilRace(raceDate as string | null);
   const trialActive = isTrialActive(user.trial_started_at as string | null);
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
+  const trainingDays = (profileData?.training_days as string[] | null) ?? null;
+  const upcomingRaces = (racesData ?? []) as Race[];
+  const dailyPlan = currentWeek && trainingDays && trainingDays.length > 0
+    ? buildDailyPlan(currentWeek, trainingDays)
+    : null;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -234,6 +294,11 @@ export default async function DashboardPage({
           </div>
         </div>
 
+        {/* Upcoming races */}
+        {upcomingRaces.length > 0 && (
+          <UpcomingRaces races={upcomingRaces} />
+        )}
+
         {/* Current week card */}
         {currentWeek && (
           <div className="bg-white rounded-2xl border-2 border-gray-900 p-5 space-y-3">
@@ -256,11 +321,31 @@ export default async function DashboardPage({
                 <p className="text-2xl font-bold text-gray-900">{currentWeek.long_run_target} <span className="text-sm font-normal text-gray-500">mi</span></p>
               </div>
             </div>
-            {currentWeek.key_workout && (
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-xs text-gray-400 mb-1">Key workout</p>
-                <p className="text-sm text-gray-800 font-medium">{currentWeek.key_workout}</p>
+            {dailyPlan ? (
+              <div className="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden">
+                {dailyPlan.map(d => (
+                  <div key={d.day} className={`flex items-center justify-between px-3 py-2 ${d.type === "rest" ? "bg-gray-50" : "bg-white"}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`text-xs font-semibold w-7 shrink-0 ${d.type === "rest" ? "text-gray-300" : "text-gray-500"}`}>{d.shortDay}</span>
+                      <span className={`text-sm leading-snug ${d.type === "rest" ? "text-gray-300" : d.type === "key" ? "text-gray-900 font-medium" : "text-gray-600"}`}>
+                        {d.label}
+                      </span>
+                    </div>
+                    {d.miles !== null && (
+                      <span className={`text-sm font-semibold shrink-0 ml-2 ${d.type === "long" ? "text-gray-900" : d.type === "key" ? "text-gray-700" : "text-gray-400"}`}>
+                        {d.miles} mi
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
+            ) : (
+              currentWeek.key_workout && (
+                <div className="bg-gray-50 rounded-xl p-3">
+                  <p className="text-xs text-gray-400 mb-1">Key workout</p>
+                  <p className="text-sm text-gray-800 font-medium">{currentWeek.key_workout}</p>
+                </div>
+              )
             )}
             {currentWeek.notes && (
               <p className="text-xs text-gray-500 italic">{currentWeek.notes}</p>
@@ -302,6 +387,47 @@ export default async function DashboardPage({
         <p className="text-center text-xs text-gray-400 pb-6">
           Text Dean anytime to discuss your plan.
         </p>
+      </div>
+    </div>
+  );
+}
+
+const GOAL_DISTANCE_LABELS: Record<string, string> = {
+  mile: "Mile", "5k": "5K", "10k": "10K", half_marathon: "Half Marathon",
+  marathon: "Marathon", "30k": "30K", "50k": "50K", "50mi": "50 Miles",
+  "100k": "100K", "100mi": "100 Miles",
+};
+
+function UpcomingRaces({ races }: { races: Race[] }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Upcoming Races</h2>
+      <div className="space-y-2">
+        {races.map(race => {
+          const days = daysUntilRace(race.race_date);
+          const distanceLabel = race.goal_distance_miles
+            ? GOAL_DISTANCE_LABELS[race.goal] ?? `${race.goal_distance_miles} mi`
+            : GOAL_DISTANCE_LABELS[race.goal] ?? race.goal;
+          return (
+            <div key={race.id} className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-bold shrink-0 ${PRIORITY_COLORS[race.priority] ?? "bg-gray-100 text-gray-600"}`}>
+                  {race.priority}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{race.race_name ?? distanceLabel}</p>
+                  <p className="text-xs text-gray-400">{formatRaceDate(race.race_date)}{race.race_name ? ` · ${distanceLabel}` : ""}</p>
+                </div>
+              </div>
+              {days && (
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-bold text-gray-700 leading-none">{days}</p>
+                  <p className="text-xs text-gray-400">days</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
