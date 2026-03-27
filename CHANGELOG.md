@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-27 — Fix dashboard rest days, B/C race display, and B race plan awareness
+
+**Type:** Bug Fix + Feature
+**Reported by:** Jake (direct testing)
+**User feedback:** "(1) my plan has workouts each date but in the dashboard the view of this week just says rest every day (2) I gave Dean two other races that should show up in Upcoming races, but they don't — I just see my A race. (3) I think the plan needs to more intelligently help me prep for my B races too"
+**Root cause:**
+1. `buildDailyPlan` in dashboard compared `sorted.includes(day)` where `sorted` had lowercase day names from DB ("tuesday") but `DAY_ORDER` used title case ("Tuesday"). The includes check always returned false → every day rendered as rest.
+2. B/C races weren't in the `races` table because `handleOtherRaces` uses Haiku (no web access) to extract race dates. Named races mentioned without explicit dates came back with null → filtered out by `.filter(r => r.date && r.goal)` at insert time. The data was captured in `onboarding_data.other_races` but never made it to the `races` table.
+3. `generateAndSaveFullPlan` didn't know about B/C races — the Haiku enrichment that writes `key_workout` and `notes` for each arc week had no context about tune-up race weeks. The `initial_plan` prompt also didn't instruct Dean on how B races should shape the arc description.
+**Fix / Change:**
+1. Normalize training days to title case in `buildDailyPlan` before the `includes` comparison.
+2. After Haiku parses `other_races`, do parallel `lookupRaceDate` web searches for any race with a name but no date. Added `/api/admin/resync-races` endpoint to re-sync the races table from `onboarding_data` for users whose races were dropped during earlier buggy onboarding.
+3. Pass B/C races to `generateAndSaveFullPlan` with week-number mappings so the enrichment Haiku can label B race weeks as tune-up efforts. Added "B/C RACE PLANNING" instructions to the `initial_plan` prompt so Dean mentions B races as fitness checkpoints in the arc orientation.
+**Files changed:** src/app/dashboard/page.tsx, src/app/api/onboarding/handle/route.ts, src/lib/training-plan.ts, src/app/api/coach/respond/route.ts, src/app/api/admin/resync-races/route.ts
+
 ## 2026-03-27 — Fix multi-race question showing wrong pre-filled date (Dipsea date shown for Sierre Zinal)
 
 **Type:** Bug Fix

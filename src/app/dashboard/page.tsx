@@ -47,7 +47,9 @@ const DAY_SHORT: Record<string, string> = {
 };
 
 function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
-  const sorted = [...trainingDays].sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
+  // Normalize to title case — DB stores lowercase ("tuesday"), DAY_ORDER uses title case ("Tuesday")
+  const normalized = trainingDays.map(d => d.charAt(0).toUpperCase() + d.slice(1).toLowerCase());
+  const sorted = [...normalized].sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
   const longRunDay = sorted[sorted.length - 1];
   const keyWorkoutDay = sorted.length > 2 ? sorted[Math.floor((sorted.length - 1) / 2)] : null;
   const easyDays = sorted.filter(d => d !== longRunDay && d !== keyWorkoutDay);

@@ -494,7 +494,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       coachMessage.match(/~(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+this\s+week/i);
     const prescribedWeek1Miles = prescribedWeek1Match ? parseFloat(prescribedWeek1Match[1]) : null;
     // Generate and save the full multi-week training arc, then text the dashboard link.
-    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined });
+    // Pass B/C races so the arc enrichment Haiku can label those weeks appropriately.
+    const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
+    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined });
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
@@ -2493,6 +2495,12 @@ DATES AND DAY LABELS:
 - CRITICAL: Use the day names from DATE CONTEXT above — do not compute weekdays yourself. DATE CONTEXT lists tomorrow and the next 7 days with correct day names. Copy them directly. "Wed, Mar 11" → use "Wed 3/11". Getting these wrong destroys trust.
 - Start the plan from tomorrow or later — do not add a session for today.
 - If "Mileage so far this week" in CURRENT TRAINING STATE is > 0, acknowledge it in the first bubble ("You've already got X miles in this week") and factor it into the weekly total. Do not ignore it.
+
+B/C RACE PLANNING (if B or C races appear in DATE CONTEXT above):
+- The arc orientation should mention B races as tune-up checkpoints — e.g. "The Dipsea in June serves as a great fitness check before the Sierre Zinal build." Do NOT ignore them.
+- B races = race at strong controlled effort, not an all-out peak. Plan doesn't fully taper for them.
+- C races = treat as a quality workout day. No schedule disruption.
+- Do NOT try to peak for both A and B races simultaneously — the A race is the only peak.
 
 DEFAULT FORMAT (for athletes not matching the EXPERIENCED RUNNER CLOSE TO RACE criteria above):
 Write as 2 short iMessage texts separated by a blank line. Each under 480 characters.

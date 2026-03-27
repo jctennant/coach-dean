@@ -673,6 +673,18 @@ If no other races mentioned AND no previously mentioned races context, return: {
     console.error("[onboarding] other_races parse failed:", e);
   }
 
+  // Web-search dates for any B/C races that have a name but no date.
+  // Haiku doesn't have web access, so named races without explicit date mentions often come back with null dates.
+  const racesNeedingDates = otherRaces.filter(r => r.name && !r.date);
+  if (racesNeedingDates.length > 0) {
+    const lookups = await Promise.all(racesNeedingDates.map(r => lookupRaceDate(r.name!)));
+    racesNeedingDates.forEach((r, i) => {
+      if (lookups[i]) r.date = lookups[i]!;
+    });
+  }
+  // Drop races that still have no date (DB requires race_date) — but keep the data in onboarding_data
+  // so re-sync can retry later. Filter happens at completeOnboarding insert time.
+
   // If the user promoted a different race to A, update the stored A race fields.
   // The original A race becomes a B race (add to other_races if not already there).
   let mergedData: Record<string, unknown> = { ...onboardingData };

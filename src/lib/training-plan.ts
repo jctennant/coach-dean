@@ -40,7 +40,7 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false, prescribedWeek1Miles }: { skipLinkSms?: boolean; prescribedWeek1Miles?: number } = {},
+  { skipLinkSms = false, prescribedWeek1Miles, bRaces }: { skipLinkSms?: boolean; prescribedWeek1Miles?: number; bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }> } = {},
 ): Promise<string> {
   const raceDate = (profile?.race_date as string | null) ?? null;
   const goal = (profile?.goal as string | null) ?? null;
@@ -115,7 +115,27 @@ export async function generateAndSaveFullPlan(
     });
   }
 
-  // Enrich each week with key_workout and notes via Claude Haiku (single call)
+  // Enrich each week with key_workout and notes via Claude Haiku (single call).
+  // Include B/C race dates so Haiku can flag those weeks appropriately.
+  const now = new Date();
+  const week1Monday = new Date(now);
+  week1Monday.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // back to Monday
+  week1Monday.setHours(0, 0, 0, 0);
+
+  // Map each B/C race to a week number so Haiku can reference them by week.
+  const bRaceWeekLabels: string[] = [];
+  for (const r of bRaces ?? []) {
+    const raceMs = new Date(r.race_date + "T12:00:00Z").getTime();
+    const weekNum = Math.round((raceMs - week1Monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    if (weekNum >= 1 && weekNum <= totalWeeks) {
+      const label = r.race_name ?? (r.priority === "B" ? "B race" : "C race");
+      bRaceWeekLabels.push(`Week ${weekNum}: ${r.priority} race — ${label} on ${r.race_date}`);
+    }
+  }
+  const bRaceContext = bRaceWeekLabels.length > 0
+    ? `\n\nB/C RACES (tune-up races during the plan):\n${bRaceWeekLabels.join("\n")}\nFor B race weeks: keep key_workout brief or race-focused ("B race — tune-up effort" or similar). For C race weeks: treat as a quality workout day.`
+    : "";
+
   const arcSummary = planWeeks.map(w =>
     `Week ${w.week_number} (${w.phase}, ${w.mileage_target}mi, long run ~${w.long_run_target}mi)`
   ).join("\n");
@@ -134,7 +154,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}${bRaceContext}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 

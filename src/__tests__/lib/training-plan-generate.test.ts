@@ -1,0 +1,434 @@
+/**
+ * generateAndSaveFullPlan tests.
+ *
+ * Verifies that the plan arc saved to training_plans is consistent with:
+ *  1. The race date (total_weeks derived correctly)
+ *  2. The prescribedWeek1Miles option (training_state stays in sync with what
+ *     Dean actually told the athlete over text — this prevents the dashboard
+ *     showing a different mileage target than Dean's first message)
+ *  3. The skipLinkSms flag suppresses the dashboard link SMS
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// ---------- module mocks (must precede imports) ----------
+
+vi.mock("@/lib/supabase", () => ({ supabase: { from: vi.fn() } }));
+
+vi.mock("@/lib/linq", () => ({
+  sendSMS: vi.fn().mockResolvedValue({ chatId: "chat-123" }),
+}));
+
+vi.mock("@/lib/anthropic", () => ({
+  anthropic: {
+    messages: {
+      // Return an empty enrichment array so the arc build completes cleanly.
+      create: vi.fn().mockResolvedValue({
+        content: [{ type: "text", text: "[]" }],
+      }),
+    },
+  },
+}));
+
+// ---------- imports ----------
+import { generateAndSaveFullPlan } from "@/lib/training-plan";
+import { supabase } from "@/lib/supabase";
+import { sendSMS } from "@/lib/linq";
+
+// ---------- helpers ----------
+
+/**
+ * Build a thenable/chainable Supabase mock for a single table.
+ * All query-builder methods (select, insert, update, eq, …) return the same
+ * object so the chain can be freely traversed.  Awaiting the chain resolves
+ * with `response` via the `then` shim.
+ */
+function chain(response: { data: unknown; error: unknown }) {
+  const c: Record<string, unknown> = {};
+  const methods = [
+    "select", "insert", "update", "upsert", "delete",
+    "eq", "neq", "is", "not", "gte", "lte", "in", "or", "order", "limit",
+  ];
+  for (const m of methods) c[m] = vi.fn().mockReturnValue(c);
+  c["single"] = vi.fn().mockResolvedValue(response);
+  c["maybeSingle"] = vi.fn().mockResolvedValue(response);
+  c["then"] = (
+    resolve: (v: unknown) => unknown,
+    reject?: (e: unknown) => unknown,
+  ) => Promise.resolve(response).then(resolve, reject);
+  return c;
+}
+
+// Fixed point-in-time used by all tests so week calculations are deterministic.
+// 2026-03-27T00:00:00Z  →  "today" for these tests.
+const FIXED_NOW = new Date("2026-03-27T00:00:00Z");
+
+// 2026-07-31T12:00:00Z is exactly Math.round(126.5 / 7) = 18 weeks from FIXED_NOW.
+const RACE_18W = "2026-07-31";
+
+// 2026-06-19T12:00:00Z is exactly Math.round(84.5 / 7) = 12 weeks from FIXED_NOW.
+const RACE_12W = "2026-06-19";
+
+// ---------- default profile used across tests ----------
+
+function baseProfile(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    goal: "trail_race",
+    days_per_week: 4,
+    current_easy_pace: "9:30",
+    ...overrides,
+  };
+}
+
+// -----------------------------------------------------------------------
+// total_weeks calculation
+// -----------------------------------------------------------------------
+
+describe("generateAndSaveFullPlan — total_weeks from race date", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("stores total_weeks = 18 when race is 18 weeks away", async () => {
+    let insertedPlan: unknown;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_plans") {
+        (c.insert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          insertedPlan = args;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true },
+    );
+
+    expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(18);
+  });
+
+  it("stores total_weeks = 12 when race is 12 weeks away", async () => {
+    let insertedPlan: unknown;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_plans") {
+        (c.insert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          insertedPlan = args;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_12W }),
+      25,
+      { skipLinkSms: true },
+    );
+
+    expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(12);
+  });
+
+  it("defaults to total_weeks = 12 when no race date is set", async () => {
+    let insertedPlan: unknown;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_plans") {
+        (c.insert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          insertedPlan = args;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile(),  // no race_date
+      25,
+      { skipLinkSms: true },
+    );
+
+    expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(12);
+  });
+
+  it("saves exactly total_weeks plan entries in the weeks array", async () => {
+    let insertedPlan: unknown;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_plans") {
+        (c.insert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          insertedPlan = args;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true },
+    );
+
+    const plan = insertedPlan as Record<string, unknown>;
+    const weeks = plan.weeks as unknown[];
+    expect(weeks).toHaveLength(18);
+  });
+});
+
+// -----------------------------------------------------------------------
+// prescribedWeek1Miles → training_state sync
+// -----------------------------------------------------------------------
+
+describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_state", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("updates training_state.weekly_mileage_target when prescribedWeek1Miles is provided", async () => {
+    const stateUpdateArgs: unknown[] = [];
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_state") {
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          stateUpdateArgs.push(args);
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true, prescribedWeek1Miles: 35 },
+    );
+
+    expect(stateUpdateArgs).toHaveLength(1);
+    expect(stateUpdateArgs[0]).toEqual(
+      expect.objectContaining({ weekly_mileage_target: 35 }),
+    );
+  });
+
+  it("does NOT update training_state when prescribedWeek1Miles is omitted", async () => {
+    let stateUpdateCalled = false;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_state") {
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation(() => {
+          stateUpdateCalled = true;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true },
+    );
+
+    expect(stateUpdateCalled).toBe(false);
+  });
+
+  it("scopes the training_state update to the correct user_id", async () => {
+    let capturedEqUserId: unknown;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_state") {
+        (c.eq as ReturnType<typeof vi.fn>).mockImplementation((col: string, val: unknown) => {
+          if (col === "user_id") capturedEqUserId = val;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-abc",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true, prescribedWeek1Miles: 35 },
+    );
+
+    expect(capturedEqUserId).toBe("user-abc");
+  });
+});
+
+// -----------------------------------------------------------------------
+// skipLinkSms flag
+// -----------------------------------------------------------------------
+
+describe("generateAndSaveFullPlan — skipLinkSms flag", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+    (supabase.from as ReturnType<typeof vi.fn>).mockReturnValue(chain({ data: null, error: null }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("suppresses the dashboard link SMS when skipLinkSms is true", async () => {
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true },
+    );
+
+    expect(sendSMS).not.toHaveBeenCalled();
+  });
+
+  it("sends the dashboard link SMS when skipLinkSms is false (default)", async () => {
+    // Provide NEXT_PUBLIC_APP_URL so the URL is deterministic.
+    process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      // skipLinkSms defaults to false
+    );
+
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025551234",
+      expect.stringContaining("coachdean.ai/dashboard"),
+    );
+  });
+});
+
+// -----------------------------------------------------------------------
+// Plan/text alignment: week 1 mileage in plan vs training_state
+//
+// When an athlete completes onboarding, Dean sends their Week 1 plan over
+// text ("start with ~35 miles this week") and then calls generateAndSaveFullPlan
+// with prescribedWeek1Miles = 35.  The plan arc uses 35 as baseMileage so the
+// plan curve starts from there; training_state.weekly_mileage_target is also
+// set to 35 so the dashboard "This Week" card shows the same number Dean spoke
+// about over text.
+// -----------------------------------------------------------------------
+
+describe("generateAndSaveFullPlan — plan / text alignment", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("training_state target matches prescribedWeek1Miles, not the plan arc's built week 1", async () => {
+    // The plan arc builds week 1 upward from baseMileage (e.g. 35 * 1.07 ≈ 37.5),
+    // but training_state.weekly_mileage_target must match what Dean sent (35) so the
+    // dashboard is consistent with the athlete's first text conversation.
+    const stateUpdateArgs: unknown[] = [];
+    let insertedPlan: unknown;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_plans") {
+        (c.insert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          insertedPlan = args;
+          return c;
+        });
+      }
+      if (table === "training_state") {
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          stateUpdateArgs.push(args);
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true, prescribedWeek1Miles: 35 },
+    );
+
+    // The training_state target is exactly what Dean said over text.
+    expect(stateUpdateArgs[0]).toEqual(
+      expect.objectContaining({ weekly_mileage_target: 35 }),
+    );
+
+    // The plan arc week 1 will be > 35 (built up from base), confirming the
+    // two values can legitimately diverge — the test is that training_state
+    // wins for the dashboard display.
+    const plan = insertedPlan as Record<string, unknown>;
+    const weeks = plan.weeks as Array<{ week_number: number; mileage_target: number }>;
+    const week1 = weeks.find(w => w.week_number === 1)!;
+    expect(week1.mileage_target).toBeGreaterThan(35); // arc applies 1.07× build factor
+  });
+
+  it("race_date stored in training_plans matches the profile race_date", async () => {
+    let insertedPlan: unknown;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_plans") {
+        (c.insert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+          insertedPlan = args;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true },
+    );
+
+    expect((insertedPlan as Record<string, unknown>).race_date).toBe(RACE_18W);
+  });
+});
