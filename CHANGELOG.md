@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-27 — Fix multi-race question showing wrong pre-filled date (Dipsea date shown for Sierre Zinal)
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** Dean said "Is the Sierre Zinal 31k the A race? I have June 14 for it" — but June 14 is Dipsea's date, not Sierre Zinal's.
+**Root cause:** The goal classifier picked "Sierre Zinal 31k" as `race_name` (because of the explicit "31k" distance in the message), while `generateRaceAcknowledgment` returned June 14 as the primary race date (for the first-mentioned race, Dipsea). Two systems picking different "primary" races, smashed together in the question.
+**Fix / Change:** In the multi-race `awaiting_other_races` question, removed the pre-filled date entirely — it can't be trusted because the goal classifier and web search pick different races as primary. Question now simply asks "Which of these is your A race? And can you give me the dates for each?" Also removed the implicit date-confirmation fallback in `handleOtherRaces` since there's no longer a pre-fill to fall back to.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-27 — Fix multi-race onboarding: ask A race question before date when multiple races mentioned
 
 **Type:** Bug Fix

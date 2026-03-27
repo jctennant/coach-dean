@@ -708,13 +708,6 @@ If no other races mentioned AND no previously mentioned races context, return: {
     // Original A race confirmed — apply the date (may be correction of the pre-fill)
     mergedData = { ...mergedData, race_date: confirmedARaceDate, race_date_confirmed: true };
     console.log(`[onboarding] A race date confirmed inline: ${confirmedARaceDate}`);
-  } else if (secondaryGoalContext && onboardingData.race_date) {
-    // Multi-race path: question asked for all dates but user may have just said "yes" to the pre-fill.
-    // If the pre-filled date exists and user didn't explicitly correct it, treat as confirmed.
-    // The LLM would have set confirmed_a_race_date if the user explicitly provided a date —
-    // absence means the user was vague/implicit, so fall back to the pre-fill.
-    mergedData = { ...mergedData, race_date_confirmed: true };
-    console.log(`[onboarding] A race date implicitly confirmed via pre-fill: ${onboardingData.race_date as string}`);
   }
 
   mergedData = {
@@ -1934,14 +1927,10 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       const raceRef = raceName ? `the ${raceName}` : raceGoal ? `your ${formatGoalInline(raceGoal)}` : "your race";
       // When we already know about multiple races, ask which is the A race without asking "do you have any others?"
       if (data.secondary_goal) {
-        // Combined A race + date question so we don't need a separate awaiting_race_date round-trip.
-        const prefillDate = data.race_date as string | null;
-        const raceName = data.race_name as string | null;
-        if (prefillDate && raceName) {
-          const formatted = new Date(prefillDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" });
-          return `Is the ${raceName} the A race — the one the whole plan peaks for? I have ${formatted} for it. What are the dates for the others in the lineup? Approximate is fine.`;
-        }
-        return `Which is your A race — the one the whole plan builds toward? And roughly when are each of these on the calendar?`;
+        // Combined A race + date question. Don't show a pre-filled date here — the goal
+        // classifier and the web search can pick different races as "primary", so the
+        // date could be misattributed to the wrong race name. Ask for all dates together.
+        return `Which of these is your A race — the one the whole plan peaks for? And can you give me the dates for each? Approximate is totally fine.`;
       }
       return `Is ${raceRef} your main goal race this season — the one we're building the whole plan around? And do you have any others on the calendar I should know about?`;
     }
