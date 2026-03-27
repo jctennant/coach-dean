@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-27 — Add test coverage for multi-race onboarding and generateAndSaveFullPlan
+
+**Type:** Improvement
+**Reported by:** Internal testing
+**User feedback:** N/A
+**Root cause:** Tests for multi-race onboarding flow and `generateAndSaveFullPlan` were either missing or had incorrect mock sequences. Specifically: (1) `awaiting_goal` tests incorrectly included a `checkOffTopic` mock (the POST handler skips it for `awaiting_goal`), causing mock pollution that cascaded into later test groups; (2) `generateAndSaveFullPlan` tests were missing entirely; (3) the `completeOnboarding` races-table test used `awaiting_schedule` but that handler never calls `completeOnboarding` — it only routes to `awaiting_anything_else`; (4) the two `awaiting_cadence` tests in `onboarding-handle.test.ts` were missing the `parseTimezoneFromMessage` LLM call that runs in parallel with cadence classification when timezone isn't yet confirmed.
+**Fix / Change:** Removed spurious `ON_TOPIC` first mock from all Group 1 and Group 2 tests in `multi-race-onboarding.test.ts`. Created `src/__tests__/lib/training-plan-generate.test.ts` with 11 tests covering `total_weeks` calculation from race date, `prescribedWeek1Miles`→`training_state` sync, `skipLinkSms` flag, and plan/text alignment. Redesigned the `completeOnboarding` races-table test to use `awaiting_anything_else` step (which correctly calls `completeOnboarding` when `isDone=true`). Added missing `parseTimezoneFromMessage` mock to both `awaiting_cadence` tests in `onboarding-handle.test.ts`.
+**Files changed:** src/__tests__/api/multi-race-onboarding.test.ts, src/__tests__/api/onboarding-handle.test.ts, src/__tests__/lib/training-plan-generate.test.ts (new)
+
 ## 2026-03-27 — Move timezone/location question to post-plan, alongside reminder cadence ask
 
 **Type:** Improvement

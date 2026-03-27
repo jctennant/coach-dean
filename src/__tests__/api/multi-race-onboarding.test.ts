@@ -560,19 +560,15 @@ describe("completeOnboarding — races table for multi-race athlete", () => {
    * to trigger completeOnboarding.
    */
   it("writes A race and B/C races to races table when onboarding completes", async () => {
-    // handleSchedule call order (checkOffTopic IS called for awaiting_schedule):
-    // 1. checkOffTopic Haiku
-    // 2. scheduleParser Haiku [parallel with extractAdditionalFields]
-    // 3. extractAdditionalFields Haiku [parallel]
-    // completeOnboarding is called directly (nextStep=null since all steps satisfied)
+    // Use awaiting_anything_else step — handleAnythingElse calls completeOnboarding when isDone=true.
+    // checkOffTopic is SKIPPED for awaiting_anything_else.
+    // Call order:
+    // 1. extractAnythingElse Haiku [parallel]
+    // 2. generateAnythingElseResponse Haiku [parallel] — returns {done:true}
+    // → completeOnboarding is called
     vi.mocked(anthropic.messages.create)
-      .mockResolvedValueOnce(ON_TOPIC)
-      .mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({
-        complete: true,
-        days_per_week: 4,
-        training_days: ["Monday", "Wednesday", "Friday", "Sunday"],
-      }) }] })
-      .mockResolvedValueOnce({ content: [{ type: "text", text: "{}" }] }); // extractAdditionalFields
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "{}" }] }) // extractAnythingElse
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"done":true}' }] }); // generateAnythingElseResponse
 
     const racesChain = chain({ data: null, error: null });
     const usersChain = chain({
@@ -580,7 +576,7 @@ describe("completeOnboarding — races table for multi-race athlete", () => {
         id: "user-001",
         phone_number: "+12025551234",
         name: "Jake",
-        onboarding_step: "awaiting_schedule",
+        onboarding_step: "awaiting_anything_else",
         onboarding_data: {
           goal: "10k",
           race_name: "Dipsea",
@@ -596,8 +592,8 @@ describe("completeOnboarding — races table for multi-race athlete", () => {
           strava_skipped: true,
           intro_sent: true,
           name: "Jake",
-          weekly_miles: 35,
-          easy_pace: "9:00",
+          days_per_week: 4,
+          training_days: ["monday", "wednesday", "friday", "sunday"],
         },
       },
       error: null,
@@ -609,7 +605,7 @@ describe("completeOnboarding — races table for multi-race athlete", () => {
       return chain({ data: null, error: null });
     });
 
-    await POST(makeRequest({ userId: "user-001", message: "Monday, Wednesday, Friday, Sunday" }));
+    await POST(makeRequest({ userId: "user-001", message: "Nope, that's everything!" }));
 
     // races.delete() should be called first (cleanup), then insert
     const deleteCalls = (racesChain.delete as ReturnType<typeof vi.fn>).mock.calls;

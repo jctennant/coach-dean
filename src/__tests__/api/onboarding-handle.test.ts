@@ -590,11 +590,13 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
   //        re-trigger initial_plan so Dean rebuilds with the new preferences.
   it("awaiting_cadence: plan change request triggers acknowledgment + initial_plan re-trigger", async () => {
     // Claude call order:
-    // 1. handleCadence Haiku (classify cadence) → "unclear"
-    // 2. handleNonCadenceMessage Haiku (classify message type) → "plan_feedback"
-    // 3. handleNonCadenceMessage Sonnet (generate acknowledgment) → ack text
+    // 1. handleCadence Haiku (classify cadence) → "unclear"  [parallel with parseTimezone]
+    // 2. parseTimezoneFromMessage Haiku → timezone (onboarding_data={} so not yet confirmed)
+    // 3. handleNonCadenceMessage Haiku (classify message type) → "plan_feedback"
+    // 4. handleNonCadenceMessage Sonnet (generate acknowledgment) → ack text
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce({ content: [{ type: "text", text: "unclear" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "America/New_York" }] }) // parseTimezone (parallel)
       .mockResolvedValueOnce({ content: [{ type: "text", text: "plan_feedback" }] })
       .mockResolvedValueOnce({ content: [{ type: "text", text: "Absolutely — rebuilding around 1-2 runs and 4 cycling days." }] });
 
@@ -626,11 +628,13 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
   // Fixed: question answered by Sonnet, cadence re-ask appended at end.
   it("awaiting_cadence: coaching question is answered and cadence is re-asked at the end", async () => {
     // Claude call order:
-    // 1. handleCadence Haiku → "unclear"
-    // 2. handleNonCadenceMessage Haiku → "coaching_question"
-    // 3. handleNonCadenceMessage Sonnet → answer + cadence question
+    // 1. handleCadence Haiku → "unclear"  [parallel with parseTimezone]
+    // 2. parseTimezoneFromMessage Haiku → timezone (onboarding_data={} so not yet confirmed)
+    // 3. handleNonCadenceMessage Haiku → "coaching_question"
+    // 4. handleNonCadenceMessage Sonnet → answer + cadence question
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce({ content: [{ type: "text", text: "unclear" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "America/New_York" }] }) // parseTimezone (parallel)
       .mockResolvedValueOnce({ content: [{ type: "text", text: "coaching_question" }] })
       .mockResolvedValueOnce({ content: [{ type: "text", text: "For a first half marathon you don't need to run the full distance beforehand. Build up to 10-11 miles and race-day adrenaline carries you the rest.\n\nOne last thing — would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?" }] });
 
