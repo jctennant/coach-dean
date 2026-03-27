@@ -246,7 +246,10 @@ export default async function DashboardPage({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Weekly target</p>
-                <p className="text-2xl font-bold text-gray-900">{currentWeek.mileage_target} <span className="text-sm font-normal text-gray-500">mi</span></p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {stateData?.weekly_mileage_target ?? currentWeek.mileage_target}
+                  {" "}<span className="text-sm font-normal text-gray-500">mi</span>
+                </p>
               </div>
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Long run</p>

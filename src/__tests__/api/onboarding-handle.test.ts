@@ -650,6 +650,79 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
     expect(smsText).toMatch(/morning.*session|evening before|weekly.*Sunday/i);
   });
 
+  // ── Bug 7 regression ──────────────────────────────────────────────────────
+  // Athlete confirms reminder cadence AFTER already receiving the plan.
+  // Old behavior: coach/respond stored initial_plan messages as "coach_response",
+  // so the planAlreadySent check found nothing and re-triggered plan generation.
+  // Fixed: initial_plan trigger now stored with message_type "initial_plan".
+  it("awaiting_cadence: confirming nightly reminders sends confirmation, does NOT re-trigger plan", async () => {
+    // Claude call order:
+    // 1. handleCadence Haiku → "nightly"
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "nightly" }] });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
+
+    mockTables({
+      users: { data: { id: "user-001", phone_number: "+12025551234", name: "Jake", onboarding_step: "awaiting_cadence", onboarding_data: {} }, error: null },
+      conversations: [
+        { data: [], error: null },            // loop detection query
+        { data: [{ id: "conv-99" }], error: null }, // planAlreadySent check → plan was sent
+        { data: null, error: null },          // sendAndStore insert
+      ],
+      training_profiles: { data: null, error: null },
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "yeah reminders evening before would be great thanks" });
+    await POST(req);
+
+    // Should confirm nightly reminders
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    expect(smsText).toMatch(/evening before|heads.up|night before/i);
+
+    // Should NOT re-trigger plan generation
+    const fetchMock = vi.mocked(global.fetch as ReturnType<typeof vi.fn>);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/coach/respond"),
+      expect.objectContaining({ body: expect.stringContaining("initial_plan") })
+    );
+  });
+
+  it("awaiting_cadence: if plan was never sent (timeout recovery), re-triggers plan generation", async () => {
+    // Claude call order:
+    // 1. handleCadence Haiku → "nightly"
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "nightly" }] });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
+
+    mockTables({
+      users: { data: { id: "user-001", phone_number: "+12025551234", name: "Jake", onboarding_step: "awaiting_cadence", onboarding_data: {} }, error: null },
+      conversations: [
+        { data: [], error: null }, // loop detection query
+        { data: [], error: null }, // planAlreadySent check → plan was never stored
+        { data: null, error: null }, // sendAndStore insert
+      ],
+      training_profiles: { data: null, error: null },
+    });
+
+    const req = makeRequest({ userId: "user-001", message: "yeah evening before" });
+    await POST(req);
+
+    // Should send the holding message
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    expect(smsText).toMatch(/sorry for the delay|plan together/i);
+
+    // Should re-trigger plan generation
+    const fetchMock = vi.mocked(global.fetch as ReturnType<typeof vi.fn>);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/coach/respond"),
+      expect.objectContaining({ body: expect.stringContaining("initial_plan") })
+    );
+  });
+
   // ── checkOffTopic improvement ─────────────────────────────────────────────
   // Coaching questions at steps with off-topic check (e.g. awaiting_schedule)
   // previously got a 1-sentence Haiku non-answer. Now get a real Sonnet answer.

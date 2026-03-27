@@ -56,7 +56,7 @@ export function buildPeriodization(
     rawWeek;
 
   const phase = computePhase(effectiveWeek, raceDate);
-  const isDeloadWeek = effectiveWeek % 4 === 0 && phase !== "taper";
+  const isDeloadWeek = effectiveWeek % 4 === 0 && phase !== "taper" && phase !== "peak";
 
   const suggestedWeeklyMiles: number | null = (() => {
     if (!avgWeeklyMileage || avgWeeklyMileage <= 0 || phase === "taper") return null;

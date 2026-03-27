@@ -102,6 +102,14 @@ describe("buildPeriodization — deload logic", () => {
     expect(p.effectiveWeek).toBe(4);
     expect(p.isDeloadWeek).toBe(false);
   });
+
+  it("does NOT trigger deload during peak phase", () => {
+    // week 4 (multiple of 4) but race is 5 weeks away → peak phase
+    const p = buildPeriodization("weekly_recap", 3, weeksFromNow(5), 30);
+    expect(p.effectiveWeek).toBe(4);
+    expect(p.phase).toBe("peak");
+    expect(p.isDeloadWeek).toBe(false);
+  });
 });
 
 describe("buildPeriodization — suggestedWeeklyMiles", () => {

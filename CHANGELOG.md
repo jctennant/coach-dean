@@ -4,6 +4,32 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Fix plan re-generation when user confirms reminder preference
+
+**Type:** Bug Fix
+**Reported by:** Dean (user report — Jake's conversation)
+**User feedback:** After receiving the initial plan and being asked about reminder cadence, Jake replied "yeah reminders evening before would be great thanks" and Coach Dean responded with "Got it — and sorry for the delay! Let me get your plan together now." and regenerated the entire plan.
+**Root cause:** `msgType` in `coach/respond/route.ts` had no case for `trigger === "initial_plan"`, so the initial plan was stored in conversations with `message_type: "coach_response"`. The `handleCadence()` function in the onboarding handler queries for `message_type === "initial_plan"` to determine if the plan was already sent — finding nothing, it set `planAlreadySent = false` and re-triggered plan generation every time the user answered the cadence question.
+**Fix / Change:** Added `"initial_plan"` case to the `msgType` ternary chain so the initial plan is stored with the correct `message_type`, making the `planAlreadySent` guard work correctly.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-03-26 — Fix 3 dashboard/SMS inconsistencies: deload in peak, weekly target drift, week-1 sync
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** "I'm noticing a lot of inconsistencies between the dashboard and what Dean texts"
+**Root cause:**
+1. **Deload logic mismatch**: `periodization.ts` was missing `&& phase !== "peak"` in the deload check, while `training-plan.ts` correctly excluded peak weeks. This caused Dean to incorrectly prescribe a reduced-volume recovery week in peak-phase weeks (e.g. week 4 when the race is 5 weeks away). Dashboard showed "Peak Phase" but Dean's plan said to back off.
+2. **Weekly target drift**: Dashboard showed `training_plans.weeks[n].mileage_target` (static plan arc). After week 1, the weekly recap updates `training_state.weekly_mileage_target` to Dean's actual dynamic prescription — but the dashboard was reading the stale arc value instead. The training_state field was fetched but never displayed.
+3. **Week 1 `training_state` not synced**: `completeOnboarding` sets `training_state.weekly_mileage_target` from onboarding data, not from what Dean actually prescribed. `generateAndSaveFullPlan` had `prescribedWeek1Miles` available but never wrote it back to training_state.
+**Fix / Change:**
+1. Added `&& phase !== "peak"` to `periodization.ts` deload check. Added a test for this case.
+2. Dashboard "Weekly target" now reads `training_state.weekly_mileage_target` (live, Dean-synced) with plan arc as fallback.
+3. `generateAndSaveFullPlan` now updates `training_state.weekly_mileage_target` with `prescribedWeek1Miles` when available.
+**Files changed:** src/lib/periodization.ts, src/lib/training-plan.ts, src/app/dashboard/page.tsx, src/__tests__/lib/periodization.test.ts
+
 ## 2026-03-26 — Fix prescribedWeek1Miles regex + capture distance corrections in goal_time step
 
 **Type:** Bug Fix

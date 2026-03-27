@@ -418,15 +418,17 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const msgType =
     trigger === "post_run"
       ? "post_run"
-      : trigger === "morning_plan"
-        ? "morning_plan"
-        : trigger === "nightly_reminder"
-          ? "nightly_reminder"
-          : trigger === "morning_reminder"
-            ? "morning_reminder"
-            : trigger === "weekly_recap"
-              ? "weekly_recap"
-              : "coach_response";
+      : trigger === "initial_plan"
+        ? "initial_plan"
+        : trigger === "morning_plan"
+          ? "morning_plan"
+          : trigger === "nightly_reminder"
+            ? "nightly_reminder"
+            : trigger === "morning_reminder"
+              ? "morning_reminder"
+              : trigger === "weekly_recap"
+                ? "weekly_recap"
+                : "coach_response";
 
   const targetMiles = (state?.weekly_mileage_target as number | null) ?? 0;
   let learnedChatId: string | null = null;
