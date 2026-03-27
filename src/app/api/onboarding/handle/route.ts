@@ -389,9 +389,11 @@ Rules:
     goal: parsed.goal,
     sport_type: sportType,
     ...extra,
-    // Don't pre-fill the date when multiple races were mentioned — too risky of assigning
-    // the wrong race's date to the primary goal. Let awaiting_race_date ask explicitly.
-    ...(raceInfo.raceDate && !extra.race_date && !raceInfo.secondaryGoal ? { race_date: raceInfo.raceDate } : {}),
+    // Pre-fill the date from web search even when multiple races were mentioned.
+    // We still leave race_date_confirmed: false so awaiting_race_date confirms it — but
+    // the A race question (awaiting_other_races) is asked FIRST when secondary_goal is set,
+    // and awaiting_race_date is revisited after the A race is confirmed.
+    ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
     ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null, race_date_confirmed: true } : {}),
     ...(raceInfo.secondaryGoal || extra.secondary_goal
       ? { secondary_goal: raceInfo.secondaryGoal ?? extra.secondary_goal }
@@ -600,14 +602,16 @@ async function handleOtherRaces(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
+  const secondaryGoalContext = onboardingData.secondary_goal as string | null;
   const [parseResponse, acknowledgment] = await Promise.all([
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 500,
-      system: `The athlete was asked if a given race is their top priority, and may mention other races and re-prioritize.
+      system: `The athlete was asked which race is their top priority, and may confirm it or name a different one.
 Return ONLY valid JSON, no other text.
-
+${secondaryGoalContext ? `\nIMPORTANT — Previously mentioned races: The athlete already mentioned these other races in their first message: "${secondaryGoalContext}". Even if their reply is brief (e.g. "yes", "yep, that's my A race"), include those previously mentioned races in other_races with appropriate priorities. Do not omit them just because they weren't repeated.\n` : ""}
 Output format: {
+  "confirmed_a_race_date": "YYYY-MM-DD" | null,
   "other_races": [
     {
       "date": "YYYY-MM-DD",
@@ -622,6 +626,13 @@ Output format: {
     "date": "YYYY-MM-DD" | null
   } | null
 }
+
+confirmed_a_race_date rules:
+- Set when the athlete confirms or corrects the date for the ORIGINAL asked-about race (not a promoted new A race)
+- If they say "yes" to a pre-filled date: return that same date
+- If they provide a correction ("no, it's June 21"): return the corrected date
+- If they don't mention the A race date at all: return null
+- Do NOT set this when new_a_race is set — use new_a_race.date instead
 
 new_a_race rules:
 - Set this when the athlete signals a different race is their top priority — this includes explicit statements AND implicit corrections like "No [race] is" or "No that one" responding to a yes/no question. Examples:
@@ -643,7 +654,7 @@ Date rules:
 - If only a month is given, assume current year (or next year if that month has passed)
 - Today is ${new Date().toISOString().split("T")[0]}
 
-If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: {"other_races": [], "new_a_race": null}`,
+If no other races mentioned AND no previously mentioned races context, return: {"other_races": [], "new_a_race": null}`,
       messages: [{ role: "user", content: message }],
     }),
     acknowledgeSharedInfo(message),
@@ -651,11 +662,13 @@ If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: 
 
   let otherRaces: Array<{ date: string; name: string | null; goal: string | null; priority: "B" | "C" }> = [];
   let newARace: { name: string; goal: string | null; date: string | null } | null = null;
+  let confirmedARaceDate: string | null = null;
   try {
     const text = parseResponse.content[0].type === "text" ? parseResponse.content[0].text : "{}";
     const parsed = JSON.parse(extractJSON(text));
     otherRaces = Array.isArray(parsed.other_races) ? parsed.other_races : [];
     newARace = parsed.new_a_race && typeof parsed.new_a_race === "object" ? parsed.new_a_race : null;
+    confirmedARaceDate = typeof parsed.confirmed_a_race_date === "string" ? parsed.confirmed_a_race_date : null;
   } catch (e) {
     console.error("[onboarding] other_races parse failed:", e);
   }
@@ -684,12 +697,24 @@ If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: 
       race_name: newARace.name,
       goal: newARace.goal ?? oldGoal,
       race_date: promotedDate ?? null,
-      race_date_confirmed: false, // old confirmation was for the previous A race
+      // Confirmed if the user gave a date for the promoted race inline; otherwise ask separately
+      race_date_confirmed: !!promotedDate,
       race_month: null,           // clear old A race's month
       goal_distance_miles: null,  // will be re-looked-up in handleRaceDate
       secondary_goal: null,       // was set when old race was A; now stale
     };
-    console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}, looked-up date: ${promotedDate}`);
+    console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}, date: ${promotedDate}, confirmed: ${!!promotedDate}`);
+  } else if (confirmedARaceDate) {
+    // Original A race confirmed — apply the date (may be correction of the pre-fill)
+    mergedData = { ...mergedData, race_date: confirmedARaceDate, race_date_confirmed: true };
+    console.log(`[onboarding] A race date confirmed inline: ${confirmedARaceDate}`);
+  } else if (secondaryGoalContext && onboardingData.race_date) {
+    // Multi-race path: question asked for all dates but user may have just said "yes" to the pre-fill.
+    // If the pre-filled date exists and user didn't explicitly correct it, treat as confirmed.
+    // The LLM would have set confirmed_a_race_date if the user explicitly provided a date —
+    // absence means the user was vague/implicit, so fall back to the pre-fill.
+    mergedData = { ...mergedData, race_date_confirmed: true };
+    console.log(`[onboarding] A race date implicitly confirmed via pre-fill: ${onboardingData.race_date as string}`);
   }
 
   mergedData = {
@@ -697,9 +722,11 @@ If no other races mentioned (e.g. "nope", "just the one", "that's it"), return: 
     other_races: otherRaces,
     other_races_answered: true,
   };
-  // If the A race was just promoted, we need to confirm its date before moving on.
+  // Loop back to awaiting_race_date only when the A race date is still unconfirmed:
+  // - Promoted race with no date found (user didn't provide one, web search returned nothing)
+  // - Multi-race path where user gave no date info at all (no pre-fill and no inline date)
   // awaiting_race_date is earlier in STEP_ORDER so findNextStep won't reach it — override manually.
-  const nextStep = newARace && !mergedData.race_date_confirmed
+  const nextStep = !mergedData.race_date_confirmed
     ? "awaiting_race_date"
     : findNextStep("awaiting_other_races", mergedData);
 
@@ -1817,6 +1844,9 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
     case "awaiting_race_date":
       // Skip for injury recovery and return_to_running — no race date needed
       if (data.goal === "injury_recovery" || data.goal === "return_to_running") return true;
+      // Skip date confirmation when multiple races were mentioned — ask which is the A race first
+      // (awaiting_other_races). After that step confirms the A race, we loop back here.
+      if (data.secondary_goal) return true;
       // Must be explicitly confirmed by the user (race_date_confirmed: true).
       // Web-search-prefilled dates do NOT satisfy this — we still ask so the user
       // can correct an inaccurate web search result (e.g. wrong year, wrong event date).
@@ -1902,6 +1932,17 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       const raceName = data.race_name as string | null;
       const raceGoal = data.goal as string | null;
       const raceRef = raceName ? `the ${raceName}` : raceGoal ? `your ${formatGoalInline(raceGoal)}` : "your race";
+      // When we already know about multiple races, ask which is the A race without asking "do you have any others?"
+      if (data.secondary_goal) {
+        // Combined A race + date question so we don't need a separate awaiting_race_date round-trip.
+        const prefillDate = data.race_date as string | null;
+        const raceName = data.race_name as string | null;
+        if (prefillDate && raceName) {
+          const formatted = new Date(prefillDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" });
+          return `Is the ${raceName} the A race — the one the whole plan peaks for? I have ${formatted} for it. What are the dates for the others in the lineup? Approximate is fine.`;
+        }
+        return `Which is your A race — the one the whole plan builds toward? And roughly when are each of these on the calendar?`;
+      }
       return `Is ${raceRef} your main goal race this season — the one we're building the whole plan around? And do you have any others on the calendar I should know about?`;
     }
 

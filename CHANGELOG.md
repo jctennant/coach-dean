@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-27 — Fix multi-race onboarding: ask A race question before date when multiple races mentioned
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation)
+**User feedback:** "feels like we still aren't correctly parsing and asking about which race is the primary focus here? I would expect it to ask — which is your A race and then confirm the dates for each" — Dean was asking "You mentioned June — do you have a specific date?" instead of "Is Dipsea the A race?"
+**Root cause:** When `secondary_goal` is set (multiple races detected), the 2026-03-26 fix correctly skipped the date *pre-fill* but did NOT skip the `awaiting_race_date` step itself. So the flow was: acknowledge all races → ask for date (`awaiting_race_date`) → ask which is A race (`awaiting_other_races`). Wrong order — date should only be confirmed after we know which race is the A race.
+**Fix / Change:**
+1. `isStepSatisfied("awaiting_race_date")` now returns `true` when `secondary_goal` is set — skips the date step entirely on first pass, jumping straight to `awaiting_other_races`.
+2. Pre-fill `race_date` from web search even in multi-race case (removed `!raceInfo.secondaryGoal` guard) so the confirmation question is "Looks like the Dipsea is on June 14" rather than open-ended.
+3. `handleOtherRaces` nextStep logic simplified: always loops back to `awaiting_race_date` when `race_date_confirmed` is false — covers both the A-race-promotion case and the new multi-race skip path.
+4. `awaiting_other_races` question now context-aware: when `secondary_goal` is set and a pre-filled date exists, asks "Is the Dipsea the A race? I have June 14 for it — what are the dates for the others?" combining A-race confirmation + all race dates in one turn. Falls back to open-ended date ask if no pre-fill.
+5. `handleOtherRaces` LLM now extracts `confirmed_a_race_date` so the A race date can be confirmed in the same step (no separate `awaiting_race_date` round-trip). If user promotes a different A race and provides its date inline, that's also confirmed without looping back.
+6. `handleOtherRaces` LLM prompt now includes `secondary_goal` context so previously mentioned races (Sierre Zinal, A Basin) are captured in `other_races` even on brief replies like "Yes".
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-03-27 — Dashboard: A/B/C race list + daily workout breakdown for current week
 
 **Type:** Feature
