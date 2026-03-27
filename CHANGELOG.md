@@ -4,6 +4,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-26 — Fix prescribedWeek1Miles regex + capture distance corrections in goal_time step
+
+**Type:** Bug Fix
+**Reported by:** Jake (direct observation — previous fixes didn't hold)
+**User feedback:** "1) I see Sierre Zinal 10K on my dashboard, it should be 31k. 2) The weekly target in the dashboard is 29 mi but Dean texted me a plan that is 18 miles."
+**Root cause (10K label):** Previous fix cleared `goal_distance_miles` when Sierre Zinal was promoted as A race, but the web search in `handleRaceDate` returned `distanceMiles: null` (multiple options found — VK + 31K). The goal bucket also stayed wrong: it fell back to Dipsea's old "10k" bucket since `newARace.goal` was null in `handleOtherRaces`. When the user corrected "I'm doing the 31k version" in `handleGoalTime`, the handler only extracted `goal_time_minutes` and ignored the distance mention.
+**Root cause (29 mi vs 18 mi):** The regex at line 489 only matched `"Total: 18mi"` format, but Dean's plan text uses `"That's ~18 miles this week."` — no match → `prescribedWeek1Miles = null` → baseMileage fell back to Strava avg → week 1 multiplied by 1.07 factor.
+**Fix / Change:** (1) In `handleGoalTime`, after extracting goal time, also check for distance mentions like "31k" or "5km" — if found and plausible, update `goal_distance_miles` and re-bucket `goal` in mergedData before completeOnboarding runs. (2) Extended the prescribedWeek1Miles regex in `coach/respond` to also match `"~18 miles this week"` format.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
 ## 2026-03-26 — Don't assume race distance in acknowledgments; ask which distance for multi-option races
 
 **Type:** Bug Fix

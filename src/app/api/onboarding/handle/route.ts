@@ -803,7 +803,29 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null, "has_answered": boo
     }
   }
 
-  const mergedData = { ...onboardingData, goal_time_minutes: goalTimeMinutes };
+  const mergedData: Record<string, unknown> = { ...onboardingData, goal_time_minutes: goalTimeMinutes };
+
+  // If the user mentioned a specific race distance in this message (e.g. "I'm doing the 31k version"),
+  // capture it now — this step is the last chance before completeOnboarding sets training_profiles.
+  const distanceCorrectionMatch = message.match(/\b(\d+(?:\.\d+)?)\s*(?:k|km)\b/i);
+  if (distanceCorrectionMatch) {
+    const km = parseFloat(distanceCorrectionMatch[1]);
+    if (km >= 1 && km <= 200) { // sanity check: ignore implausible values
+      const miles = Math.round((km / 1.60934) * 100) / 100;
+      mergedData.goal_distance_miles = miles;
+      // Re-bucket the goal based on the corrected distance.
+      // Thresholds in miles — matches the original goal classifier bucketing logic.
+      // "30k" is the catch-all for non-standard 13K–42K (half-to-marathon) distances.
+      const DISTANCE_TO_BUCKET: Array<[number, string]> = [
+        [3, "mile"], [6.5, "5k"], [13, "10k"], [26.5, "30k"], [27.5, "marathon"],
+        [35, "50k"], [52, "50mi"], [80, "100k"], [200, "100mi"],
+      ];
+      const bucket = DISTANCE_TO_BUCKET.find(([threshold]) => miles <= threshold)?.[1] ?? "100mi";
+      mergedData.goal = bucket;
+      console.log(`[onboarding] distance correction in goal_time: ${km}km → ${miles}mi → bucket: ${bucket}`);
+    }
+  }
+
   const nextStep = findNextStep("awaiting_goal_time", mergedData);
 
   await supabase

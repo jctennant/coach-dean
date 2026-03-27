@@ -486,7 +486,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     await extractAndStorePlanSessions(userId, coachMessage);
     // Parse the prescribed week 1 total from the plan text so the arc week 1 matches
     // what Dean actually sent (not an independently recomputed estimate).
-    const prescribedWeek1Match = coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*mi/i);
+    // Match "Total: ~18mi" OR "~18 miles this week" (the more common format Dean uses)
+    const prescribedWeek1Match =
+      coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*mi/i) ||
+      coachMessage.match(/~(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+this\s+week/i);
     const prescribedWeek1Miles = prescribedWeek1Match ? parseFloat(prescribedWeek1Match[1]) : null;
     // Generate and save the full multi-week training arc, then text the dashboard link.
     await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined });
