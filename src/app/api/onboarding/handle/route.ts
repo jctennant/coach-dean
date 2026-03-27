@@ -476,7 +476,11 @@ async function handleRaceDate(
   // cleared) but we have a name to search on. Run in parallel with date extraction.
   const shouldLookupDistance = !!raceName && existingDistanceMiles === null;
 
-  const [parseResponse, extra, acknowledgment, raceInfo] = await Promise.all([
+  // When there was a pre-filled date (not yet confirmed), check in parallel if the user
+  // is indicating that date belongs to a DIFFERENT race (e.g. "Ah that's Sierre Zinal's date").
+  const prefillDate = onboardingData.race_date as string | null;
+  const prefillUnconfirmed = !!prefillDate && !onboardingData.race_date_confirmed;
+  const [parseResponse, extra, acknowledgment, raceInfo, raceDateCorrection] = await Promise.all([
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 64,
@@ -494,6 +498,22 @@ Rules:
     extractAdditionalFields(message),
     acknowledgeSharedInfo(message),
     shouldLookupDistance ? generateRaceAcknowledgment(raceName!) : Promise.resolve(null),
+    // Only check for date-race mismatch if there was an unconfirmed pre-filled date
+    prefillUnconfirmed ? anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 64,
+      system: `The athlete was asked to confirm or correct a race date. The date shown was for "${raceName ?? "their race"}".
+
+Did the athlete indicate this date actually belongs to a DIFFERENT race — not ${raceName ?? "their race"}?
+Examples of this:
+- "Ah that's the date of Sierre Zinal" → yes, different_race: "Sierre Zinal"
+- "That's for the other race" → yes, different_race: "the other race"
+- "No that's right" → no
+- "August 8th" → no (just confirming/correcting the date itself)
+
+Return ONLY valid JSON: {"different_race": string | null}`,
+      messages: [{ role: "user", content: message }],
+    }) : Promise.resolve(null),
   ]);
 
   const parseText =
@@ -505,6 +525,24 @@ Rules:
     parsed = JSON.parse(extractJSON(parseText));
   } catch (e) {
     console.error("[onboarding] race_date parse failed:", e);
+  }
+
+  // Check if user indicated the pre-filled date belongs to a different race entirely.
+  // If so, clear the date and re-ask rather than silently accepting the wrong assignment.
+  if (raceDateCorrection) {
+    const correctionText = raceDateCorrection.content[0].type === "text" ? raceDateCorrection.content[0].text : "{}";
+    let differentRace: string | null = null;
+    try {
+      differentRace = JSON.parse(extractJSON(correctionText))?.different_race ?? null;
+    } catch { /* ignore */ }
+    if (differentRace) {
+      console.log(`[onboarding] race_date mismatch: user said date belongs to "${differentRace}", not "${raceName}"`);
+      const clearedData = { ...onboardingData, race_date: null, race_date_confirmed: false };
+      await supabase.from("users").update({ onboarding_data: clearedData as unknown as Json }).eq("id", user.id);
+      const raceRef = raceName ? `the ${raceName}` : "your race";
+      await sendAndStore(user.id, user.phone_number, `Got it — so that date is for ${differentRace}. What's the date for ${raceRef}?`, "awaiting_race_date");
+      return NextResponse.json({ ok: true });
+    }
   }
 
   // Merge extra fields first, then apply the dedicated race_date parse result on top.
@@ -570,7 +608,12 @@ Output format: {
 }
 
 new_a_race rules:
-- Set this ONLY when the athlete explicitly signals a different race is their top priority (e.g. "the 100k is the top priority", "actually X is my A race", "X is more important"). null if the original A race remains the top priority.
+- Set this when the athlete signals a different race is their top priority — this includes explicit statements AND implicit corrections like "No [race] is" or "No that one" responding to a yes/no question. Examples:
+  - "the 100k is the top priority" → new_a_race: 100K race
+  - "actually X is my A race" → new_a_race: X
+  - "No Sierre Zinal is" (in response to "Is Dipsea your A race?") → new_a_race: Sierre Zinal
+  - "No that one" (in response to "Is X your A race?") → new_a_race: the other race the athlete has mentioned
+  - "Yes" or "That's right" → new_a_race: null (original is confirmed as A race)
 - If set, the original A race should appear in other_races with priority "B" (not "A").
 
 other_races rules (races other than the new A race, or other than the original A race if no promotion):
@@ -1972,7 +2015,7 @@ If the race offers multiple distance options (e.g. 10K, 30K, 50K, 50 miles) AND 
 {"ack": "<1-2 sentence acknowledgment of the race without assuming distance>", "date": "YYYY-MM-DD" | null, "distance_options": ["10K", "30K", "50K", "50 miles"]}
 The "ack" in this case should mention the race name and terrain/character but NOT a specific distance.
 
-IMPORTANT — Multi-race messages: When an athlete mentions several races, identify their PRIMARY goal (usually the one they say is their "main objective", "A race", or the most important event). All fields below refer to that primary race only.
+IMPORTANT — Multi-race messages: When an athlete mentions several races, identify their PRIMARY goal (usually the one mentioned first, or the one they say is their "main objective", "A race", or the most important event). All fields below refer to that primary race only. CRITICAL: if the athlete mentioned a specific month or season for the primary race (e.g. "Dipsea in June"), the date you return MUST fall in that month/season. Do NOT return a date from a secondary race. If you can't find a date for the primary race that matches what the athlete said, return null for date.
 
 If the race has only one distance, or the athlete clearly stated their distance:
 Write a conversational 1-3 sentence acknowledgment ("ack") that:
