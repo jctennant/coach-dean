@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-27 — Move timezone/location question to post-plan, alongside reminder cadence ask
+
+**Type:** Improvement
+**Reported by:** Jake (direct feedback)
+**User feedback:** "we should move the question about location to confirm when reminders go out to after the plan is created when we ask about when someone wants reminders"
+**Root cause:** `awaiting_timezone` was a pre-plan onboarding step, creating an awkward mid-flow question ("what city are you in?") before the athlete had seen any plan or context for why location matters.
+**Fix / Change:** Removed `awaiting_timezone` from `STEP_ORDER` and set `isStepSatisfied` to always return `true` for it (effectively skipping it pre-plan). In the `initial_plan` prompt, when timezone is not yet confirmed, Dean is instructed to combine both questions into one natural ask: "I can send a reminder the morning of each session or the evening before — which works better? And what city are you in so I time them right?" In `handleCadence`, timezone is now extracted in parallel with cadence classification and saved to `users.timezone` if successfully parsed. Strava users are excluded since their timezone is already set from the athlete profile.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
 ## 2026-03-27 — Fix race ack implying wrong hierarchy when multiple races mentioned
 
 **Type:** Bug Fix

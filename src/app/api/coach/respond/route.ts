@@ -277,7 +277,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek);
+  const timezoneConfirmed = !!(onboardingData.timezone_confirmed) || !!(user.strava_athlete_id); // Strava users get TZ from athlete profile
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -2184,7 +2185,8 @@ function buildUserMessage(
   missedRunCheckin?: boolean,
   periodization?: PeriodizationContext,
   storedPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
-  storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null
+  storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
+  timezoneConfirmed = true
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -2516,7 +2518,7 @@ SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "
 QUALITY SESSION "WHY": For any tempo run, interval session (800m repeats, etc.), or race-pace workout in the plan, add a brief purpose note on the same line — one short clause after a dash. Keep it specific to the athlete's goal: "— builds lactate threshold, the engine for your half marathon pace" or "— sharpens the speed you'll need at goal pace" or "— teaches your legs to run fast when tired." Easy runs and long runs do not need this treatment.
 Use short day abbreviations and M/D dates (cross-referenced against DATE CONTEXT — do not compute day names independently). Then close with three short lines on a new line, each as its own sentence:
 1. Invite feedback on the plan — e.g. "How does this look? Happy to adjust anything."
-2. Offer reminders naturally — e.g. "I can also shoot you a reminder the morning of each session or the evening before — just let me know which works better."
+2. Offer reminders naturally${!timezoneConfirmed ? " — and since you haven't confirmed your location yet, ask for their city/timezone in the same sentence so reminders go out at the right time. Combine both naturally into one question, e.g. \"I can send a reminder the morning of each session or the evening before — which works better? And what city are you in so I time them right?\"" : " — e.g. \"I can also shoot you a reminder the morning of each session or the evening before — just let me know which works better.\""}
 3. Open line — e.g. "And this number's always open — how a run felt, questions, if something's off. That's what I'm here for."
 Vary the phrasing each time — these are the ideas, not a script.
 

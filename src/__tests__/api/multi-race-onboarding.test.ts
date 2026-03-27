@@ -157,14 +157,12 @@ describe("handleGoal — multi-race routing", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it("skips awaiting_race_date and routes to awaiting_other_races when secondary_goal is set", async () => {
-    // handleGoal call order:
-    // 1. checkOffTopic Haiku
-    // 2. goalParse Sonnet  [parallel]
-    // 3. extractAdditionalFields Haiku  [parallel]
-    // 4. detectAndAnswerImmediate Haiku  [parallel]
-    // 5. generateRaceAcknowledgment Sonnet  [parallel]
+    // handleGoal call order (checkOffTopic is SKIPPED for awaiting_goal):
+    // 1. goalParse Sonnet  [parallel]
+    // 2. extractAdditionalFields Haiku  [parallel]
+    // 3. detectAndAnswerImmediate Haiku  [second parallel]
+    // 4. generateRaceAcknowledgment Sonnet  [second parallel]
     vi.mocked(anthropic.messages.create)
-      .mockResolvedValueOnce(ON_TOPIC)
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"10k","race_name":"Dipsea","goal_distance_miles":7.4}' }] })
       .mockResolvedValueOnce(EXTRACT_JAKE)
       .mockResolvedValueOnce(DETECT_NULL)
@@ -191,7 +189,6 @@ describe("handleGoal — multi-race routing", () => {
 
   it("stores the web-search pre-filled race_date even when secondary_goal is set", async () => {
     vi.mocked(anthropic.messages.create)
-      .mockResolvedValueOnce(ON_TOPIC)
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"10k","race_name":"Dipsea","goal_distance_miles":7.4}' }] })
       .mockResolvedValueOnce(EXTRACT_JAKE)
       .mockResolvedValueOnce(DETECT_NULL)
@@ -215,7 +212,6 @@ describe("handleGoal — multi-race routing", () => {
 
   it("routes to awaiting_race_date (not awaiting_other_races) for a single-race message", async () => {
     vi.mocked(anthropic.messages.create)
-      .mockResolvedValueOnce(ON_TOPIC)
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"marathon","race_name":null,"goal_distance_miles":null}' }] })
       .mockResolvedValueOnce(EXTRACT_JAKE)
       .mockResolvedValueOnce(DETECT_NULL)
@@ -250,7 +246,6 @@ describe("awaiting_other_races — question content after multi-race goal", () =
     // This tests the bug where "Is the Sierre Zinal the A race? I have June 14 for it"
     // was sent — date came from Dipsea but was shown for Sierre Zinal (classifier mismatch).
     vi.mocked(anthropic.messages.create)
-      .mockResolvedValueOnce(ON_TOPIC)
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"10k","race_name":"Dipsea","goal_distance_miles":7.4}' }] })
       .mockResolvedValueOnce(EXTRACT_JAKE)
       .mockResolvedValueOnce(DETECT_NULL)
@@ -278,7 +273,6 @@ describe("awaiting_other_races — question content after multi-race goal", () =
 
   it("asks for dates for all races (not just the A race)", async () => {
     vi.mocked(anthropic.messages.create)
-      .mockResolvedValueOnce(ON_TOPIC)
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"10k","race_name":"Dipsea","goal_distance_miles":7.4}' }] })
       .mockResolvedValueOnce(EXTRACT_JAKE)
       .mockResolvedValueOnce(DETECT_NULL)
@@ -566,17 +560,19 @@ describe("completeOnboarding — races table for multi-race athlete", () => {
    * to trigger completeOnboarding.
    */
   it("writes A race and B/C races to races table when onboarding completes", async () => {
-    // handleSchedule call order:
+    // handleSchedule call order (checkOffTopic IS called for awaiting_schedule):
     // 1. checkOffTopic Haiku
-    // 2. scheduleParser Haiku [parallel]
-    // 3. acknowledgeSchedule Haiku [parallel]
+    // 2. scheduleParser Haiku [parallel with extractAdditionalFields]
+    // 3. extractAdditionalFields Haiku [parallel]
+    // completeOnboarding is called directly (nextStep=null since all steps satisfied)
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce(ON_TOPIC)
       .mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({
+        complete: true,
         days_per_week: 4,
         training_days: ["Monday", "Wednesday", "Friday", "Sunday"],
       }) }] })
-      .mockResolvedValueOnce({ content: [{ type: "text", text: "4 days — solid plan." }] });
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "{}" }] }); // extractAdditionalFields
 
     const racesChain = chain({ data: null, error: null });
     const usersChain = chain({
@@ -600,6 +596,8 @@ describe("completeOnboarding — races table for multi-race athlete", () => {
           strava_skipped: true,
           intro_sent: true,
           name: "Jake",
+          weekly_miles: 35,
+          easy_pace: "9:00",
         },
       },
       error: null,

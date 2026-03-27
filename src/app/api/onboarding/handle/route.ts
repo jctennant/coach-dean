@@ -187,7 +187,7 @@ export async function POST(request: Request) {
       result = await handleTimezone(user, message, onboardingData);
       break;
     case "awaiting_cadence":
-      result = await handleCadence(user, message);
+      result = await handleCadence({ ...user, onboarding_data: onboardingData }, message);
       break;
     default:
       result = NextResponse.json({ ok: true });
@@ -1449,13 +1449,17 @@ async function handleTimezone(
 }
 
 async function handleCadence(
-  user: { id: string; phone_number: string; name: string | null },
+  user: { id: string; phone_number: string; name: string | null; onboarding_data: Record<string, unknown> },
   message: string
 ) {
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 16,
-    system: `The athlete is responding to a question offering three reminder options: morning-of reminders, evening-before reminders, or a weekly Sunday overview only.
+  const timezoneAlreadyConfirmed = !!(user.onboarding_data.timezone_confirmed) || !!(user.onboarding_data.strava_connected);
+
+  // Run cadence classification and (when needed) timezone extraction in parallel.
+  const [cadenceResponse, parsedTimezone] = await Promise.all([
+    anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 16,
+      system: `The athlete is responding to a question offering three reminder options: morning-of reminders, evening-before reminders, or a weekly Sunday overview only.
 
 Classify their reply. Return only one word: "morning", "nightly", "weekly", or "unclear".
 
@@ -1463,10 +1467,12 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
 - "evening", "night before", "nightly", "night of", "the night before", "yes", "yeah", "sure", "please", "sounds good", "reminders", "that works" → nightly
 - "weekly", "sunday", "just weekly", "no", "nope", "no thanks", "just the overview" → weekly
 - Anything that isn't clearly answering the reminder question (e.g. sharing an injury, asking a question, talking about something else) → unclear`,
-    messages: [{ role: "user", content: message }],
-  });
+      messages: [{ role: "user", content: message }],
+    }),
+    timezoneAlreadyConfirmed ? Promise.resolve(null) : parseTimezoneFromMessage(message),
+  ]);
 
-  const raw = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "nightly";
+  const raw = cadenceResponse.content[0].type === "text" ? cadenceResponse.content[0].text.trim().toLowerCase() : "nightly";
 
   // If the message wasn't actually answering the cadence question, classify what it
   // actually is (plan feedback vs coaching question) and respond appropriately.
@@ -1490,9 +1496,15 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
     .limit(1);
   const planAlreadySent = (planMessages?.length ?? 0) > 0;
 
+  const userUpdate: Record<string, unknown> = { onboarding_step: null };
+  if (!timezoneAlreadyConfirmed && parsedTimezone) {
+    userUpdate.timezone = parsedTimezone;
+    userUpdate.onboarding_data = { ...user.onboarding_data, timezone_confirmed: true };
+  }
+
   await Promise.all([
     supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", user.id),
-    supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
+    supabase.from("users").update(userUpdate).eq("id", user.id),
   ]);
 
   void trackEvent(user.id, "cadence_preference_set", { cadence });
@@ -1836,7 +1848,7 @@ const STEP_ORDER = [
   "awaiting_mileage_baseline",    // only for non-Strava users who haven't mentioned mileage yet
   "awaiting_ultra_background",    // only shown for 50K+ goals
   "awaiting_injury_background",   // only shown for injury_recovery goals
-  "awaiting_timezone",            // confirm/set timezone for accurate reminder timing
+  // awaiting_timezone moved to post-plan — asked alongside the cadence/reminder question
   "awaiting_anything_else",
 ];
 
@@ -1897,10 +1909,8 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       // Satisfied once we have injury notes captured.
       return !!(data.injury_notes);
     case "awaiting_timezone":
-      // Auto-satisfy if Strava is connected but no city available to confirm
-      // (timezone already set from Strava athlete profile, nothing meaningful to ask).
-      if (data.strava_connected && !data.strava_city) return true;
-      return !!(data.timezone_confirmed);
+      // Moved to post-plan — asked alongside the cadence/reminder question. Always skip here.
+      return true;
     case "awaiting_anything_else":
       // Skip if the user already shared mileage AND some fitness/pace reference —
       // that's the core of what this question is designed to capture.
