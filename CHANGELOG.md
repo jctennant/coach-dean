@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Mid-onboarding Strava events get a coaching reaction + onboarding nudge
+
+**Type:** Feature
+**Reported by:** Jake (internal observation)
+**User feedback:** N/A
+**Root cause:** Strava activity events for users mid-onboarding were silently stored but not acted on, wasting a good engagement moment.
+**Fix / Change:** Instead of skipping the coaching response, the webhook now fires a `post_run_onboarding` trigger. `coach/respond` handles this with a lightweight early-exit path — Claude reacts briefly to the run (distance, pace), then re-asks the user's current pending onboarding question so they know to reply and finish setup.
+**Files changed:** `src/app/api/webhooks/strava/route.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/strava-webhook.test.ts`
+
+## 2026-03-28 — Mention recent races when Strava connects
+
+**Type:** Feature
+**Reported by:** Jake (internal observation)
+**User feedback:** N/A
+**Root cause:** The Strava connect confirmation SMS only mentioned recent runs; races (workout_type=1) — which are great fitness assessments — were invisible to the user.
+**Fix / Change:** After the synchronous 8-week activity import in the Strava callback, we query for races and include them in the welcome SMS. E.g. "Spotted your recent half marathon too — great fitness marker." Uses a `guessRaceLabel()` helper to map distance → race name (5K, 10K, half marathon, marathon, etc.).
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`
+
 ## 2026-03-28 — Plan changes now propagate to the dashboard in real-time
 
 **Type:** Feature / Bug Fix

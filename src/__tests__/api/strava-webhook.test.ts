@@ -162,17 +162,19 @@ describe("POST /api/webhooks/strava", () => {
     expect(getActivity).not.toHaveBeenCalled();
   });
 
-  it("skips coaching for users still in onboarding", async () => {
-    setupSupabase({ user: mockUser({ onboarding_step: "awaiting_schedule" }) });
+  it("fires post_run_onboarding coaching for new activity from user still in onboarding", async () => {
+    setupSupabase({ user: mockUser({ onboarding_step: "awaiting_schedule" }), existingActivity: null });
 
     const req = mockRequest({ object_type: "activity", aspect_type: "create", owner_id: 12345, object_id: 999 });
     await POST(req);
     await flush();
 
-    expect(global.fetch).not.toHaveBeenCalledWith(
+    expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("coach/respond"),
-      expect.anything()
+      expect.objectContaining({ method: "POST" })
     );
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.trigger).toBe("post_run_onboarding");
   });
 
   it("fires coaching response for new activity from onboarded user", async () => {

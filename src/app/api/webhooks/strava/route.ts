@@ -71,12 +71,8 @@ async function processStravaEvent(body: {
       return NextResponse.json({ ok: true });
     }
 
-    // Don't trigger coaching responses during onboarding — the activity is still
-    // stored so it appears in their history, but we don't interrupt the flow.
-    if (user.onboarding_step !== null) {
-      console.log(`[strava-webhook] user ${user.id} is in onboarding (${user.onboarding_step}), skipping post_run`);
-      // Still store the activity below, just don't fire the coaching response.
-    }
+    // Users who are mid-onboarding still get a brief run reaction + nudge to finish setup.
+    // The activity is stored either way so it appears in their history.
 
     try {
       const accessToken = await getValidAccessToken(user.id);
@@ -204,7 +200,7 @@ async function processStravaEvent(body: {
       // activity within seconds. The isNew check above has a race condition if both
       // events arrive before either stores the activity. A recent post_run message
       // in the conversations table is a reliable late-stage gate.
-      if (isNew && !suppressCoaching && user.onboarding_step === null) {
+      if (isNew && !suppressCoaching) {
         const recentCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         const { data: recentPostRun } = await supabase
           .from("conversations")
@@ -220,15 +216,16 @@ async function processStravaEvent(body: {
         }
       }
 
-      // Only fire coaching response for new activities (not duplicate webhook events)
-      // and only for fully onboarded users.
-      if (isNew && !suppressCoaching && user.onboarding_step === null) {
+      // Fire coaching response for new activities. Fully onboarded users get the full
+      // post_run analysis; users mid-onboarding get a brief reaction + segue to finish setup.
+      if (isNew && !suppressCoaching) {
+        const trigger = user.onboarding_step === null ? "post_run" : "post_run_onboarding";
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userId: user.id,
-            trigger: "post_run",
+            trigger,
             activityId: activity.id,
           }),
         });

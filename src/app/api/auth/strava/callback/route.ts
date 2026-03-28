@@ -153,6 +153,26 @@ export async function GET(request: Request) {
     console.error("[strava-callback] recent activity import error:", err)
   );
 
+  // Query for any races synced in the recent import (workout_type = 1).
+  // These are great fitness markers and users appreciate knowing Dean saw them.
+  const { data: recentRaces } = await supabase
+    .from("activities")
+    .select("distance_meters, average_pace, start_date")
+    .eq("user_id", user.id)
+    .eq("workout_type", 1)
+    .order("start_date", { ascending: false })
+    .limit(2);
+
+  let raceMentionLine = "";
+  if (recentRaces && recentRaces.length > 0) {
+    const raceLabels = recentRaces.map((r) => guessRaceLabel(r.distance_meters ?? 0));
+    if (raceLabels.length === 1) {
+      raceMentionLine = ` Spotted your recent ${raceLabels[0]} too — great fitness marker.`;
+    } else {
+      raceMentionLine = ` Also spotted a couple recent races (${raceLabels.join(", ")}) — good fitness benchmarks.`;
+    }
+  }
+
   // Background imports run in after() so Vercel keeps the process alive after
   // the redirect response is sent. Plain fire-and-forget gets killed on response.
   after(async () => {
@@ -178,8 +198,8 @@ export async function GET(request: Request) {
     : null;
   const recentCount = recentTotals?.count as number | undefined;
   const stravaSeenLine = recentMiles && recentCount
-    ? `I can see your recent runs — ${recentMiles} miles across ${recentCount} ${recentCount === 1 ? "run" : "runs"} in the last 4 weeks. That's great context.`
-    : `I can see your training history — that's going to help a lot.`;
+    ? `I can see your recent runs — ${recentMiles} miles across ${recentCount} ${recentCount === 1 ? "run" : "runs"} in the last 4 weeks.${raceMentionLine} That's great context.`
+    : `I can see your training history — that's going to help a lot.${raceMentionLine}`;
 
   // Connecting Strava IS the answer to "do you use Strava?" — so when the user was on
   // awaiting_strava, ask the next question (schedule) rather than telling them to answer
@@ -205,6 +225,17 @@ export async function GET(request: Request) {
   return NextResponse.redirect(
     `${process.env.NEXT_PUBLIC_APP_URL}/strava-connected`
   );
+}
+
+/** Map a race distance in meters to a common label (5K, half marathon, etc.). */
+function guessRaceLabel(distanceMeters: number): string {
+  if (distanceMeters < 6000) return "5K";
+  if (distanceMeters < 11000) return "10K";
+  if (distanceMeters < 16000) return "15K";
+  if (distanceMeters < 22000) return "half marathon";
+  if (distanceMeters < 30000) return "25K";
+  if (distanceMeters < 44000) return "marathon";
+  return "ultra";
 }
 
 /** Build a DB row from a raw Strava activity object. */

@@ -13,7 +13,7 @@ import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image";
 
 interface CoachRequest {
   userId: string;
@@ -72,8 +72,114 @@ export async function POST(request: Request) {
   return await processCoachRequest(body);
 }
 
+// Step-to-question map for mid-onboarding post_run nudges.
+const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
+  awaiting_schedule: "Which days of the week work best for your training? (e.g. Mon, Wed, Fri, Sun)",
+  awaiting_race_date: "When's your race? A rough month and year works fine.",
+  awaiting_goal_time: "Do you have a time goal in mind?",
+  awaiting_anything_else: "Anything else I should know before I put your plan together?",
+  awaiting_ultra_background: "Have you run any ultras or very long trail races before?",
+  awaiting_injury_background: "Any injuries or physical limitations I should keep in mind?",
+  awaiting_cadence: "Last thing — how often do you want to hear from me? Daily, a few times a week, or mainly after runs?",
+};
+
+/**
+ * Handles a Strava activity event for a user who hasn't finished onboarding yet.
+ * Sends a brief, warm reaction to the run, then re-asks the current onboarding question
+ * so the user knows to reply and finish setup.
+ */
+async function handlePostRunOnboarding(
+  userId: string,
+  activityId: number | undefined,
+  dryRun: boolean,
+  requestChatId: string | undefined
+): Promise<NextResponse> {
+  const [userResult, activityResult] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id, phone_number, name, onboarding_step, linq_chat_id")
+      .eq("id", userId)
+      .single(),
+    activityId
+      ? supabase
+          .from("activities")
+          .select("activity_type, distance_meters, moving_time_seconds, average_heartrate, average_pace, elevation_gain")
+          .eq("strava_activity_id", activityId)
+          .single()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const user = userResult.data;
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const activity = activityResult.data as Record<string, unknown> | null;
+  const onboardingStep = user.onboarding_step as string | null;
+  const pendingQuestion = onboardingStep ? (ONBOARDING_STEP_QUESTIONS[onboardingStep] ?? null) : null;
+
+  const systemPrompt = `You are Coach Dean, an AI running coach. A user just finished a run but hasn't finished setting up their coaching profile yet. React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable). Then pivot naturally to continue their onboarding with the question below. Keep the whole message under 4 sentences. No lists, no markdown, no bullet points.${pendingQuestion ? `\n\nAfter your brief reaction, ask: "${pendingQuestion}"` : "\n\nAfter your brief reaction, let them know you're excited to get their plan together."}`;
+
+  const activityDetails = activity
+    ? {
+        type: activity.activity_type,
+        distance_miles: Math.round(((activity.distance_meters as number) / 1609.34) * 100) / 100,
+        duration_minutes: Math.round((activity.moving_time_seconds as number) / 60),
+        average_pace: activity.average_pace,
+        average_heartrate: activity.average_heartrate ?? null,
+        elevation_gain_feet: activity.elevation_gain != null
+          ? Math.round((activity.elevation_gain as number) * 3.28084)
+          : null,
+      }
+    : null;
+
+  const claudeResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 300,
+    system: systemPrompt,
+    messages: [
+      {
+        role: "user",
+        content: activityDetails
+          ? `New activity synced from Strava:\n${JSON.stringify(activityDetails, null, 2)}`
+          : "A new run just synced from Strava (details unavailable).",
+      },
+    ],
+  });
+
+  const coachMessage = claudeResponse.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { type: "text"; text: string }).text.trim())
+    .join(" ")
+    .trim();
+
+  if (dryRun) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
+
+  if (!coachMessage) return NextResponse.json({ ok: true, skipped: true });
+
+  const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+  if (chatId) await startTyping(chatId);
+
+  await sendSMS(user.phone_number as string, coachMessage);
+  await supabase.from("conversations").insert({
+    user_id: userId,
+    role: "assistant",
+    content: coachMessage,
+    message_type: "post_run",
+    strava_activity_id: activityId || null,
+  });
+
+  void trackEvent(userId, "coaching_response_sent", { trigger: "post_run_onboarding", onboarding: true });
+
+  return NextResponse.json({ ok: true, message: coachMessage });
+}
+
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
+
+  // Lightweight early-exit: brief run reaction + onboarding nudge for mid-onboarding users.
+  // Avoids the heavy data fetching the full post_run path requires.
+  if (trigger === "post_run_onboarding") {
+    return await handlePostRunOnboarding(userId, activityId, dry_run ?? false, requestChatId);
+  }
 
   // Fetch user context in parallel
   const [
@@ -2259,6 +2365,9 @@ function buildUserMessage(
   switch (trigger) {
     case "morning_plan":
       return "Generate today's workout plan for this athlete. Consider their current training state, recent activity history and trends, and any adjustments needed. Be specific about distances, paces, and effort levels.";
+    case "post_run_onboarding":
+      // Handled by early-exit in processCoachRequest; unreachable here.
+      return "";
     case "post_run": {
       const actStartDate = activityData?.start_date && typeof activityData.start_date === "string"
         ? new Date(activityData.start_date).toLocaleDateString("en-US", { timeZone: timezone, weekday: "long", month: "short", day: "numeric" })
