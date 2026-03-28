@@ -532,7 +532,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         );
       }
       const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
-      await maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage);
+      await maybeUpdatePlanSessions(
+        userId, currentSessions, latestUserMsg.content, coachMessage,
+        storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek,
+      );
       if (storedPlanId && storedPlanAllWeeks.length > 0) {
         await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
       }
@@ -1233,13 +1236,16 @@ async function maybeUpdatePlanSessions(
   userId: string,
   currentSessions: Array<{ day: string; date: string; label: string }>,
   userMessage: string,
-  coachResponse: string
+  coachResponse: string,
+  planId: string | null = null,
+  planAllWeeks: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }> = [],
+  currentWeekNum: number = 1,
 ): Promise<void> {
   if (currentSessions.length === 0) return; // no plan stored yet — nothing to update
 
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 400,
+    max_tokens: 500,
     system: `You are checking whether a conversation exchange changed any planned training sessions for the week.
 
 Current planned sessions (JSON):
@@ -1248,13 +1254,14 @@ ${JSON.stringify(currentSessions)}
 The athlete sent a message and the coach responded. Determine if any sessions were changed (different day, different distance, cancelled, added, or replaced).
 
 If NO changes were made, return exactly: {"changed": false}
-If changes WERE made, return the full updated sessions list reflecting the agreed changes:
-{"changed": true, "sessions": [{"day": "Mon"|"Tue"|..., "date": "M/D", "label": "..."}]}
+If changes WERE made, return the full updated sessions list AND the new key workout for the plan arc:
+{"changed": true, "sessions": [{"day": "Mon"|"Tue"|..., "date": "M/D", "label": "..."}], "key_workout": "brief label for the defining quality session this week, e.g. '6×800m @ 5K pace' or '4mi tempo'. Null if no quality session was added or changed."}
 
 Rules:
 - Only mark changed=true if the coach explicitly agreed to a change
 - Preserve all unchanged sessions exactly as-is
 - If a session was cancelled with no replacement, omit it from the list
+- key_workout: pick the most quality-focused session that changed (intervals, tempo, race-specific work). If only easy runs changed, set to null.
 - Return ONLY valid JSON, no other text`,
     messages: [{ role: "user", content: `Athlete: ${userMessage}\n\nCoach: ${coachResponse}` }],
   });
@@ -1262,11 +1269,23 @@ Rules:
   const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
   try {
     const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
-    if (parsed.changed && Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+    if (!parsed.changed || !Array.isArray(parsed.sessions) || parsed.sessions.length === 0) return;
+
+    await supabase
+      .from("training_state")
+      .update({ weekly_plan_sessions: parsed.sessions as unknown as Json })
+      .eq("user_id", userId);
+
+    // If a quality session changed and we have the arc, patch the current week's key_workout
+    // so the dashboard reflects what Dean actually agreed to.
+    if (planId && planAllWeeks.length > 0 && parsed.key_workout) {
+      const updatedWeeks = planAllWeeks.map(w =>
+        w.week_number === currentWeekNum ? { ...w, key_workout: parsed.key_workout as string } : w
+      );
       await supabase
-        .from("training_state")
-        .update({ weekly_plan_sessions: parsed.sessions as unknown as Json })
-        .eq("user_id", userId);
+        .from("training_plans")
+        .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
+        .eq("id", planId);
     }
   } catch {
     // parse failed — leave sessions unchanged
@@ -1288,7 +1307,7 @@ async function maybeUpdateTrainingPlanWeeks(
   userMessage: string,
   coachResponse: string
 ): Promise<void> {
-  const adjustmentKeywords = /\b(sick|ill|illness|injury|injured|hurt|travel|traveling|travelling|busy|adjust|update.*plan|change.*plan|drop.*week|recovery week|rest week|modified|lighter week|easy week)\b/i;
+  const adjustmentKeywords = /\b(sick|ill|illness|injury|injured|hurt|travel|traveling|travelling|busy|adjust|update.*plan|change.*plan|drop.*week|recovery week|rest week|modified|lighter week|easy week|more interval|add interval|more tempo|add tempo|more hill|add hill|more strength|add strength|switch.*workout|change.*workout|different workout|more quality|harder week)\b/i;
   if (!adjustmentKeywords.test(userMessage) && !adjustmentKeywords.test(coachResponse)) return;
 
   // Only look ahead at upcoming weeks — don't allow retroactive changes to past weeks.
@@ -2173,6 +2192,49 @@ async function persistProfileUpdates(
           }).eq("id", userId)
         : Promise.resolve(),
     ]);
+
+    // When the race date changed, propagate it to the races table (A race) and the
+    // training plan arc so the dashboard countdown and week count stay accurate.
+    if (hasRaceDate && extracted.race_date) {
+      const newRaceDate = extracted.race_date as string;
+
+      // Update A race row in races table
+      await supabase.from("races")
+        .update({ race_date: newRaceDate })
+        .eq("user_id", userId)
+        .eq("priority", "A");
+
+      // Update training_plans: fix race_date, recompute total_weeks, trim weeks if shorter
+      const { data: plan } = await supabase
+        .from("training_plans")
+        .select("id, weeks, total_weeks")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (plan) {
+        const now = new Date();
+        const race = new Date(newRaceDate + "T12:00:00Z");
+        const newTotalWeeks = Math.max(4, Math.min(52, Math.ceil(
+          (race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+        )));
+        const planWeeks = (plan.weeks as unknown[]) ?? [];
+        // Trim if race moved closer; leave as-is if it moved further (can't generate new weeks without full regen)
+        const updatedWeeks = newTotalWeeks < planWeeks.length ? planWeeks.slice(0, newTotalWeeks) : planWeeks;
+
+        await supabase.from("training_plans")
+          .update({
+            race_date: newRaceDate,
+            total_weeks: updatedWeeks.length,
+            weeks: updatedWeeks as unknown as Json,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", plan.id as string);
+
+        console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, arc trimmed to ${updatedWeeks.length} weeks`);
+      }
+    }
   } catch (err) {
     console.error("[coach/respond] persistProfileUpdates failed:", err);
   }

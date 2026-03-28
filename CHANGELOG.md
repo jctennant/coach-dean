@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Plan changes now propagate to the dashboard in real-time
+
+**Type:** Feature / Bug Fix
+**Reported by:** Jake (internal audit)
+**User feedback:** N/A — identified via code review: race date corrections and workout changes made over SMS were not reflected in the dashboard
+**Root cause:** Three separate gaps: (1) `persistProfileUpdates` updated `training_profiles.race_date` but not `races` or `training_plans`, so the dashboard countdown and arc length stayed wrong after a correction. (2) `maybeUpdatePlanSessions` updated the operational session list but never patched `training_plans.weeks[currentWeek].key_workout`, so the dashboard showed the stale workout even after Dean agreed to change it. (3) `maybeUpdateTrainingPlanWeeks` had too narrow a keyword list — illness/travel keywords only, missing workout-preference changes like "more intervals".
+**Fix / Change:**
+- `persistProfileUpdates`: when `race_date` is extracted, also update the A race row in `races` table and patch `training_plans` (`race_date`, `total_weeks`, trimmed `weeks` array if race moved closer)
+- `maybeUpdatePlanSessions`: now accepts `planId`, `planAllWeeks`, `currentWeekNum`; Haiku response extended to include `key_workout`; when a quality session changes, patches `training_plans.weeks[currentWeekNum].key_workout` so the dashboard reflects Dean's agreement
+- `maybeUpdateTrainingPlanWeeks`: keyword list broadened to include workout-preference triggers (`more interval`, `add tempo`, `more hill`, `switch workout`, etc.)
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-28 — Dashboard "This Week" now shows miles logged so far with progress bar
 
 **Type:** Feature
