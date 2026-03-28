@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Dashboard display improvements: week dates, race day badge, key workout miles, single-race label
+
+**Type:** Improvement
+**Reported by:** Jake (internal testing), Gwyneth (weekly target mismatch)
+**User feedback:** "4 mi tempo effort is listed as 3 miles on the right side of the dashboard, causing the overall weekly target (15 mi) to be out of sync with the number in the 'full training arc' section (16 mi) and what dean texted (16 mi)"
+**Root cause (key workout miles):** `keyWorkoutMi` in `buildDailyPlan` was always 20% of weekly mileage. If Dean's plan said "4mi tempo", it would show 3mi (20% of 16mi ≈ 3). Fix: parse leading mileage from `key_workout` text (e.g. "4mi tempo" → 4mi).
+**Root cause (weekly target mismatch):** Plan arc week 1 applied a 1.07× buildFactor on top of `prescribedWeek1Miles`, making the arc start at ~28mi when Dean said 26mi. `training_state.weekly_mileage_target` held the correct value but caused arc vs "This Week" card divergence. Fix: week 1 now uses `baseMileage` directly (no buildFactor); build begins from week 2. Dashboard now uses `currentWeek.mileage_target` (plan arc) directly.
+**Root cause (total weeks off by one on mid-week onboarding):** `Math.round` on fractional weeks could round down, losing a partial first week. Changed to `Math.ceil` so e.g. 18.07 weeks → 19 weeks (user gets the full week including current partial week).
+**Fix / Change:**
+- `buildDailyPlan`: parse miles from key_workout text before falling back to 20% formula
+- "This Week" weekly target: use `currentWeek.mileage_target` directly (drops stale `training_state` override)
+- `WeekCard`: shows week date range (e.g. "Mar 24 – Mar 30") and a "Race day" red badge on the race week
+- `UpcomingRaces`: hides priority (A/B/C) badge when user has only one race
+- `generateAndSaveFullPlan`: week 1 = baseMileage (no factor); buildFactor starts week 2; `Math.ceil` for total weeks
+**Files changed:** `src/app/dashboard/page.tsx`, `src/lib/training-plan.ts`, `src/__tests__/lib/training-plan-generate.test.ts`
+
+---
+
 ## 2026-03-27 — Add test coverage for multi-race onboarding and generateAndSaveFullPlan
 
 **Type:** Improvement

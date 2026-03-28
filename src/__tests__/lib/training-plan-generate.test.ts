@@ -63,10 +63,10 @@ function chain(response: { data: unknown; error: unknown }) {
 // 2026-03-27T00:00:00Z  →  "today" for these tests.
 const FIXED_NOW = new Date("2026-03-27T00:00:00Z");
 
-// 2026-07-31T12:00:00Z is exactly Math.round(126.5 / 7) = 18 weeks from FIXED_NOW.
+// 2026-07-31T12:00:00Z is 126.5 days from FIXED_NOW → 18.07 weeks → Math.ceil = 19.
 const RACE_18W = "2026-07-31";
 
-// 2026-06-19T12:00:00Z is exactly Math.round(84.5 / 7) = 12 weeks from FIXED_NOW.
+// 2026-06-19T12:00:00Z is 84.5 days from FIXED_NOW → 12.07 weeks → Math.ceil = 13.
 const RACE_12W = "2026-06-19";
 
 // ---------- default profile used across tests ----------
@@ -117,10 +117,10 @@ describe("generateAndSaveFullPlan — total_weeks from race date", () => {
       { skipLinkSms: true },
     );
 
-    expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(18);
+    expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(19);
   });
 
-  it("stores total_weeks = 12 when race is 12 weeks away", async () => {
+  it("stores total_weeks = 13 when race is ~12 weeks away", async () => {
     let insertedPlan: unknown;
 
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
@@ -142,7 +142,7 @@ describe("generateAndSaveFullPlan — total_weeks from race date", () => {
       { skipLinkSms: true },
     );
 
-    expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(12);
+    expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(13);
   });
 
   it("defaults to total_weeks = 12 when no race date is set", async () => {
@@ -194,7 +194,7 @@ describe("generateAndSaveFullPlan — total_weeks from race date", () => {
 
     const plan = insertedPlan as Record<string, unknown>;
     const weeks = plan.weeks as unknown[];
-    expect(weeks).toHaveLength(18);
+    expect(weeks).toHaveLength(19);
   });
 });
 
@@ -361,7 +361,7 @@ describe("generateAndSaveFullPlan — plan / text alignment", () => {
     vi.clearAllMocks();
   });
 
-  it("training_state target matches prescribedWeek1Miles, not the plan arc's built week 1", async () => {
+  it("training_state target and plan arc week 1 both equal prescribedWeek1Miles", async () => {
     // The plan arc builds week 1 upward from baseMileage (e.g. 35 * 1.07 ≈ 37.5),
     // but training_state.weekly_mileage_target must match what Dean sent (35) so the
     // dashboard is consistent with the athlete's first text conversation.
@@ -398,13 +398,12 @@ describe("generateAndSaveFullPlan — plan / text alignment", () => {
       expect.objectContaining({ weekly_mileage_target: 35 }),
     );
 
-    // The plan arc week 1 will be > 35 (built up from base), confirming the
-    // two values can legitimately diverge — the test is that training_state
-    // wins for the dashboard display.
+    // Plan arc week 1 is exactly prescribedWeek1Miles — no buildFactor applied to week 1
+    // so the arc and training_state start from the same baseline.
     const plan = insertedPlan as Record<string, unknown>;
     const weeks = plan.weeks as Array<{ week_number: number; mileage_target: number }>;
     const week1 = weeks.find(w => w.week_number === 1)!;
-    expect(week1.mileage_target).toBeGreaterThan(35); // arc applies 1.07× build factor
+    expect(week1.mileage_target).toBe(35); // week 1 = base, buildFactor starts from week 2
   });
 
   it("race_date stored in training_plans matches the profile race_date", async () => {

@@ -54,7 +54,7 @@ export async function generateAndSaveFullPlan(
   if (raceDate) {
     const now = new Date();
     const race = new Date(raceDate + "T12:00:00Z");
-    const weeksUntil = Math.round((race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    const weeksUntil = Math.ceil((race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000));
     totalWeeks = Math.max(4, Math.min(52, weeksUntil));
   }
 
@@ -94,7 +94,11 @@ export async function generateAndSaveFullPlan(
       // buildMileage stays unchanged — resumes from pre-deload level next week
     } else {
       const buildFactor = phase === "peak" ? 1.04 : 1.07;
-      buildMileage = Math.round(buildMileage * buildFactor * 2) / 2;
+      // Week 1 IS the base — don't apply buildFactor so the arc starts at exactly
+      // prescribedWeek1Miles (or baseMileage). Build begins from week 2 onward.
+      if (week > 1) {
+        buildMileage = Math.round(buildMileage * buildFactor * 2) / 2;
+      }
       weekMileage = buildMileage;
       if (phase === "peak") peakMileage = buildMileage;
     }

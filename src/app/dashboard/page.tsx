@@ -55,7 +55,11 @@ function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
   const easyDays = sorted.filter(d => d !== longRunDay && d !== keyWorkoutDay);
 
   const longRunMi = week.long_run_target;
-  const keyWorkoutMi = keyWorkoutDay ? Math.round(week.mileage_target * 0.20 * 2) / 2 : 0;
+  // Try to parse miles from key_workout text (e.g. "4mi tempo @ threshold" → 4)
+  const keyWorkoutTextMatch = keyWorkoutDay && week.key_workout ? week.key_workout.match(/^(\d+(?:\.\d+)?)\s*mi/i) : null;
+  const keyWorkoutMi = keyWorkoutDay
+    ? (keyWorkoutTextMatch ? parseFloat(keyWorkoutTextMatch[1]!) : Math.round(week.mileage_target * 0.20 * 2) / 2)
+    : 0;
   const totalEasy = Math.max(0, week.mileage_target - longRunMi - keyWorkoutMi);
   const easyMi = easyDays.length > 0 ? Math.round((totalEasy / easyDays.length) * 10) / 10 : 0;
 
@@ -206,6 +210,11 @@ export default async function DashboardPage({
   }
   const raceDate = profileData?.race_date ?? planData.race_date;
 
+  // Which plan week does the race fall in (for "Race day" badge)?
+  const raceWeekNum = (raceDate as string | null)
+    ? Math.floor((new Date((raceDate as string) + "T12:00:00Z").getTime() - week1Monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1
+    : null;
+
   // Build a human-readable goal label: prefer specific race name over generic bucket
   const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
   const raceName = (onboardingData.race_name as string | null) ?? null;
@@ -314,7 +323,7 @@ export default async function DashboardPage({
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Weekly target</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {stateData?.weekly_mileage_target ?? currentWeek.mileage_target}
+                  {currentWeek.mileage_target}
                   {" "}<span className="text-sm font-normal text-gray-500">mi</span>
                 </p>
               </div>
@@ -373,6 +382,8 @@ export default async function DashboardPage({
                 return null;
               }
 
+              const weekStart = new Date(week1Monday);
+              weekStart.setUTCDate(week1Monday.getUTCDate() + (week.week_number - 1) * 7);
               return (
                 <WeekCard
                   key={week.week_number}
@@ -380,6 +391,8 @@ export default async function DashboardPage({
                   isCurrent={isCurrent}
                   isPast={isPast}
                   actualMiles={actualMilesByWeek[week.week_number] ?? null}
+                  weekStartDate={weekStart}
+                  isRaceWeek={raceWeekNum === week.week_number}
                 />
               );
             })}
@@ -401,6 +414,7 @@ const GOAL_DISTANCE_LABELS: Record<string, string> = {
 };
 
 function UpcomingRaces({ races }: { races: Race[] }) {
+  const showPriority = races.length > 1;
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Upcoming Races</h2>
@@ -413,9 +427,11 @@ function UpcomingRaces({ races }: { races: Race[] }) {
           return (
             <div key={race.id} className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-bold shrink-0 ${PRIORITY_COLORS[race.priority] ?? "bg-gray-100 text-gray-600"}`}>
-                  {race.priority}
-                </span>
+                {showPriority && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-bold shrink-0 ${PRIORITY_COLORS[race.priority] ?? "bg-gray-100 text-gray-600"}`}>
+                    {race.priority}
+                  </span>
+                )}
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{race.race_name ?? distanceLabel}</p>
                   <p className="text-xs text-gray-400">{formatRaceDate(race.race_date)}{race.race_name ? ` · ${distanceLabel}` : ""}</p>
@@ -435,10 +451,23 @@ function UpcomingRaces({ races }: { races: Race[] }) {
   );
 }
 
-function WeekCard({ week, isCurrent, isPast, actualMiles }: { week: PlanWeek; isCurrent: boolean; isPast: boolean; actualMiles: number | null }) {
+function WeekCard({ week, isCurrent, isPast, actualMiles, weekStartDate, isRaceWeek }: {
+  week: PlanWeek;
+  isCurrent: boolean;
+  isPast: boolean;
+  actualMiles: number | null;
+  weekStartDate?: Date;
+  isRaceWeek?: boolean;
+}) {
   const completed = isPast && actualMiles !== null && actualMiles >= week.mileage_target * 0.8;
   const attempted = isPast && actualMiles !== null && actualMiles > 0 && !completed;
   const missed = isPast && (actualMiles === null || actualMiles === 0);
+
+  const weekEnd = weekStartDate ? new Date(weekStartDate) : null;
+  if (weekEnd) weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+  const dateRange = weekStartDate && weekEnd
+    ? `${weekStartDate.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} – ${weekEnd.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`
+    : null;
 
   return (
     <div
@@ -451,13 +480,16 @@ function WeekCard({ week, isCurrent, isPast, actualMiles }: { week: PlanWeek; is
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <span className={`text-sm font-semibold shrink-0 ${isPast ? "text-gray-400" : "text-gray-700"}`}>Week {week.week_number}</span>
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${PHASE_COLORS[week.phase] ?? "bg-gray-100 text-gray-700"}`}>
             {PHASE_LABELS[week.phase] ?? week.phase}
           </span>
           {isCurrent && (
             <span className="rounded-full bg-gray-900 px-2 py-0.5 text-xs font-medium text-white shrink-0">Now</span>
+          )}
+          {isRaceWeek && (
+            <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-medium text-white shrink-0">Race day</span>
           )}
           {completed && (
             <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 shrink-0">✓ Done</span>
@@ -480,6 +512,9 @@ function WeekCard({ week, isCurrent, isPast, actualMiles }: { week: PlanWeek; is
           )}
         </div>
       </div>
+      {dateRange && (
+        <p className={`mt-1 text-xs ${isPast ? "text-gray-300" : "text-gray-400"}`}>{dateRange}</p>
+      )}
       {week.key_workout && (
         <p className={`mt-2 text-xs leading-snug ${isPast ? "text-gray-400" : "text-gray-500"}`}>{week.key_workout}</p>
       )}
