@@ -641,6 +641,7 @@ new_a_race rules:
   - "No Sierre Zinal is" (in response to "Is Dipsea your A race?") → new_a_race: Sierre Zinal
   - "No that one" (in response to "Is X your A race?") → new_a_race: the other race the athlete has mentioned
   - "Yes" or "That's right" → new_a_race: null (original is confirmed as A race)
+  - "Sierre Zinal. Dipsea is June 14, Sierre Zinal August 8, A Basin Sep 6" → new_a_race: {name: "Sierre Zinal", date: "2026-08-08", goal: null} — IMPORTANT: when the athlete was asked "which is your A race?" and their reply leads with just a race name (a short first sentence or single word before the date list), that standalone name IS the A race answer. Extract it as new_a_race.
 - If set, the original A race should appear in other_races with priority "B" (not "A").
 
 other_races rules (races other than the new A race, or other than the original A race if no promotion):

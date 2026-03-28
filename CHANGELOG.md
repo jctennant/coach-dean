@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Fix: goal time question asked about wrong race after A race promotion
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "still feels odd that Dean is asking me about my non A race here in onboarding" — after saying "Sierre Zinal. Dipsea is June 14, Sierre Zinal August 8, A Basin September 6", Dean asked "Do you have a time goal for the Dipsea race..."
+**Root cause:** Haiku in `handleOtherRaces` wasn't recognizing the pattern where a user leads with just the race name ("Sierre Zinal.") as their A race answer. It returned `new_a_race: null`, treating the reply as date confirmations for the existing A race (Dipsea). So `race_name` stayed "Dipsea" and `awaiting_goal_time` asked about it.
+**Fix / Change:** Added an explicit example to the `handleOtherRaces` Haiku prompt: when the athlete leads their reply with a standalone race name (short first sentence before the date list), that name IS the A race answer. Maps to the common pattern "RaceName. Date1, Date2, Date3."
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-28 — Mid-onboarding Strava events get a coaching reaction + onboarding nudge
 
 **Type:** Feature
