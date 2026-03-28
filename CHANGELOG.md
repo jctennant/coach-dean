@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Dashboard "This Week" now shows miles logged so far with progress bar
+
+**Type:** Feature
+**Reported by:** Jake (internal feedback)
+**User feedback:** "One more thing that would be good to show would be how many miles a user actually did in a given week"
+**Root cause:** N/A — `actualMilesByWeek` was already computed for past weeks but not surfaced for the current week.
+**Fix / Change:** Added a "Done this week" progress bar to the "This Week" card showing `X / Y mi` with a live fill. Bar turns green if the weekly target is met. Only renders when at least one run has been recorded this week.
+**Files changed:** `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-03-28 — Dashboard display improvements: week dates, race day badge, key workout miles, single-race label
 
 **Type:** Improvement

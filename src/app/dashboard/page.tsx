@@ -242,6 +242,7 @@ export default async function DashboardPage({
   const raceDays = daysUntilRace(raceDate as string | null);
   const trialActive = isTrialActive(user.trial_started_at as string | null);
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
+  const currentWeekActualMiles = actualMilesByWeek[currentWeekNum] ?? null;
   const trainingDays = (profileData?.training_days as string[] | null) ?? null;
   const upcomingRaces = (racesData ?? []) as Race[];
   const dailyPlan = currentWeek && trainingDays && trainingDays.length > 0
@@ -332,6 +333,23 @@ export default async function DashboardPage({
                 <p className="text-2xl font-bold text-gray-900">{currentWeek.long_run_target} <span className="text-sm font-normal text-gray-500">mi</span></p>
               </div>
             </div>
+            {/* Progress bar for miles logged this week */}
+            {currentWeekActualMiles !== null && currentWeekActualMiles > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-400">Done this week</span>
+                  <span className="text-xs font-semibold text-gray-700">
+                    {Math.round(currentWeekActualMiles * 10) / 10} / {currentWeek.mileage_target} mi
+                  </span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-1.5">
+                  <div
+                    className={`h-1.5 rounded-full ${currentWeekActualMiles >= currentWeek.mileage_target ? "bg-green-500" : "bg-gray-900"}`}
+                    style={{ width: `${Math.min(100, (currentWeekActualMiles / currentWeek.mileage_target) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
             {dailyPlan ? (
               <div className="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden">
                 {dailyPlan.map(d => (
