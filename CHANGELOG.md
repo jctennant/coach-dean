@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-29 — Fixed morning reminder parroting "rest day" example when a run was discussed
+
+**Type:** Bug Fix
+**Reported by:** Ian (via Jake)
+**User feedback:** "yesterday Dean said run on Sunday and today on Sunday he said it's a rest day"
+**Root cause:** The `morning_reminder` prompt checks RECENT CONVERSATION to avoid re-describing what was already discussed — if it finds coverage, it sends a one-line confirmation. The example phrase in the prompt was `"Good morning — rest day today as we discussed last night."` — Claude anchored on this example and sent it verbatim (including "rest day") even when the prior conversation had confirmed a run for Sunday evening.
+**Fix / Change:** Replaced the single rest-day example with two conditional examples — one for when last night covered a run, one for when it covered a rest day — with an explicit instruction that the confirmation must match what was actually discussed.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-03-28 — Partial-week display: show only remaining workouts when onboarding mid-week
 
 **Type:** Improvement

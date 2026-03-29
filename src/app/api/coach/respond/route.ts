@@ -2506,7 +2506,7 @@ Structure (all in one message unless it runs long — split into two bubbles wit
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
-      return `If RECENT CONVERSATION already contains a message from you covering today's workout or rest day, send ONE brief confirmation sentence under 160 characters only — e.g. "Good morning — rest day today as we discussed last night. Let me know how you're feeling." Output nothing else.
+      return `If RECENT CONVERSATION already contains a message from you covering today's workout or rest day, send ONE brief confirmation sentence under 160 characters only. The confirmation must match what was actually discussed — if last night covered a run, confirm the run (e.g. "Good morning — easy long run tonight as planned. Let me know how it goes."); if it covered a rest day, confirm the rest day (e.g. "Good morning — rest day today as we discussed. Let me know how you're feeling."). Output nothing else.
 
 Otherwise, send a short reminder text about today's workout. Three parts, all in one message:
 
