@@ -593,6 +593,31 @@ Return ONLY valid JSON: {"different_race": string | null}`,
 }
 
 /**
+ * Maps a distance in miles to the closest goal bucket string.
+ * Mirrors the DISTANCE_TO_BUCKET thresholds used throughout onboarding.
+ */
+function distanceMilesToGoalBucket(miles: number): string {
+  const DISTANCE_TO_BUCKET: Array<[number, string]> = [
+    [3, "mile"], [6.5, "5k"], [13, "10k"], [26.5, "30k"], [27.5, "marathon"],
+    [35, "50k"], [52, "50mi"], [80, "100k"], [200, "100mi"],
+  ];
+  return DISTANCE_TO_BUCKET.find(([threshold]) => miles <= threshold)?.[1] ?? "100mi";
+}
+
+/**
+ * Given a distance option string like "VK", "31K", "50 miles", return km value.
+ */
+function parseOptionKm(opt: string): number | null {
+  // VK = Vertical Kilometer ~1km vertical, treat as ~7.5km equivalent distance
+  if (/\bvk\b/i.test(opt)) return 7.5;
+  const m = opt.match(/(\d+(?:\.\d+)?)\s*(mi(?:les?)?|km?)?/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const unit = (m[2] || "k").toLowerCase();
+  return unit.startsWith("mi") ? n * 1.609 : n;
+}
+
+/**
  * awaiting_other_races: after confirming their primary (A) race date, ask if they
  * have any other races on the calendar and whether this is truly their A race.
  * Parses any B/C races mentioned and stores them in onboarding_data.other_races.
@@ -602,6 +627,52 @@ async function handleOtherRaces(
   message: string,
   onboardingData: Record<string, unknown>
 ) {
+  // Re-entry: user is answering our "which distance?" question from a previous turn.
+  const pendingOptions = onboardingData.pending_distance_options as string[] | null;
+  if (pendingOptions && pendingOptions.length > 0) {
+    const raceName = onboardingData.race_name as string | null;
+    // Try to find which option the user picked by matching against known distance strings.
+    const lowerMsg = message.toLowerCase();
+    const picked = pendingOptions.find(opt => {
+      const km = parseOptionKm(opt);
+      if (!km) return false;
+      // Match by km number, miles equivalent, or label (e.g. "vk", "31k")
+      const optLower = opt.toLowerCase().replace(/\s+/g, "");
+      if (lowerMsg.includes(optLower)) return true;
+      // Also match by numeric km mention, e.g. "31k" or "31 km"
+      const kmMatch = opt.match(/(\d+(?:\.\d+)?)/);
+      if (kmMatch && lowerMsg.includes(kmMatch[1])) return true;
+      return false;
+    });
+    if (picked) {
+      const km = parseOptionKm(picked);
+      const miles = km ? Math.round((km / 1.60934) * 100) / 100 : null;
+      const updatedData: Record<string, unknown> = {
+        ...onboardingData,
+        pending_distance_options: null,
+        other_races_answered: true,
+        ...(miles !== null
+          ? { goal_distance_miles: miles, goal: distanceMilesToGoalBucket(miles) }
+          : {}),
+      };
+      const nextStep = findNextStep("awaiting_other_races", updatedData);
+      await supabase.from("users")
+        .update({ onboarding_step: nextStep, onboarding_data: updatedData as unknown as Json })
+        .eq("id", user.id);
+      if (nextStep) {
+        const nextQuestion = getStepQuestion(nextStep, updatedData, user.id);
+        await sendAndStore(user.id, user.phone_number, nextQuestion, nextStep);
+      } else {
+        await completeOnboarding(user, updatedData);
+      }
+      return NextResponse.json({ ok: true });
+    }
+    // Couldn't parse — re-ask
+    const optionsList = pendingOptions.join(" or ");
+    await sendAndStore(user.id, user.phone_number, `Which distance of the ${raceName ?? "race"} are you doing — ${optionsList}?`, "awaiting_other_races");
+    return NextResponse.json({ ok: true });
+  }
+
   const secondaryGoalContext = onboardingData.secondary_goal as string | null;
   const [parseResponse, acknowledgment] = await Promise.all([
     anthropic.messages.create({
@@ -730,6 +801,41 @@ If no other races mentioned AND no previously mentioned races context, return: {
       secondary_goal: null,       // was set when old race was A; now stale
     };
     console.log(`[onboarding] A race promoted: ${oldRaceName} → ${newARace.name}, date: ${promotedDate}, user-confirmed: ${promotedDateConfirmed}`);
+
+    // When the user provided the date inline, awaiting_race_date is bypassed, so we never
+    // hit handleRaceDate where the distance lookup normally happens. Do it here instead.
+    if (promotedDateConfirmed) {
+      const raceInfo = await generateRaceAcknowledgment(newARace.name);
+      if (raceInfo.distanceOptions && raceInfo.distanceOptions.length > 0) {
+        // Multi-distance race — ask which distance before continuing
+        mergedData = {
+          ...mergedData,
+          pending_distance_options: raceInfo.distanceOptions,
+          goal: null,
+          goal_distance_miles: null,
+        };
+        const optionsList = raceInfo.distanceOptions.join(" or ");
+        await supabase.from("users")
+          .update({ onboarding_step: "awaiting_other_races", onboarding_data: mergedData as unknown as Json })
+          .eq("id", user.id);
+        const ackPrefix = acknowledgment ? `${acknowledgment}\n\n` : "";
+        await sendAndStore(user.id, user.phone_number, `${ackPrefix}${newARace.name} has a few distance options — are you doing the ${optionsList}?`, "awaiting_other_races");
+        return NextResponse.json({ ok: true });
+      }
+      if (raceInfo.distanceMiles !== null) {
+        mergedData = {
+          ...mergedData,
+          goal_distance_miles: raceInfo.distanceMiles,
+          goal: distanceMilesToGoalBucket(raceInfo.distanceMiles),
+        };
+        console.log(`[onboarding] distance looked up for promoted A race ${newARace.name}: ${raceInfo.distanceMiles}mi → goal: ${mergedData.goal}`);
+      } else {
+        // Distance lookup returned nothing — clear the stale goal from the old A race so the
+        // dashboard doesn't show the wrong distance bucket.
+        mergedData = { ...mergedData, goal: null };
+        console.log(`[onboarding] distance lookup returned nothing for promoted A race ${newARace.name}, clearing stale goal`);
+      }
+    }
   } else if (confirmedARaceDate) {
     // Original A race confirmed — apply the date (may be correction of the pre-fill)
     mergedData = { ...mergedData, race_date: confirmedARaceDate, race_date_confirmed: true };

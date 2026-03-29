@@ -230,10 +230,12 @@ export default async function DashboardPage({
     return_to_running: "Return to Running", injury_recovery: "Injury Recovery",
   };
   const standardLabel = GOAL_LABELS[goalBucket as string] ?? null;
-  // For named races: show the actual distance (e.g. "7.4 mi") if it was explicitly parsed,
-  // otherwise fall back to the standard bucket label (e.g. "Marathon" for Boston).
+  // For named races: show the actual distance (e.g. "7.4 mi") if it was explicitly parsed.
+  // Do NOT fall back to the standard bucket label for named races — the bucket may be stale
+  // from a previously-named race (e.g. "10K" from Dipsea showing on Sierre Zinal).
+  // For unnamed goals, show the standard bucket label as usual.
   const distanceSuffix = raceName
-    ? (specificDistanceMiles ? `${specificDistanceMiles} mi` : standardLabel)
+    ? (specificDistanceMiles ? `${specificDistanceMiles} mi` : null)
     : standardLabel;
   const goalLabel = raceName
     ? `${raceName}${distanceSuffix ? ` · ${distanceSuffix}` : ""}`

@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Fix: promoted A race distance not looked up when date provided inline
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "I noticed that Dean didn't check to see what the Sierre Zinal distance was - it says 10k on my dashboard."
+**Root cause:** When the user provides all race dates inline (e.g. "Sierre Zinal. Dipsea June 14, Sierre Zinal August 8"), `promotedDateConfirmed = true` in `handleOtherRaces` and `awaiting_race_date` is bypassed entirely. The distance lookup via `generateRaceAcknowledgment` lives inside `handleRaceDate`, so it never ran. `goal_distance_miles` stayed null and `goal` kept "10k" from the old A race (Dipsea). Dashboard showed "Sierre Zinal · 10K".
+**Fix / Change:**
+1. In `handleOtherRaces`, after promoting a new A race with `promotedDateConfirmed = true`, immediately call `generateRaceAcknowledgment` to look up the distance. If a distance is found, set `goal_distance_miles` and re-bucket `goal`. If the race has multiple distance options, ask "which distance?" and stay on `awaiting_other_races` via new `pending_distance_options` flag. If lookup returns nothing, clear `goal` to null rather than keeping the stale bucket.
+2. Added `pending_distance_options` re-entry path at the start of `handleOtherRaces` to handle the follow-up distance answer.
+3. Added `distanceMilesToGoalBucket` and `parseOptionKm` helper functions.
+4. Dashboard: for named races, don't fall back to the standard bucket label when `specificDistanceMiles` is null — the bucket may be stale from the old race. Just show the race name without a distance suffix.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/dashboard/page.tsx`
+
 ## 2026-03-28 — Fix: goal time question asked about wrong race after A race promotion
 
 **Type:** Bug Fix
@@ -14,6 +27,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Files changed:** `src/app/api/onboarding/handle/route.ts`
 
 ---
+
+## 2026-03-28 — Fix: "X miles in the last 4 weeks" was reading a stale Strava aggregate
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "it could be because he's not counting miles from runs today (I did an 18 miler)"
+**Root cause:** The mileage figure came from `stats.recent_run_totals` — a pre-computed aggregate from the Strava athlete stats endpoint fetched at OAuth time. This lags behind activities uploaded moments earlier (e.g. a long run done the same day as connecting), so fresh runs were excluded.
+**Fix / Change:** After `importRecentActivities` runs (which IS up-to-date), query the activities DB table directly for the last 28 days and sum from there. The race detection for `raceMentionLine` was consolidated into the same query.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`
 
 ## 2026-03-28 — Mid-onboarding Strava events get a coaching reaction + onboarding nudge
 

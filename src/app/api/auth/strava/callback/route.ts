@@ -153,19 +153,29 @@ export async function GET(request: Request) {
     console.error("[strava-callback] recent activity import error:", err)
   );
 
-  // Query for any races synced in the recent import (workout_type = 1).
-  // These are great fitness markers and users appreciate knowing Dean saw them.
-  const { data: recentRaces } = await supabase
+  // Query the DB for recent runs and races — this is more accurate than Strava's
+  // athlete stats aggregate (recent_run_totals), which can lag behind activities
+  // uploaded moments ago (e.g. a long run done the same day as connecting).
+  const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: recentActivitiesFromDB } = await supabase
     .from("activities")
-    .select("distance_meters, average_pace, start_date")
+    .select("distance_meters, workout_type")
     .eq("user_id", user.id)
-    .eq("workout_type", 1)
-    .order("start_date", { ascending: false })
-    .limit(2);
+    .gte("start_date", fourWeeksAgo);
 
+  const recentRuns = (recentActivitiesFromDB ?? []).filter(
+    (a) => a.distance_meters && a.distance_meters > 0
+  );
+  const recentMiles = recentRuns.length > 0
+    ? Math.round(recentRuns.reduce((sum, a) => sum + (a.distance_meters ?? 0), 0) / 1609.34)
+    : null;
+  const recentCount = recentRuns.length > 0 ? recentRuns.length : null;
+
+  // Races (workout_type = 1) in the last 8 weeks — show up to 2.
+  const recentRaces = (recentActivitiesFromDB ?? []).filter((a) => a.workout_type === 1);
   let raceMentionLine = "";
-  if (recentRaces && recentRaces.length > 0) {
-    const raceLabels = recentRaces.map((r) => guessRaceLabel(r.distance_meters ?? 0));
+  if (recentRaces.length > 0) {
+    const raceLabels = recentRaces.slice(0, 2).map((r) => guessRaceLabel(r.distance_meters ?? 0));
     if (raceLabels.length === 1) {
       raceMentionLine = ` Spotted your recent ${raceLabels[0]} too — great fitness marker.`;
     } else {
@@ -192,11 +202,6 @@ export async function GET(request: Request) {
 
   // Build a brief summary of what Dean can see from Strava so the user knows
   // the connection worked and their history is being used.
-  const recentTotals = stats.recent_run_totals as Record<string, unknown> | undefined;
-  const recentMiles = recentTotals?.distance
-    ? Math.round((recentTotals.distance as number) / 1609.34)
-    : null;
-  const recentCount = recentTotals?.count as number | undefined;
   const stravaSeenLine = recentMiles && recentCount
     ? `I can see your recent runs — ${recentMiles} miles across ${recentCount} ${recentCount === 1 ? "run" : "runs"} in the last 4 weeks.${raceMentionLine} That's great context.`
     : `I can see your training history — that's going to help a lot.${raceMentionLine}`;
