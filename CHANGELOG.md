@@ -4,6 +4,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Partial-week display: show only remaining workouts when onboarding mid-week
+
+**Type:** Improvement
+**Reported by:** Jake (testing)
+**User feedback:** "it seemed to give me a whole week of training for week 1 even though it's already saturday. I think we should just gray out the dates before today... only show week one as a partial week if there are workouts prescribed by Dean in that week"
+**Root cause:** The "This Week" card always showed the full week target (e.g. 30 mi) even when the user onboarded on Saturday with just one run left in the week.
+**Fix / Change:** Added partial-week logic that runs before `week1Monday` is used anywhere:
+- Find remaining non-rest workouts for today-or-later in the current week
+- If some remain (e.g. Saturday with a Sunday run): show mileage target as sum of those days only (e.g. 5 mi)
+- If none remain (e.g. Saturday with no Sunday run): shift `week1Monday` forward 7 days so week 1 genuinely starts Monday — date labels, activity bucketing, race week badge, and arc all update automatically. No cursor-advance hack needed.
+**Files changed:** `src/app/dashboard/page.tsx`
+
+## 2026-03-28 — Gray out past days in This Week workout grid
+
+**Type:** Improvement
+**Reported by:** Jake (testing)
+**User feedback:** "it seemed to give me a whole week of training for week 1 even though it's already saturday. I think we should just gray out the dates before today"
+**Root cause:** The daily plan grid showed all 7 days with full color regardless of whether they'd already passed.
+**Fix / Change:** Days before today are now dimmed the same as rest days (gray text, gray background). Today and future days remain full contrast. Uses `toLocaleDateString` to get today's weekday name and compares against `DAY_ORDER` index.
+**Files changed:** `src/app/dashboard/page.tsx`
+
 ## 2026-03-28 — Fix: dashboard bolding, race week missing from plan, B/C races not showing
 
 **Type:** Bug Fix

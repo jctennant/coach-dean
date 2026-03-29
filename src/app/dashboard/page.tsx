@@ -188,15 +188,31 @@ export default async function DashboardPage({
   const planWeeks = (planData.weeks as PlanWeek[] | null) ?? [];
   const totalWeeks = planData.total_weeks ?? planWeeks.length;
   const currentWeekNum = (stateData?.current_week as number | null) ?? 1;
+  const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
+  const trainingDays = (profileData?.training_days as string[] | null) ?? null;
+  const upcomingRaces = (racesData ?? []) as Race[];
+  const dailyPlan = currentWeek && trainingDays && trainingDays.length > 0
+    ? buildDailyPlan(currentWeek, trainingDays)
+    : null;
 
-  // Compute actual mileage per plan week from activities.
-  // Week 1 starts on the Monday of the week the plan was created.
+  // Partial-week logic — must run before week1Monday is used so date anchors are correct.
+  // If the user onboarded mid-week with no remaining workouts (e.g. Saturday, no Sunday run),
+  // shift week 1 forward to start on Monday. Everything downstream (date labels, activity
+  // bucketing, race week badge) uses the adjusted anchor automatically.
+  const todayDayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+  const todayDayIdx = DAY_ORDER.indexOf(todayDayName);
+  const remainingWorkoutsThisWeek = dailyPlan
+    ? dailyPlan.filter(d => DAY_ORDER.indexOf(d.day) >= todayDayIdx && d.type !== "rest")
+    : null;
+  const noRemainingWorkouts = remainingWorkoutsThisWeek !== null && remainingWorkoutsThisWeek.length === 0;
+
+  // Week 1 anchor: Monday of the plan-creation week, shifted forward 7 days when no workouts remain.
   const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
   const planCreatedAt = new Date(planData.created_at as string);
   const dayOfWeek = planCreatedAt.getUTCDay(); // 0=Sun, 1=Mon...
   const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
   const week1Monday = new Date(planCreatedAt);
-  week1Monday.setUTCDate(week1Monday.getUTCDate() + daysToMonday);
+  week1Monday.setUTCDate(week1Monday.getUTCDate() + daysToMonday + (noRemainingWorkouts ? 7 : 0));
   week1Monday.setUTCHours(0, 0, 0, 0);
 
   const actualMilesByWeek: Record<number, number> = {};
@@ -243,13 +259,14 @@ export default async function DashboardPage({
     ?? (specificDistanceMiles ? `${specificDistanceMiles} mi race` : goalBucket);
   const raceDays = daysUntilRace(raceDate as string | null);
   const trialActive = isTrialActive(user.trial_started_at as string | null);
-  const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
   const currentWeekActualMiles = actualMilesByWeek[currentWeekNum] ?? null;
-  const trainingDays = (profileData?.training_days as string[] | null) ?? null;
-  const upcomingRaces = (racesData ?? []) as Race[];
-  const dailyPlan = currentWeek && trainingDays && trainingDays.length > 0
-    ? buildDailyPlan(currentWeek, trainingDays)
+
+  // Partial week mileage target: when some workouts remain this week (e.g. Saturday onboard
+  // with a Sunday run), show only the miles for those remaining days instead of the full week.
+  const partialWeekMileage = (remainingWorkoutsThisWeek && !noRemainingWorkouts)
+    ? Math.round(remainingWorkoutsThisWeek.reduce((sum, d) => sum + (d.miles ?? 0), 0) * 10) / 10
     : null;
+  const displayMileageTarget = partialWeekMileage ?? currentWeek?.mileage_target ?? 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -326,7 +343,7 @@ export default async function DashboardPage({
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Weekly target</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {currentWeek.mileage_target}
+                  {displayMileageTarget}
                   {" "}<span className="text-sm font-normal text-gray-500">mi</span>
                 </p>
               </div>
@@ -341,34 +358,39 @@ export default async function DashboardPage({
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-gray-400">Done this week</span>
                   <span className="text-xs font-semibold text-gray-700">
-                    {Math.round(currentWeekActualMiles * 10) / 10} / {currentWeek.mileage_target} mi
+                    {Math.round(currentWeekActualMiles * 10) / 10} / {displayMileageTarget} mi
                   </span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-1.5">
                   <div
-                    className={`h-1.5 rounded-full ${currentWeekActualMiles >= currentWeek.mileage_target ? "bg-green-500" : "bg-gray-900"}`}
-                    style={{ width: `${Math.min(100, (currentWeekActualMiles / currentWeek.mileage_target) * 100)}%` }}
+                    className={`h-1.5 rounded-full ${currentWeekActualMiles >= displayMileageTarget ? "bg-green-500" : "bg-gray-900"}`}
+                    style={{ width: `${Math.min(100, (currentWeekActualMiles / displayMileageTarget) * 100)}%` }}
                   />
                 </div>
               </div>
             )}
             {dailyPlan ? (
               <div className="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden">
-                {dailyPlan.map(d => (
-                  <div key={d.day} className={`flex items-center justify-between px-3 py-2 ${d.type === "rest" ? "bg-gray-50" : "bg-white"}`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`text-xs font-semibold w-7 shrink-0 ${d.type === "rest" ? "text-gray-300" : "text-gray-500"}`}>{d.shortDay}</span>
-                      <span className={`text-sm leading-snug ${d.type === "rest" ? "text-gray-300" : "text-gray-600"}`}>
-                        {d.label}
-                      </span>
+                {dailyPlan.map(d => {
+                  const dayIdx = DAY_ORDER.indexOf(d.day);
+                  const isPastDay = dayIdx < todayDayIdx;
+                  const isDimmed = d.type === "rest" || isPastDay;
+                  return (
+                    <div key={d.day} className={`flex items-center justify-between px-3 py-2 ${isDimmed ? "bg-gray-50" : "bg-white"}`}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`text-xs font-semibold w-7 shrink-0 ${isDimmed ? "text-gray-300" : "text-gray-500"}`}>{d.shortDay}</span>
+                        <span className={`text-sm leading-snug ${isDimmed ? "text-gray-300" : "text-gray-600"}`}>
+                          {d.label}
+                        </span>
+                      </div>
+                      {d.miles !== null && (
+                        <span className={`text-sm font-semibold shrink-0 ml-2 ${isDimmed ? "text-gray-300" : d.type === "long" ? "text-gray-900" : d.type === "key" ? "text-gray-700" : "text-gray-400"}`}>
+                          {d.miles} mi
+                        </span>
+                      )}
                     </div>
-                    {d.miles !== null && (
-                      <span className={`text-sm font-semibold shrink-0 ml-2 ${d.type === "long" ? "text-gray-900" : d.type === "key" ? "text-gray-700" : "text-gray-400"}`}>
-                        {d.miles} mi
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               currentWeek.key_workout && (
