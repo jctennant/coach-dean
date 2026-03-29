@@ -2495,7 +2495,7 @@ Structure (all in one message — split into two bubbles with a blank line if it
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
       if (includeWorkoutCheckin) {
-        return `If RECENT CONVERSATION already contains a message from you covering today's plan or rest day, output ONE brief confirmation sentence under 160 characters — e.g. "Good morning — rest day today as we talked about. Let me know how you're feeling." No preamble, no explanation. Just the one sentence.
+        return `If RECENT CONVERSATION already contains a message from you covering today's plan or rest day, output ONE brief confirmation sentence under 160 characters. The confirmation must match what was actually discussed — if it covered a run, confirm the run (e.g. "Good morning — long run tonight as planned. Let me know how it goes."); if it covered a rest day, confirm the rest day (e.g. "Good morning — rest day today as we talked about. Let me know how you're feeling."). No preamble, no explanation. Just the one sentence.
 
 Otherwise, send a short message that does two things: check in on yesterday's workout, then preview today's.
 
@@ -2532,7 +2532,7 @@ Structure (all in one message — split into two bubbles with a blank line if it
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
       if (includeWorkoutCheckin) {
-        return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's plan or rest day, send ONE brief confirmation sentence under 160 characters only — e.g. "Just a heads up for tomorrow — rest day as we talked about. Hope you're feeling better!" Output nothing else.
+        return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's plan or rest day, send ONE brief confirmation sentence under 160 characters only. The confirmation must match what was actually discussed — if it covered a run, confirm the run (e.g. "Just a heads up for tomorrow — long run as planned. Should be a good one."); if it covered a rest day, confirm the rest day (e.g. "Just a heads up for tomorrow — rest day as we talked about. Hope you're feeling better!"). Output nothing else.
 
 Otherwise, send a short message that does two things: check in on today's workout, then preview tomorrow's.
 
@@ -2543,7 +2543,7 @@ Structure (all in one message unless it runs long — split into two bubbles wit
 
 No markdown. Sound like a real coach texting. Total under 560 characters.`;
       }
-      return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's workout or rest day, output ONE brief confirmation sentence under 160 characters — e.g. "Wednesday reminder — rest day tomorrow as we discussed. You're doing the right thing." No preamble, no explanation. Just the one sentence.
+      return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's workout or rest day, output ONE brief confirmation sentence under 160 characters. The confirmation must match what was actually discussed — if it covered a run, confirm the run (e.g. "Wednesday reminder — long run tomorrow as we talked about. You've got this."); if it covered a rest day, confirm the rest day (e.g. "Wednesday reminder — rest day tomorrow as we discussed. You're doing the right thing."). No preamble, no explanation. Just the one sentence.
 
 Otherwise, send a short reminder text about tomorrow's workout. Three parts, all in one message:
 
