@@ -171,11 +171,13 @@ export async function GET(request: Request) {
     : null;
   const recentCount = recentRuns.length > 0 ? recentRuns.length : null;
 
-  // Races (workout_type = 1) in the last 8 weeks — show up to 2.
+  // Races (workout_type = 1) in the last 4 weeks — show up to 2.
   const recentRaces = (recentActivitiesFromDB ?? []).filter((a) => a.workout_type === 1);
   let raceMentionLine = "";
   if (recentRaces.length > 0) {
-    const raceLabels = recentRaces.slice(0, 2).map((r) => guessRaceLabel(r.distance_meters ?? 0));
+    const raceLabels = recentRaces.slice(0, 2).map((r) =>
+      formatRaceDistance(r.distance_meters ?? 0, preferredUnits)
+    );
     if (raceLabels.length === 1) {
       raceMentionLine = ` Spotted your recent ${raceLabels[0]} too — great fitness marker.`;
     } else {
@@ -232,15 +234,36 @@ export async function GET(request: Request) {
   );
 }
 
-/** Map a race distance in meters to a common label (5K, half marathon, etc.). */
-function guessRaceLabel(distanceMeters: number): string {
-  if (distanceMeters < 6000) return "5K";
-  if (distanceMeters < 11000) return "10K";
-  if (distanceMeters < 16000) return "15K";
-  if (distanceMeters < 22000) return "half marathon";
-  if (distanceMeters < 30000) return "25K";
-  if (distanceMeters < 44000) return "marathon";
-  return "ultra";
+/**
+ * Format a race distance for display. Matches against standard race distances
+ * within ±3% (GPS drift on a 30K can read ~29.8km, so strict equality fails).
+ * Falls back to actual distance in preferred units for non-standard distances.
+ */
+function formatRaceDistance(distanceMeters: number, preferredUnits: "imperial" | "metric"): string {
+  const STANDARD_DISTANCES: Array<[number, string]> = [
+    [1609, "Mile"],
+    [5000, "5K"],
+    [10000, "10K"],
+    [15000, "15K"],
+    [21097, "Half Marathon"],
+    [25000, "25K"],
+    [30000, "30K"],
+    [42195, "Marathon"],
+    [50000, "50K"],
+    [80467, "50 Miles"],
+    [100000, "100K"],
+    [160934, "100 Miles"],
+  ];
+  for (const [stdMeters, label] of STANDARD_DISTANCES) {
+    if (Math.abs(distanceMeters - stdMeters) / stdMeters <= 0.03) return label;
+  }
+  // Non-standard distance — report actual in preferred units
+  if (preferredUnits === "metric") {
+    const km = Math.round(distanceMeters / 100) / 10;
+    return `${km}km`;
+  }
+  const miles = Math.round((distanceMeters / 1609.34) * 10) / 10;
+  return `${miles} mi`;
 }
 
 /** Build a DB row from a raw Strava activity object. */

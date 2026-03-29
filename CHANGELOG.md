@@ -71,6 +71,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Fix: race distance labels now use ±3% tolerance matching instead of coarse buckets
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "I did a 30k today but he said 25k so it felt a little inaccurate"
+**Root cause:** `guessRaceLabel()` used hard < thresholds (e.g. `< 30000` → "25K"), so a 30K GPS track reading 29.8km (GPS drift is normal) fell into the "25K" bucket.
+**Fix / Change:** Replaced with `formatRaceDistance()` — checks each standard distance (mile, 5K, 10K, 15K, half, 25K, 30K, marathon, 50K, 50 mi, 100K, 100 mi) with ±3% tolerance. If no standard matches, falls back to actual distance in the user's preferred units (`18.6 mi` or `30.1km`). Also passes `preferredUnits` (already computed from athlete profile) through to the formatter.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`
+
 ## 2026-03-28 — Fix: "X miles in the last 4 weeks" was reading a stale Strava aggregate
 
 **Type:** Bug Fix
