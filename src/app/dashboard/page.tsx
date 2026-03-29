@@ -111,12 +111,6 @@ function daysUntilRace(raceDateStr: string | null): number | null {
   return days > 0 ? days : null;
 }
 
-function isTrialActive(trialStartedAt: string | null): boolean {
-  if (!trialStartedAt) return false;
-  const started = new Date(trialStartedAt);
-  const daysSinceStart = (Date.now() - started.getTime()) / (24 * 60 * 60 * 1000);
-  return daysSinceStart <= 7;
-}
 
 export default async function DashboardPage({
   searchParams,
@@ -132,7 +126,7 @@ export default async function DashboardPage({
   // Look up user by dashboard token
   const { data: user } = await supabase
     .from("users")
-    .select("id, name, trial_started_at, onboarding_data")
+    .select("id, name, onboarding_data")
     .eq("dashboard_token", token)
     .single();
 
@@ -258,7 +252,6 @@ export default async function DashboardPage({
     : standardLabel
     ?? (specificDistanceMiles ? `${specificDistanceMiles} mi race` : goalBucket);
   const raceDays = daysUntilRace(raceDate as string | null);
-  const trialActive = isTrialActive(user.trial_started_at as string | null);
   const currentWeekActualMiles = actualMilesByWeek[currentWeekNum] ?? null;
 
   // Partial week mileage target: when some workouts remain this week (e.g. Saturday onboard
@@ -413,16 +406,6 @@ export default async function DashboardPage({
             {planWeeks.map((week) => {
               const isCurrent = week.week_number === currentWeekNum;
               const isPast = week.week_number < currentWeekNum;
-              // Blur logic: trial active → all visible; expired → only show past + current + 1 next
-              const isVisible = trialActive || isPast || isCurrent || week.week_number === currentWeekNum + 1;
-
-              if (!isVisible) {
-                // Show blurred paywall card once, then a CTA
-                if (week.week_number === currentWeekNum + 2) {
-                  return <PaywallCTA key="paywall" remainingWeeks={totalWeeks - currentWeekNum - 1} />;
-                }
-                return null;
-              }
 
               const weekStart = new Date(week1Monday);
               weekStart.setUTCDate(week1Monday.getUTCDate() + (week.week_number - 1) * 7);
@@ -564,24 +547,6 @@ function WeekCard({ week, isCurrent, isPast, actualMiles, weekStartDate, isRaceW
   );
 }
 
-function PaywallCTA({ remainingWeeks }: { remainingWeeks: number }) {
-  return (
-    <div className="rounded-xl border border-dashed border-gray-300 bg-white p-5 text-center">
-      <p className="text-sm font-semibold text-gray-800 mb-1">
-        {remainingWeeks} more {remainingWeeks === 1 ? "week" : "weeks"} in your plan
-      </p>
-      <p className="text-xs text-gray-500 mb-4">
-        Your free preview has ended. Unlock your full training arc to see the complete build, peak, and taper.
-      </p>
-      <a
-        href="https://coachdean.ai/#pricing"
-        className="inline-block rounded-full bg-gray-900 px-5 py-2 text-sm font-medium text-white"
-      >
-        Unlock full plan
-      </a>
-    </div>
-  );
-}
 
 function NoTokenScreen({ expired = false }: { expired?: boolean }) {
   return (

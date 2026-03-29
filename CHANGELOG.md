@@ -25,6 +25,14 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Fix / Change:** Days before today are now dimmed the same as rest days (gray text, gray background). Today and future days remain full contrast. Uses `toLocaleDateString` to get today's weekday name and compares against `DAY_ORDER` index.
 **Files changed:** `src/app/dashboard/page.tsx`
 
+## 2026-03-28 — Remove dashboard paywall / trial locking
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** "we don't want the plan to lock for now since we don't have a paid / free trial version just yet"
+**Fix / Change:** Removed the 7-day trial gate — full plan arc is now always visible. Deleted `isTrialActive`, `PaywallCTA`, and the visibility/blur logic from the plan arc render. Also removed unused `trial_started_at` from the users DB query.
+**Files changed:** `src/app/dashboard/page.tsx`
+
 ## 2026-03-28 — Fix: dashboard bolding, race week missing from plan, B/C races not showing
 
 **Type:** Bug Fix
