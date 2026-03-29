@@ -48,13 +48,18 @@ export async function generateAndSaveFullPlan(
   const daysPerWeek = (profile?.days_per_week as number | null) ?? 4;
   const hasRace = !!raceDate;
 
-  // Determine total weeks: race → use Math.round so the arc week count matches what
-  // Dean computes in the plan text (which uses whole-week language like "~19 weeks").
+  // Determine total weeks: anchor to the start of the current week (Monday) so the race
+  // always falls within the last plan week rather than one week past it. Using "now" directly
+  // is sensitive to the time of day — if the plan is generated after noon UTC, a race that's
+  // exactly N weeks out can round down to N-1 weeks, leaving the race outside the plan.
   let totalWeeks = 12;
   if (raceDate) {
     const now = new Date();
     const race = new Date(raceDate + "T12:00:00Z");
-    const weeksUntil = Math.ceil((race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    const monday = new Date(now);
+    monday.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
+    monday.setUTCHours(0, 0, 0, 0);
+    const weeksUntil = Math.ceil((race.getTime() - monday.getTime()) / (7 * 24 * 60 * 60 * 1000));
     totalWeeks = Math.max(4, Math.min(52, weeksUntil));
   }
 

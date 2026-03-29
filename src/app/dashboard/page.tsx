@@ -358,7 +358,7 @@ export default async function DashboardPage({
                   <div key={d.day} className={`flex items-center justify-between px-3 py-2 ${d.type === "rest" ? "bg-gray-50" : "bg-white"}`}>
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`text-xs font-semibold w-7 shrink-0 ${d.type === "rest" ? "text-gray-300" : "text-gray-500"}`}>{d.shortDay}</span>
-                      <span className={`text-sm leading-snug ${d.type === "rest" ? "text-gray-300" : d.type === "key" ? "text-gray-900 font-medium" : "text-gray-600"}`}>
+                      <span className={`text-sm leading-snug ${d.type === "rest" ? "text-gray-300" : "text-gray-600"}`}>
                         {d.label}
                       </span>
                     </div>

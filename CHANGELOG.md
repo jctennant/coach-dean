@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Fix: dashboard bolding, race week missing from plan, B/C races not showing
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "why is it bolding certain workouts during the 'this week' section? feels a bit random" / "last week ends Aug 2nd now" / "it's not showing B or C races, just my A race"
+**Root cause (bolding):** Key workout days had `font-medium` applied to the label but long run days didn't. Made one workout look arbitrarily bolder than others.
+**Root cause (race week missing):** `totalWeeks` in `generateAndSaveFullPlan` and `persistProfileUpdates` was calculated from `new Date()` (exact current time) rather than from the start of the current week (Monday). If computed after noon UTC, a race exactly N weeks away rounds down to N-1 weeks, leaving the race one week past the end of the plan. E.g. if computed at 2pm UTC, Aug 8 race gives 19 weeks (ends Aug 2) instead of 20 (ends Aug 9).
+**Root cause (B/C races missing):** `completeOnboarding` filtered B/C races with `.filter(r => r.date && r.goal)` — Haiku often returns `goal: null` for named races (e.g. "A Basin") where it can't infer the distance, so those rows were silently dropped before insert.
+**Fix / Change:**
+- Removed `font-medium` from key workout label — all active workout rows now have the same text weight
+- Changed `totalWeeks` calculation in both `generateAndSaveFullPlan` and `persistProfileUpdates` to anchor from Monday (start of week) rather than "now"
+- Changed B/C races filter to only require `r.date`; falls back to A race's goal bucket when `r.goal` is null
+**Files changed:** `src/app/dashboard/page.tsx`, `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
 ## 2026-03-28 — Fix: promoted A race distance not looked up when date provided inline
 
 **Type:** Bug Fix

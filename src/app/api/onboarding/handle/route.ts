@@ -1876,14 +1876,16 @@ async function completeOnboarding(
         goal_time_minutes: (data.goal_time_minutes as number | null) ?? null,
         goal_distance_miles: goalDistanceMiles,
       },
-      // B/C races captured in awaiting_other_races
+      // B/C races captured in awaiting_other_races.
+      // Only require a date — goal may be null for named races where Haiku couldn't
+      // infer the distance; fall back to the A race's goal as a reasonable default.
       ...((data.other_races as Array<{ date: string; name: string | null; goal: string | null; priority: "B" | "C" }> | null) ?? [])
-        .filter(r => r.date && r.goal)
+        .filter(r => r.date)
         .map(r => ({
           user_id: user.id,
           race_date: r.date,
           race_name: r.name ?? null,
-          goal: r.goal!,
+          goal: r.goal ?? goal,
           priority: r.priority,
           goal_time_minutes: null,
           goal_distance_miles: null,

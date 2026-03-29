@@ -2322,8 +2322,13 @@ async function persistProfileUpdates(
       if (plan) {
         const now = new Date();
         const race = new Date(newRaceDate + "T12:00:00Z");
+        // Anchor to Monday (same logic as generateAndSaveFullPlan) so the race
+        // always falls in the last week of the plan rather than one week past it.
+        const monday = new Date(now);
+        monday.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
+        monday.setUTCHours(0, 0, 0, 0);
         const newTotalWeeks = Math.max(4, Math.min(52, Math.ceil(
-          (race.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+          (race.getTime() - monday.getTime()) / (7 * 24 * 60 * 60 * 1000)
         )));
         const planWeeks = (plan.weeks as unknown[]) ?? [];
         // Trim if race moved closer; leave as-is if it moved further (can't generate new weeks without full regen)
