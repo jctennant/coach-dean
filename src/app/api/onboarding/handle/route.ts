@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, shareContactCard } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
-import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
+import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange, formatRaceDistance } from "@/lib/paces";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
@@ -1207,7 +1207,16 @@ Rules:
   };
   const nextStep = findNextStep("awaiting_schedule", mergedData);
 
-  const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: mergedData };
+  // If transitioning to awaiting_anything_else and user has Strava but no paces yet,
+  // look up race history now so the question can reference it.
+  let finalData = mergedData;
+  if (nextStep === "awaiting_anything_else" && mergedData.strava_connected &&
+      !mergedData.recent_race_distance_km && !mergedData.easy_pace) {
+    const sbr = await lookupBestStravaRace(user.id);
+    if (sbr) finalData = { ...mergedData, strava_best_race: sbr };
+  }
+
+  const updatePayload: Record<string, unknown> = { onboarding_step: nextStep, onboarding_data: finalData };
   if (extra.name) updatePayload.name = extra.name;
   await supabase.from("users").update(updatePayload).eq("id", user.id);
 
@@ -1218,7 +1227,7 @@ Rules:
     // and naturally handles any flexibility caveats the user mentioned.
     const [scheduleAck, nextQuestion] = await Promise.all([
       acknowledgeSchedule(message, trainingDays),
-      Promise.resolve(getStepQuestion(nextStep, mergedData, user.id)),
+      Promise.resolve(getStepQuestion(nextStep, finalData, user.id)),
     ]);
     const completeResponse = `${scheduleAck}\n\n${nextQuestion}`;
     await sendAndStore(user.id, user.phone_number, completeResponse, nextStep);
@@ -1284,16 +1293,24 @@ Rules:
   }
 
   const nextStep = findNextStep("awaiting_ultra_background", merged);
-  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: merged as unknown as Json }).eq("id", user.id);
+
+  let ultraFinalData = merged;
+  if (nextStep === "awaiting_anything_else" && merged.strava_connected &&
+      !merged.recent_race_distance_km && !merged.easy_pace) {
+    const sbr = await lookupBestStravaRace(user.id);
+    if (sbr) ultraFinalData = { ...merged, strava_best_race: sbr };
+  }
+
+  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: ultraFinalData as unknown as Json }).eq("id", user.id);
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "ultra_background", has_ultra_experience: extracted.has_ultra_experience });
 
   if (nextStep) {
-    const nextQuestion = getStepQuestion(nextStep, merged, user.id);
+    const nextQuestion = getStepQuestion(nextStep, ultraFinalData, user.id);
     const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
     await sendAndStore(user.id, user.phone_number, reply, nextStep);
   } else {
-    await completeOnboarding(user, merged, chatId);
+    await completeOnboarding(user, ultraFinalData, chatId);
   }
 
   return NextResponse.json({ ok: true });
@@ -1345,12 +1362,20 @@ Rules:
   if (extracted.can_run_now != null) merged.can_run_now = extracted.can_run_now;
 
   const nextStep = findNextStep("awaiting_injury_background", merged);
-  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: merged as unknown as Json }).eq("id", user.id);
+
+  let injuryFinalData = merged;
+  if (nextStep === "awaiting_anything_else" && merged.strava_connected &&
+      !merged.recent_race_distance_km && !merged.easy_pace) {
+    const sbr = await lookupBestStravaRace(user.id);
+    if (sbr) injuryFinalData = { ...merged, strava_best_race: sbr };
+  }
+
+  await supabase.from("users").update({ onboarding_step: nextStep, onboarding_data: injuryFinalData as unknown as Json }).eq("id", user.id);
 
   void trackEvent(user.id, "onboarding_step_completed", { step: "injury_background", can_run_now: extracted.can_run_now });
 
   if (nextStep) {
-    const nextQuestion = getStepQuestion(nextStep, merged, user.id);
+    const nextQuestion = getStepQuestion(nextStep, injuryFinalData, user.id);
     const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
     await sendAndStore(user.id, user.phone_number, reply, nextStep);
   } else {
@@ -1377,9 +1402,10 @@ async function handleAnythingElse(
   // Merge: strip nulls from extracted so pre-existing data isn't overwritten
   const merged = { ...onboardingData, ...removeNulls(extracted as unknown as Record<string, unknown>) };
 
-  // Compute paces — prefer VDOT from race data, fall back to easy pace estimation.
-  // Check both the current message extract AND earlier-captured onboarding data
-  // (e.g. a PR mentioned in the first message is stored in onboardingData).
+  // Compute paces — priority order:
+  // 1. Race time from this message (or earlier in onboarding) → VDOT
+  // 2. Easy pace from this message (or earlier) → estimate tempo/interval
+  // 3. Strava-suggested race (strava_best_race) → user confirmed or didn't correct it
   const raceDistKm = extracted.recent_race_distance_km ?? (onboardingData.recent_race_distance_km as number | null);
   const raceTimeMin = extracted.recent_race_time_minutes ?? (onboardingData.recent_race_time_minutes as number | null);
   if (raceDistKm && raceTimeMin) {
@@ -1392,6 +1418,14 @@ async function handleAnythingElse(
     merged.easy_pace = paces.easy;
     merged.tempo_pace = paces.tempo ?? merged.tempo_pace;
     merged.interval_pace = paces.interval ?? merged.interval_pace;
+  } else if (onboardingData.strava_best_race) {
+    // User didn't provide new pace data — apply the Strava-suggested paces they confirmed (or didn't correct)
+    const sbr = onboardingData.strava_best_race as StravaRaceSuggestion;
+    merged.easy_pace = sbr.easy_pace;
+    merged.tempo_pace = sbr.tempo_pace;
+    merged.interval_pace = sbr.interval_pace;
+    merged.recent_race_distance_km = sbr.dist_km;
+    merged.recent_race_time_minutes = sbr.time_minutes;
   }
 
   // If the athlete asked a question or shared something that needs a reply,
@@ -1753,6 +1787,113 @@ Classify it. Return only one word:
     "awaiting_cadence"
   );
   return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Strava race history helpers for pace zone suggestion
+// ---------------------------------------------------------------------------
+
+interface StravaRaceSuggestion {
+  label: string;
+  date_str: string;
+  time_str: string;
+  dist_km: number;
+  time_minutes: number;
+  easy_pace: string;
+  tempo_pace: string;
+  interval_pace: string;
+}
+
+/**
+ * Scores a list of Strava race activities and returns the best one to use for
+ * VDOT estimation. Prefers recent (<6 months), standard-distance (5K–marathon) road
+ * races. Excludes ultras (>50km) — their pace doesn't translate to training zones.
+ * Returns null if no usable race exists or all are older than 2.5 years.
+ */
+function selectBestRaceForPacing(
+  races: Array<{ distance_meters: number | null; moving_time_seconds: number | null; start_date: string }>
+): { distance_meters: number; moving_time_seconds: number; start_date: string } | null {
+  const now = Date.now();
+  const STANDARD_KM = [5, 10, 15, 21.097, 42.195]; // 5K, 10K, 15K, half, marathon
+
+  const scored = races
+    .filter(r =>
+      r.distance_meters != null && r.moving_time_seconds != null &&
+      r.distance_meters >= 1500 && r.distance_meters <= 50000
+    )
+    .map(r => {
+      const daysAgo = (now - new Date(r.start_date).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysAgo > 900) return null; // older than 2.5 years — too stale
+      const recencyScore = daysAgo < 180 ? 3 : daysAgo < 365 ? 2 : 1;
+      const distKm = r.distance_meters! / 1000;
+      const isStandard = STANDARD_KM.some(d => Math.abs(distKm - d) / d <= 0.03);
+      const distScore = isStandard ? 2 : 1;
+      return { race: r, score: recencyScore * distScore };
+    })
+    .filter((x): x is { race: typeof races[number]; score: number } => x !== null)
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  if (!best) return null;
+  return {
+    distance_meters: best.race.distance_meters!,
+    moving_time_seconds: best.race.moving_time_seconds!,
+    start_date: best.race.start_date,
+  };
+}
+
+/**
+ * Queries the user's Strava activity history for races and returns a structured
+ * suggestion (label, display time, computed VDOT paces) ready to show in onboarding.
+ * Returns null if no usable race found.
+ */
+async function lookupBestStravaRace(userId: string): Promise<StravaRaceSuggestion | null> {
+  const [{ data: races }, { data: profile }] = await Promise.all([
+    supabase
+      .from("activities")
+      .select("distance_meters, moving_time_seconds, start_date")
+      .eq("user_id", userId)
+      .eq("workout_type", 1)
+      .order("start_date", { ascending: false })
+      .limit(20),
+    supabase
+      .from("training_profiles")
+      .select("preferred_units")
+      .eq("user_id", userId)
+      .single(),
+  ]);
+
+  const best = selectBestRaceForPacing(races || []);
+  if (!best) return null;
+
+  const preferredUnits = (profile?.preferred_units as "imperial" | "metric" | null) ?? "imperial";
+  const distKm = best.distance_meters / 1000;
+  const timeMin = best.moving_time_seconds / 60;
+  const paces = calculateVDOTPaces(distKm, timeMin);
+  const label = formatRaceDistance(best.distance_meters, preferredUnits);
+
+  const dateStr = new Date(best.start_date).toLocaleDateString("en-US", {
+    month: "short", year: "numeric", timeZone: "UTC",
+  });
+
+  const totalSec = best.moving_time_seconds;
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const timeStr = h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+
+  return {
+    label,
+    date_str: dateStr,
+    time_str: timeStr,
+    dist_km: distKm,
+    time_minutes: timeMin,
+    easy_pace: paces.easy,
+    tempo_pace: paces.tempo,
+    interval_pace: paces.interval,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2144,8 +2285,18 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       return "One quick one — what city are you in? Want to make sure your reminders go out at the right time, not 3am.";
     }
 
-    case "awaiting_anything_else":
+    case "awaiting_anything_else": {
+      const sbr = data.strava_best_race as StravaRaceSuggestion | null | undefined;
+      if (sbr) {
+        const easyRange = easyPaceRange(sbr.easy_pace);
+        return `Almost there! I spotted your ${sbr.label} from ${sbr.date_str} (${sbr.time_str}) in your Strava — I'd set your easy training pace at ${easyRange}. Does that work? If your fitness has changed, share a more recent race time or easy pace. Anything else to add (injuries, cross-training, target time)?`;
+      }
+      // Strava connected but no races found — ask explicitly for a PR or easy pace
+      if (data.strava_connected && !data.recent_race_distance_km && !data.easy_pace) {
+        return "Almost there! I don't see any race results in your Strava yet. Do you have a recent race time (5K, 10K, half, marathon) or comfortable easy pace I can use to set your training zones? If not, just say nope and I'll estimate from your mileage.";
+      }
       return "Almost there — anything else before I put this together? Target paces, cross-training, strength work — mention it now and I'll build it in. If not, just say nope!";
+    }
 
     case "awaiting_name":
       return "What's your name?";

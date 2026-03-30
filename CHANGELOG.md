@@ -93,6 +93,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-29 — Strava race history used to suggest pace zones during onboarding
+
+**Type:** Feature
+**Reported by:** Jake (internal observation)
+**User feedback:** N/A
+**Root cause:** Dean had no way to derive training paces for Strava users unless they explicitly mentioned a PR — users with race history often never volunteered that info, leaving paces unset.
+**Fix / Change:** When transitioning to `awaiting_anything_else`, if the user has Strava connected and no paces yet, query their race history for the best recent race (scored by recency + standard distance; ultras excluded). If found, compute VDOT paces and surface the suggestion in the "anything else?" question for confirmation/correction. If Strava connected but no races found, explicitly ask for a PR or easy pace. `formatRaceDistance` moved to `src/lib/paces.ts` as a shared utility.
+**Files changed:** `src/lib/paces.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/auth/strava/callback/route.ts`
+
 ## 2026-03-28 — Fix: race distance labels now use ±3% tolerance matching instead of coarse buckets
 
 **Type:** Bug Fix

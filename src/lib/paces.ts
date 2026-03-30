@@ -4,6 +4,37 @@
  */
 
 /**
+ * Format a race distance for display. Matches standard race distances within ±3%
+ * (GPS drift on a 30K can read ~29.8km, so strict equality fails). Falls back to
+ * actual distance in preferred units for non-standard distances.
+ */
+export function formatRaceDistance(distanceMeters: number, preferredUnits: "imperial" | "metric" = "imperial"): string {
+  const STANDARD_DISTANCES: Array<[number, string]> = [
+    [1609, "Mile"],
+    [5000, "5K"],
+    [10000, "10K"],
+    [15000, "15K"],
+    [21097, "Half Marathon"],
+    [25000, "25K"],
+    [30000, "30K"],
+    [42195, "Marathon"],
+    [50000, "50K"],
+    [80467, "50 Miles"],
+    [100000, "100K"],
+    [160934, "100 Miles"],
+  ];
+  for (const [stdMeters, label] of STANDARD_DISTANCES) {
+    if (Math.abs(distanceMeters - stdMeters) / stdMeters <= 0.03) return label;
+  }
+  if (preferredUnits === "metric") {
+    const km = Math.round(distanceMeters / 100) / 10;
+    return `${km}km`;
+  }
+  const miles = Math.round((distanceMeters / 1609.34) * 10) / 10;
+  return `${miles} mi`;
+}
+
+/**
  * Calculate VDOT-based training paces from a race performance.
  * Uses Jack Daniels' Running Formula.
  */
