@@ -1199,7 +1199,7 @@ Rules:
   const daysPerWeek = Math.max(1, Math.min(7, Math.round(rawDaysPerWeek)));
 
   // Merge extra fields, then apply the dedicated schedule parse results on top
-  const mergedData = {
+  const mergedData: Record<string, unknown> = {
     ...onboardingData,
     ...removeNulls(extra),
     days_per_week: daysPerWeek,
@@ -1863,7 +1863,7 @@ async function lookupBestStravaRace(userId: string): Promise<StravaRaceSuggestio
       .single(),
   ]);
 
-  const best = selectBestRaceForPacing(races || []);
+  const best = selectBestRaceForPacing((races || []).filter((r): r is typeof r & { start_date: string } => r.start_date != null));
   if (!best) return null;
 
   const preferredUnits = (profile?.preferred_units as "imperial" | "metric" | null) ?? "imperial";

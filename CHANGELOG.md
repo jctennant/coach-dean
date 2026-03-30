@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-28 — Fixed TypeScript build error in handleSchedule (Vercel deploy)
+
+**Type:** Bug Fix
+**Reported by:** Vercel build log
+**User feedback:** N/A
+**Root cause:** `mergedData` in `handleSchedule` was inferred as `{ days_per_week: number; training_days: string[] }` by TypeScript (losing the spread from `onboardingData: Record<string, unknown>`), so accessing `.strava_connected` was a type error. Additionally, the `selectBestRaceForPacing` call received `start_date: string | null` from the DB query but the function signature expected `start_date: string`.
+**Fix / Change:** Added explicit `Record<string, unknown>` type annotation to `mergedData`; filtered out null `start_date` rows before calling `selectBestRaceForPacing`.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-03-29 — Fixed nightly analysis incorrectly flagging Strava data as hallucinations
 
 **Type:** Bug Fix
