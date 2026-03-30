@@ -393,7 +393,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // (e.g. legacy user onboarded before full-plan generation was added, or initial_plan
   // failed silently), regenerate it now so they actually get their link.
   if (trigger === "user_message") {
-    const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
+    // recentMessages is newest-first (ORDER BY created_at DESC) — find() without
+    // reversing gives the most recent user message, which is what we want here.
+    const latestUserMsg = recentMessages.find(m => m.role === "user");
     const isPlanRequest = latestUserMsg && /^\s*my\s+plan\s*$/i.test(latestUserMsg.content);
     if (isPlanRequest) {
       if (!dashboardToken) {
@@ -403,8 +405,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           user.phone_number as string,
           profile,
           avgWeeklyMileage,
-          { bRaces: bCRaces.length > 0 ? bCRaces : undefined }
-          // skipLinkSms defaults to false — generateAndSaveFullPlan sends its own link SMS
+          { skipLinkSms: true, bRaces: bCRaces.length > 0 ? bCRaces : undefined }
         ).catch(err => {
           console.error("[coach/respond] generateAndSaveFullPlan failed on my-plan request:", err);
           return null;
@@ -416,7 +417,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       if (chatId) await startTyping(chatId);
       const linkMsg = dashboardUrl
         ? `Here's your full training plan: ${dashboardUrl}`
-        : "Having trouble pulling up your plan right now — I'll send the link shortly.";
+        : "Having trouble pulling up your plan right now — try again in a few minutes.";
       if (!dry_run) {
         await sendSMS(user.phone_number as string, linkMsg);
         await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: linkMsg, message_type: "user_message" });
