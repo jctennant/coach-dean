@@ -296,6 +296,46 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   const shouldUseWebSearch = trigger === "user_message";
 
+  // "My plan" keyword: short-circuit before any LLM calls.
+  // Must be placed here — before profile extraction — so we don't waste a Haiku call.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+  let dashboardToken = user.dashboard_token as string | null;
+  let dashboardUrl = dashboardToken ? `${appUrl}/dashboard?token=${dashboardToken}` : null;
+  if (trigger === "user_message") {
+    // recentMessages is oldest-first (DB returns DESC, then reversed at line 239).
+    // Spread-reverse to search newest-first and get the most recent user message.
+    const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
+    const isPlanRequest = latestUserMsg && /^\s*my\s+plan\s*$/i.test(latestUserMsg.content);
+    if (isPlanRequest) {
+      if (!dashboardToken) {
+        const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
+        const newToken = await generateAndSaveFullPlan(
+          userId,
+          user.phone_number as string,
+          profile,
+          avgWeeklyMileage,
+          { skipLinkSms: true, bRaces: bCRaces.length > 0 ? bCRaces : undefined }
+        ).catch(err => {
+          console.error("[coach/respond] generateAndSaveFullPlan failed on my-plan request:", err);
+          return null;
+        });
+        dashboardToken = newToken;
+        dashboardUrl = newToken ? `${appUrl}/dashboard?token=${newToken}` : null;
+      }
+      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+      if (chatId) await startTyping(chatId);
+      const linkMsg = dashboardUrl
+        ? `Here's your full training plan: ${dashboardUrl}`
+        : "Having trouble pulling up your plan right now — try again in a few minutes.";
+      if (!dry_run) {
+        await sendSMS(user.phone_number as string, linkMsg);
+        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: linkMsg, message_type: "user_message" });
+        void trackEvent(userId, "plan_link_sent", { source: "my_plan_keyword" });
+      }
+      return NextResponse.json({ ok: true, message: linkMsg });
+    }
+  }
+
   // For user_message: extract race/pace data BEFORE building the system prompt so the
   // coach responds with accurate paces immediately (not one message later).
   let pendingExtracted: Awaited<ReturnType<typeof extractProfileData>> | null = null;
@@ -384,49 +424,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
   const timezoneConfirmed = !!(onboardingData.timezone_confirmed) || !!(user.strava_athlete_id); // Strava users get TZ from athlete profile
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-  let dashboardToken = user.dashboard_token as string | null;
-  let dashboardUrl = dashboardToken ? `${appUrl}/dashboard?token=${dashboardToken}` : null;
-
-  // "My plan" keyword: athlete replied with the exact phrase we told them to send.
-  // Skip Claude entirely and send the dashboard link directly. If the token is missing
-  // (e.g. legacy user onboarded before full-plan generation was added, or initial_plan
-  // failed silently), regenerate it now so they actually get their link.
-  if (trigger === "user_message") {
-    // recentMessages is newest-first (ORDER BY created_at DESC) — find() without
-    // reversing gives the most recent user message, which is what we want here.
-    const latestUserMsg = recentMessages.find(m => m.role === "user");
-    const isPlanRequest = latestUserMsg && /^\s*my\s+plan\s*$/i.test(latestUserMsg.content);
-    if (isPlanRequest) {
-      if (!dashboardToken) {
-        const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
-        const newToken = await generateAndSaveFullPlan(
-          userId,
-          user.phone_number as string,
-          profile,
-          avgWeeklyMileage,
-          { skipLinkSms: true, bRaces: bCRaces.length > 0 ? bCRaces : undefined }
-        ).catch(err => {
-          console.error("[coach/respond] generateAndSaveFullPlan failed on my-plan request:", err);
-          return null;
-        });
-        dashboardToken = newToken;
-        dashboardUrl = newToken ? `${appUrl}/dashboard?token=${newToken}` : null;
-      }
-      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
-      if (chatId) await startTyping(chatId);
-      const linkMsg = dashboardUrl
-        ? `Here's your full training plan: ${dashboardUrl}`
-        : "Having trouble pulling up your plan right now — try again in a few minutes.";
-      if (!dry_run) {
-        await sendSMS(user.phone_number as string, linkMsg);
-        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: linkMsg, message_type: "user_message" });
-        void trackEvent(userId, "plan_link_sent", { source: "my_plan_keyword" });
-      }
-      return NextResponse.json({ ok: true, message: linkMsg });
-    }
-  }
-
   const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and

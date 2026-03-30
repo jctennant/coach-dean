@@ -36,6 +36,11 @@ vi.mock("@/lib/weather", () => ({
   buildWeatherBlock: vi.fn().mockReturnValue(""),
 }));
 
+vi.mock("@/lib/training-plan", () => ({
+  generateAndSaveFullPlan: vi.fn().mockResolvedValue("new-token-abc"),
+  computePhaseForPlan: vi.fn().mockReturnValue("base"),
+}));
+
 vi.mock("next/server", () => ({
   NextResponse: {
     json: (data: unknown, init?: ResponseInit) => ({ data, init }),
@@ -84,6 +89,9 @@ function setupSupabase(opts: {
   profile?: Record<string, unknown>;
   state?: Record<string, unknown>;
   races?: Array<Record<string, unknown>>;
+  // Conversations supplied newest-first, matching DB ORDER BY created_at DESC.
+  // The route calls .reverse() on this data internally, making it oldest-first.
+  conversations?: Array<Record<string, unknown>>;
 }) {
   // Reuse the same chain for training_state so we can inspect all update() calls.
   const stateChain = makeChain({ data: opts.state ?? null, error: null });
@@ -93,7 +101,8 @@ function setupSupabase(opts: {
     if (table === "training_profiles") return makeChain({ data: opts.profile ?? null, error: null });
     if (table === "training_state") return stateChain;
     if (table === "races") return makeChain({ data: opts.races ?? null, error: null });
-    // conversations, activities, training_plans etc. — return empty/null data
+    if (table === "conversations") return makeChain({ data: opts.conversations ?? null, error: null });
+    // activities, training_plans etc. — return empty/null data
     return makeChain({ data: null, error: null });
   });
 
@@ -321,5 +330,90 @@ describe("coach/respond — B/C race context in system prompt", () => {
     expect(prompt).not.toContain("B RACE");
     expect(prompt).not.toContain("C RACE");
     expect(prompt).not.toContain("Upcoming B race");
+  });
+});
+
+describe("coach/respond — 'my plan' keyword early-exit", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+  });
+
+  it("sends dashboard link directly when token exists, skipping Claude", async () => {
+    // Simulate Ian's situation: conversation history with older messages PLUS "My plan"
+    // as the latest message. Conversations are supplied newest-first (as the DB returns
+    // them) — the route internally calls .reverse() to make them oldest-first, so our
+    // fix must re-reverse to find the newest user message.
+    setupSupabase({
+      user: baseUser({ dashboard_token: "tok-ian-abc" }),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: [
+        // newest-first (DB order)
+        { role: "user",      content: "My plan",                                         created_at: "2026-03-30T10:50:00Z" },
+        { role: "assistant", content: "Your training plan isn't ready yet",              created_at: "2026-03-30T10:06:00Z" },
+        { role: "user",      content: "My plan",                                         created_at: "2026-03-30T10:06:00Z" },
+        { role: "user",      content: "Can you send my full training plan for Philly?",  created_at: "2026-03-30T09:12:00Z" },
+      ],
+    });
+
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    // Link sent directly — no Claude call
+    expect(anthropic.messages.create).not.toHaveBeenCalled();
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025550001",
+      expect.stringContaining("http://localhost:3000/dashboard?token=tok-ian-abc")
+    );
+  });
+
+  it("generates a new token and sends link when dashboard_token is null", async () => {
+    const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
+    (generateAndSaveFullPlan as ReturnType<typeof vi.fn>).mockResolvedValue("freshtoken");
+
+    setupSupabase({
+      user: baseUser({ dashboard_token: null }),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: [
+        { role: "user", content: "My plan", created_at: "2026-03-30T10:50:00Z" },
+        { role: "user", content: "I want to run Philadelphia", created_at: "2026-03-03T04:26:00Z" },
+      ],
+    });
+
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    expect(anthropic.messages.create).not.toHaveBeenCalled();
+    expect(generateAndSaveFullPlan).toHaveBeenCalled();
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025550001",
+      expect.stringContaining("freshtoken")
+    );
+  });
+
+  it("does NOT early-exit when latest message is not 'my plan'", async () => {
+    setupSupabase({
+      user: baseUser({ dashboard_token: "tok-abc" }),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: [
+        { role: "user", content: "How's my tempo pace looking?", created_at: "2026-03-30T10:50:00Z" },
+        { role: "user", content: "My plan",                      created_at: "2026-03-30T09:00:00Z" },
+      ],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    // Normal Claude path taken
+    expect(anthropic.messages.create).toHaveBeenCalled();
   });
 });
