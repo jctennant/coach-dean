@@ -55,10 +55,27 @@ function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
   const easyDays = sorted.filter(d => d !== longRunDay && d !== keyWorkoutDay);
 
   const longRunMi = week.long_run_target;
-  // Try to parse miles from key_workout text (e.g. "4mi tempo @ threshold" → 4)
-  const keyWorkoutTextMatch = keyWorkoutDay && week.key_workout ? week.key_workout.match(/^(\d+(?:\.\d+)?)\s*mi/i) : null;
+  // Parse miles from key_workout text. Handles:
+  //   "4mi tempo" → 4
+  //   "4x800m" → 4 × 0.5mi = 2mi
+  //   "6x1mi repeats" → 6mi
+  //   "5x1000m" → 5 × 0.621mi ≈ 3.1mi
+  function parseKeyWorkoutMiles(text: string): number | null {
+    const direct = text.match(/^(\d+(?:\.\d+)?)\s*mi/i);
+    if (direct) return parseFloat(direct[1]!);
+    const interval = text.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(m|km|mi)/i);
+    if (interval) {
+      const reps = parseInt(interval[1]!);
+      const dist = parseFloat(interval[2]!);
+      const unit = interval[3]!.toLowerCase();
+      const distMi = unit === "mi" ? dist : unit === "km" ? dist * 0.621371 : dist / 1609.34;
+      return Math.round(reps * distMi * 10) / 10;
+    }
+    return null;
+  }
+  const parsedKeyMi = keyWorkoutDay && week.key_workout ? parseKeyWorkoutMiles(week.key_workout) : null;
   const keyWorkoutMi = keyWorkoutDay
-    ? (keyWorkoutTextMatch ? parseFloat(keyWorkoutTextMatch[1]!) : Math.round(week.mileage_target * 0.20 * 2) / 2)
+    ? (parsedKeyMi !== null ? parsedKeyMi : Math.round(week.mileage_target * 0.20 * 2) / 2)
     : 0;
   const totalEasy = Math.max(0, week.mileage_target - longRunMi - keyWorkoutMi);
   const easyMi = easyDays.length > 0 ? Math.round((totalEasy / easyDays.length) * 10) / 10 : 0;
@@ -377,7 +394,7 @@ export default async function DashboardPage({
                         </span>
                       </div>
                       {d.miles !== null && (
-                        <span className={`text-sm font-semibold shrink-0 ml-2 ${isDimmed ? "text-gray-300" : d.type === "long" ? "text-gray-900" : d.type === "key" ? "text-gray-700" : "text-gray-400"}`}>
+                        <span className={`text-sm shrink-0 ml-2 ${d.type === "key" && !isDimmed ? "font-semibold" : ""} ${isDimmed ? "text-gray-300" : d.type === "long" ? "text-gray-900" : d.type === "key" ? "text-gray-700" : "text-gray-400"}`}>
                           {d.miles} mi
                         </span>
                       )}

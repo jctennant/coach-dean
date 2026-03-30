@@ -189,13 +189,14 @@ No other text.`,
     weeks: planWeeks as unknown as Json,
   });
 
-  // Sync training_state.weekly_mileage_target to match the actual prescribed week 1 mileage
-  // so the dashboard's "Weekly target" for week 1 reflects what Dean actually sent.
-  if (prescribedWeek1Miles) {
-    await supabase.from("training_state")
-      .update({ weekly_mileage_target: prescribedWeek1Miles })
-      .eq("user_id", userId);
-  }
+  // Reset current_week to 1 and sync weekly_mileage_target to match week 1 of the new plan.
+  // Always reset current_week when a full plan is (re)generated so the dashboard starts at week 1.
+  await supabase.from("training_state")
+    .update({
+      current_week: 1,
+      ...(prescribedWeek1Miles ? { weekly_mileage_target: prescribedWeek1Miles } : {}),
+    })
+    .eq("user_id", userId);
 
   // Generate dashboard token and mark trial start
   const dashboardToken = crypto.randomUUID();

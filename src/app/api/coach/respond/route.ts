@@ -314,7 +314,11 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           user.phone_number as string,
           profile,
           avgWeeklyMileage,
-          { skipLinkSms: true, bRaces: bCRaces.length > 0 ? bCRaces : undefined }
+          {
+            skipLinkSms: true,
+            prescribedWeek1Miles: (state?.weekly_mileage_target as number | null) ?? undefined,
+            bRaces: bCRaces.length > 0 ? bCRaces : undefined,
+          }
         ).catch(err => {
           console.error("[coach/respond] generateAndSaveFullPlan failed on my-plan request:", err);
           return null;

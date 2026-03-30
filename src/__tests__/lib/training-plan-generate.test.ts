@@ -241,14 +241,14 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     );
   });
 
-  it("does NOT update training_state when prescribedWeek1Miles is omitted", async () => {
-    let stateUpdateCalled = false;
+  it("always resets current_week to 1 in training_state even when prescribedWeek1Miles is omitted", async () => {
+    let capturedUpdate: Record<string, unknown> | null = null;
 
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation(() => {
-          stateUpdateCalled = true;
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+          capturedUpdate = payload;
           return c;
         });
       }
@@ -263,7 +263,9 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       { skipLinkSms: true },
     );
 
-    expect(stateUpdateCalled).toBe(false);
+    expect(capturedUpdate).not.toBeNull();
+    expect(capturedUpdate).toMatchObject({ current_week: 1 });
+    expect(capturedUpdate).not.toHaveProperty("weekly_mileage_target");
   });
 
   it("scopes the training_state update to the correct user_id", async () => {

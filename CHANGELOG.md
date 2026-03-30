@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-30 — Dashboard week number wrong after plan regen; mileage arc too low; interval mileage not parsed; bolding inconsistent
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "It told her that this week is week two, even though the date of today should be within week one" / "It told her different mileage throughout the plan than what Dean had discussed" / "in the 'This week' section, the far right column where it says 'Mileage for that day' is sometimes inaccurate because it doesn't take into account how much mileage intervals will take up. It just seems to be scanning for mentions of miles, not something like 4x800" / "I'm also noticing some weird bolding on the far right side"
+**Root cause:** Four separate issues. (1) `generateAndSaveFullPlan` never reset `training_state.current_week` to 1 on plan regeneration, so if a weekly_recap had previously incremented it the dashboard showed the wrong week. (2) The "my plan" regeneration path didn't pass `prescribedWeek1Miles`, so it ignored the stored weekly mileage target from prior coaching conversations and used a raw Strava average, producing a lower arc. (3) Key workout mileage parsing only matched patterns like "4mi tempo" — interval notation like "4x800m" or "6x1mi" returned 0 and fell back to a rough 20% estimate. (4) `font-semibold` was applied to all mileage values; only the quality session should be bold.
+**Fix / Change:** (1) `generateAndSaveFullPlan` now always writes `current_week: 1` to training_state. (2) "My plan" path passes `state.weekly_mileage_target` as `prescribedWeek1Miles`. (3) Added interval parsing: `NxDISTANCE` in meters, km, or mi is converted to total miles. (4) Removed `font-semibold` from all rows; applied only to the key workout type.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`, `src/__tests__/lib/training-plan-generate.test.ts`
+
+---
+
 ## 2026-03-30 — Vague race dates not extracted; goal_distance_miles not updated on goal change
 
 **Type:** Bug Fix
