@@ -2295,6 +2295,12 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       if (data.strava_connected && !data.recent_race_distance_km && !data.easy_pace) {
         return "Almost there! I don't see any race results in your Strava yet. Do you have a recent race time (5K, 10K, half, marathon) or comfortable easy pace I can use to set your training zones? If not, just say nope and I'll estimate from your mileage.";
       }
+      // No Strava, race goal, no pace data yet — ask directly for a PR or easy pace
+      const NON_PACE_GOALS = ["general_fitness", "return_to_running", "injury_recovery", "cycling"];
+      const hasRaceGoal = data.goal && !NON_PACE_GOALS.includes(data.goal as string);
+      if (!data.strava_connected && hasRaceGoal && !data.recent_race_distance_km && !data.easy_pace) {
+        return "Almost there! Do you have a recent race time — 5K, 10K, half, marathon — or a comfortable easy pace I can use to set your training zones? If not, just say nope and I'll estimate from your mileage.";
+      }
       return "Almost there — anything else before I put this together? Target paces, cross-training, strength work — mention it now and I'll build it in. If not, just say nope!";
     }
 
