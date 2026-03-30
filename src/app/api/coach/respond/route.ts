@@ -318,6 +318,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
             skipLinkSms: true,
             prescribedWeek1Miles: (state?.weekly_mileage_target as number | null) ?? undefined,
             bRaces: bCRaces.length > 0 ? bCRaces : undefined,
+            // "my plan" is only triggered when there's no dashboard token yet — this is
+            // always a first-time plan generation, so start at week 1.
+            resetToWeek1: true,
           }
         ).catch(err => {
           console.error("[coach/respond] generateAndSaveFullPlan failed on my-plan request:", err);
@@ -654,7 +657,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     // Generate and save the full multi-week training arc, then text the dashboard link.
     // Pass B/C races so the arc enrichment Haiku can label those weeks appropriately.
     const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
-    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined });
+    // New plan from scratch at the end of onboarding — always start at week 1.
+    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true });
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
@@ -2407,7 +2411,9 @@ async function persistProfileUpdates(
           // Race moved further out — need more weeks than the existing arc has.
           // Do a full regeneration so the dashboard reflects the new plan correctly.
           const mergedProfile = { ...profile, ...profileUpdate };
-          await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, { skipLinkSms: true });
+          // Race date changed to a new, further-out date — this is a genuinely new plan
+          // for a different race, so reset to week 1.
+          await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, { skipLinkSms: true, resetToWeek1: true });
           console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, full plan regenerated (${planWeeks.length} → ${newTotalWeeks} weeks)`);
         } else {
           // Race moved closer — trim the existing arc.

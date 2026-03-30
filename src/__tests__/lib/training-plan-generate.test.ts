@@ -268,6 +268,32 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     expect(capturedUpdate).not.toHaveProperty("weekly_mileage_target");
   });
 
+  it("does NOT include current_week in the update when resetToWeek1 is false", async () => {
+    let capturedUpdate: Record<string, unknown> | null = null;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_state") {
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+          capturedUpdate = payload;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      { skipLinkSms: true, prescribedWeek1Miles: 20, resetToWeek1: false },
+    );
+
+    expect(capturedUpdate).not.toHaveProperty("current_week");
+    expect(capturedUpdate).toMatchObject({ weekly_mileage_target: 20 });
+  });
+
   it("scopes the training_state update to the correct user_id", async () => {
     let capturedEqUserId: unknown;
 

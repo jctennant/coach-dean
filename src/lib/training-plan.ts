@@ -40,7 +40,19 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false, prescribedWeek1Miles, bRaces }: { skipLinkSms?: boolean; prescribedWeek1Miles?: number; bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }> } = {},
+  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true }: {
+    skipLinkSms?: boolean;
+    prescribedWeek1Miles?: number;
+    bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }>;
+    /**
+     * Whether to reset training_state.current_week to 1.
+     * Set true (default) when this is a genuinely new plan — new race date, new goal,
+     * or first-time onboarding. The user is starting from scratch.
+     * Set false when regenerating mid-plan for the same race/goal (e.g. tweaking
+     * mileage targets) so the user stays on their current week.
+     */
+    resetToWeek1?: boolean;
+  } = {},
 ): Promise<string> {
   const raceDate = (profile?.race_date as string | null) ?? null;
   const goal = (profile?.goal as string | null) ?? null;
@@ -189,11 +201,10 @@ No other text.`,
     weeks: planWeeks as unknown as Json,
   });
 
-  // Reset current_week to 1 and sync weekly_mileage_target to match week 1 of the new plan.
-  // Always reset current_week when a full plan is (re)generated so the dashboard starts at week 1.
+  // Sync training_state: reset week counter if this is a new plan, optionally sync mileage target.
   await supabase.from("training_state")
     .update({
-      current_week: 1,
+      ...(resetToWeek1 ? { current_week: 1 } : {}),
       ...(prescribedWeek1Miles ? { weekly_mileage_target: prescribedWeek1Miles } : {}),
     })
     .eq("user_id", userId);
