@@ -672,6 +672,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       if (pendingExtracted) {
         await persistProfileUpdates(
           userId,
+          user.phone_number,
           pendingExtracted,
           originalProfile,
           (user.onboarding_data as Record<string, unknown>) || {},
@@ -2224,6 +2225,7 @@ Return {} if nothing new is present.`,
  */
 async function persistProfileUpdates(
   userId: string,
+  phoneNumber: string,
   extracted: ExtractedProfileData,
   profile: Record<string, unknown> | null,
   onboardingData: Record<string, unknown>,
@@ -2389,19 +2391,25 @@ async function persistProfileUpdates(
           (race.getTime() - monday.getTime()) / (7 * 24 * 60 * 60 * 1000)
         )));
         const planWeeks = (plan.weeks as unknown[]) ?? [];
-        // Trim if race moved closer; leave as-is if it moved further (can't generate new weeks without full regen)
-        const updatedWeeks = newTotalWeeks < planWeeks.length ? planWeeks.slice(0, newTotalWeeks) : planWeeks;
-
-        await supabase.from("training_plans")
-          .update({
-            race_date: newRaceDate,
-            total_weeks: updatedWeeks.length,
-            weeks: updatedWeeks as unknown as Json,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", plan.id as string);
-
-        console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, arc trimmed to ${updatedWeeks.length} weeks`);
+        if (newTotalWeeks > planWeeks.length) {
+          // Race moved further out — need more weeks than the existing arc has.
+          // Do a full regeneration so the dashboard reflects the new plan correctly.
+          const mergedProfile = { ...profile, ...profileUpdate };
+          await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, { skipLinkSms: true });
+          console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, full plan regenerated (${planWeeks.length} → ${newTotalWeeks} weeks)`);
+        } else {
+          // Race moved closer — trim the existing arc.
+          const updatedWeeks = planWeeks.slice(0, newTotalWeeks);
+          await supabase.from("training_plans")
+            .update({
+              race_date: newRaceDate,
+              total_weeks: updatedWeeks.length,
+              weeks: updatedWeeks as unknown as Json,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", plan.id as string);
+          console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, arc trimmed to ${updatedWeeks.length} weeks`);
+        }
       }
     }
   } catch (err) {

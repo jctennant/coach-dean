@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-30 — Dashboard not updated after race date pushed further out
+
+**Type:** Bug Fix
+**Reported by:** User (wife)
+**User feedback:** "Hm that doesn't look like it's updated with the 8 week 5k plan"
+**Root cause:** `persistProfileUpdates` only trimmed the existing plan arc when a race date changed; if the race moved *further* out (more weeks needed), the code explicitly left the plan as-is with a comment "can't generate new weeks without full regen." So when the user changed from an April 19 race to late May (~8 weeks), the dashboard still showed the old 3-week April plan.
+**Fix / Change:** When a race date change requires *more* weeks than the existing plan has, call `generateAndSaveFullPlan` with `skipLinkSms: true` to fully regenerate the plan arc in-place. The trimming path is unchanged. Added `phoneNumber` parameter to `persistProfileUpdates` to support this.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-30 — Fixed "my plan" keyword sending wrong response instead of plan link
 
 **Type:** Bug Fix
