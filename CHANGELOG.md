@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-30 — Fixed "my plan" keyword sending wrong response instead of plan link
+
+**Type:** Bug Fix
+**Reported by:** User (Ian)
+**User feedback:** Ian was told to reply "my plan" to get his dashboard link. When he did, Dean responded "Your training plan isn't ready yet — I'll send you a link once it's set up." — no link was sent.
+**Root cause:** Two issues: (1) The "my plan" keyword had no dedicated code path — it went through Claude as a normal user_message. Claude was told via fallback text that the link was unavailable and to have the user reply "my plan"... creating an infinite loop. (2) For users where `dashboard_token` was null (e.g. plan generation failed silently, or legacy users onboarded before this feature), there was no recovery path.
+**Fix / Change:** Added an early-exit handler for `user_message` triggers where the message exactly matches "my plan" (case-insensitive). This path bypasses Claude entirely and: (1) uses the existing `dashboard_token` if present, or (2) calls `generateAndSaveFullPlan()` to create the token for users who are missing one, then sends the link directly via SMS. Also converts `dashboardToken`/`dashboardUrl` from `const` to `let` so the newly generated token can flow through to Claude's context if needed.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-30 — Fixed hallucinated mile splits (km splits misread as mile splits)
 
 **Type:** Bug Fix
