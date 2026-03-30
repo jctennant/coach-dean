@@ -2200,7 +2200,7 @@ Extract ONLY explicitly stated NEW information:
   - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
 - Their location or timezone if explicitly mentioned (e.g. "I'm in Denver", "I live in Seattle", "I'm on Pacific time", "I'm in PST") → timezone as IANA string (e.g. "America/Denver", "America/Los_Angeles"). Only set if they are clearly stating where they are, not just mentioning a city in passing.
 - A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${todayDateStr}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
-- A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th") → race_date as "YYYY-MM-DD". Only set when athlete clearly states a specific race date. If month only, use first day of that month. Today is ${todayDateStr}.
+- A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th", "late May", "end of June") → race_date as "YYYY-MM-DD". Resolve vague phrases: "early [month]" → first Saturday of that month, "mid [month]" → Saturday nearest the 15th, "late [month]" or "end of [month]" → last Saturday of that month, month only → first Saturday of that month. Always use the next upcoming occurrence of that month. Today is ${todayDateStr}.
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip or swap.
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
@@ -2298,7 +2298,15 @@ async function persistProfileUpdates(
     if (hasRaceDate) profileUpdate.race_date = extracted.race_date;
     if (hasGoalTime) profileUpdate.goal_time_minutes = extracted.goal_time_minutes;
     if (hasTrainingDays) profileUpdate.training_days = extracted.updated_training_days;
-    if (hasGoalRaceType) profileUpdate.goal = extracted.goal_race_type;
+    if (hasGoalRaceType) {
+      profileUpdate.goal = extracted.goal_race_type;
+      const goalDistanceMap: Record<string, number> = {
+        "mile": 1.0, "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
+        "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
+      };
+      const dist = goalDistanceMap[extracted.goal_race_type as string];
+      if (dist) profileUpdate.goal_distance_miles = dist;
+    }
 
     // Build onboarding_data update
     const updatedOnboardingData = { ...onboardingData };

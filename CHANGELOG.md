@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-30 — Vague race dates not extracted; goal_distance_miles not updated on goal change
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (investigating dashboard not updating)
+**User feedback:** N/A
+**Root cause:** Two separate issues. (1) `extractProfileData` prompt only accepted specific dates or month-only; vague phrases like "late May" or "end of June" were intentionally excluded, so when a user or coach mentioned a vague race date it was silently dropped. (2) When a user changes their goal race type via SMS (e.g. "I'm doing a 5K now"), `persistProfileUpdates` updated `goal` but not `goal_distance_miles`, leaving it stale from the previous goal (e.g. a user who switched from 10K to 5K kept `goal_distance_miles = 6.214`).
+**Fix / Change:** (1) Extended the race_date extraction prompt to resolve vague phrases to concrete dates: "early [month]" → 5th, "mid [month]" → 15th, "late/end of [month]" → 25th, month-only → 1st. (2) Added `goal_distance_miles` sync to the `hasGoalRaceType` branch in `persistProfileUpdates` using the same distance map as onboarding.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-30 — Dashboard not updated after race date pushed further out
 
 **Type:** Bug Fix
