@@ -1,3 +1,78 @@
+# Coach Dean — Codebase Reference
+
+## Stack
+Next.js 14 App Router · Supabase (PostgreSQL) · Anthropic Claude · Linq SMS (iMessage-like) · Strava OAuth · Vercel
+
+## Core data flow
+
+```
+Web signup → POST /api/signup → SMS onboarding (multi-step via /api/onboarding/handle)
+                                      ↓ onboarding_step = null → initial_plan fires
+Strava OAuth → /api/auth/strava/callback → imports activities → sends SMS
+Strava webhook → /api/webhooks/strava → POST /api/coach/respond (trigger: post_run)
+Inbound SMS → /api/webhooks/linq → onboarding/handle (if onboarding_step set) or coach/respond
+Crons → POST /api/coach/respond (various triggers)
+```
+
+## Key files
+
+| File | Purpose |
+|---|---|
+| `src/app/api/coach/respond/route.ts` | Core coaching engine — all triggers, Claude calls, SMS send |
+| `src/app/api/onboarding/handle/route.ts` | Multi-step onboarding flow with Claude extractions |
+| `src/app/api/webhooks/strava/route.ts` | Strava activity events → stores activity → fires coach/respond |
+| `src/app/api/webhooks/linq/route.ts` | Inbound SMS routing |
+| `src/app/api/auth/strava/callback/route.ts` | Strava OAuth, activity import, welcome SMS |
+| `src/lib/strava.ts` | Strava API helpers (token refresh, activities, stats) |
+| `src/lib/linq.ts` | SMS send/receive, typing indicator |
+| `src/lib/paces.ts` | VDOT pace calculations |
+| `src/lib/periodization.ts` | Training week/phase/deload logic |
+| `src/lib/training-plan.ts` | Full multi-week plan generation |
+| `src/lib/plan-validation.ts` | Volume cap enforcement, session dedup |
+
+## DB tables
+
+| Table | Key columns |
+|---|---|
+| `users` | `phone_number`, `name`, `strava_athlete_id`, `strava_*_token`, `onboarding_step`, `onboarding_data` (JSON), `timezone`, `linq_chat_id` |
+| `training_profiles` | `race_date`, `goal`, `current_easy_pace`, `current_tempo_pace`, `current_interval_pace`, `preferred_units`, `injury_notes`, `proactive_cadence`, `training_days` |
+| `training_state` | `current_week`, `current_phase`, `weekly_mileage_target`, `weekly_plan_sessions` (JSON), `last_activity_date`, `taper_peak_miles` |
+| `training_plans` | `weeks` (JSON array of week objects), `total_weeks` — the full multi-week arc |
+| `activities` | `strava_activity_id`, `activity_type`, `distance_meters`, `average_pace`, `average_heartrate`, `workout_type` (1=race), `start_date`, `summary` (splits/laps JSON) |
+| `races` | `race_date`, `race_name`, `goal`, `priority` (A/B/C), `goal_time_minutes`, `goal_distance_miles` |
+| `conversations` | `role`, `content`, `message_type`, `strava_activity_id`, `created_at` |
+
+## Coach triggers (coach/respond)
+
+| Trigger | When |
+|---|---|
+| `post_run` | Strava activity webhook (fully onboarded user) |
+| `post_run_onboarding` | Strava activity webhook (user mid-onboarding) — lightweight early-exit path |
+| `initial_plan` | End of onboarding — sets `onboarding_step: awaiting_cadence` before calling Claude |
+| `weekly_recap` | Sunday cron — recaps week + builds next week plan |
+| `morning_plan` | Morning cron — today's workout |
+| `morning_reminder` | Morning cron for non-Strava or non-responding users |
+| `nightly_reminder` | Nightly cron |
+| `user_message` | Inbound SMS from onboarded user |
+| `workout_image` | Image upload path |
+
+## Onboarding steps (onboarding_step column)
+
+`awaiting_goal` → `awaiting_race_date` → `awaiting_schedule` → [`awaiting_ultra_background`] → [`awaiting_injury_background`] → `awaiting_anything_else` → `awaiting_cadence` → `null` (complete)
+
+`awaiting_strava` is a separate step handled by the Strava connect button, not by onboarding/handle. The OAuth callback advances the user from `awaiting_strava` → `awaiting_schedule`.
+
+## Patterns to know
+
+- **All proactive triggers** use `after()` to return 200 immediately, then process async — Vercel keeps the process alive after response
+- **`dry_run` mode** available on both coach/respond and onboarding/handle — skips SMS, still writes conversations, returns the message in the response body
+- **Activity dedup**: by `strava_activity_id` (upsert), plus near-dupe detection (±2 min start time, ±15% distance) and manual-dupe cleanup
+- **Typing indicators**: `startTyping()` called before each Claude call; a background loop refreshes every 4.5s for long generations
+- **Message splitting**: `splitIntoMessages()` breaks long coach responses into multiple SMS bubbles, each sent with a compose delay
+- **Tests**: vitest, all in `src/__tests__/`. Supabase and Anthropic are always mocked. Run with `npm test`.
+
+---
+
 # Claude Code Instructions — Changelog Maintenance
 ## Changelog Rule
 

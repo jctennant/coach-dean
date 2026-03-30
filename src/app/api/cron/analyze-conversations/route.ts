@@ -79,9 +79,26 @@ export async function GET(request: Request) {
   const analysisPrompt = `You are reviewing coaching conversations from an AI running coach called Coach Dean.
 Analyze the transcripts below from ${dateLabel} (${userCount} users, ${messages.length} messages total) and identify any issues.
 
+IMPORTANT — what Coach Dean has access to via Strava:
+- Activity data: distance, moving time, elapsed time, pace, elevation gain, sport type, start date/time
+- Per-mile splits (when synced): pace per mile
+- Lap data (when available): lap paces and durations
+- Heart rate (when athlete's device records it): average HR, max HR, HR by lap/split
+- Weekly mileage: computed live from Strava activity history
+- All-time and YTD stats: total distance, run count
+- Athlete profile: name, location, gear/shoes
+When Dean references any of the above with specific numbers, that is NOT a hallucination — it came from Strava.
+
+A true hallucination is when Dean invents data that Strava would not provide, such as:
+- Specific mile splits when splits were not synced (splits must come from device upload)
+- HR values when the athlete has no HR monitor
+- Lap details when no laps were recorded
+- Future run outcomes or specific numbers Dean couldn't know
+- Data about runs that didn't happen according to Strava
+
 Look for:
 1. **Coaching errors** — wrong paces, wrong distances, contradicting previous messages, bad advice
-2. **Data hallucinations** — Coach Dean referencing splits/HR/laps it doesn't have, inventing specific numbers
+2. **Data hallucinations** — Coach Dean inventing specific numbers that Strava would not provide (see above). Do NOT flag Dean citing run distance, pace, or weekly mileage as hallucinations — those come from Strava.
 3. **User complaints or corrections** — athlete saying "that's wrong", "no I said", "that's not right", expressing confusion
 4. **Onboarding friction** — users getting stuck, repeating themselves, giving up
 5. **Positive patterns** — interactions that went really well and should be preserved

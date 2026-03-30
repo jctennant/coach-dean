@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-29 — Fixed nightly analysis incorrectly flagging Strava data as hallucinations
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (nightly email review)
+**User feedback:** N/A
+**Root cause:** The `analyze-conversations` prompt told Claude to flag "Coach Dean referencing splits/HR/laps it doesn't have, inventing specific numbers" — but gave no context about what data Dean actually has. Claude saw Dean citing specific distances, paces, and weekly mileage (all pulled live from Strava) and flagged them as hallucinations.
+**Fix / Change:** Added an explicit section to the analysis prompt listing what Dean has access to via Strava (distance, pace, splits when synced, HR when device records it, weekly mileage, YTD stats, etc.) vs. what would be a true hallucination (inventing splits when not synced, HR without a monitor, etc.). The hallucination check is now scoped to actually-invented data only.
+**Files changed:** src/app/api/cron/analyze-conversations/route.ts
+
+---
+
 ## 2026-03-29 — Fixed morning reminder parroting "rest day" example when a run was discussed
 
 **Type:** Bug Fix
