@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-30 — Fixed leaked internal label and full plan not sent on user request
+
+**Type:** Bug Fix
+**Reported by:** User feedback (conversation screenshot)
+**User feedback:** "this looks like a big - leaked the discrepancy label and then didn't actually send the plan"
+**Root cause:** Two separate issues: (1) The output rules didn't explicitly forbid echoing internal `⚠️`-prefixed system-prompt directive labels, so Claude prefixed its response with "⚠️ GOAL DISCREPANCY DETECTED" — visible to the athlete. (2) When an athlete asked "send me my full plan", Claude responded "give me a sec and I'll build it out" then never sent it — because the `user_message` case lacked any instruction to output the plan directly, and `storedPlanAllWeeks` was never injected into the user message prompt.
+**Fix / Change:** (1) Added an explicit output rule: never echo `⚠️`-prefixed internal directive headers in responses. (2) Added `storedPlanAllWeeks` as a parameter to `buildUserMessage`, injected the full plan arc summary into the `user_message` prompt, and added a rule: when athlete asks for their full plan, output it immediately — never promise to send it later. Also raised `max_tokens` for `user_message` from 512 to 1000 to accommodate full plan responses.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-03-28 — Fixed TypeScript build error in handleSchedule (Vercel deploy)
 
 **Type:** Bug Fix

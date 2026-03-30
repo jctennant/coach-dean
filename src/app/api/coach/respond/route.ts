@@ -384,7 +384,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
   const timezoneConfirmed = !!(onboardingData.timezone_confirmed) || !!(user.strava_athlete_id); // Strava users get TZ from athlete profile
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -418,7 +418,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     // Plans can be longer (full week schedule); SMS triggers cap at 512 (SMS max ~640 chars ≈ 150 tokens)
-    max_tokens: (trigger === "initial_plan" || trigger === "weekly_recap") ? 800 : 512,
+    // user_message gets 1000 to handle full plan arc requests
+    max_tokens: (trigger === "initial_plan" || trigger === "weekly_recap") ? 800 : trigger === "user_message" ? 1000 : 512,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
     ...(shouldUseWebSearch
@@ -1721,6 +1722,7 @@ Your response is sent directly to the athlete as an SMS text message. Never incl
 - Draft versions or abandoned attempts ("I was going to say X but actually Y")
 - Meta-commentary about the plan ("I need to be smart here", "Given his history...")
 - Any commentary about discrepancies between what the system prompt says and what you know ("The system says X but I know X is actually Y...") — if you notice a data issue, proceed with what's in the system prompt and say nothing about it
+- Internal system-prompt instruction labels or warning headers — these are directives to you, not content the athlete should see. Examples: "⚠️ GOAL DISCREPANCY DETECTED", "⚠️ RECOVERY WEEK", "⚠️ MILEAGE TRACKING UNAVAILABLE". Never echo these labels or any ⚠️-prefixed directive header in your response.
 Do all reasoning silently before writing your final response. Output only the message the athlete should receive.
 
 CRITICAL — TRAINING PACES:
@@ -2365,7 +2367,8 @@ function buildUserMessage(
   periodization?: PeriodizationContext,
   storedPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
   storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
-  timezoneConfirmed = true
+  timezoneConfirmed = true,
+  storedPlanAllWeeks?: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -2465,9 +2468,14 @@ PLAN CONSISTENCY RULES — follow these exactly:
       const nextWeekContext = storedNextPlanWeek
         ? `Week ${storedNextPlanWeek.week_number} (next week): ${storedNextPlanWeek.mileage_target} mi target, long run ${storedNextPlanWeek.long_run_target} mi, key workout: ${storedNextPlanWeek.key_workout}`
         : null;
+      const fullPlanArc = storedPlanAllWeeks && storedPlanAllWeeks.length > 0
+        ? storedPlanAllWeeks.map(w => `Wk ${w.week_number} (${w.phase}): ~${w.mileage_target}mi, long run ~${w.long_run_target}mi, key: ${w.key_workout || "easy base"}`).join("\n")
+        : null;
       return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
 
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.
+
+FULL PLAN REQUESTS: If the athlete asks to see their full plan, full training arc, or all upcoming weeks — output it directly in this message. Do NOT say "give me a sec", "I'll send it over", or promise to send it later. You have the data right now; send it.${fullPlanArc ? `\n\nFULL TRAINING PLAN ARC (all weeks):\n${fullPlanArc}` : ""}
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for a easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
