@@ -1847,6 +1847,21 @@ ${(() => {
   })();
   const useMetricInner = profile?.preferred_units === "metric";
   const miInner = (miles: number) => useMetricInner ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
+  // Convert a stored min/mile pace to min/km for metric users.
+  // Paces are always stored as "M:SS/mi". For metric athletes the system prompt must
+  // show them in min/km so Claude never needs to convert them itself (a documented
+  // source of unit errors, e.g. 8:46/mi displayed as 14:07 without units).
+  const formatPaceForPrompt = (paceStr: string | null | undefined): string => {
+    if (!paceStr) return "TBD";
+    if (!useMetricInner) return paceStr; // already min/mile
+    const match = paceStr.match(/(\d+):(\d+)/);
+    if (!match) return paceStr;
+    const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+    const kmSec = Math.round(totalSec / 1.60934);
+    const min = Math.floor(kmSec / 60);
+    const sec = kmSec % 60;
+    return `${min}:${String(sec).padStart(2, "0")}/km`;
+  };
   const effectiveWeekDisplay = periodization?.effectiveWeek ?? (state?.current_week as number | null) ?? 1;
   const phaseDisplay = (periodization?.phase ?? (state?.current_phase as string | null) ?? "base");
   const phaseLabel = phaseDisplay.charAt(0).toUpperCase() + phaseDisplay.slice(1);
@@ -1860,8 +1875,9 @@ ${deloadBlock}${progressionLine}- Weekly mileage target (athlete baseline): ${ta
 ⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${mileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
-- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${profile?.current_tempo_pace || "TBD"}, Interval ${profile?.current_interval_pace || "TBD"}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
+- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${(() => { const stored = profile?.current_tempo_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.tempo ? `${formatPaceForPrompt(est.tempo)} (estimated from easy pace — no race data on file)` : "TBD"; })()}, Interval ${(() => { const stored = profile?.current_interval_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.interval ? `${formatPaceForPrompt(est.interval)} (estimated from easy pace — no race data on file)` : "TBD"; })()}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
 - RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
+- PACE SANITY CHECK: Before prescribing any tempo, threshold, or interval pace, verify it is faster (lower number) than the easy pace shown above. A tempo pace slower than or within 30 sec/mile of the easy pace is wrong — use the stored Tempo value instead. Always include the unit (e.g. "/mi" or "/km") on every pace prescription.
 - RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}`;
@@ -2407,14 +2423,25 @@ function buildUserMessage(
                   // Filter out paused-device splits (pace > 20 min/mile = clearly not running).
                   // These appear when the athlete forgets to stop Strava, creating a wildly-slow
                   // final partial split that Claude then flags as a concerning anomaly.
-                  splits: rawSummary.splits
-                    ?.map(s => transformSplitForClaude(s as Record<string, unknown>))
-                    .filter(s => {
-                      const pace = s.pace as string | null;
-                      if (!pace) return true;
-                      const mins = parseInt(pace.split(":")[0], 10);
-                      return isNaN(mins) || mins < 20;
-                    }),
+                  // NOTE: We use splits_metric (one per km, not per mile). Add a cumulative_miles
+                  // field to each split so Claude knows the actual position in the run. This
+                  // prevents Claude from misreading the split index as a "mile number" — e.g. a
+                  // 3.1mi (5K) run has 5 km splits, and without this Claude says "mile 5".
+                  splits: (() => {
+                    let cumulativeMiles = 0;
+                    return rawSummary.splits
+                      ?.map(s => transformSplitForClaude(s as Record<string, unknown>))
+                      .filter(s => {
+                        const pace = s.pace as string | null;
+                        if (!pace) return true;
+                        const mins = parseInt(pace.split(":")[0], 10);
+                        return isNaN(mins) || mins < 20;
+                      })
+                      .map(s => {
+                        cumulativeMiles += (s.distance_miles as number) || 0;
+                        return { ...s, cumulative_miles: Math.round(cumulativeMiles * 100) / 100 };
+                      });
+                  })(),
                   laps: rawSummary.laps?.map(s => transformSplitForClaude(s as Record<string, unknown>)),
                 }
               : null,
@@ -2428,10 +2455,19 @@ function buildUserMessage(
       const hasSplits = !!(rawSummary?.splits && (rawSummary.splits as unknown[]).length > 0);
       const hasLaps = !!(rawSummary?.laps && (rawSummary.laps as unknown[]).length > 0);
       const hasHR = !!(activityData?.average_heartrate != null);
+      const runDistanceMiles = activityData?.distance_meters != null
+        ? (activityData.distance_meters as number) / 1609.34
+        : null;
+      const splitCount = (activityForClaude as { summary?: { splits?: unknown[] } })?.summary?.splits?.length ?? 0;
       const dataGuards: string[] = [];
       if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
       if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT invent or estimate lap paces or lap-by-lap effort.");
       if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference specific HR values.");
+      // Guard against km-split confusion: splits_metric produces one entry per km, so a
+      // 3.1mi (5K) run has 5 splits. Without this guard Claude says "mile 5" for a 3.1mi run.
+      if (hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
+        dataGuards.push(`SPLIT UNIT WARNING: This run is ${runDistanceMiles.toFixed(2)} miles but has ${splitCount} split entries — the splits are per-kilometer, not per-mile. Each split's "cumulative_miles" field shows its actual position in the run. NEVER reference "mile ${splitCount}" or any mile number beyond ${Math.ceil(runDistanceMiles)} — that mile does not exist in this run. Use cumulative_miles to describe position (e.g. "around mile 2.5" or "in the final stretch").`);
+      }
       const dataGuardBlock = dataGuards.length > 0
         ? `\nDATA AVAILABILITY GUARD — the following data is NOT present; do not fabricate it:\n${dataGuards.map(g => `- ${g}`).join("\n")}`
         : "";
@@ -2444,7 +2480,7 @@ function buildUserMessage(
 CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 8:12/mi avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
 
 DATA GLOSSARY for the details below:
-- summary.splits: auto-generated by Strava, one entry per mile. Shows pace for each mile of the run.
+- summary.splits: auto-generated by Strava, one entry per kilometer (NOT per mile). Each entry includes a "cumulative_miles" field showing how far into the run that split ends. Use cumulative_miles to describe position — do NOT treat the array index or the "split" field as a mile number. For a 3.1mi run there will be ~5 km splits; calling the last one "mile 5" is wrong.
 - summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown.
 - All paces are min/mile. Elevation in feet. Distances in miles.${dataGuardBlock}
 
@@ -2615,6 +2651,7 @@ SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate.
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
+TOTAL LINE FORMAT: The Total line must show ONLY the sum of the planned future sessions. Never write "Total: X mi + your Y mi already this week" — that is confusing and misleading. If the athlete has already run some miles this week and you want to acknowledge it, do so in a separate sentence outside the session list (e.g. "Note: you've already got X mi in your legs this week."). Never combine planned and already-completed miles in the same Total line.
 ⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.`;
     }
     case "workout_image":
@@ -2679,6 +2716,7 @@ SPORT-SPECIFIC GUIDANCE:
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
+TOTAL LINE FORMAT: The Total line must show ONLY the sum of the planned future sessions. Never write "Total: X mi + your Y mi already this week" — that is confusing and misleading. If the athlete has already run some miles this week and you want to acknowledge it, do so in a separate sentence outside the session list. Never combine planned and already-completed miles in the same Total line.
 ⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.
 
 SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days if the athlete has requested them.
@@ -2687,7 +2725,7 @@ SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed
 DATES AND DAY LABELS:
 - CRITICAL: Use the day names from DATE CONTEXT above — do not compute weekdays yourself. DATE CONTEXT lists tomorrow and the next 7 days with correct day names. Copy them directly. "Wed, Mar 11" → use "Wed 3/11". Getting these wrong destroys trust.
 - Start the plan from tomorrow or later — do not add a session for today.
-- If "Mileage so far this week" in CURRENT TRAINING STATE is > 0, acknowledge it in the first bubble ("You've already got X miles in this week") and factor it into the weekly total. Do not ignore it.
+- If "Mileage so far this week" in CURRENT TRAINING STATE is > 0, acknowledge it in the first bubble with a separate sentence — e.g. "You've already got X miles in this week." DO NOT add those miles to the Total line. The Total line must equal ONLY the sum of the planned future sessions you are prescribing. Never write "Total: X mi + your Y mi already this week" — that format is confusing and implies a combined 65-mile week when you mean 28 miles of new work. If the current week's mileage is already very high relative to the athlete's normal weekly target (e.g. they ran a long race mid-week), flag the overload risk explicitly rather than silently stacking more miles on top.
 
 B/C RACE PLANNING (if B or C races appear in DATE CONTEXT above):
 - The arc orientation should mention B races as tune-up checkpoints — e.g. "The Dipsea in June serves as a great fitness check before the Sierre Zinal build." Do NOT ignore them.

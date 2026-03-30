@@ -4,6 +4,45 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-30 — Fixed hallucinated mile splits (km splits misread as mile splits)
+
+**Type:** Bug Fix
+**Reported by:** Internal QA observation
+**User feedback:**
+User 5caa7571: "Saw it come through — 3.1mi at 7:59/mi avg. That's a sharp effort: started controlled at 8:29, then got progressively faster each mile down to 7:19 in mile 5." (3.1mi run cannot have a mile 5)
+User 58a1d122: "Saw it come through — 4mi, avg HR 159, splits held steady around 9:30-10:15/mi through mile 5, then you slowed to 12:02 on mile 6." (4mi run cannot have a mile 6)
+**Root cause:** The code stores `splits_metric` from Strava (one entry per kilometer, not per mile). The data glossary told Claude "one entry per mile," so Claude treated split index as mile number. A 3.1mi (5K) run has 5 km splits; Claude called the last one "mile 5." A 4mi run has ~6-7 km splits; Claude referenced "mile 5" and "mile 6." No actual hallucination — the split data was real, just misidentified as mile splits.
+**Fix / Change:**
+- Added `cumulative_miles` field to each split entry (running total of distance in miles as each km split ends). Claude now has the actual position in the run, not just an array index.
+- Updated data glossary to correctly describe splits as "one entry per kilometer — use cumulative_miles for position, do NOT treat the split index as a mile number."
+- Added dynamic DATA AVAILABILITY GUARD: when splitCount > ceil(runDistanceMiles) + 1, injects an explicit warning naming the actual run distance, the split count, and a hard rule against referencing any mile number beyond the actual run distance.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-03-30 — Fixed tempo pace unit errors and weekly mileage Total line format
+
+**Type:** Bug Fix
+**Reported by:** Internal QA observation
+**User feedback:**
+Issue 1 (ae993f7b): "Wed 4/1 · Tempo 5mi (1mi warmup, 3mi @ 14:07, 1mi cooldown)" — 14:07 is slower than the athlete's easy pace of 10:12/mi. Either Dean prescribed the pace in min/km (14:07/km ≈ 8:46/mi) without labeling it, or it was an outright error.
+Issue 2 (2426e277): "Total: 28 mi + your 37 mi already this week" — confusing additive format implies a 65-mile week when Dean meant 28 miles of future sessions. Also failed to flag overtraining risk.
+
+**Root cause (Issue 1):** In the system prompt, easy pace was displayed via `easyPaceRange()` (which converts to min/km for metric users) but tempo and interval paces were injected verbatim from the DB (always min/mile). For metric users, Claude saw mixed units and attempted its own conversion — a documented error source. For athletes with no stored tempo pace, the system showed "Tempo TBD" and instructed Claude to derive paces from Strava, leaving it unconstrained and prone to unit confusion and invented values.
+
+**Root cause (Issue 2):** The `initial_plan` prompt instruction said "factor [completed miles] into the weekly total" — Claude interpreted this literally by writing "Total: X mi + your Y mi" instead of keeping them separate. The same risk existed in the `weekly_recap` MILEAGE ACCURACY block which had no explicit prohibition on the additive format.
+
+**Fix / Change:**
+- Added `formatPaceForPrompt()` helper that converts stored min/mile paces to min/km for metric athletes before injection into the system prompt — Claude now receives pre-converted values and never needs to convert units itself.
+- When `current_tempo_pace` or `current_interval_pace` is null, fall back to `estimatePacesFromEasyPace()` and show the estimated value with "(estimated from easy pace — no race data on file)" label, so Claude always has a concrete number to anchor to.
+- Added "PACE SANITY CHECK" rule to the system prompt: any prescribed tempo/interval pace must be faster than the stored easy pace; if not, use the stored Tempo value instead. All pace prescriptions must include the unit.
+- Rewrote the `initial_plan` "mileage so far" instruction: completed miles must be acknowledged in a separate sentence; the Total line shows ONLY planned future sessions; never write "Total: X mi + Y mi already this week"; if current week mileage is very high relative to target, flag the overload risk explicitly.
+- Added explicit "TOTAL LINE FORMAT" rule to both `weekly_recap` and `initial_plan` MILEAGE ACCURACY sections.
+
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-03-30 — Fixed leaked internal label and full plan not sent on user request
 
 **Type:** Bug Fix
