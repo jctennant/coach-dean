@@ -371,6 +371,109 @@ describe("POST /api/webhooks/linq — message routing", () => {
     expect(sendSMS).not.toHaveBeenCalled();
   });
 
+  it("'my plan' with token: sends link immediately, skips coach/respond", async () => {
+    mockTables({
+      conversations: [
+        { data: null, error: null },           // dedup check → no existing
+        { data: { id: "conv-001" }, error: null }, // insert storedMsg
+      ],
+      users: {
+        data: {
+          id: "user-001", onboarding_step: null, timezone: "America/New_York",
+          linq_chat_id: "chat-abc", messaging_opted_out: false,
+          reengagement_sent_at: null, strava_athlete_id: "12345",
+          dashboard_token: "tok-abc123",
+        },
+        error: null,
+      },
+    });
+
+    const req = makeRequest("+12025551234", "my plan");
+    await POST(req);
+    await flush();
+
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025551234",
+      expect.stringContaining("http://localhost:3000/dashboard?token=tok-abc123")
+    );
+    expect(global.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("coach/respond"),
+      expect.anything()
+    );
+  });
+
+  it("'my plan' case-insensitive variants all send the link", async () => {
+    for (const variant of ["My plan", "MY PLAN", "my training plan", "My Training Plan"]) {
+      vi.clearAllMocks();
+      afterQueue.splice(0);
+      mockTables({
+        conversations: [
+          { data: null, error: null },
+          { data: { id: "conv-001" }, error: null },
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null,
+            dashboard_token: "tok-xyz",
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", variant);
+      await POST(req);
+      await flush();
+
+      expect(sendSMS).toHaveBeenCalledWith(
+        "+12025551234",
+        expect.stringContaining("tok-xyz")
+      );
+    }
+  });
+
+  it("'my plan' with no token: falls through to coach/respond instead of dead-end message", async () => {
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        conversations: [
+          { data: null, error: null },           // dedup check
+          { data: { id: "conv-001" }, error: null }, // insert storedMsg
+          { data: { id: "conv-001" }, error: null }, // debounce latest-msg check
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null,
+            dashboard_token: null, // no token yet
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", "my plan");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await flushPromise;
+
+      // Should NOT send the old dead-end message
+      expect(sendSMS).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringMatching(/isn't ready yet/i)
+      );
+      // Should fall through to coach/respond for plan generation
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.objectContaining({ method: "POST" })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("skips duplicate messages (same external_message_id)", async () => {
     mockTables({
       // Dedup check returns an existing message → early return

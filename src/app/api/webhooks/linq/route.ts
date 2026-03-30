@@ -404,17 +404,19 @@ async function handleInboundMessage(
     return;
   }
 
-  // Detect "my plan" / "my training plan" — exact match only to avoid false positives
+  // Detect "my plan" / "my training plan" — exact match only to avoid false positives.
+  // If token exists, send immediately. If missing, fall through to coach/respond which
+  // will call generateAndSaveFullPlan to regenerate it — don't send a dead-end "not ready" message.
   const isDashboardIntent = /^(my plan|my training plan)$/i.test(body.trim());
   if (isDashboardIntent) {
     const token = user.dashboard_token as string | null;
-    if (!token) {
-      await sendAndStore(user.id, senderPhone, "Your training plan isn't ready yet — I'll send you a link once it's set up.", messageId);
-    } else {
+    if (token) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
       await sendAndStore(user.id, senderPhone, `Here's your training plan:\n${appUrl}/dashboard?token=${token}`, messageId);
+      return;
     }
-    return;
+    // Token missing — fall through to the debounce + coach/respond path, which will
+    // regenerate the token and send the link.
   }
 
   // Coaching flow: debounce 10 seconds so rapid multi-part messages are batched
