@@ -2375,6 +2375,20 @@ async function persistProfileUpdates(
         : Promise.resolve(),
     ]);
 
+    // When goal race type changed, sync the A race row so the dashboard shows consistent info.
+    if (hasGoalRaceType) {
+      const goalDistanceMap: Record<string, number> = {
+        "mile": 1.0, "5k": 3.107, "10k": 6.214, "half_marathon": 13.109, "marathon": 26.219,
+        "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
+      };
+      const newGoal = extracted.goal_race_type as string;
+      const newDist = goalDistanceMap[newGoal] ?? null;
+      await supabase.from("races")
+        .update({ goal: newGoal, ...(newDist !== null ? { goal_distance_miles: newDist } : {}) })
+        .eq("user_id", userId)
+        .eq("priority", "A");
+    }
+
     // When the race date changed, propagate it to the races table (A race) and the
     // training plan arc so the dashboard countdown and week count stay accurate.
     if (hasRaceDate && extracted.race_date) {

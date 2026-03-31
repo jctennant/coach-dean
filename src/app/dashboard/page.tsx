@@ -335,8 +335,10 @@ export default async function DashboardPage({
           </div>
         </div>
 
-        {/* Upcoming races */}
-        {upcomingRaces.length > 0 && (
+        {/* Upcoming races — only show when there are multiple races (B/C alongside A).
+            A single race is already represented by the header countdown, so the section
+            would just be redundant. */}
+        {upcomingRaces.length > 1 && (
           <UpcomingRaces races={upcomingRaces} />
         )}
 
