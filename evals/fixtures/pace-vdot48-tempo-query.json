@@ -1,0 +1,39 @@
+{
+  "id": "pace-vdot48-tempo-query",
+  "description": "VDOT 48 athlete asks what pace to run their tempo workout — should match stored VDOT 48 tempo pace",
+  "category": "pace_accuracy",
+  "trigger": "user_message",
+  "user": {
+    "name": "Dana",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Denver Marathon",
+    "goal_race_date": "2026-10-18",
+    "goal_time_minutes": null,
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 40,
+    "miles_logged_this_week": 9.0,
+    "runs_this_week": 1,
+    "recent_activities": [
+      { "date": "2026-03-24", "type": "Run", "distance_miles": 8.0, "pace": "9:10/mi" },
+      { "date": "2026-03-21", "type": "Run", "distance_miles": 6.0, "pace": "9:05/mi" },
+      { "date": "2026-03-19", "type": "Run", "distance_miles": 12.0, "pace": "9:20/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "I have a tempo run today — what pace should I be hitting?",
+  "ground_truth": {
+    "correct_tempo_pace": "7:13/mi",
+    "correct_easy_pace_range": "9:00–9:30/mi",
+    "vdot": 48,
+    "notes": "Response must state tempo pace as 7:13/mi (or very close). Must NOT state a pace slower than or near the easy pace. Must include /mi unit."
+  }
+}

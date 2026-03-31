@@ -1,0 +1,40 @@
+{
+  "id": "pace-vdot55-easy-long-run",
+  "description": "VDOT 55 athlete asks what pace for their long run — should get 8:05-8:35/mi easy range",
+  "category": "pace_accuracy",
+  "trigger": "user_message",
+  "user": {
+    "name": "Alex",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Los Angeles Marathon",
+    "goal_race_date": "2027-03-14",
+    "goal_time_minutes": 185,
+    "current_week": 12,
+    "current_phase": "peak",
+    "vdot": 55,
+    "easy_pace": "8:06/mi",
+    "tempo_pace": "6:28/mi",
+    "interval_pace": "5:49/mi",
+    "training_days": ["monday", "tuesday", "thursday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 55,
+    "miles_logged_this_week": 22.0,
+    "runs_this_week": 3,
+    "recent_activities": [
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 8.0, "pace": "8:15/mi" },
+      { "date": "2026-03-29", "type": "Run", "distance_miles": 6.0, "pace": "8:10/mi" },
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 8.0, "pace": "8:20/mi" },
+      { "date": "2026-03-26", "type": "Run", "distance_miles": 16.0, "pace": "8:25/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "18 miler Sunday — what should my target pace be?",
+  "ground_truth": {
+    "correct_easy_pace_range": "8:05–8:35/mi",
+    "correct_easy_pace_stored": "8:06/mi",
+    "vdot": 55,
+    "notes": "Response must prescribe easy pace in the 8:05-8:35/mi range (or thereabouts). For a long run, this is the correct zone. Must NOT prescribe tempo or marathon pace as the long run effort."
+  }
+}

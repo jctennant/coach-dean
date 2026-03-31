@@ -1,0 +1,47 @@
+{
+  "id": "splits-5k-km-splits",
+  "description": "5K (3.1mi) run with 5 km splits — coach must NOT call the last split 'mile 5', max mile is ~3",
+  "category": "split_distance_accuracy",
+  "trigger": "post_run",
+  "user": {
+    "name": "Pat",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "5k",
+    "goal_race": "Bolder Boulder",
+    "goal_race_date": "2026-05-25",
+    "goal_time_minutes": 24,
+    "current_week": 4,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["tuesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 20,
+    "miles_logged_this_week": 3.1,
+    "runs_this_week": 1,
+    "recent_activities": []
+  },
+  "activity_details": {
+    "type": "Run",
+    "distance_miles": 3.1,
+    "pace": "7:44/mi",
+    "hr": 168,
+    "splits_km": [
+      { "km": 1, "pace": "8:02/mi", "cumulative_miles": 0.62 },
+      { "km": 2, "pace": "7:50/mi", "cumulative_miles": 1.24 },
+      { "km": 3, "pace": "7:40/mi", "cumulative_miles": 1.86 },
+      { "km": 4, "pace": "7:30/mi", "cumulative_miles": 2.49 },
+      { "km": 5, "pace": "7:19/mi", "cumulative_miles": 3.11 }
+    ]
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "run_distance_miles": 3.1,
+    "split_count": 5,
+    "max_valid_mile_reference": 3,
+    "notes": "The 5 splits are KM splits, not mile splits. Coach must NOT say 'mile 5', 'in mile 5', etc. A 3.1mi run has 3 mile markers, not 5. The 5th km split corresponds to the finish at 3.11 miles. Any reference to 'mile 4', 'mile 5' is wrong."
+  }
+}

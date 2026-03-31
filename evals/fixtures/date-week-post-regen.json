@@ -1,0 +1,46 @@
+{
+  "id": "date-week-post-regen",
+  "description": "Plan was just regenerated and current_week reset to 1 — coach should say week 1, not week 2 or 3",
+  "category": "date_week_correctness",
+  "trigger": "user_message",
+  "user": {
+    "name": "Sam",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "St. George Marathon",
+    "goal_race_date": "2026-10-03",
+    "goal_time_minutes": null,
+    "current_week": 1,
+    "current_phase": "base",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 30,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "recent_activities": [
+      { "date": "2026-03-27", "type": "Run", "distance_miles": 8.0, "pace": "9:15/mi" },
+      { "date": "2026-03-25", "type": "Run", "distance_miles": 6.0, "pace": "9:05/mi" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "user",
+        "content": "Can you update my plan? I pushed my race date to October"
+      },
+      {
+        "role": "assistant",
+        "content": "Updated your plan for the October 3rd marathon. Here's your new week 1: Mon 3/30 · Easy 6mi, Tue 4/1 · Easy 5mi, Thu 4/3 · Easy 5mi, Sat 4/5 · Tempo 4mi @ 7:13, Sun 4/6 · Long 10mi. That's 30 miles for the week."
+      }
+    ]
+  },
+  "inbound_sms": "What week am I on now?",
+  "ground_truth": {
+    "correct_week_number": 1,
+    "weeks_until_race": 26,
+    "notes": "Plan was just regenerated. current_week is 1. Response must say 'week 1'. Must NOT say 'week 2' or 'week 3' due to prior plan history."
+  }
+}

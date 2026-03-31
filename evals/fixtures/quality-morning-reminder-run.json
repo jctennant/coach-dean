@@ -1,0 +1,47 @@
+{
+  "id": "quality-morning-reminder-run",
+  "description": "Morning reminder where prior night's conversation confirmed a long run today — must say 'run today' not 'rest day today as we discussed'",
+  "category": "response_quality",
+  "trigger": "morning_reminder",
+  "user": {
+    "name": "Ian",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Colfax Half Marathon",
+    "goal_race_date": "2026-05-17",
+    "goal_time_minutes": null,
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "tuesday", "thursday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 38,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "recent_activities": [
+      { "date": "2026-03-26", "type": "Run", "distance_miles": 6.0, "pace": "9:15/mi" },
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 8.0, "pace": "9:10/mi" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "content": "Good plan — go for that 12-miler Monday morning at easy pace, around 9:00-9:30/mi. Solid week ahead."
+      },
+      {
+        "role": "user",
+        "content": "Sounds good, I'll do the long run Monday morning"
+      }
+    ]
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "today_is": "Monday March 30",
+    "scheduled_workout": "12mi long run",
+    "forbidden_phrases": ["rest day", "day off", "no run today"],
+    "notes": "The prior evening conversation explicitly confirmed a 12-mile long run on Monday (today). The morning reminder must reference today's long run — NOT say 'rest day today as we discussed last night' or any rest-day phrasing. The coach example prompt had a rest day example that caused Claude to anchor on it even when a run was planned."
+  }
+}

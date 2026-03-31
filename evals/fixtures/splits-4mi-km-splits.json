@@ -1,0 +1,49 @@
+{
+  "id": "splits-4mi-km-splits",
+  "description": "4mi run with 6-7 km splits — coach must NOT reference 'mile 5' or 'mile 6', max is mile 4",
+  "category": "split_distance_accuracy",
+  "trigger": "post_run",
+  "user": {
+    "name": "Riley",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "10k",
+    "goal_race": "Chicago 10K",
+    "goal_race_date": "2026-06-14",
+    "goal_time_minutes": null,
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:35/mi",
+    "interval_pace": "6:50/mi",
+    "training_days": ["monday", "wednesday", "friday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 25,
+    "miles_logged_this_week": 4.0,
+    "runs_this_week": 1,
+    "recent_activities": []
+  },
+  "activity_details": {
+    "type": "Run",
+    "distance_miles": 4.0,
+    "pace": "9:30/mi",
+    "hr": 152,
+    "splits_km": [
+      { "km": 1, "pace": "9:45/mi", "cumulative_miles": 0.62 },
+      { "km": 2, "pace": "9:38/mi", "cumulative_miles": 1.24 },
+      { "km": 3, "pace": "9:30/mi", "cumulative_miles": 1.86 },
+      { "km": 4, "pace": "9:25/mi", "cumulative_miles": 2.49 },
+      { "km": 5, "pace": "9:20/mi", "cumulative_miles": 3.11 },
+      { "km": 6, "pace": "12:02/mi", "cumulative_miles": 3.73 },
+      { "km": 7, "pace": "12:30/mi", "cumulative_miles": 4.00 }
+    ]
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "run_distance_miles": 4.0,
+    "split_count": 7,
+    "max_valid_mile_reference": 4,
+    "notes": "The 7 splits are KM splits. The run is 4 miles. Coach must NOT say 'mile 5', 'mile 6', 'mile 7'. Valid mile references are 1, 2, 3, 4. The slowdown at splits 6-7 (cumulative 3.73-4.00 miles) is near the end — should be described as slowing at the finish, not as 'mile 5' or 'mile 6'."
+  }
+}

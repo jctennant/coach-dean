@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-31 — LLM-as-judge eval harness
+
+**Type:** Infra
+**Reported by:** Internal (Jake)
+**User feedback:** N/A
+**Root cause:** No automated way to score Coach Dean's response quality or catch regressions in factual accuracy (mileage, paces, split references, date/week correctness).
+**Fix / Change:** Created `/evals/` eval harness. 18 fixtures covering 6 bug categories extracted from the changelog. Runner builds a realistic system prompt from fixture data, calls Claude Sonnet for the coaching response, then calls Claude Opus as judge. Exits 1 if any fixture scores below 7. `score-report.mjs` diffs two result files to show regressions/improvements. Added `npm run eval` script.
+**Files changed:** `evals/run-evals.mjs`, `evals/score-report.mjs`, `evals/judges/factual-accuracy.mjs`, `evals/fixtures/*.json` (18 files), `package.json`, `.gitignore`
+
+---
+
 ## 2026-03-30 — Dashboard week number wrong after plan regen; mileage arc too low; interval mileage not parsed; bolding inconsistent
 
 **Type:** Bug Fix

@@ -112,6 +112,60 @@ The GH Actions workflow runs `npm test` on every push. A commit that breaks test
 
 ---
 
+## Eval Harness (`/evals/`)
+
+`npm run eval` — run LLM-as-judge quality checks on Coach Dean's responses. Not part of CI (expensive); run manually before significant prompt changes.
+
+### What the evals test
+
+Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound SMS. The runner (`evals/run-evals.mjs`) builds a realistic coaching system prompt from the fixture data, calls Claude Sonnet for the response, then calls Claude Opus as the judge. Results go to `evals/results/` (gitignored).
+
+**18 fixtures across 6 categories:**
+
+| Category | What it catches | Fixture count |
+|---|---|---|
+| `mileage_accuracy` | Wrong weekly total, hallucinated mileage, deload week target errors | 4 |
+| `pace_accuracy` | Wrong VDOT-derived pace, unit errors (min/km vs min/mile), tempo slower than easy | 4 |
+| `split_distance_accuracy` | Coach says "mile 5" on a 3.1mi run — km splits misread as mile splits | 3 |
+| `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 3 |
+| `mileage_format` | Additive total format ("Total: 25mi + your 15mi already") | 2 |
+| `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed | 2 |
+
+**Current baseline (2026-03-31):** 15/18 passing, avg 8.7/10. Three known failures represent real Dean response quality issues being tracked:
+- `pace-vdot52-post-run-easy` — Claude sums recent activities for week mileage instead of using the authoritative figure
+- `format-weekly-recap-clean-total` — Claude states 43mi target but only plans 34mi of sessions
+- `splits-10k-progression` — Claude states weekly total that ignores miles already logged
+
+### When to update evals
+
+**Update a fixture's `ground_truth`** when you change intentional behavior — e.g. if the mileage format changes deliberately, update what "correct" means.
+
+**Add a new fixture** when a user reports a factual error in a response: extract the user's context (week, VDOT, miles), recreate it as a fixture, and add it to catch regressions of that specific bug.
+
+**Do NOT update a fixture to make a failing test pass** by loosening the criteria — that defeats the purpose. If Dean's response is wrong, fix the prompt in `coach/respond/route.ts`, then re-run evals to confirm improvement.
+
+### How the runner works (architecture note)
+
+The runner builds the system prompt directly from fixture JSON — it does **not** call the live Next.js route or Supabase. This makes it a standalone tool with no running-server dependency. The tradeoff: it mirrors the prompt-building logic in `route.ts` rather than importing it. If you add a major new section to `buildSystemPrompt` (e.g. a new guard block that changes model behavior for a category), add the equivalent injection to `buildEvalSystemPrompt` in `evals/run-evals.mjs` so the evals stay realistic.
+
+Key parity points to maintain between `route.ts` and `run-evals.mjs`:
+- VDOT pace formula and easy-pace display range (`paceAtVDOTPct`, `easyPaceRange`)
+- Next-7-days date mapping (weekday ↔ calendar date)
+- The km-split DATA GUARD injection (`splitCount > ceil(miles) + 1`)
+- ⚠️ RECOVERY WEEK block (injected when `current_week % 4 === 0 && phase !== taper/peak`)
+- Mileage accuracy rules block (no additive totals)
+
+### Score report / diff
+
+```bash
+node evals/score-report.mjs                              # compare two most recent runs
+node evals/score-report.mjs results/run-A.json results/run-B.json
+```
+
+Exits 1 if regressions detected, so this can gate a deploy if needed.
+
+---
+
 ## Database Schema Rule
 
 Whenever a DB migration is needed (new column, table, index, etc.):

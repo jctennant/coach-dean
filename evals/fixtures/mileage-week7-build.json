@@ -1,0 +1,47 @@
+{
+  "id": "mileage-week7-build",
+  "description": "Week 7 of 18 build phase, no miles logged yet this week, asks about the plan",
+  "category": "mileage_accuracy",
+  "trigger": "user_message",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-10-11",
+    "goal_time_minutes": 210,
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:35/mi",
+    "interval_pace": "6:50/mi",
+    "training_days": ["tuesday", "thursday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 44,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "recent_activities": [
+      { "date": "2026-03-24", "type": "Run", "distance_miles": 9.0, "pace": "9:30/mi" },
+      { "date": "2026-03-26", "type": "Run", "distance_miles": 4.0, "pace": "9:20/mi" },
+      { "date": "2026-03-27", "type": "Run", "distance_miles": 14.0, "pace": "9:50/mi" },
+      { "date": "2026-03-29", "type": "Run", "distance_miles": 7.0, "pace": "9:45/mi" }
+    ],
+    "recent_conversation": [],
+    "plan_sessions_remaining": [
+      { "day": "Tuesday", "date": "Mar 31", "label": "10mi easy @ 9:30-10:00/mi" },
+      { "day": "Thursday", "date": "Apr 2", "label": "12mi with 6mi tempo @ 7:35/mi" },
+      { "day": "Friday", "date": "Apr 3", "label": "6mi easy" },
+      { "day": "Sunday", "date": "Apr 5", "label": "16mi long run @ 9:50-10:10/mi" }
+    ]
+  },
+  "inbound_sms": "What's the plan for this week?",
+  "ground_truth": {
+    "correct_weekly_mileage_target": 44,
+    "miles_logged_this_week": 0,
+    "prior_week_total": 34,
+    "planned_sessions_miles": 44,
+    "notes": "Response must reference 44 miles as this week's target (10+12+6+16=44). Last week (Mar 23-29) total was 34mi (9+4+14+7). Must NOT fabricate a different prior week total or sum multiple weeks."
+  }
+}

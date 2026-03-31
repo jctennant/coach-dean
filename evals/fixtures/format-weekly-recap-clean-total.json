@@ -1,0 +1,41 @@
+{
+  "id": "format-weekly-recap-clean-total",
+  "description": "Weekly recap where coach should give a clean single Total line — not 'Total: 28mi + your 37mi already'",
+  "category": "mileage_format",
+  "trigger": "weekly_recap",
+  "user": {
+    "name": "Sam",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "St. George Marathon",
+    "goal_race_date": "2026-10-03",
+    "goal_time_minutes": null,
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 40,
+    "miles_logged_this_week": 37.0,
+    "runs_this_week": 5,
+    "recent_activities": [
+      { "date": "2026-03-23", "type": "Run", "distance_miles": 6.0, "pace": "9:15/mi" },
+      { "date": "2026-03-24", "type": "Run", "distance_miles": 8.0, "pace": "9:00/mi" },
+      { "date": "2026-03-26", "type": "Run", "distance_miles": 7.0, "pace": "7:20/mi" },
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 6.0, "pace": "9:10/mi" },
+      { "date": "2026-03-29", "type": "Run", "distance_miles": 10.0, "pace": "9:25/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "this_week_completed": 37,
+    "next_week_number": 6,
+    "next_week_target_approx": 44,
+    "notes": "This is a weekly_recap trigger — it recaps last week (week 5, 37mi done) and plans the upcoming week (week 6). Saying 'week 6' in the next-week plan is CORRECT. The new plan's Total line must be a single number (e.g. 'Total: 44mi') — must NOT be additive like '7mi + 37mi already'. The 37mi already-completed belongs to the prior week being recapped, not to next week."
+  }
+}

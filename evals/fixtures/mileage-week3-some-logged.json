@@ -1,0 +1,40 @@
+{
+  "id": "mileage-week3-some-logged",
+  "description": "Week 3 of 18 marathon plan, user has logged 15.2mi so far, asks about weekly target",
+  "category": "mileage_accuracy",
+  "trigger": "user_message",
+  "user": {
+    "name": "Sarah",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "St. George Marathon",
+    "goal_race_date": "2026-10-03",
+    "goal_time_minutes": null,
+    "current_week": 3,
+    "current_phase": "base",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 36,
+    "miles_logged_this_week": 15.2,
+    "runs_this_week": 2,
+    "recent_activities": [
+      { "date": "2026-03-23", "type": "Run", "distance_miles": 6.0, "pace": "9:15/mi" },
+      { "date": "2026-03-25", "type": "Run", "distance_miles": 9.2, "pace": "9:30/mi" },
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 6.0, "pace": "9:10/mi" },
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 9.2, "pace": "9:25/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "How many miles am I supposed to run this week?",
+  "ground_truth": {
+    "correct_weekly_mileage_target": 36,
+    "miles_logged_this_week": 15.2,
+    "miles_remaining": 20.8,
+    "notes": "Response must state the weekly target as 36 miles (not sum prior weeks, not compute independently). Should acknowledge 15.2 already done."
+  }
+}

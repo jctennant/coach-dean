@@ -1,0 +1,41 @@
+{
+  "id": "quality-no-internal-labels",
+  "description": "System prompt contains ⚠️ GOAL DISCREPANCY label — coach must not echo it in the response",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "user": {
+    "name": "Blake",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Cherry Creek Sneak",
+    "goal_race_date": "2026-04-26",
+    "goal_time_minutes": null,
+    "current_week": 6,
+    "current_phase": "build",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:35/mi",
+    "interval_pace": "6:50/mi",
+    "training_days": ["tuesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 32,
+    "miles_logged_this_week": 6.5,
+    "runs_this_week": 1,
+    "inject_goal_discrepancy_warning": true,
+    "recent_activities": [
+      { "date": "2026-03-29", "type": "Run", "distance_miles": 6.5, "pace": "9:35/mi" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "user",
+        "content": "I think I want to do the 5K option instead"
+      }
+    ]
+  },
+  "inbound_sms": "Yeah I switched to the 5K",
+  "ground_truth": {
+    "forbidden_phrases": ["⚠️", "GOAL DISCREPANCY", "DISCREPANCY DETECTED"],
+    "notes": "The system prompt injects a ⚠️ GOAL DISCREPANCY warning. The coach must NEVER echo these internal directive labels. Response should acknowledge the goal change naturally, but must not start with or include '⚠️ GOAL DISCREPANCY DETECTED' or any ⚠️-prefixed header."
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "id": "splits-10k-progression",
+  "description": "10K run (6.2mi) with 10 km splits showing a negative split — must reference miles correctly",
+  "category": "split_distance_accuracy",
+  "trigger": "post_run",
+  "user": {
+    "name": "Morgan",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "NYC Half Marathon",
+    "goal_race_date": "2026-10-18",
+    "goal_time_minutes": 105,
+    "current_week": 9,
+    "current_phase": "build",
+    "vdot": 50,
+    "easy_pace": "8:46/mi",
+    "tempo_pace": "7:00/mi",
+    "interval_pace": "6:18/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 42,
+    "miles_logged_this_week": 6.2,
+    "runs_this_week": 1,
+    "recent_activities": []
+  },
+  "activity_details": {
+    "type": "Run",
+    "distance_miles": 6.2,
+    "pace": "8:10/mi",
+    "hr": 162,
+    "splits_km": [
+      { "km": 1, "pace": "8:30/mi", "cumulative_miles": 0.62 },
+      { "km": 2, "pace": "8:22/mi", "cumulative_miles": 1.24 },
+      { "km": 3, "pace": "8:15/mi", "cumulative_miles": 1.86 },
+      { "km": 4, "pace": "8:10/mi", "cumulative_miles": 2.49 },
+      { "km": 5, "pace": "8:05/mi", "cumulative_miles": 3.11 },
+      { "km": 6, "pace": "7:58/mi", "cumulative_miles": 3.73 },
+      { "km": 7, "pace": "7:55/mi", "cumulative_miles": 4.35 },
+      { "km": 8, "pace": "7:50/mi", "cumulative_miles": 4.97 },
+      { "km": 9, "pace": "7:45/mi", "cumulative_miles": 5.59 },
+      { "km": 10, "pace": "7:35/mi", "cumulative_miles": 6.21 }
+    ]
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "run_distance_miles": 6.2,
+    "split_count": 10,
+    "max_valid_mile_reference": 6,
+    "notes": "The 10 splits are KM splits, not mile splits. The run was 6.2 miles. Valid mile references are 1-6. Should NOT say 'mile 7', 'mile 8', 'mile 9', 'mile 10'. The final push at splits 9-10 happened around mile 5.5-6.2 (cumulative_miles 5.59-6.21)."
+  }
+}

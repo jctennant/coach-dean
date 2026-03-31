@@ -1,0 +1,42 @@
+{
+  "id": "pace-vdot52-post-run-easy",
+  "description": "VDOT 52 athlete asks if their easy run pace was right — should confirm 8:30-9:00/mi range",
+  "category": "pace_accuracy",
+  "trigger": "user_message",
+  "user": {
+    "name": "Chris",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Philadelphia Half Marathon",
+    "goal_race_date": "2026-11-22",
+    "goal_time_minutes": 95,
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 52,
+    "easy_pace": "8:28/mi",
+    "tempo_pace": "6:45/mi",
+    "interval_pace": "6:05/mi",
+    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 38,
+    "miles_logged_this_week": 6.2,
+    "runs_this_week": 1,
+    "recent_activities": [
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 6.2, "pace": "8:45/mi" }
+    ],
+    "recent_conversation": [],
+    "plan_sessions_remaining": [
+      { "day": "Wednesday", "date": "Apr 1", "label": "8mi easy @ 8:30-9:00/mi" },
+      { "day": "Friday", "date": "Apr 3", "label": "8mi easy" },
+      { "day": "Sunday", "date": "Apr 5", "label": "16mi long run @ 8:30-9:00/mi" }
+    ]
+  },
+  "inbound_sms": "I just ran 6 miles at 8:45/mi — was that too slow for an easy run?",
+  "ground_truth": {
+    "correct_easy_pace_range": "8:30–9:00/mi",
+    "actual_pace_run": "8:45/mi",
+    "vdot": 52,
+    "notes": "8:45/mi is within the correct easy range (8:30-9:00/mi) for VDOT 52. Response should confirm this is appropriate easy pace, not suggest they should be running faster. The easy range is 8:30-9:00/mi."
+  }
+}

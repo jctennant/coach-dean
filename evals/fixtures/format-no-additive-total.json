@@ -1,0 +1,43 @@
+{
+  "id": "format-no-additive-total",
+  "description": "Initial plan with 15mi already completed this week — Total line must NOT be additive like 'Total: 25mi + your 15mi'",
+  "category": "mileage_format",
+  "trigger": "initial_plan",
+  "user": {
+    "name": "Quinn",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "NYC Marathon",
+    "goal_race_date": "2026-11-01",
+    "goal_time_minutes": null,
+    "current_week": 1,
+    "current_phase": "base",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:35/mi",
+    "interval_pace": "6:50/mi",
+    "training_days": ["tuesday", "thursday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 35,
+    "miles_logged_this_week": 15.0,
+    "runs_this_week": 2,
+    "recent_activities": [
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 8.0, "pace": "9:40/mi" },
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 7.0, "pace": "9:35/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Thu", "date": "4/2", "label": "Tempo 4mi @ 7:35/mi" },
+      { "day": "Fri", "date": "4/3", "label": "Easy 4mi" },
+      { "day": "Sun", "date": "4/5", "label": "Long 12mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "correct_weekly_mileage_target": 35,
+    "miles_already_done": 15,
+    "planned_sessions_miles": 20,
+    "notes": "The Total line for remaining sessions should show 20mi (planned future sessions only). Must NOT say 'Total: 20mi + your 15mi already this week'. Must NOT say '35mi total + 15mi done'. The already-completed miles should be acknowledged separately. A combined 'Total: 35mi' is acceptable as the weekly target."
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "id": "date-race-week",
+  "description": "Race is in 6 days — should be in race-week mode, send appropriate taper/race-prep messaging",
+  "category": "date_week_correctness",
+  "trigger": "user_message",
+  "user": {
+    "name": "Casey",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Colfax Half Marathon",
+    "goal_race_date": "2026-04-05",
+    "goal_time_minutes": 100,
+    "current_week": 18,
+    "current_phase": "taper",
+    "vdot": 52,
+    "easy_pace": "8:28/mi",
+    "tempo_pace": "6:45/mi",
+    "interval_pace": "6:05/mi",
+    "training_days": ["tuesday", "thursday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 18,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "recent_activities": [
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 6.0, "pace": "8:40/mi" },
+      { "date": "2026-03-25", "type": "Run", "distance_miles": 4.0, "pace": "8:30/mi" },
+      { "date": "2026-03-22", "type": "Run", "distance_miles": 8.0, "pace": "8:45/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "How are you feeling about Sunday's race?",
+  "ground_truth": {
+    "race_date": "2026-04-05",
+    "days_until_race": 6,
+    "correct_week_number": 18,
+    "correct_phase": "taper",
+    "prior_week_total": 10,
+    "notes": "Race is April 5, today March 30 = 6 days. Response should acknowledge RACE WEEK, address taper, race prep (gear, nutrition, pacing strategy). Should NOT suggest hard workouts this week. Days count should align with 6 days away. Prior week (Mar 23-29) total was 10mi (4mi Mar 25 + 6mi Mar 28) — Dean stating '10 miles last week' is accurate, not a hallucination."
+  }
+}
