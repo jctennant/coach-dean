@@ -488,8 +488,17 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Join them at block boundaries: append punctuation-starting blocks directly to the
   // previous block; add a single space when two word-boundary blocks meet. This preserves
   // any embedded paragraph breaks (\n\n inside blocks) without introducing spurious ones.
+  // web_search_20250305 is a server-side tool: the SDK returns blocks typed as
+  // "server_tool_use" (the search request) and "web_search_tool_result" (the result),
+  // NOT "tool_use". We must match all three so that pre-search text blocks (Claude's
+  // internal reasoning) are correctly discarded.
   const lastToolIdx = response.content.reduce(
-    (idx, b, i) => (b.type === "tool_use" ? i : idx),
+    (idx, b, i) => (
+      b.type === "tool_use" ||
+      b.type === "server_tool_use" ||
+      b.type === "web_search_tool_result"
+        ? i : idx
+    ),
     -1
   );
   const textBlocks = response.content
@@ -1936,7 +1945,7 @@ ${deloadBlock}${progressionLine}- Weekly mileage target (athlete baseline): ${ta
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${(() => { const stored = profile?.current_tempo_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.tempo ? `${formatPaceForPrompt(est.tempo)} (estimated from easy pace — no race data on file)` : "TBD"; })()}, Interval ${(() => { const stored = profile?.current_interval_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.interval ? `${formatPaceForPrompt(est.interval)} (estimated from easy pace — no race data on file)` : "TBD"; })()}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
 - RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
 ⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${easyPaceGuardDisplay ? ` This athlete's easy pace is ${easyPaceGuardDisplay}. Any tempo or interval pace you write that is ${easyPaceGuardDisplay} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tempoPaceGuardDisplay ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(easyPaceRaw, useMetricInner) || "see above"}); never prescribe WU/CD more than 30 sec${useMetricInner ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.
-- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach.
+- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any of: "⚠️ GOAL DISCREPANCY", "Now I need to provide", "Let me craft the response", "Now let me search", or any internal analysis paragraph. The FIRST thing you output must be the coaching message itself — nothing before it.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}`;
 })()}

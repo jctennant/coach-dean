@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-01 — Fix web search reasoning leaking as SMS messages
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A — observed in conversation where Dean sent 5 SMS messages instead of 1: internal reasoning paragraphs ("⚠️ GOAL DISCREPANCY DETECTED", "Wait — I need to check", "Now I need to provide the training plan") were all delivered to the athlete
+**Root cause:** `lastToolIdx` filtering only matched `b.type === "tool_use"`, but `web_search_20250305` is a server-side tool whose blocks are typed `"server_tool_use"` (the request) and `"web_search_tool_result"` (the result) — neither matches `"tool_use"`. This meant `lastToolIdx` always stayed at -1 when web search was used, so ALL text blocks (including every reasoning paragraph) were kept and sent as SMS via `splitIntoMessages`.
+**Fix / Change:** Updated `lastToolIdx` reduce to also match `"server_tool_use"` and `"web_search_tool_result"` block types. Added explicit prompt rule: when web search is used, the first thing output must be the coaching message — no narration of the search process, no internal analysis blocks.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-01 — Strengthen coaching prompt guards (pace sanity, WU/CD, mileage disputes, day labeling)
 
 **Type:** Bug Fix
