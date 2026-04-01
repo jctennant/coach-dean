@@ -27,7 +27,7 @@ export function Navbar({ smsUrl }: { smsUrl: string }) {
 
         {/* CTA */}
         <div className="flex items-center gap-4">
-          <a href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <a href="/dashboard" className="hidden md:inline text-sm text-muted-foreground hover:text-foreground transition-colors">
             Sign in
           </a>
           <div className="group relative w-fit">

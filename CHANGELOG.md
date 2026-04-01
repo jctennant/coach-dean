@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-01 — Improve dashboard return access and fix mobile sign-in placement
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** "the sign-in button shows up on mobile in an awkward spot between coach dean and get started on the top"
+**Root cause:** Navbar had three items on mobile (logo, Sign in, Get started) with no room. Dashboard had no way to return without the magic link URL or re-requesting via phone number.
+**Fix / Change:** (1) Hide "Sign in" from navbar on mobile; add "Already a user? View your plan" link below the Get Started button in the hero on mobile only. (2) Dashboard now saves the token to localStorage on first authenticated visit (`TokenPersist`). Subsequent visits to `/dashboard` (no token in URL) auto-redirect via `LocalTokenRedirect` — users can bookmark `coachdean.ai/dashboard` and it just works.
+**Files changed:** `src/components/navbar.tsx`, `src/components/signup-form.tsx`, `src/app/dashboard/page.tsx`, `src/app/dashboard/token-manager.tsx` (new)
+
+---
+
 ## 2026-04-01 — Fix race week mileage targets and dashboard weekly target display
 
 **Type:** Bug Fix

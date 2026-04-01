@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { supabase } from "@/lib/supabase";
 import RequestLinkForm from "./request-link-form";
+import { TokenPersist, LocalTokenRedirect } from "./token-manager";
 
 export const metadata: Metadata = {
   title: "Your Training Plan — Coach Dean",
@@ -275,6 +276,7 @@ export default async function DashboardPage({
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <TokenPersist token={token} />
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-4">
         <div className="max-w-lg mx-auto flex items-center justify-between">
@@ -574,7 +576,7 @@ function NoTokenScreen({ expired = false }: { expired?: boolean }) {
             Enter your phone number and we&apos;ll text you a fresh link to your plan.
           </p>
         </div>
-        <RequestLinkForm />
+        {expired ? <RequestLinkForm /> : <LocalTokenRedirect />}
       </div>
     </div>
   );

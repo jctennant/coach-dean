@@ -25,6 +25,12 @@ export function SignupForm({ smsPhone, centered }: SignupFormProps) {
       <a href={smsUrl} className="md:hidden" onClick={() => trackCta("mobile")}>
         <Button size="lg" className="h-12 w-full rounded-full">Get started</Button>
       </a>
+      <p className="md:hidden text-center text-sm text-muted-foreground">
+        Already a user?{" "}
+        <a href="/dashboard" className="underline hover:text-foreground transition-colors">
+          View your plan
+        </a>
+      </p>
 
       {/* Desktop: button with hover QR code */}
       <div className={`group relative hidden w-fit md:block ${centered ? "mx-auto" : ""}`}>
