@@ -218,13 +218,22 @@ export async function generateAndSaveFullPlan(
     `Week ${w.week_number} (${w.phase}, ${w.mileage_target}mi, long run ~${w.long_run_target}mi)`
   ).join("\n");
 
+  // A runner with an established base (≥15 mi/week) doesn't need weeks of pure easy
+  // aerobic miles at the start — they already have the base. Quality sessions (strides,
+  // short tempos, fartleks) are appropriate from week 1. Only truly new runners building
+  // from scratch should have pure easy base weeks.
+  const hasEstablishedBase = baseMileage >= 15;
+  const basePhaseGuidance = hasEstablishedBase
+    ? `This runner already has an established aerobic base at ~${baseMileage}mi/week. Do NOT assign pure easy/base-building weeks — include quality sessions (strides, fartlek, short tempo, easy intervals) from week 1 onward. Reserve "easy aerobic miles" labels only for deload weeks.`
+    : `This runner is building their base from scratch. Early base-phase weeks should be easy aerobic miles to develop the aerobic foundation before adding quality.`;
+
   try {
     const enrichResponse = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 2500,
       system: `You are a running coach generating a structured training plan arc.
 For each week provide:
-- key_workout: the defining session for that week (1 line). Examples: "6×800m @ 5K pace", "4mi tempo @ threshold", "12mi long run with 2mi @ goal pace", "Base building — easy aerobic miles", "Race simulation 5mi @ goal pace". Pure base/easy weeks get a motivating description, not a pacing prescription.
+- key_workout: the defining session for that week (1 line). Examples: "6×800m @ 5K pace", "4mi tempo @ threshold", "12mi long run with 2mi @ goal pace", "6×strides + easy 5mi", "20min fartlek", "Race simulation 5mi @ goal pace". Deload weeks get a low-key description.
 - notes: one coaching sentence. Vary these so each week feels distinct.
 
 Return ONLY a valid JSON array:
@@ -232,7 +241,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}${bRaceContext}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${bRaceContext}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 

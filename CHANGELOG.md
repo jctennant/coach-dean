@@ -15,6 +15,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-31 — Quality sessions from week 1 for runners with an established base
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** "if someone has already very consistently been doing X miles per week (lets say 25), then do they actually need a bunch more weeks of easy base building w/o quality sessions? The first few weeks look like 26 mi, 26.5 mi, 27 mi, 19 mi, 27.5 mi - just seems it's a bit boring and may not actually improve me much if I've already been doing base"
+**Root cause:** The Haiku enrichment prompt instructed the model to assign pure easy/motivating descriptions to "base phase" weeks regardless of whether the runner already had an established base. A runner at 25 mi/week consistently gets early weeks just slightly above their current load with zero quality — genuinely not useful.
+**Fix / Change:** Added `hasEstablishedBase` flag (baseMileage ≥ 15 mi/week). When true, the Haiku prompt now explicitly instructs it to include quality sessions (strides, fartlek, short tempo, easy intervals) from week 1, and only uses "easy aerobic miles" labels for deload weeks. New runners building from scratch still get a proper easy base phase. Also removed "Pure base/easy weeks get a motivating description" from the system prompt example list and added quality examples (strides + easy, fartlek).
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
 ## 2026-03-31 — LLM-as-judge eval harness
 
 **Type:** Infra
