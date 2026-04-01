@@ -1665,11 +1665,13 @@ function buildSystemPrompt(
       // Volume percentages by race type and taper stage.
       // 30K (~18.6 mi) is a trail race closer to marathon distance than to 5K/10K —
       // give it marathon-style taper rather than the short-race defaults.
-      let w3Pct = 0.88, w2Pct = 0.72, w1Pct = 0.45;
-      if (isUltra)    { w3Pct = 0.78; w2Pct = 0.62; w1Pct = 0.40; }
-      else if (isMarathon || is30k) { w3Pct = 0.88; w2Pct = 0.72; w1Pct = 0.45; }
-      else if (isHalf)     { w3Pct = 0.90; w2Pct = 0.75; w1Pct = 0.50; }
-      else               { w3Pct = 0.90; w2Pct = 0.78; w1Pct = 0.55; } // 5K/10K
+      // w1Pct = race week training miles only (pre-race), intentionally low.
+      // The race itself adds a major distance on top (e.g. marathon +26.2mi).
+      let w3Pct = 0.88, w2Pct = 0.72, w1Pct = 0.25;
+      if (isUltra)    { w3Pct = 0.78; w2Pct = 0.62; w1Pct = 0.25; }
+      else if (isMarathon || is30k) { w3Pct = 0.88; w2Pct = 0.72; w1Pct = 0.25; }
+      else if (isHalf)     { w3Pct = 0.90; w2Pct = 0.75; w1Pct = 0.28; }
+      else               { w3Pct = 0.90; w2Pct = 0.78; w1Pct = 0.35; } // 5K/10K
 
       const w3 = Math.round(peak * w3Pct);
       const w2 = Math.round(peak * w2Pct);

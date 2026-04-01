@@ -138,6 +138,14 @@ export async function generateAndSaveFullPlan(
 
   // Build the arc week by week.
   // `buildMileage` tracks the real progression level (deloads and tapers branch off it).
+  // Race-type-aware race week factor — represents pre-race training miles only.
+  // Lowered significantly from a flat 0.50 to account for the race distance itself
+  // being a major effort in that week (marathon adds 26.2mi on top of training).
+  const isUltraGoal = ["50k","100k","50mi","100mi"].includes(goal ?? "");
+  const isMarathonGoal = goal === "marathon" || goal === "30k";
+  const isHalfGoal = goal === "half_marathon";
+  const raceWeekFactor = isUltraGoal ? 0.25 : isMarathonGoal ? 0.25 : isHalfGoal ? 0.28 : 0.35;
+
   let buildMileage = baseMileage;
   let peakMileage = baseMileage;
 
@@ -157,9 +165,12 @@ export async function generateAndSaveFullPlan(
 
     let weekMileage: number;
     if (phase === "taper") {
-      // 2-week taper: 70% → 50% of peak
+      // 2-week taper: 70% → raceWeekFactor of peak.
+      // Race week factor is intentionally low (0.25–0.35) because it represents
+      // pre-race training miles only — the race distance itself is an additional
+      // major effort in that week.
       const taperWeek = 2 - weeksFromEnd; // 1, 2
-      const taperFactor = taperWeek >= 2 ? 0.50 : 0.70;
+      const taperFactor = taperWeek >= 2 ? raceWeekFactor : 0.70;
       weekMileage = Math.round(peakMileage * taperFactor * 2) / 2;
     } else if (isDeload) {
       weekMileage = Math.round(buildMileage * 0.70 * 2) / 2;

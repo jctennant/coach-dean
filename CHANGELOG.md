@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-01 — Fix race week mileage targets and dashboard weekly target display
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "week 31 race week shows 23 mi, which I assume is before the race, but that actually would put me at 49 mi for that week which seems a bit high. Other issue - the 'weekly target' in the 'This week' section on the dashboard says 19.8 mi but week 1 before full training arc says 26 mi."
+**Root cause:** (1) Race week `mileage_target` used a flat 50% of peak factor regardless of race type. Since this represents pre-race training miles only (not including the race), a marathon runner would have 23mi pre-race + 26.2mi race = ~49mi total — far too high. The system prompt taper protocol had different (but also too-high) race week factors. (2) Dashboard "This week" header overrode the full week target with a partial-week sum of remaining sessions, making week 1 show 19.8mi instead of the plan's 26mi target.
+**Fix / Change:** (1) Race week factor is now race-type-aware and significantly reduced: marathon/ultra = 25%, half = 28%, 5K/10K = 35% of peak. For a 46mi/wk marathon runner: 46×0.25=11.5mi pre-race training + 26.2mi race ≈ 38mi total — reasonable. Synced system prompt taper protocol to match. (2) Dashboard weekly target always shows the full week's `mileage_target` from the plan arc, removing the partial-week override.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-03-31 — Cap weekly mileage growth on long training plans
 
 **Type:** Bug Fix

@@ -271,12 +271,7 @@ export default async function DashboardPage({
   const raceDays = daysUntilRace(raceDate as string | null);
   const currentWeekActualMiles = actualMilesByWeek[currentWeekNum] ?? null;
 
-  // Partial week mileage target: when some workouts remain this week (e.g. Saturday onboard
-  // with a Sunday run), show only the miles for those remaining days instead of the full week.
-  const partialWeekMileage = (remainingWorkoutsThisWeek && !noRemainingWorkouts)
-    ? Math.round(remainingWorkoutsThisWeek.reduce((sum, d) => sum + (d.miles ?? 0), 0) * 10) / 10
-    : null;
-  const displayMileageTarget = partialWeekMileage ?? currentWeek?.mileage_target ?? 0;
+  const displayMileageTarget = currentWeek?.mileage_target ?? 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
