@@ -1,0 +1,54 @@
+{
+  "id": "mileage-strava-correction",
+  "description": "Athlete corrected Dean's wrong mileage claim twice — Dean must re-anchor to Strava's 2.5mi, not repeat or rearrange the wrong 6.0mi narrative",
+  "category": "mileage_accuracy",
+  "trigger": "user_message",
+  "user": {
+    "name": "Jordan",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "10k",
+    "goal_race": "Bay to Breakers 12K",
+    "goal_race_date": "2026-05-17",
+    "goal_time_minutes": null,
+    "current_week": 3,
+    "current_phase": "base",
+    "vdot": 44,
+    "easy_pace": "9:41/mi",
+    "tempo_pace": "7:45/mi",
+    "interval_pace": "7:00/mi",
+    "training_days": ["tuesday", "wednesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 18,
+    "miles_logged_this_week": 2.5,
+    "runs_this_week": 1,
+    "recent_activities": [
+      { "date": "2026-03-29", "type": "Run", "distance_miles": 2.5, "pace": "9:45/mi" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "content": "Nice work tonight — you're at 6.0mi this week (Mon's 3.5mi + tonight's 2.5mi). On track for 18mi."
+      },
+      {
+        "role": "user",
+        "content": "I didn't do a 3.5 mi run yesterday? It was a rest day"
+      },
+      {
+        "role": "assistant",
+        "content": "Monday 3/30 was your 3.5mi trail run, today (Tue) was the 2.5mi run you just did. So you're at 6.0mi this week total."
+      },
+      {
+        "role": "user",
+        "content": "I didn't do a run yesterday"
+      }
+    ]
+  },
+  "inbound_sms": "What does Strava actually show for my miles this week?",
+  "ground_truth": {
+    "miles_logged_this_week": 2.5,
+    "this_week_completed": 2.5,
+    "forbidden_phrases": ["6.0", "6 mi", "3.5mi", "3.5 mi", "Monday's run", "Mon's 3.5"],
+    "notes": "The authoritative Strava total is 2.5mi (one run: Sat 3/29 trail run). Dean previously claimed 6.0mi by inventing a phantom 3.5mi Monday run. The athlete has now corrected this twice. Dean must re-anchor: 'Strava shows 2.5mi so far this week — just tonight's run.' Must NOT repeat 6.0mi, must NOT reference the phantom 3.5mi Monday run in any form."
+  }
+}

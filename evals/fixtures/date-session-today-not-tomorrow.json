@@ -1,0 +1,46 @@
+{
+  "id": "date-session-today-not-tomorrow",
+  "description": "Scheduled session is today (Sunday 3/30) — Dean must say 'today', not 'tomorrow' or give the wrong date",
+  "category": "date_week_correctness",
+  "trigger": "user_message",
+  "user": {
+    "name": "Alex",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-10-11",
+    "goal_time_minutes": null,
+    "current_week": 5,
+    "current_phase": "base",
+    "vdot": 47,
+    "easy_pace": "9:10/mi",
+    "tempo_pace": "7:22/mi",
+    "interval_pace": "6:39/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 35,
+    "miles_logged_this_week": 18.0,
+    "runs_this_week": 3,
+    "recent_activities": [
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 8.0, "pace": "9:15/mi" },
+      { "date": "2026-03-26", "type": "Run", "distance_miles": 6.0, "pace": "9:12/mi" },
+      { "date": "2026-03-24", "type": "Run", "distance_miles": 4.0, "pace": "9:08/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Sun", "date": "3/30", "label": "Long run 10mi easy" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "content": "Solid week so far — 18mi across three runs. Sunday long run still to go: 10mi easy to close out at 28mi for the week."
+      }
+    ]
+  },
+  "inbound_sms": "About to head out — any tips for my long run?",
+  "ground_truth": {
+    "correct_week_number": 5,
+    "forbidden_phrases": ["tomorrow", "Monday", "Mon 3/31"],
+    "notes": "Today in the eval context is Sunday 3/30. The long run is scheduled for Sun 3/30 — it IS today, not tomorrow. Dean must reference it as 'today's long run' or 'this morning's run' or similar. Saying 'tomorrow' or referencing Monday 3/31 would be wrong — the session is happening right now."
+  }
+}

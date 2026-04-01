@@ -1,0 +1,42 @@
+{
+  "id": "pace-wucd-query",
+  "description": "Athlete asks what pace to run warm-up/cool-down — should match easy pace range, not invent a slower pace",
+  "category": "pace_accuracy",
+  "trigger": "user_message",
+  "user": {
+    "name": "Morgan",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Oakland Half Marathon",
+    "goal_race_date": "2026-05-17",
+    "goal_time_minutes": null,
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:35/mi",
+    "interval_pace": "6:50/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 32,
+    "miles_logged_this_week": 9.5,
+    "runs_this_week": 2,
+    "recent_activities": [
+      { "date": "2026-03-27", "type": "Run", "distance_miles": 9.5, "pace": "9:35/mi" },
+      { "date": "2026-03-25", "type": "Run", "distance_miles": 6.0, "pace": "9:28/mi" },
+      { "date": "2026-03-22", "type": "Run", "distance_miles": 4.0, "pace": "7:38/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Sun", "date": "3/30", "label": "Tempo 5mi (1mi WU + 3mi @ 7:35 + 1mi CD)" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "Heading out for my tempo session — what pace should I run the warm-up and cool-down at?",
+  "ground_truth": {
+    "correct_easy_pace_range": "9:30-10:00/mi",
+    "correct_tempo_pace": "7:35/mi",
+    "forbidden_phrases": ["10:15", "10:30", "10:45", "11:00", "11:15"],
+    "notes": "WU/CD pace must be the athlete's easy pace range (~9:30–10:00/mi). A pace significantly slower than easy (e.g. 10:15–10:45/mi) is wrong — WU/CD = easy pace, not some invented slower effort. The response must not state a WU/CD pace that is more than 30 sec/mi slower than the athlete's stored easy pace of 9:30/mi."
+  }
+}

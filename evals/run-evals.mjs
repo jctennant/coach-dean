@@ -253,7 +253,7 @@ ${isDeload ? `⚠️ RECOVERY WEEK: This week's target is ${weeklyTarget} mi —
 - Current paces (Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth):
   Easy ${paces.easyRange}, Tempo ${paces.tempo}, Interval ${paces.interval}
 - RULE: NEVER recalculate VDOT or training paces. The stored paces above are correct.
-- PACE SANITY CHECK: Any tempo/interval pace must be faster than easy pace. Tempo slower than easy is wrong.${sessionRows}
+⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace. This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or SLOWER is a documented error — use the stored Tempo (${paces.tempo}) instead; never compute a quality pace from scratch. Warm-up and cool-down pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit ("/mi" or "/km") on every pace.${sessionRows}
 ${conversationBlock}
 MILEAGE ACCURACY RULES — follow exactly:
 - When listing planned sessions for a week, the Total line shows ONLY planned future sessions. Never write "Total: X mi + your Y mi already this week". If the athlete has run some miles already, acknowledge them in a separate sentence. The Total shows what is still to be done (or the full week target).
