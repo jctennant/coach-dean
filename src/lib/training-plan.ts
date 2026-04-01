@@ -29,6 +29,42 @@ export function computePhaseForPlan(weekNumber: number, totalWeeks: number, hasR
 }
 
 /**
+ * Compute a sensible peak weekly mileage for a training plan based on race goal
+ * and current fitness.
+ *
+ * Two constraints work together:
+ *   - hardCap: upper bound regardless of starting volume (prevents 100+ mpw for
+ *     non-ultra goals on long plans)
+ *   - floor: lower bound so a low-mileage runner (5 mpw) still gets a plan that
+ *     can actually prepare them for the target race distance
+ *
+ * The build factor in the arc loop is then derived dynamically from
+ * (targetPeak / baseMileage)^(1/realBuildWeeks), clamped to 2%–10%/week.
+ * This means a low-volume runner ramps faster (≈10%/week) while a runner already
+ * near the cap ramps slowly or plateaus entirely.
+ */
+function getTargetPeakMileage(goal: string | null, baseMileage: number): number {
+  const g = (goal ?? "").toLowerCase();
+  let hardCap: number;
+  let floor: number;
+  if (g.includes("ultra") || g.includes("50k") || g.includes("50 k") || g.includes("100k") || g.includes("100 m")) {
+    hardCap = 100; floor = 45;
+  } else if ((g.includes("marathon") || g.includes("26.2")) && !g.includes("half")) {
+    hardCap = 70; floor = 35;
+  } else if (g.includes("half") || g.includes("13.1")) {
+    hardCap = 55; floor = 22;
+  } else if (g.includes("10k") || g.includes("10 k")) {
+    hardCap = 50; floor = 15;
+  } else if (g.includes("5k") || g.includes("5 k")) {
+    hardCap = 45; floor = 12;
+  } else {
+    hardCap = 60; floor = 20;
+  }
+  // Allow up to 80% growth from base, but never outside [floor, hardCap]
+  return Math.max(Math.min(baseMileage * 1.8, hardCap), floor);
+}
+
+/**
  * Compute the full multi-week training arc and save it to training_plans.
  * Generates a dashboard_token and sets trial_started_at on the user record.
  *
@@ -81,6 +117,25 @@ export async function generateAndSaveFullPlan(
     ? Math.max(5, prescribedWeek1Miles)
     : Math.max(5, Math.round((avgWeeklyMileage ?? 15) * 2) / 2);
 
+  // Compute a race-type-aware peak with both a floor (low-mileage runners still get
+  // a plan sufficient for the target distance) and a hard cap (no 100+ mpw marathon
+  // plans on 7-month arcs). The build factor is then derived dynamically so the arc
+  // reaches targetPeak at exactly the right rate regardless of plan length.
+  const targetPeak = getTargetPeakMileage(goal, baseMileage);
+
+  // Count real build weeks (non-deload, non-taper, after week 1) so we can derive
+  // a build factor that reaches targetPeak smoothly by peak phase.
+  let realBuildWeeks = 0;
+  for (let w = 2; w <= totalWeeks; w++) {
+    const ph = computePhaseForPlan(w, totalWeeks, hasRace);
+    const isD = w % 4 === 0 && ph !== "taper" && ph !== "peak";
+    if (!isD && ph !== "taper") realBuildWeeks++;
+  }
+  // Derived factor: (targetPeak / baseMileage) ^ (1 / realBuildWeeks)
+  // Clamped to 2%–10%/week: never slower than a plateau, never faster than convention allows.
+  const rawFactor = realBuildWeeks > 0 ? Math.pow(targetPeak / baseMileage, 1 / realBuildWeeks) : 1.07;
+  const weeklyBuildFactor = Math.max(1.02, Math.min(1.10, rawFactor));
+
   // Build the arc week by week.
   // `buildMileage` tracks the real progression level (deloads and tapers branch off it).
   let buildMileage = baseMileage;
@@ -110,11 +165,13 @@ export async function generateAndSaveFullPlan(
       weekMileage = Math.round(buildMileage * 0.70 * 2) / 2;
       // buildMileage stays unchanged — resumes from pre-deload level next week
     } else {
-      const buildFactor = phase === "peak" ? 1.04 : 1.07;
       // Week 1 IS the base — don't apply buildFactor so the arc starts at exactly
       // prescribedWeek1Miles (or baseMileage). Build begins from week 2 onward.
       if (week > 1) {
-        buildMileage = Math.round(buildMileage * buildFactor * 2) / 2;
+        buildMileage = Math.min(
+          Math.round(buildMileage * weeklyBuildFactor * 2) / 2,
+          targetPeak,
+        );
       }
       weekMileage = buildMileage;
       if (phase === "peak") peakMileage = buildMileage;

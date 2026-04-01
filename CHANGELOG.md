@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-03-31 — Cap weekly mileage growth on long training plans
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "looks like I just got a plan for the NYC marathon which is 7 months away, but it had me go up to 100 mi per week - that seems really high for an intermediate/semi-advanced runner - it seems Dean just continues to increase mileage over time"
+**Root cause:** The arc builder in `training-plan.ts` applied a fixed 7% weekly growth factor with no ceiling. On a 12-week plan this is fine (~8 real build weeks → ~70% total gain), but a 30-week plan has ~22 real build weeks, compounding to 4–5× the starting volume. A runner starting at 25 mi/week would reach 100+ mi/week by race week.
+**Fix / Change:** Added `getTargetPeakMileage()` with both a hard cap (prevents 100+ mpw on long plans) and a floor (prevents plans too low to prepare for the target distance — e.g. a 5 mi/week runner still gets a 35+ mpw marathon peak, not 9 mpw). The build factor is now derived dynamically from `(targetPeak / baseMileage)^(1 / realBuildWeeks)` and clamped to 2%–10%/week, so a low-volume runner ramps at ≈10%/week and a high-volume runner plateaus gracefully. Ultra hard cap raised to 100 mpw to support 100-mile training. Example peaks: marathon @ 5mpw → 33mi, marathon @ 25mpw → 44mi, marathon @ 40mpw → 68mi, ultra 100mi @ 60mpw → 99mi.
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
 ## 2026-03-31 — LLM-as-judge eval harness
 
 **Type:** Infra
