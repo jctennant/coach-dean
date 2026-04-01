@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-01 — Strengthen coaching prompt guards (pace sanity, WU/CD, mileage disputes, day labeling)
+
+**Type:** Bug Fix
+**Reported by:** Internal — automated conversation audit
+**User feedback:** N/A
+**Root cause:** Four prompt compliance failures identified from conversation review: (1) PACE SANITY CHECK was abstract ("faster than the easy pace above") so Claude could fail it when the stored tempo was TBD or when km/mile units were ambiguous — the documented error pattern is 8:46/mi × 1.60934 = 14:07/km, output as a tempo pace. (2) WU/CD pace was not mentioned in the sanity check, so Claude invented a pace 1 min/mile off from the easy pace already in context. (3) When an athlete disputed a mileage figure, Claude rearranged the same wrong narrative instead of re-anchoring to Strava ground truth. (4) When referencing planned sessions as "today" vs "tomorrow," Claude inferred day labels from list order rather than cross-checking stored dates against the current date.
+**Fix / Change:** (1) Extracted `easyPaceGuardDisplay` and `tempoPaceGuardDisplay` variables so the PACE SANITY CHECK injects concrete numbers ("This athlete's easy pace is 9:30/mi — any quality pace at 9:30/mi or slower is a documented error") rather than abstract references. (2) Added WU/CD = easy pace rule to the same guard. (3) Added MILEAGE DISPUTE paragraph to user_message prompt: re-anchor to authoritative Strava figure, trust athlete correction, never rearrange narrative. (4) Added SESSION DAY LABELING paragraph: always cross-check session date against DATE CONTEXT, name moved sessions explicitly.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-01 — Improve dashboard return access and fix mobile sign-in placement
 
 **Type:** Improvement
