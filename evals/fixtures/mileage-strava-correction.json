@@ -23,7 +23,7 @@
     "miles_logged_this_week": 2.5,
     "runs_this_week": 1,
     "recent_activities": [
-      { "date": "2026-03-29", "type": "Run", "distance_miles": 2.5, "pace": "9:45/mi" }
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 2.5, "pace": "9:45/mi" }
     ],
     "recent_conversation": [
       {
@@ -49,6 +49,6 @@
     "miles_logged_this_week": 2.5,
     "this_week_completed": 2.5,
     "forbidden_phrases": ["6.0", "6 mi", "3.5mi", "3.5 mi", "Monday's run", "Mon's 3.5"],
-    "notes": "The authoritative Strava total is 2.5mi (one run: Sat 3/29 trail run). Dean previously claimed 6.0mi by inventing a phantom 3.5mi Monday run. The athlete has now corrected this twice. Dean must re-anchor: 'Strava shows 2.5mi so far this week — just tonight's run.' Must NOT repeat 6.0mi, must NOT reference the phantom 3.5mi Monday run in any form."
+    "notes": "The authoritative Strava total is 2.5mi (one run: Mon 3/30). Dean previously claimed 6.0mi by inventing a phantom 3.5mi Monday run. The athlete has now corrected this twice. Dean must re-anchor: 'Strava shows 2.5mi so far this week — just tonight's run.' Must NOT repeat 6.0mi, must NOT reference the phantom 3.5mi Monday run in any form."
   }
 }
