@@ -305,7 +305,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     // recentMessages is oldest-first (DB returns DESC, then reversed at line 239).
     // Spread-reverse to search newest-first and get the most recent user message.
     const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
-    const isPlanRequest = latestUserMsg && /^\s*my\s+plan\s*$/i.test(latestUserMsg.content);
+    // Catch natural-language plan requests in addition to the exact "my plan" keyword.
+    // "Could you send me my plan for training for bay to breakers?" must hit this path —
+    // if it falls through to Claude, web search kicks in and Claude generates an inline
+    // plan instead of sending the dashboard link.
+    const isPlanRequest = latestUserMsg && (
+      /^\s*my\s+plan\s*$/i.test(latestUserMsg.content) ||
+      /\bsend\s+(?:me\s+)?(?:my|the)\s+(?:training\s+)?plan\b/i.test(latestUserMsg.content) ||
+      /\b(?:show|see|view)\s+(?:me\s+)?(?:my|the)\s+(?:training\s+)?plan\b/i.test(latestUserMsg.content)
+    );
     if (isPlanRequest) {
       if (!dashboardToken) {
         const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
@@ -2610,7 +2618,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
 
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.
 
-FULL PLAN REQUESTS: If the athlete asks to see their full plan, full training arc, all upcoming weeks, or wants to review training around travel/events — send them their dashboard link${dashboardUrl ? `: ${dashboardUrl}` : " (unavailable — tell them to reply \"my plan\" and the system will generate it)"}. The dashboard shows the full week-by-week arc with phases and targets. Do NOT output the plan over text — it's too long for SMS. Do NOT promise to send it later. One or two sentences max: mention the link and that it shows the full arc.
+FULL PLAN REQUESTS — HARD RULE: If the athlete asks to see their full plan, training schedule, full training arc, all upcoming weeks, or says anything like "send me my plan" / "show me my plan" — your entire response is the dashboard link${dashboardUrl ? `: ${dashboardUrl}` : " (unavailable — tell them to reply \"my plan\" and the system will generate it)"}. One or two sentences max. Do NOT output a week-by-week schedule in the SMS. Do NOT use web search to research the race and build a plan inline. Do NOT promise to send the plan later. This applies even if web search is available — research does not override this rule.
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for a easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 

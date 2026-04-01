@@ -416,4 +416,139 @@ describe("coach/respond — 'my plan' keyword early-exit", () => {
     // Normal Claude path taken
     expect(anthropic.messages.create).toHaveBeenCalled();
   });
+
+  it("early-exits with dashboard link for natural-language plan requests", async () => {
+    // "Could you send me my plan for training for bay to breakers?" was going through
+    // to Claude, which used web search and generated an inline plan instead of the link.
+    const variants = [
+      "Could you send me my plan for training for bay to breakers?",
+      "send me my training plan",
+      "can you show me my plan",
+      "I want to view my training plan",
+    ];
+
+    const { sendSMS } = await import("@/lib/linq");
+
+    for (const content of variants) {
+      vi.clearAllMocks();
+      setupSupabase({
+        user: baseUser({ dashboard_token: "tok-plan-123" }),
+        profile: baseProfile(),
+        state: baseState(),
+        conversations: [
+          { role: "user", content, created_at: "2026-03-30T10:50:00Z" },
+        ],
+      });
+
+      const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+      await POST(req);
+      await flush();
+
+      expect(anthropic.messages.create).not.toHaveBeenCalled();
+      expect(sendSMS).toHaveBeenCalledWith(
+        "+12025550001",
+        expect.stringContaining("tok-plan-123")
+      );
+    }
+  });
+});
+
+describe("coach/respond — prompt content guards", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("includes SESSION DAY LABELING instruction in user_message system prompt", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Wed", date: "4/1", label: "Easy 3mi" },
+          { day: "Thu", date: "4/2", label: "Tempo 4mi" },
+        ],
+      }),
+      conversations: [
+        { role: "user", content: "What's on tap today?", created_at: "2026-04-01T20:00:00Z" },
+      ],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    // user_message makes 2 Claude calls: extraction (call 0, Haiku) then coaching (call 1, Sonnet).
+    // SESSION DAY LABELING lives in the user message (buildUserMessage), not the system prompt.
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    const coachingUserMsg = calls[1][0].messages[0].content as string;
+
+    // The SESSION DAY LABELING guard must be passed to Claude so Dean knows to
+    // cross-check stored session dates against today rather than inferring from list order.
+    expect(coachingUserMsg).toContain("SESSION DAY LABELING");
+    expect(coachingUserMsg).toContain("cross-check the session");
+  });
+});
+
+describe("coach/respond — web search block filtering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("strips pre-search reasoning when response contains server_tool_use blocks", async () => {
+    // Simulates web_search_20250305: the SDK returns "server_tool_use" (not "tool_use")
+    // for the search request and "web_search_tool_result" for the result.
+    // Text blocks BEFORE the last non-text block are reasoning and must not be sent.
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [
+        { type: "text", text: "⚠️ GOAL DISCREPANCY DETECTED — checking race dates." },
+        { type: "server_tool_use", id: "su_1", name: "web_search", input: { query: "Bay to Breakers 2026 date" } },
+        { type: "web_search_tool_result", tool_use_id: "su_1", content: [] },
+        { type: "text", text: "Now let me search for the course profile. Perfect, I have what I need." },
+        { type: "server_tool_use", id: "su_2", name: "web_search", input: { query: "Bay to Breakers course profile" } },
+        { type: "web_search_tool_result", tool_use_id: "su_2", content: [] },
+        { type: "text", text: "Bay to Breakers is May 17 — 46 days out. Here's this week's plan." },
+      ],
+    });
+
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const sentText = calls.map((c: unknown[]) => c[1] as string).join("\n");
+
+    // Only the post-search coaching message should be sent
+    expect(sentText).toContain("Bay to Breakers is May 17");
+    // Pre-search reasoning must not appear
+    expect(sentText).not.toContain("GOAL DISCREPANCY");
+    expect(sentText).not.toContain("Now let me search");
+  });
+
+  it("sends all text blocks normally when no tool blocks are present", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [
+        { type: "text", text: "Good run today!" },
+        { type: "text", text: "Keep it up this week." },
+      ],
+    });
+
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const sentText = calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sentText).toContain("Good run today");
+    expect(sentText).toContain("Keep it up this week");
+  });
 });

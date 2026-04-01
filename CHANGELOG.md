@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-01 — Fix plan request sending dashboard link and date labeling in sessions
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A — "Could you send me my plan for training for bay to breakers?" caused Dean to use web search, research the race, and send the full plan as an inline SMS rather than the dashboard link
+**Root cause:** Two separate issues. (1) The `isPlanRequest` early-exit only matched the exact phrase "my plan" via `/^\s*my\s+plan\s*$/i`. Natural-language variants like "send me my plan for training for X" bypassed the code-level redirect, went to Claude with web search enabled, and Claude generated an inline plan rather than sending the link. (2) The FULL PLAN REQUESTS prompt instruction was not strong enough to prevent this — Claude with web search capability overrode it.
+**Fix / Change:** (1) Expanded `isPlanRequest` regex to also catch "send me my plan", "show me my plan", "view my training plan" patterns. (2) Strengthened FULL PLAN REQUESTS prompt: now labelled HARD RULE, explicitly forbids outputting a schedule inline even when web search is available. (3) Added tests: natural-language plan request variants now hit the early-exit and send the dashboard link without calling Claude; SESSION DAY LABELING instruction verified present in coaching user message.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-04-01 — Fix web search reasoning leaking as SMS messages
 
 **Type:** Bug Fix
