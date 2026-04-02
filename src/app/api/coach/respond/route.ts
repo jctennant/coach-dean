@@ -2196,6 +2196,7 @@ type ExtractedProfileData = {
   race_date?: string | null;
   goal_time_minutes?: number | null;
   updated_training_days?: string[] | null;
+  this_week_override_days?: string[] | null;
   goal_race_type?: string | null;
   workout?: {
     activity_type: string;
@@ -2242,9 +2243,10 @@ Extract ONLY explicitly stated NEW information:
 - A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th", "late May", "end of June") → race_date as "YYYY-MM-DD". Resolve vague phrases: "early [month]" → first Saturday of that month, "mid [month]" → Saturday nearest the 15th, "late [month]" or "end of [month]" → last Saturday of that month, month only → first Saturday of that month. Always use the next upcoming occurrence of that month. Today is ${todayDateStr}.
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip, swap, or "this week only" request (e.g. "I want to run Mon, Tue, Fri this week" should NOT set updated_training_days).
+- A one-week-only schedule change (e.g. "I want to run Mon/Wed/Fri this week", "just this week I'm running Tuesday and Thursday", "this week I can only do Mon and Sat", "running Tue/Wed/Fri instead this week") → this_week_override_days as array of full day names. Only set when the athlete explicitly scopes the change to the current week. Do NOT set if it sounds like a permanent change.
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "this_week_override_days": string[] | null, "goal_race_type": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -2286,8 +2288,9 @@ async function persistProfileUpdates(
 
     const hasInjuryBodyPart = !!extracted.injury_body_part;
     const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
+    const hasWeekOverride = Array.isArray(extracted.this_week_override_days) && (extracted.this_week_override_days as string[]).length > 0;
     const hasGoalRaceType = !!(extracted.goal_race_type);
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType) return;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasWeekOverride && !hasGoalRaceType) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -2336,7 +2339,24 @@ async function persistProfileUpdates(
     }
     if (hasRaceDate) profileUpdate.race_date = extracted.race_date;
     if (hasGoalTime) profileUpdate.goal_time_minutes = extracted.goal_time_minutes;
-    if (hasTrainingDays) profileUpdate.training_days = (extracted.updated_training_days as string[]).map(d => d.toLowerCase());
+    if (hasTrainingDays) {
+      profileUpdate.training_days = (extracted.updated_training_days as string[]).map(d => d.toLowerCase());
+      // Clear any active week override — the standing schedule takes precedence
+      profileUpdate.this_week_override_days = null;
+      profileUpdate.this_week_override_expires = null;
+    }
+    if (hasWeekOverride) {
+      profileUpdate.this_week_override_days = (extracted.this_week_override_days as string[]).map(d => d.toLowerCase());
+      // Expires end of current week: compute local date string, then add days to reach Sunday
+      const tz = timezone || "America/New_York";
+      const now = new Date();
+      const localDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now); // "YYYY-MM-DD"
+      const localDate = new Date(localDateStr + "T12:00:00Z"); // noon UTC proxy for local date
+      const nowDow = localDate.getUTCDay(); // 0=Sun … 6=Sat
+      const daysUntilSunday = nowDow === 0 ? 0 : 7 - nowDow;
+      const sundayDate = new Date(localDate.getTime() + daysUntilSunday * 24 * 60 * 60 * 1000);
+      profileUpdate.this_week_override_expires = sundayDate.toISOString().slice(0, 10);
+    }
     if (hasGoalRaceType) {
       profileUpdate.goal = extracted.goal_race_type;
       const goalDistanceMap: Record<string, number> = {

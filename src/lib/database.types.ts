@@ -299,6 +299,8 @@ export type Database = {
           proactive_cadence: string | null
           race_date: string | null
           skip_dates: string[] | null
+          this_week_override_days: string[] | null
+          this_week_override_expires: string | null
           training_days: string[] | null
           updated_at: string | null
           user_id: string
@@ -324,6 +326,8 @@ export type Database = {
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
+          this_week_override_days?: string[] | null
+          this_week_override_expires?: string | null
           training_days?: string[] | null
           updated_at?: string | null
           user_id: string
@@ -349,6 +353,8 @@ export type Database = {
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
+          this_week_override_days?: string[] | null
+          this_week_override_expires?: string | null
           training_days?: string[] | null
           updated_at?: string | null
           user_id?: string

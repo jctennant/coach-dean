@@ -1,6 +1,19 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
+/** Returns the active training days for a profile — override if valid, else standing schedule. */
+function effectiveTrainingDays(
+  trainingDays: string[],
+  overrideDays: string[] | null,
+  overrideExpires: string | null,
+  todayDateStr: string
+): string[] {
+  if (overrideDays && overrideDays.length > 0 && overrideExpires && todayDateStr <= overrideExpires) {
+    return overrideDays;
+  }
+  return trainingDays;
+}
+
 /**
  * GET /api/cron/nightly-reminder
  * Runs daily at 02:00 UTC (6pm PST / 7pm PDT).
@@ -17,7 +30,7 @@ export async function GET(request: Request) {
   // training_profiles.proactive_cadence = 'nightly_reminders'
   const { data: profiles, error } = await supabase
     .from("training_profiles")
-    .select("user_id, training_days, last_nightly_reminder_date, skip_dates, users!inner(timezone, onboarding_step, messaging_opted_out, strava_access_token)")
+    .select("user_id, training_days, this_week_override_days, this_week_override_expires, last_nightly_reminder_date, skip_dates, users!inner(timezone, onboarding_step, messaging_opted_out, strava_access_token)")
     .eq("proactive_cadence", "nightly_reminders")
     .is("users.onboarding_step", null)
     .eq("users.messaging_opted_out", false);
@@ -56,8 +69,15 @@ export async function GET(request: Request) {
     if (profile.last_nightly_reminder_date === todayUTC) continue;
     const user = profile.users as unknown as { timezone: string | null; strava_access_token: string | null };
     const tz = user.timezone || "America/New_York";
-    const trainingDays = (profile.training_days as string[]) || [];
     const skipDates = (profile.skip_dates as string[]) || [];
+
+    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+    const trainingDays = effectiveTrainingDays(
+      (profile.training_days as string[]) || [],
+      profile.this_week_override_days as string[] | null,
+      profile.this_week_override_expires as string | null,
+      todayDateStr
+    );
 
     const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrow);
     if (!trainingDays.includes(tomorrowWeekday.toLowerCase())) continue;
@@ -66,7 +86,6 @@ export async function GET(request: Request) {
 
     if (!user.strava_access_token) {
       const todayDay = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now).toLowerCase();
-      const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
       if (trainingDays.includes(todayDay) && !skipDates.includes(todayDateStr)) {
         needsCheckinTodayIds.push(profile.user_id);
       }
@@ -109,18 +128,25 @@ export async function GET(request: Request) {
   for (const profile of profiles) {
     const user = profile.users as unknown as { timezone: string | null; onboarding_step: string | null; strava_access_token: string | null };
     const tz = user.timezone || "America/New_York";
-    const trainingDays = (profile.training_days as string[]) || [];
 
     if (profile.last_nightly_reminder_date === todayUTC) {
       console.log(`[nightly-reminder] skipping ${profile.user_id} — already sent today (${todayUTC})`);
       continue;
     }
 
+    const skipDates = (profile.skip_dates as string[]) || [];
+    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+    const trainingDays = effectiveTrainingDays(
+      (profile.training_days as string[]) || [],
+      profile.this_week_override_days as string[] | null,
+      profile.this_week_override_expires as string | null,
+      todayDateStr
+    );
+
     const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrow);
     const tomorrowDay = tomorrowWeekday.toLowerCase();
     if (!trainingDays.includes(tomorrowDay)) continue;
 
-    const skipDates = (profile.skip_dates as string[]) || [];
     const tomorrowDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(tomorrow);
     if (skipDates.includes(tomorrowDateStr)) {
       console.log(`[nightly-reminder] skipping ${profile.user_id} — ${tomorrowDateStr} is a one-off skip`);

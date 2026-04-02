@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — This-week schedule override: reminders fire on the right days
+
+**Type:** Feature
+**Reported by:** Jake
+**User feedback:** "if someone says I want to run mon, tues, fri this week instead of monday, sat, sunday, will the cron fire appropriately for reminders even if training days isn't updated?"
+**Root cause:** No mechanism existed for temporary single-week schedule swaps. Without updating `training_days`, crons would fire on the old days; updating it permanently would overwrite the standing schedule.
+**Fix / Change:** Added `this_week_override_days text[]` and `this_week_override_expires date` to `training_profiles`. When a user says "I want to run Mon/Wed/Fri this week", Dean stores the temporary days + an expiry of the upcoming Sunday. The morning-reminder and nightly-reminder crons now call `effectiveTrainingDays()` which uses the override if present and not expired, falling back to the standing schedule. A permanent schedule update clears any active override. The extraction prompt distinguishes "this week only" from standing schedule changes.
+**Files changed:** `supabase/migrations/022_week_override_days.sql`, `src/lib/database.types.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/cron/morning-reminder/route.ts`, `src/app/api/cron/nightly-reminder/route.ts`
+
+---
+
 ## 2026-04-02 — Fixed training_days case mismatch silently breaking morning reminders
 
 **Type:** Bug Fix
