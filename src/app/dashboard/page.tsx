@@ -41,6 +41,12 @@ type DayWorkout = {
   miles: number | null;
 };
 
+type PlanSession = {
+  day: string; // "Mon", "Tue", etc.
+  date: string;
+  label: string;
+};
+
 const DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const DAY_SHORT: Record<string, string> = {
   Monday: "Mon", Tuesday: "Tue", Wednesday: "Wed", Thursday: "Thu",
@@ -87,6 +93,43 @@ function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
     if (day === longRunDay) return { day, shortDay, type: "long", label: "Long run", miles: longRunMi };
     if (day === keyWorkoutDay) return { day, shortDay, type: "key", label: week.key_workout || "Key workout", miles: keyWorkoutMi };
     return { day, shortDay, type: "easy", label: "Easy run", miles: easyMi };
+  });
+}
+
+const DAY_SHORT_TO_FULL: Record<string, string> = {
+  Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday",
+  Fri: "Friday", Sat: "Saturday", Sun: "Sunday",
+};
+
+function buildDailyPlanFromSessions(sessions: PlanSession[]): DayWorkout[] {
+  const sessionByDay = new Map(sessions.map(s => [s.day, s]));
+
+  function classifySession(label: string): "long" | "key" | "easy" | "rest" {
+    const l = label.toLowerCase();
+    if (l.includes("long run")) return "long";
+    if (l.includes("tempo") || l.includes("interval") || l.includes("repeat") ||
+        l.includes("stride") || l.includes("threshold") || l.includes("fartlek") ||
+        l.includes("vo2") || l.includes("hills")) return "key";
+    return "easy";
+  }
+
+  function parseMiles(label: string): number | null {
+    const m = label.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    return m ? parseFloat(m[1]!) : null;
+  }
+
+  return DAY_ORDER.map(day => {
+    const shortDay = DAY_SHORT[day]!;
+    const dayShort = Object.entries(DAY_SHORT_TO_FULL).find(([, v]) => v === day)?.[0];
+    const session = dayShort ? sessionByDay.get(dayShort) : undefined;
+    if (!session) return { day, shortDay, type: "rest", label: "Rest", miles: null };
+    return {
+      day,
+      shortDay,
+      type: classifySession(session.label),
+      label: session.label,
+      miles: parseMiles(session.label),
+    };
   });
 }
 
@@ -163,7 +206,7 @@ export default async function DashboardPage({
       .single(),
     supabase
       .from("training_state")
-      .select("current_week, current_phase, weekly_mileage_target")
+      .select("current_week, current_phase, weekly_mileage_target, weekly_plan_sessions")
       .eq("user_id", user.id)
       .single(),
     supabase
@@ -203,9 +246,12 @@ export default async function DashboardPage({
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
   const trainingDays = (profileData?.training_days as string[] | null) ?? null;
   const upcomingRaces = (racesData ?? []) as Race[];
-  const dailyPlan = currentWeek && trainingDays && trainingDays.length > 0
-    ? buildDailyPlan(currentWeek, trainingDays)
-    : null;
+  const weeklyPlanSessions = (stateData?.weekly_plan_sessions as PlanSession[] | null) ?? null;
+  const dailyPlan = weeklyPlanSessions && weeklyPlanSessions.length > 0
+    ? buildDailyPlanFromSessions(weeklyPlanSessions)
+    : (currentWeek && trainingDays && trainingDays.length > 0
+      ? buildDailyPlan(currentWeek, trainingDays)
+      : null);
 
   // Partial-week logic — must run before week1Monday is used so date anchors are correct.
   // If the user onboarded mid-week with no remaining workouts (e.g. Saturday, no Sunday run),

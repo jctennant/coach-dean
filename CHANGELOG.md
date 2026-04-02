@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — Dashboard now shows actual weekly sessions from Coach Dean
+
+**Type:** Bug Fix
+**Reported by:** Jake (user)
+**User feedback:** "Seems my plan in the dashboard + what Dean sent me aren't the same — in particular, it seems like the dashboard doesn't include strength or cross training? and also it doesn't have the same detail on workouts."
+**Root cause:** Dashboard was reading from `training_plans.weeks` and reconstructing the weekly view algorithmically via `buildDailyPlan()`, which only knew about running sessions (easy/key/long/rest). It never read `weekly_plan_sessions` from `training_state`, which is where the actual extracted sessions (including strength, cross-training, treadmill hills, bike, etc.) are stored after each weekly recap.
+**Fix / Change:** Dashboard now fetches `weekly_plan_sessions` from `training_state`. When sessions exist, `buildDailyPlanFromSessions()` renders them directly — preserving exact labels, all session types, and parsed mileage. Falls back to the old algorithmic approach only when no stored sessions are available.
+**Files changed:** `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-01 — Fix plan request sending dashboard link and date labeling in sessions
 
 **Type:** Bug Fix
