@@ -114,7 +114,7 @@ function buildDailyPlanFromSessions(sessions: PlanSession[]): DayWorkout[] {
   }
 
   function parseMiles(label: string): number | null {
-    const m = label.match(/(\d+(?:\.\d+)?)\s*mi/i);
+    const m = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
     return m ? parseFloat(m[1]!) : null;
   }
 
