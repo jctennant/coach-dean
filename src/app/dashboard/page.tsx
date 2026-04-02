@@ -456,7 +456,10 @@ export default async function DashboardPage({
               )
             )}
             {currentWeek.notes && (
-              <p className="text-xs text-gray-500 italic">{currentWeek.notes}</p>
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Coach&apos;s Note</p>
+                <p className="text-sm text-gray-600 leading-relaxed">{currentWeek.notes}</p>
+              </div>
             )}
           </div>
         )}

@@ -245,7 +245,7 @@ export async function generateAndSaveFullPlan(
       system: `You are a running coach generating a structured training plan arc.
 For each week provide:
 - key_workout: the defining session for that week (1 line). Examples: "6×800m @ 5K pace", "4mi tempo @ threshold", "12mi long run with 2mi @ goal pace", "6×strides + easy 5mi", "20min fartlek", "Race simulation 5mi @ goal pace". Deload weeks get a low-key description.
-- notes: one coaching sentence. Vary these so each week feels distinct.
+- notes: 2-3 sentences for the athlete to read on their dashboard. First sentence: the week's purpose and why it matters at this stage of training (e.g. "Week 6 is about building your aerobic base — consistent easy mileage here pays dividends in the peak phase."). Then 1-2 sentences on the key workout: what it is, the target effort or pace, and one brief execution tip (e.g. "The tempo run on Wednesday should feel comfortably hard — you should be able to speak in short phrases but not hold a conversation. Start controlled and aim to hold pace in the second half."). Deload weeks should acknowledge the pullback and why recovery is productive. Keep it direct and practical, not generic.
 
 Return ONLY a valid JSON array:
 [{"week_number": 1, "key_workout": "...", "notes": "..."}, ...]
