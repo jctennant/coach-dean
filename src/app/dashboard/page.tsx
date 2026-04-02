@@ -439,7 +439,7 @@ export default async function DashboardPage({
                         </span>
                       </div>
                       {d.miles !== null && (
-                        <span className={`text-sm shrink-0 ml-2 ${d.type === "key" && !isDimmed ? "font-semibold" : ""} ${isDimmed ? "text-gray-300" : d.type === "long" ? "text-gray-900" : d.type === "key" ? "text-gray-700" : "text-gray-400"}`}>
+                        <span className={`text-sm shrink-0 ml-2 ${isDimmed ? "text-gray-300" : d.type === "key" ? "font-semibold text-gray-900" : "text-gray-500"}`}>
                           {d.miles} mi
                         </span>
                       )}
