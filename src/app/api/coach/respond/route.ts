@@ -2636,6 +2636,11 @@ PLAN CONSISTENCY RULES — follow these exactly:
       const nextWeekContext = storedNextPlanWeek
         ? `Week ${storedNextPlanWeek.week_number} (next week): ${storedNextPlanWeek.mileage_target} mi target, long run ${storedNextPlanWeek.long_run_target} mi, key workout: ${storedNextPlanWeek.key_workout}`
         : null;
+      // Inject a compact summary of every planned week so Dean can answer questions about
+      // upcoming mileage, peak volume, long runs, or key sessions without guessing.
+      const fullArcContext = storedPlanAllWeeks && storedPlanAllWeeks.length > 0
+        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (reference when asked about upcoming weeks, peak volume, or overall plan; do NOT reproduce this list in your response):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${w.mileage_target} mi, long run ~${w.long_run_target} mi${w.key_workout ? ` — ${w.key_workout}` : ''}`).join('\n')}`
+        : '';
       return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
 
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.
@@ -2656,7 +2661,7 @@ INTERVAL SESSION MATH: When converting interval sessions to time or total distan
 
 FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK:", they are submitting feedback. Decide which of two paths applies:
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
-- If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.`;
+- If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.${fullArcContext}`;
     }
     case "morning_reminder":
       if (missedRunCheckin) {

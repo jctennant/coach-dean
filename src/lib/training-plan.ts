@@ -189,7 +189,14 @@ export async function generateAndSaveFullPlan(
     }
 
     const longRunFactor = phase === "taper" ? 0.30 : phase === "peak" ? 0.38 : 0.32;
-    const longRunTarget = Math.round(weekMileage * longRunFactor * 2) / 2;
+    // Goal-specific long run caps: short-race training doesn't need marathon-style long runs.
+    const g2 = (goal ?? "").toLowerCase();
+    const longRunCap = (g2.includes("5k") || g2.includes("5 k")) ? 7
+      : (g2.includes("10k") || g2.includes("10 k")) ? 10
+      : (g2.includes("half") || g2.includes("13.1")) ? 14
+      : null;
+    const rawLongRun = Math.round(weekMileage * longRunFactor * 2) / 2;
+    const longRunTarget = longRunCap !== null ? Math.min(rawLongRun, longRunCap) : rawLongRun;
 
     // Label deload weeks explicitly so the dashboard can surface them distinctly.
     // The phase value is used for mileage logic above; displayPhase is what gets stored.
@@ -278,19 +285,32 @@ No other text.`,
     weeks: planWeeks as unknown as Json,
   });
 
-  // Sync training_state: reset week counter if this is a new plan, optionally sync mileage target.
+  // Sync training_state: reset week counter if this is a new plan; sync mileage target.
+  // Always sync weekly_mileage_target: use prescribedWeek1Miles (what Dean told the athlete) if
+  // provided, otherwise fall back to the computed arc week 1 so the dashboard stays consistent
+  // with the plan (fixes the "dashboard shows 15mi but plan says 13mi" mismatch after race date
+  // changes that trigger a full regen without a fresh prescribed value).
+  const week1ArcMileage = planWeeks[0]?.mileage_target ?? null;
+  const week1MileageTarget = prescribedWeek1Miles ?? week1ArcMileage;
   await supabase.from("training_state")
     .update({
       ...(resetToWeek1 ? { current_week: 1 } : {}),
-      ...(prescribedWeek1Miles ? { weekly_mileage_target: prescribedWeek1Miles } : {}),
+      ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
     })
     .eq("user_id", userId);
 
-  // Generate dashboard token and mark trial start
-  const dashboardToken = crypto.randomUUID();
+  // Reuse the existing dashboard token so old links remain valid.
+  // Only generate a new UUID (and stamp trial_started_at) if the user has never had one.
+  const { data: existingUserData } = await supabase.from("users")
+    .select("dashboard_token")
+    .eq("id", userId)
+    .single();
+  const existingToken = (existingUserData as { dashboard_token: string | null } | null)?.dashboard_token ?? null;
+  const dashboardToken = existingToken ?? crypto.randomUUID();
+  const isNewToken = !existingToken;
   await supabase.from("users").update({
     dashboard_token: dashboardToken,
-    trial_started_at: new Date().toISOString(),
+    ...(isNewToken ? { trial_started_at: new Date().toISOString() } : {}),
   }).eq("id", userId);
 
   if (!skipLinkSms) {

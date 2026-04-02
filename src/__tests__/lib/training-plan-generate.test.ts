@@ -265,7 +265,9 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
 
     expect(capturedUpdate).not.toBeNull();
     expect(capturedUpdate).toMatchObject({ current_week: 1 });
-    expect(capturedUpdate).not.toHaveProperty("weekly_mileage_target");
+    // weekly_mileage_target is now always synced from the computed arc week 1 (baseMileage=30)
+    // so the dashboard stays consistent with the plan even when no prescribedWeek1Miles is given.
+    expect(capturedUpdate).toMatchObject({ weekly_mileage_target: 30 });
   });
 
   it("does NOT include current_week in the update when resetToWeek1 is false", async () => {

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — Plan regen fixes: stable links, accurate arc context, 5K long run cap
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "Dashboard goes up to 16 miles but Dean says up to 20 / I don't have a week by week breakdown in front of me - yes he should have the training arc to be able to edit things / Old link didn't work when plan updated / Regenerated a new plan in the middle of a week, mileage for this week is 13 miles, but weekly target says 15 miles / 5K plan has 9.5 mi long run in it"
+**Root cause:** Four distinct bugs: (1) `generateAndSaveFullPlan` always issued a new `dashboard_token`, invalidating the athlete's existing link every time the plan was regenerated. (2) The `user_message` context only included the next-week arc entry, so Dean hallucinated peak mileage instead of reading the stored plan. (3) `training_state.weekly_mileage_target` was only synced when `prescribedWeek1Miles` was provided; after a race-date regen it kept the old value, causing a mismatch with the new arc. (4) The long run factor (38% at peak) was applied without a goal-specific cap, producing 9.5mi long runs for 5K plans.
+**Fix / Change:** (1) `generateAndSaveFullPlan` now fetches the user's existing `dashboard_token` and reuses it; only generates a new UUID (and stamps `trial_started_at`) if none exists. (2) Added `fullArcContext` to the `user_message` prompt — a compact week-by-week arc summary Dean can reference when asked about upcoming mileage or key sessions. (3) Always sync `weekly_mileage_target` to the computed arc week 1 value when no `prescribedWeek1Miles` is provided, so the dashboard reflects the regenerated plan. (4) Added goal-specific long run caps: 5K → 7mi, 10K → 10mi, half marathon → 14mi.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-plan-generate.test.ts`
+
+---
+
 ## 2026-04-02 — This-week schedule override: reminders fire on the right days
 
 **Type:** Feature
