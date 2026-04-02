@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — Richer session detail: HR targets, easy run cues, strength exercises
+
+**Type:** Improvement
+**Reported by:** Jake (user)
+**User feedback:** "I've gotten a lot of feedback that the sessions could use a bit more detail — for example, if a runner gets all easy miles in a week it's a bit boring and unmotivating. We should consider ways to give a bit more detail, for example - target HR zones if we see a user has a HR coming in via their strava, types of terrain to shoot for, more details on the why behind the workouts, etc. And also in my plan it says 30 min strength and mobility but I wasn't given much detail on what that is"
+**Root cause:** Session labels were bare (e.g. "Easy 5mi @ 9:30/mi") with no purpose context, HR data from Strava was collected but never used for prescriptions, and strength sessions had no exercise specifics.
+**Fix / Change:** Three prompt changes: (1) HR zone guidance — when HEART RATE data appears in activity summary, Dean appends a bpm target on easy run labels (~10–20 bpm below highest avg effort). (2) Easy run enrichment — easy runs now get one contextual cue per plan (terrain, effort description, or recovery framing), especially for all-easy weeks. (3) Strength specifics — whenever Dean prescribes a strength session, a follow-up bubble with 3–5 specific exercises (runner-focused hip stability/glute work by default, adjusted for injury notes) is required.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-02 — Dashboard now shows actual weekly sessions from Coach Dean
 
 **Type:** Bug Fix
