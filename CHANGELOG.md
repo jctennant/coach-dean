@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — Fix: today's planned sessions shown as "upcoming", causing Dean to call them "tomorrow's"
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "in this instance (for me), Dean thinks it is still yesterday and I have a strength session today (thursday), but it is thursday and I already did the strength session. [...] Keep tomorrow's strength session light on the hamstrings"
+**Root cause:** The `activeSessions` filter used `sessionDate >= localTodayUTC`, which included today's sessions in the "UPCOMING SESSIONS THIS WEEK" list with no distinction from future sessions. Claude saw Thursday's strength session listed as "upcoming" without knowing it was today, and inferred it hadn't happened yet — calling it "tomorrow's session" when responding to a Thursday afternoon message.
+**Fix / Change:** Split sessions into `todaySessions` (exactly today) and `futureSessions` (strictly tomorrow+). Today's sessions are now shown under a separate "TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice)" header. Future sessions remain under "UPCOMING SESSIONS THIS WEEK". The projected week total now only sums future sessions (today's may already be done).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-02 — Plan regen fixes: stable links, accurate arc context, 5K long run cap
 
 **Type:** Bug Fix

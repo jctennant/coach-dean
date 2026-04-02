@@ -1868,28 +1868,43 @@ ${(() => {
     const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
     if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: null };
     const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
-    const activeSessions = sessions.filter(s => {
+    const todaySessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      const sessionDate = new Date(Date.UTC(ty, m - 1, d));
+      return sessionDate.getTime() === localTodayUTC.getTime();
+    });
+    const futureSessions = sessions.filter(s => {
       const [m, d] = s.date.split("/").map(Number);
       if (isNaN(m) || isNaN(d)) return true;
       const sessionDate = new Date(Date.UTC(ty, m - 1, d));
-      return sessionDate >= localTodayUTC;
+      return sessionDate > localTodayUTC;
     });
+    const activeSessions = [...todaySessions, ...futureSessions];
     if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar };
-    // Sum remaining session miles for projection
+    // Sum remaining session miles for projection (only future; today may be done)
     let remainingSessionMiles = 0;
-    for (const s of activeSessions) {
+    for (const s of futureSessions) {
       const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
       const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
       const mMatch = explicitTotal || firstMi;
       if (mMatch) remainingSessionMiles += parseFloat(mMatch[1]);
     }
-    const list = activeSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
     const targetAlreadyMet = targetMiles > 0 && weekMileageSoFar >= targetMiles;
-    const sessionHeader = targetAlreadyMet
-      ? `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n`
-      : `\n- UPCOMING SESSIONS THIS WEEK:\n`;
+    let sessionRows = "";
+    if (todaySessions.length > 0) {
+      const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+      sessionRows += `\n- TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice):\n${todayList}\n`;
+    }
+    if (futureSessions.length > 0) {
+      const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+      const futureHeader = targetAlreadyMet
+        ? `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n`
+        : `\n- UPCOMING SESSIONS THIS WEEK:\n`;
+      sessionRows += `${futureHeader}${futureList}\n`;
+    }
     return {
-      sessionRows: `${sessionHeader}${list}`,
+      sessionRows,
       projectedWeekMiles: weekMileageSoFar + remainingSessionMiles,
     };
   })();
