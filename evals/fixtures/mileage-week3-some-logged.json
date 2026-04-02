@@ -1,8 +1,9 @@
 {
   "id": "mileage-week3-some-logged",
-  "description": "Week 3 of 18 marathon plan, user has logged 15.2mi so far, asks about weekly target",
+  "description": "Week 3 of 18 marathon plan, user has logged 15.2mi so far (Monday + Tuesday), asks about weekly target",
   "category": "mileage_accuracy",
   "trigger": "user_message",
+  "today": "2026-04-01",
   "user": {
     "name": "Sarah",
     "timezone": "America/Denver",
@@ -26,7 +27,7 @@
       { "date": "2026-03-23", "type": "Run", "distance_miles": 6.0, "pace": "9:15/mi" },
       { "date": "2026-03-25", "type": "Run", "distance_miles": 9.2, "pace": "9:30/mi" },
       { "date": "2026-03-30", "type": "Run", "distance_miles": 6.0, "pace": "9:10/mi" },
-      { "date": "2026-03-28", "type": "Run", "distance_miles": 9.2, "pace": "9:25/mi" }
+      { "date": "2026-03-31", "type": "Run", "distance_miles": 9.2, "pace": "9:25/mi" }
     ],
     "recent_conversation": []
   },

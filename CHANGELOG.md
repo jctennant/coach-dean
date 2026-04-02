@@ -4,6 +4,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — Fixed training_days case mismatch silently breaking morning reminders
+
+**Type:** Bug Fix
+**Reported by:** Jake (user's mom, Catherine)
+**User feedback:** "My mom had Dean update her schedule to Sun, Tues, Thursday but hasn't heard from Dean since Sunday"
+**Root cause:** When a user updates their training schedule via SMS, the LLM extraction prompt instructs Claude to return "full day names" (e.g. `["Sunday", "Tuesday", "Thursday"]`). These were saved directly to `training_profiles.training_days` without normalization. The morning-reminder cron compares against `todayWeekday.toLowerCase()` (e.g. `"tuesday"`), so capitalized values never matched and all affected users were silently skipped. The onboarding flow correctly normalizes to lowercase, creating an inconsistency between the two code paths.
+**Fix / Change:** Added `.map(d => d.toLowerCase())` when saving `updated_training_days` from user messages in `coach/respond`. Catherine and anyone else who updated their schedule via SMS also needs their existing DB row fixed manually (capitalize bug may have introduced `["Sunday", "Tuesday", "Thursday"]` into their `training_days` column).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-02 — Fix: additive total format in weekly plan messages
+
+**Type:** Bug Fix
+**Reported by:** Eval — `quality-no-internal-labels` fixture revealed by richer judge context
+**Root cause:** Two issues compounding: (1) The TOTAL LINE FORMAT prompt rule said "show ONLY planned future sessions" — so when 6.5mi were already done and 19mi planned, Claude wrote "Total: 19 mi" ignoring already-done miles. (2) `correctMileageTotal` only parsed the compact session format `"Mon 3/2 · ..."` — when Claude used the fallback `"Tuesday, Mar 31: ..."` format, the function never fired and couldn't correct the total. After the prompt was updated to say "Total = planned + done", Claude started writing the math out explicitly as "19 mi planned + 6.5 done = 25.5 mi" (still wrong format).
+**Fix / Change:** (1) Updated TOTAL LINE FORMAT prompt for `user_message` trigger: Total = full week (planned + already done), show ONLY the final number — no "X + Y = Z" breakdown. (2) Extended `correctMileageTotal` to also parse the fallback long-form date format ("Tuesday, Mar 31: ...") using a new `fallbackLineRe` regex and a shared `extractSessionMiles` helper. (3) Updated `format-no-additive-total` fixture ground_truth note to clarify that dates in Apr 2–5 are correct for a week starting Mon 3/30 (judge was incorrectly penalizing them). (4) Fixed activity date inconsistencies in `mileage-week3-some-logged` and `date-18-week-plan-week10` fixtures — both had a Saturday activity that landed in the prior Mon–Sun week, confusing the richer judge. Added `today: "2026-04-01"` to both.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/fixtures/format-no-additive-total.json`, `evals/fixtures/mileage-week3-some-logged.json`, `evals/fixtures/date-18-week-plan-week10.json`
+
+---
+
 ## 2026-04-02 — Eval judge now date-aware and includes conversation context
 
 **Type:** Infra

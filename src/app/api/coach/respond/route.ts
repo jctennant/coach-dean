@@ -819,50 +819,48 @@ function correctProjectedTotal(message: string, projectedWeekMiles: number | nul
  * Only activates when both a session list (lines matching our format) and a
  * stated total are found — otherwise it's a no-op.
  */
+const MONTH_NAME_TO_NUM: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
 function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string {
-  // Session lines: "Mon 3/2 · ..." or "Tue 3/10 · ..."
+  // Primary format: "Mon 3/2 · ..." or "Tue 3/10 · ..."
+  // Fallback format: "Tuesday, Mar 31: ..." or "Monday, Apr 6 — ..." (Claude sometimes uses this)
   // Capture month/day so we can detect future-week plans.
   const sessionLineRe = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d+)\/(\d+)\s+·\s+(.+)$/gm;
+  const fallbackLineRe = /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d+)\s*[:\-–—]\s*(.+)$/gim;
 
   let plannedMiles = 0;
   let hasSessionList = false;
   let earliestSessionMs = Infinity;
   let m: RegExpExecArray | null;
 
-  while ((m = sessionLineRe.exec(message)) !== null) {
+  const extractSessionMiles = (monthNum: number, dayNum: number, desc: string) => {
     hasSessionList = true;
-    const monthNum = parseInt(m[2], 10);
-    const dayNum = parseInt(m[3], 10);
-    const desc = m[4];
-
-    // Track earliest session date to detect future-week plans
     const now = new Date();
     const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), monthNum - 1, dayNum));
-    // If this date appears to be >180 days in the past, assume it wraps to next year
     if (now.getTime() - sessionDate.getTime() > 180 * 24 * 60 * 60 * 1000) {
       sessionDate.setUTCFullYear(now.getUTCFullYear() + 1);
     }
     if (sessionDate.getTime() < earliestSessionMs) earliestSessionMs = sessionDate.getTime();
-
-    // Skip mileage counting for cross-training sessions regardless of what unit appears.
-    // Claude sometimes writes "60mi" meaning "60 minutes" for bike sessions — counting
-    // that as 60 miles inflates the total and defeats the correction.
     const isCrossTraining = /\b(bike|biking|cycling|swim|swimming|strength|mobility|stretch|yoga|elliptical|cross.train)\b/i.test(desc);
-    if (isCrossTraining) continue;
-
-    // Positive matching: only count sessions that have an explicit mileage marker.
-    // Non-running sessions (strength, cross-training, swimming, cycling, rest) are
-    // instructed in the prompt to NEVER include a distance in miles — so no mi marker
-    // means it's a non-running session. This avoids a brittle exclusion keyword list.
-    //   "≈7mi", "~7mi", "(7mi total)", "= 7mi" — these are intentionally placed totals.
-    // Fall back to the first mileage figure for simple sessions ("Easy 5mi @ 9:30/mi" → 5).
-    // Use word boundaries on "mi" so "60 min" is not counted as 60 miles.
-    // \bmi\b matches "mi" and "mi" alone; "miles" is caught by the mi(?:les?)? variant.
+    if (isCrossTraining) return;
     const explicitTotal = desc.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?:les?)?\b/i)
       || desc.match(/\((\d+(?:\.\d+)?)\s*mi(?:les?)?(?:\s+total)?\)/i);
     const firstMi = desc.match(/(\d+(?:\.\d+)?)\s*mi(?:les?)?\b/i);
     const miMatch = explicitTotal || firstMi;
     if (miMatch) plannedMiles += parseFloat(miMatch[1]);
+  };
+
+  while ((m = sessionLineRe.exec(message)) !== null) {
+    extractSessionMiles(parseInt(m[2], 10), parseInt(m[3], 10), m[4]);
+  }
+
+  // Also scan fallback format: "Tuesday, Mar 31: 6 mi ..." that Claude sometimes uses
+  while ((m = fallbackLineRe.exec(message)) !== null) {
+    const monthNum = MONTH_NAME_TO_NUM[m[1].toLowerCase()] ?? 0;
+    if (monthNum > 0) extractSessionMiles(monthNum, parseInt(m[2], 10), m[3]);
   }
 
   if (!hasSessionList || plannedMiles === 0) return message;
@@ -2243,7 +2241,7 @@ Extract ONLY explicitly stated NEW information:
 - A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${todayDateStr}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
 - A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th", "late May", "end of June") → race_date as "YYYY-MM-DD". Resolve vague phrases: "early [month]" → first Saturday of that month, "mid [month]" → Saturday nearest the 15th, "late [month]" or "end of [month]" → last Saturday of that month, month only → first Saturday of that month. Always use the next upcoming occurrence of that month. Today is ${todayDateStr}.
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
-- A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip or swap.
+- A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip, swap, or "this week only" request (e.g. "I want to run Mon, Tue, Fri this week" should NOT set updated_training_days).
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 
 Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
@@ -2338,7 +2336,7 @@ async function persistProfileUpdates(
     }
     if (hasRaceDate) profileUpdate.race_date = extracted.race_date;
     if (hasGoalTime) profileUpdate.goal_time_minutes = extracted.goal_time_minutes;
-    if (hasTrainingDays) profileUpdate.training_days = extracted.updated_training_days;
+    if (hasTrainingDays) profileUpdate.training_days = (extracted.updated_training_days as string[]).map(d => d.toLowerCase());
     if (hasGoalRaceType) {
       profileUpdate.goal = extracted.goal_race_type;
       const goalDistanceMap: Record<string, number> = {
@@ -2772,7 +2770,7 @@ SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate. When you prescribe a strength session, always follow the session list with a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
-TOTAL LINE FORMAT: The Total line must show ONLY the sum of the planned future sessions. Never write "Total: X mi + your Y mi already this week" — that is confusing and misleading. If the athlete has already run some miles this week and you want to acknowledge it, do so in a separate sentence outside the session list (e.g. "Note: you've already got X mi in your legs this week."). Never combine planned and already-completed miles in the same Total line.
+TOTAL LINE FORMAT: The Total line must show the FULL WEEK total = planned future sessions + miles the athlete has already logged this week. Show ONLY the final number — never show the math or breakdown. Correct: "Total: 25.5 mi". Wrong (any form): "19 mi + your 6.5 mi already", "19 mi planned + 6.5 already done = 25.5 mi", or any other "X + Y = Z" expression. If no miles are done yet, Total = the planned sessions sum.
 ⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.`;
     }
     case "workout_image":

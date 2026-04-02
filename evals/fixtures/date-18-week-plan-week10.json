@@ -3,6 +3,7 @@
   "description": "Week 10 of 18-week plan, 8 weeks out from race — should be peak phase, 56 days to race",
   "category": "date_week_correctness",
   "trigger": "user_message",
+  "today": "2026-04-01",
   "user": {
     "name": "Taylor",
     "timezone": "America/Chicago",
@@ -23,8 +24,8 @@
     "miles_logged_this_week": 12.0,
     "runs_this_week": 2,
     "recent_activities": [
-      { "date": "2026-03-28", "type": "Run", "distance_miles": 6.0, "pace": "9:10/mi" },
-      { "date": "2026-03-30", "type": "Run", "distance_miles": 6.0, "pace": "9:05/mi" },
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 6.0, "pace": "9:10/mi" },
+      { "date": "2026-03-31", "type": "Run", "distance_miles": 6.0, "pace": "9:05/mi" },
       { "date": "2026-03-25", "type": "Run", "distance_miles": 8.0, "pace": "9:00/mi" },
       { "date": "2026-03-22", "type": "Run", "distance_miles": 18.0, "pace": "9:30/mi" }
     ],
@@ -35,8 +36,8 @@
     "correct_week_number": 10,
     "correct_phase": "peak",
     "race_date": "2026-10-11",
-    "days_until_race": 195,
+    "days_until_race": 193,
     "weeks_until_race": 28,
-    "notes": "Race is 2026-10-11. Today is 2026-03-30. That's ~28 weeks away (195 days). Phase with 28 weeks out = base (>14). But stored current_phase is 'peak' because that's what the DB says. Response should say week 10 and reference the phase from state. Days until race should be ~195."
+    "notes": "Race is 2026-10-11. Today is 2026-04-01. That's ~28 weeks away (193 days). Phase with 28 weeks out = base (>14). But stored current_phase is 'peak' because that's what the DB says. Response should say week 10 and reference the phase from state. Days until race should be ~193."
   }
 }

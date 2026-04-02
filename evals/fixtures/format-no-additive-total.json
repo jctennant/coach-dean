@@ -38,6 +38,6 @@
     "correct_weekly_mileage_target": 35,
     "miles_already_done": 15,
     "planned_sessions_miles": 20,
-    "notes": "The Total line for remaining sessions should show 20mi (planned future sessions only). Must NOT say 'Total: 20mi + your 15mi already this week'. Must NOT say '35mi total + 15mi done'. The already-completed miles should be acknowledged separately. A combined 'Total: 35mi' is acceptable as the weekly target."
+    "notes": "Today is Monday 3/30 — this is the start of Week 1. Scheduled sessions on Thu 4/2, Fri 4/3, Sun 4/5 ARE correct (they fall within the Mon 3/30 – Sun 4/5 calendar week). Do NOT penalize dates as being in the wrong week. The primary test is format: the Total line must NOT be additive like 'Total: 20mi + your 15mi already'. A plain 'Total: 20mi' (sessions only) or 'Total: 35mi' (weekly target) are both acceptable."
   }
 }

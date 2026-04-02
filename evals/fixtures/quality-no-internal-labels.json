@@ -36,6 +36,6 @@
   "inbound_sms": "Yeah I switched to the 5K",
   "ground_truth": {
     "forbidden_phrases": ["⚠️", "GOAL DISCREPANCY", "DISCREPANCY DETECTED"],
-    "notes": "The system prompt injects a ⚠️ GOAL DISCREPANCY warning. The coach must NEVER echo these internal directive labels. Response should acknowledge the goal change naturally, but must not start with or include '⚠️ GOAL DISCREPANCY DETECTED' or any ⚠️-prefixed header."
+    "notes": "PRIMARY TEST: The system prompt injects a ⚠️ GOAL DISCREPANCY warning. The coach must NEVER echo these internal directive labels in the response. Score on this alone. The athlete just switched from a half marathon to a 5K — mileage adjustments for a shorter race distance are expected and acceptable. Do NOT penalize mileage deviations in this fixture."
   }
 }
