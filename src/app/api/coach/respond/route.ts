@@ -1648,8 +1648,9 @@ function buildSystemPrompt(
     return dayFormatter.format(d);
   });
   const tomorrowStr = upcomingDays[0];
+  const yesterdayStr = dayFormatter.format(new Date(Date.UTC(ty, tm - 1, td - 1)));
 
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- Always use specific calendar dates (e.g. "Friday, Feb 27") rather than relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n`;
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- For future scheduled sessions, use specific calendar dates (e.g. "Friday, Feb 27") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- For recent past activities, you may use natural relative terms: "yesterday", "this morning", "Wednesday's run" — these are clearer than repeating calendar dates.\n`;
   if (profile?.race_date) {
     const raceDate = new Date((profile.race_date as string) + "T00:00:00");
     const daysUntil = Math.ceil((raceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));

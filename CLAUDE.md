@@ -129,12 +129,13 @@ Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound
 | `split_distance_accuracy` | Coach says "mile 5" on a 3.1mi run — km splits misread as mile splits | 3 |
 | `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 3 |
 | `mileage_format` | Additive total format ("Total: 25mi + your 15mi already") | 2 |
-| `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed | 2 |
+| `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed, morning plan attributes activity to wrong day | 3 |
 
-**Current baseline (2026-03-31):** 15/18 passing, avg 8.7/10. Three known failures represent real Dean response quality issues being tracked:
+**Current baseline (2026-04-02):** 21/22 passing, avg 9.0/10. Four known failures represent real Dean response quality issues being tracked:
 - `pace-vdot52-post-run-easy` — Claude sums recent activities for week mileage instead of using the authoritative figure
 - `format-weekly-recap-clean-total` — Claude states 43mi target but only plans 34mi of sessions
 - `splits-10k-progression` — Claude states weekly total that ignores miles already logged
+- `quality-no-internal-labels` — Claude says "Total: 19 mi this week" ignoring 6.5mi already done (additive format bug, newly surfaced by the richer judge context)
 
 ### When to update evals
 

@@ -1,0 +1,53 @@
+{
+  "id": "quality-morning-plan-yesterday-activity",
+  "description": "Morning plan where athlete logged a run yesterday (Wednesday) via SMS — Dean must reference it as 'yesterday' or 'Wednesday', NOT as 'Monday' or another wrong day",
+  "category": "response_quality",
+  "trigger": "morning_plan",
+  "today": "2026-04-02",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Spring Half Marathon",
+    "goal_race_date": "2026-05-17",
+    "goal_time_minutes": null,
+    "current_week": 6,
+    "current_phase": "build",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:45/mi",
+    "interval_pace": "7:00/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 18,
+    "miles_logged_this_week": 6,
+    "runs_this_week": 1,
+    "recent_activities": [
+      { "date": "2026-04-01", "type": "Run", "distance_miles": 6.0, "pace": "9:35/mi" },
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 8.0, "pace": "9:40/mi" },
+      { "date": "2026-03-26", "type": "Run", "distance_miles": 5.0, "pace": "9:30/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Thu", "date": "4/2", "label": "Easy 4mi" },
+      { "day": "Sat", "date": "4/5", "label": "Long run 8mi easy" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "user",
+        "content": "Got my Wednesday run in — 6 miles easy between some other workouts"
+      },
+      {
+        "role": "assistant",
+        "content": "Nice — 6 miles logged. That puts you at 6 mi for the week so far. Thursday easy 4mi still on deck, then the long run Saturday."
+      }
+    ]
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "today_is": "Thursday April 2",
+    "yesterday_was": "Wednesday April 1",
+    "forbidden_phrases": ["from Monday", "Monday's run", "on Monday", "from Tuesday", "Tuesday's run"],
+    "notes": "Today is Thursday 4/2. The 6-mile run was on Wednesday 4/1 (yesterday). Any reference to when those miles were logged must say 'yesterday', 'Wednesday', or 'Wed, Apr 1' — NEVER 'Monday' or any other wrong day. This fixture catches the bug where Claude attributed a Wednesday run to Monday because dateContext lacked an explicit Yesterday anchor and told Claude to avoid all relative terms."
+  }
+}

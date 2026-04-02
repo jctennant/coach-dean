@@ -78,7 +78,8 @@ function buildEvalSystemPrompt(fixture) {
   const { user, trigger } = fixture;
   const tz = user.timezone || "America/Denver";
   const raceDate = user.goal_race_date;
-  const today = new Date("2026-03-30T12:00:00Z");
+  const todayDateStr = fixture.today ?? "2026-03-30";
+  const today = new Date(todayDateStr + "T12:00:00Z");
 
   // Date context
   const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -98,8 +99,9 @@ function buildEvalSystemPrompt(fixture) {
     const d = new Date(Date.UTC(ty, tm - 1, td + i + 1));
     return dayFmt.format(d);
   });
+  const yesterdayStr = dayFmt.format(new Date(Date.UTC(ty, tm - 1, td - 1)));
 
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Tomorrow: ${upcomingDays[0]}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- Always use specific calendar dates (e.g. "Tuesday, Mar 31") rather than relative terms like "tomorrow" or "next Monday".\n`;
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${upcomingDays[0]}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- For future scheduled sessions, use specific calendar dates (e.g. "Tuesday, Mar 31") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- For recent past activities, you may use natural relative terms: "yesterday", "this morning", "Wednesday's run" — these are clearer than repeating calendar dates.\n`;
   let daysUntilRace = null;
   let weeksUntilRace = null;
   if (raceDate) {

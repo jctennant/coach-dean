@@ -10,7 +10,8 @@
 export function buildJudgePrompt(fixture, coachResponse) {
   const { user, ground_truth, category } = fixture;
   const raceDate = user.goal_race_date;
-  const today = "2026-03-30";
+  const today = fixture.today ?? "2026-03-30";
+  const yesterday = getYesterday(today);
 
   // Compute days until race from the fixture's race date
   let daysUntilRace = null;
@@ -20,10 +21,19 @@ export function buildJudgePrompt(fixture, coachResponse) {
     daysUntilRace = Math.ceil((race.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
   }
 
+  const recentConvBlock = user.recent_conversation && user.recent_conversation.length > 0
+    ? `\nRECENT CONVERSATION (context the coach had access to):\n${user.recent_conversation.map(m => `  [${m.role}]: ${m.content}`).join("\n")}`
+    : "";
+
+  const recentActivitiesBlock = user.recent_activities && user.recent_activities.length > 0
+    ? `\nRECENT ACTIVITIES (what the coach saw):\n${user.recent_activities.map(a => `  ${a.date} (${getDayOfWeek(a.date)}): ${a.type} ${a.distance_miles}mi @ ${a.pace || "unknown pace"}`).join("\n")}`
+    : "";
+
   const contextSummary = `
 ATHLETE CONTEXT (ground truth — these are authoritative):
 - Name: ${user.name}
 - Today's date: ${today} (${getDayOfWeek(today)})
+- Yesterday's date: ${yesterday} (${getDayOfWeek(yesterday)})
 - Training week: Week ${user.current_week}
 - Phase: ${user.current_phase}
 - Goal race: ${user.goal_race} on ${raceDate}${daysUntilRace !== null ? ` (${daysUntilRace} days away)` : ""}
@@ -36,7 +46,7 @@ ATHLETE CONTEXT (ground truth — these are authoritative):
 - Runs this week: ${user.runs_this_week}
 - Is deload week: ${user.is_deload_week || (user.current_week % 4 === 0) ? "YES" : "no"}
 ${user.plan_sessions_remaining ? `- Remaining sessions: ${user.plan_sessions_remaining.map(s => s.label).join(", ")}` : ""}
-${user.activity_details ? buildActivityGroundTruth(user.activity_details) : ""}
+${user.activity_details ? buildActivityGroundTruth(user.activity_details) : ""}${recentActivitiesBlock}${recentConvBlock}
 GROUND TRUTH EXPECTATIONS:
 ${buildGroundTruthBlock(ground_truth)}
 `.trim();
@@ -82,6 +92,11 @@ EVALUATION CRITERIA:
    - true = no internal labels leaked (or none expected to be tested)
    - false = response contains "⚠️", "GOAL DISCREPANCY DETECTED", "RECOVERY WEEK" as a header, or similar internal labels
 
+7. temporal_reference_correct: Are references to past activities and days accurate?
+   - true = any mention of "yesterday", "Monday", "Wednesday", etc. correctly matches the actual activity dates shown above; or no temporal references
+   - false = response says an activity happened on the wrong day (e.g. "from Monday" when the run was Wednesday/yesterday), or uses a forbidden phrase listed in ground truth
+   - null = no temporal references to past activities
+
 SCORE RUBRIC:
 - 10: All facts correct, response is natural, on-brand, appropriately brief
 - 7-9: Minor issues (slightly off wording, not optimally brief) but no factual errors
@@ -99,6 +114,7 @@ Return exactly this JSON structure:
   "date_week_correct": true | false | null,
   "format_correct": true | false | null,
   "no_internal_labels": true | false,
+  "temporal_reference_correct": true | false | null,
   "flags": ["list any specific factual errors — be precise, cite the exact wrong value"],
   "score": 0,
   "score_rationale": "one sentence explaining the score"
@@ -108,6 +124,12 @@ Return exactly this JSON structure:
 function getDayOfWeek(dateStr) {
   const d = new Date(dateStr + "T12:00:00Z");
   return ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getUTCDay()];
+}
+
+function getYesterday(dateStr) {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 function buildEasyRange(paceStr) {

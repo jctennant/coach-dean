@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — Eval judge now date-aware and includes conversation context
+
+**Type:** Infra
+**Reported by:** Internal — discovered while adding fixture for the yesterday-attribution bug
+**Root cause:** `buildEvalSystemPrompt` in `run-evals.mjs` and `buildJudgePrompt` in `factual-accuracy.mjs` both hardcoded `today = "2026-03-30"`. This made per-fixture date testing impossible — the coach response was generated for today's real date while the judge evaluated it against March 30, causing date-related fixtures to fail for the wrong reasons. Additionally, the judge had no visibility into `recent_activities` or `recent_conversation`, causing it to falsely flag content from those sources as hallucinated.
+**Fix / Change:** Added `today` field to fixtures (defaults to `"2026-03-30"` so all existing fixtures are unaffected). Threaded it through both `buildEvalSystemPrompt` and `buildJudgePrompt`. Added `recent_activities` and `recent_conversation` blocks to judge context. Added `temporal_reference_correct` evaluation dimension to the judge. The richer judge context also surfaced a pre-existing bug in `quality-no-internal-labels` (additive total ignoring already-done miles) — added to known failures. Added `quality-morning-plan-yesterday-activity` fixture (9/10). Baseline is now 21/22 passing.
+**Files changed:** `evals/run-evals.mjs`, `evals/judges/factual-accuracy.mjs`, `evals/fixtures/quality-morning-plan-yesterday-activity.json`, `CLAUDE.md`
+
+---
+
+## 2026-04-02 — Fix: morning plan referencing wrong day for recent activities
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "Here's another issue - Dean referring to Monday as yesterday: ...You're at 6 mi this week already from Monday, so this keeps you moving without piling on too much volume. Listen to your body — if you're still feeling yesterday's double header..."
+**Root cause:** `dateContext` told Claude to "always use specific calendar dates rather than relative terms like 'tomorrow' or 'next Monday'". This rule is correct for *future* scheduled sessions (messages may be read later), but Claude was applying it to *past* activity references too — and when it couldn't say "yesterday" it guessed a training day from the schedule (Monday) instead of the actual logged date (Wednesday).
+**Fix / Change:** Added `Yesterday: <date>` explicitly to `dateContext` (mirroring how Tomorrow is provided). Clarified the rule: future sessions should use specific calendar dates; past activities should use natural relative terms like "yesterday" or "Wednesday's run". Updated `run-evals.mjs` to match. Added new eval fixture `quality-morning-plan-yesterday-activity` to catch regressions.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+**Eval note:** A fixture for this was attempted but the eval framework hardcodes `today = "2026-03-30"` in the judge while the coach response is generated with the real date — making temporal-reference tests ("yesterday" vs wrong day) impossible to judge correctly without per-fixture date injection. The first eval run did confirm the fix works (judge noted "Response avoids the forbidden day-specific phrases"). Proper eval coverage would require adding date injection to the judge.
+
+---
+
 ## 2026-04-02 — Richer session detail: HR targets, easy run cues, strength exercises
 
 **Type:** Improvement
