@@ -1712,11 +1712,12 @@ async function handleNonCadenceMessage(
   const classifyResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 16,
-    system: `The athlete just received their initial training plan and, instead of answering a reminder preference question, sent a different message.
+    system: `The athlete just received their initial training plan and a post-run coaching message, and instead of answering a reminder preference question, sent a different message.
 
 Classify it. Return only one word:
 - "plan_feedback" — athlete wants to change the plan (fewer/more runs, different sports, schedule adjustments, volume concerns)
-- "coaching_question" — athlete is asking a genuine training or race prep question
+- "run_question" — athlete is asking about their most recent run (e.g. "what did I do?", "tell me more about my run", "what were my splits", "how did I do?", "elaborate on that")
+- "coaching_question" — athlete is asking a genuine training or race prep question unrelated to a specific recent run
 - "other" — everything else`,
     messages: [{ role: "user", content: message }],
   });
@@ -1759,6 +1760,41 @@ Classify it. Return only one word:
       body: JSON.stringify({ userId: user.id, trigger: "initial_plan" }),
     });
 
+    return NextResponse.json({ ok: true });
+  }
+
+  if (msgType.startsWith("run_question")) {
+    // The athlete is asking about their most recent run. Pull the last few messages
+    // (which will include the post_run coaching message with all the activity data)
+    // and answer from that context rather than claiming ignorance.
+    const { data: recentConvos } = await supabase
+      .from("conversations")
+      .select("role, content, message_type")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(6);
+
+    const contextMessages = (recentConvos ?? [])
+      .reverse()
+      .map((c) => ({
+        role: c.role as "user" | "assistant",
+        content: c.content as string,
+      }));
+
+    const answerResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 300,
+      system: `You are Coach Dean, an expert running and endurance coach. The athlete just asked about their recent run. You already described it in the conversation above — use that data to answer their question specifically and directly. Do NOT say you don't have access to their run data. After your answer, on a new line, add exactly: "${cadenceQuestion}"`,
+      messages: contextMessages.length > 0
+        ? [...contextMessages, { role: "user" as const, content: message }]
+        : [{ role: "user" as const, content: message }],
+    });
+
+    const answer = answerResponse.content[0].type === "text"
+      ? answerResponse.content[0].text.trim()
+      : cadenceQuestion;
+
+    await sendAndStore(user.id, user.phone_number, answer, "awaiting_cadence");
     return NextResponse.json({ ok: true });
   }
 

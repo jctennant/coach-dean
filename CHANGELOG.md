@@ -15,6 +15,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-02 — Fixed tempo label/pace mismatch, run-question handling in onboarding, email analysis GPS splits
+
+**Type:** Bug Fix (x3)
+**Reported by:** Internal — daily conversation analysis digest
+**Root cause (Issue 5):** When a user had no VDOT and tempo pace couldn't be validated, Dean could prescribe "Tempo 1.5mi @ 9:30-10:00/mi" — assigning the easy pace range to a quality session label. The existing PACE SANITY CHECK caught numerically wrong paces but didn't have an explicit label/pace consistency rule.
+**Fix:** Added ⚠️ LABEL/PACE CONSISTENCY rule to system prompt: any session labeled Tempo/Threshold/Race Pace must be at least 30 sec/mi faster than easy pace. If it isn't, fix the label or the pace — never output a contradictory label+pace pair.
+
+**Root cause (Issue 3):** The daily analysis email kept flagging Dean citing per-split paces as hallucinations. All GPS Strava runs automatically include `splits_metric` (per-km split data), so any split paces in a `post_run` message are real — not invented. The email analysis prompt didn't distinguish per-km splits (always present) from manual lap data (optional).
+**Fix:** Updated email analysis prompt to clarify GPS splits are always real Strava data. A true hallucination would be HR values without an HR monitor, lap-by-lap detail when no laps were recorded, or a split narrative that contradicts the overall pace.
+
+**Root cause (Issue 4):** During `awaiting_cadence`, if a user asked "what did I do during my run?", `handleNonCadenceMessage` classified it as a coaching question and answered without any activity context — leading to "I don't have access to your previous run data" even though Dean had just described that exact run. The classifier had no category for run-specific elaboration requests.
+**Fix:** Added `run_question` classification. When detected, Dean fetches the last 6 conversation messages (which includes the post_run message with all activity data) and answers using that context, then re-appends the cadence question.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/cron/analyze-conversations/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-02 — This-week schedule override: reminders fire on the right days
 
 **Type:** Feature

@@ -81,20 +81,20 @@ Analyze the transcripts below from ${dateLabel} (${userCount} users, ${messages.
 
 IMPORTANT — what Coach Dean has access to via Strava:
 - Activity data: distance, moving time, elapsed time, pace, elevation gain, sport type, start date/time
-- Per-mile splits (when synced): pace per mile
-- Lap data (when available): lap paces and durations
-- Heart rate (when athlete's device records it): average HR, max HR, HR by lap/split
+- Per-km splits (splits_metric): ALL GPS-recorded runs on Strava automatically include per-km split data — distance, pace, and HR per km. Dean converts these to per-mile descriptions. Any specific split paces cited in a post_run message are ALWAYS real Strava data, not hallucinations.
+- Lap data (when available): manual lap button presses or device auto-laps. Only present when the athlete explicitly recorded laps.
+- Heart rate (when athlete's device records it): average HR, max HR, HR by split/lap
 - Weekly mileage: computed live from Strava activity history
 - All-time and YTD stats: total distance, run count
 - Athlete profile: name, location, gear/shoes
-When Dean references any of the above with specific numbers, that is NOT a hallucination — it came from Strava.
+When Dean references any of the above with specific numbers in a post_run message, that is NOT a hallucination — it came from Strava.
 
 A true hallucination is when Dean invents data that Strava would not provide, such as:
-- Specific mile splits when splits were not synced (splits must come from device upload)
-- HR values when the athlete has no HR monitor
-- Lap details when no laps were recorded
+- HR values when the athlete has no HR monitor (check if "No heart rate data" guard appears or if avg/max HR is absent from the overall activity)
+- Specific lap details (lap count, lap paces) when no laps were recorded — note this is different from per-km splits, which are always present
 - Future run outcomes or specific numbers Dean couldn't know
 - Data about runs that didn't happen according to Strava
+- Inventing a split progression narrative that contradicts the overall pace (e.g. saying "great negative split" when overall pace was even)
 
 Look for:
 1. **Coaching errors** — wrong paces, wrong distances, contradicting previous messages, bad advice
