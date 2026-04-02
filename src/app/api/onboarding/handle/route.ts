@@ -82,7 +82,7 @@ export async function POST(request: Request) {
   // Skip awaiting_strava — handleStrava has its own question detection that includes the Strava URL.
   // Skip awaiting_goal_time — handleGoalTime has its own web-search path for research questions.
   if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava" && step !== "awaiting_cadence" && step !== "awaiting_goal_time") {
-    const offTopicResult = await checkOffTopic(step, message);
+    const offTopicResult = await checkOffTopic(step, message, userId);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
       await sendAndStore(user.id, user.phone_number, offTopicResult.response, step ?? undefined);
@@ -2845,7 +2845,8 @@ If there is no question — just goal-setting, background info, or race/training
  */
 async function checkOffTopic(
   step: string,
-  message: string
+  message: string,
+  userId: string
 ): Promise<{ offTopic: false } | { offTopic: true; response: string }> {
   const stepContext: Record<string, { topic: string; reAsk: string }> = {
     awaiting_race_date:       { topic: "their race date or target event",                                reAsk: "When is your race?" },
@@ -2883,10 +2884,14 @@ ON-TOPIC ({"on_topic": true}):
 - Pushback on training volume, intensity, or plan structure
 - Requests to adjust the plan based on their experience
 
+OFF-TOPIC run question ({"on_topic": false, "type": "run_question"}):
+- Asking about a recent run ("what did I do?", "tell me about my run", "what were my splits", "how did I do?", "elaborate on that")
+- Any question clearly referencing a specific run they just completed
+
 OFF-TOPIC coaching question ({"on_topic": false, "type": "coaching_question"}):
 - Questions about training methodology, race prep, pacing, nutrition, gear
 - Questions about Dean's services or capabilities ("do you coach cycling?")
-- Any genuine advice-seeking question unrelated to the current topic
+- Any genuine advice-seeking question unrelated to the current topic and not about a specific recent run
 
 Other off-topic ({"on_topic": false, "type": "other", "response": "..."}):
 - Meta-questions about the onboarding process ("how many more questions?", "how long does this take?")
@@ -2902,6 +2907,31 @@ Other off-topic ({"on_topic": false, "type": "other", "response": "..."}):
     if (parsed.on_topic === true) return { offTopic: false };
 
     if (parsed.on_topic === false) {
+      if (parsed.type === "run_question") {
+        // Answer using recent conversation context (includes the post_run message with activity data)
+        const { data: recentConvos } = await supabase
+          .from("conversations")
+          .select("role, content")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(6);
+        const contextMessages = (recentConvos ?? [])
+          .reverse()
+          .map((c) => ({ role: c.role as "user" | "assistant", content: c.content as string }));
+        const answerResponse = await anthropic.messages.create({
+          model: "claude-sonnet-4-5-20250929",
+          max_tokens: 300,
+          system: `You are Coach Dean, an expert running and endurance coach. The athlete is asking about their recent run. You already described it in the conversation above — use that data to answer specifically and directly. Do NOT say you don't have access to their run data. Plain text only — no markdown, no asterisks. After your answer, on a new line, add: "${ctx.reAsk}"`,
+          messages: contextMessages.length > 0
+            ? [...contextMessages, { role: "user" as const, content: message }]
+            : [{ role: "user" as const, content: message }],
+        });
+        const answer = answerResponse.content[0].type === "text"
+          ? answerResponse.content[0].text.trim()
+          : ctx.reAsk;
+        return { offTopic: true, response: answer };
+      }
+
       if (parsed.type === "coaching_question") {
         // Generate a real coaching answer with Sonnet, then re-ask the current step question
         const answerResponse = await anthropic.messages.create({
