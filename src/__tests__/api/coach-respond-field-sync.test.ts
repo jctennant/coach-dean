@@ -311,6 +311,100 @@ describe("persistProfileUpdates — goal time change", () => {
   });
 });
 
+describe("persistProfileUpdates — standing schedule change", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("lowercases updated_training_days before saving to training_profiles", async () => {
+    mockExtractionThenCoach({ updated_training_days: ["Tuesday", "Thursday", "Sunday"] });
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: baseConversations("Change my schedule to Tuesday, Thursday, Sunday from now on"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const daysUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.training_days != null);
+    expect(daysUpdate).toBeDefined();
+    expect(daysUpdate?.[0].training_days).toEqual(["tuesday", "thursday", "sunday"]);
+  });
+
+  it("clears any active week override when the standing schedule changes", async () => {
+    mockExtractionThenCoach({ updated_training_days: ["Monday", "Wednesday", "Friday"] });
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ this_week_override_days: ["tuesday", "thursday"], this_week_override_expires: "2026-04-06" }),
+      state: baseState(),
+      conversations: baseConversations("Change my schedule to Mon/Wed/Fri going forward"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const daysUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.training_days != null);
+    expect(daysUpdate?.[0]).toMatchObject({
+      training_days: ["monday", "wednesday", "friday"],
+      this_week_override_days: null,
+      this_week_override_expires: null,
+    });
+  });
+});
+
+describe("persistProfileUpdates — this-week schedule override", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("saves this_week_override_days as lowercase with a Sunday expiry", async () => {
+    mockExtractionThenCoach({ this_week_override_days: ["Tuesday", "Wednesday", "Friday"] });
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: baseConversations("I want to run Tue/Wed/Fri this week instead"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const overrideUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.this_week_override_days != null);
+    expect(overrideUpdate).toBeDefined();
+    expect(overrideUpdate?.[0].this_week_override_days).toEqual(["tuesday", "wednesday", "friday"]);
+    // Expiry must be a valid date string (YYYY-MM-DD) and a Sunday
+    const expires = overrideUpdate?.[0].this_week_override_expires as string;
+    expect(expires).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const expiresDate = new Date(expires + "T12:00:00Z");
+    expect(expiresDate.getUTCDay()).toBe(0); // 0 = Sunday
+  });
+
+  it("does not overwrite training_days when saving a week override", async () => {
+    mockExtractionThenCoach({ this_week_override_days: ["Monday", "Saturday"] });
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ training_days: ["tuesday", "thursday", "sunday"] }),
+      state: baseState(),
+      conversations: baseConversations("Just this week I can only do Monday and Saturday"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const anyUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.training_days != null);
+    // training_days must NOT be touched by a week override
+    expect(anyUpdate).toBeUndefined();
+  });
+});
+
 describe("persistProfileUpdates — no spurious writes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
