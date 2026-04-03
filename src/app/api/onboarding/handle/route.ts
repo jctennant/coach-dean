@@ -4,6 +4,7 @@ import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, shareContactCard } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange, formatRaceDistance } from "@/lib/paces";
+import { getCheckoutPageUrl } from "@/lib/stripe";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 60;
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
   // Skip awaiting_anything_else, awaiting_name, awaiting_cadence — any response is valid for those.
   // Skip awaiting_strava — handleStrava has its own question detection that includes the Strava URL.
   // Skip awaiting_goal_time — handleGoalTime has its own web-search path for research questions.
-  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava" && step !== "awaiting_cadence" && step !== "awaiting_goal_time") {
+  if (step && step !== "awaiting_goal" && step !== "awaiting_anything_else" && step !== "awaiting_name" && step !== "awaiting_strava" && step !== "awaiting_cadence" && step !== "awaiting_goal_time" && step !== "awaiting_payment") {
     const offTopicResult = await checkOffTopic(step, message, userId);
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
@@ -107,7 +108,8 @@ export async function POST(request: Request) {
     "awaiting_goal_time":         "Sorry, something got tangled on my end! What's your goal time for the race?",
     "awaiting_mileage_baseline":  "Sorry, something got tangled on my end! Roughly how many miles a week are you currently running?",
     "awaiting_timezone":          "Sorry, something got tangled on my end! What time zone are you in?",
-    "awaiting_cadence":           "Sorry, something got tangled on my end! How often would you like check-ins from me?",
+    "awaiting_cadence":           "Sorry, something got tangled on my end! Would you like a reminder the morning of each workout, or the evening before? If not, just say 'weekly' and I'll send you a Sunday plan.",
+    "awaiting_payment":           "Sorry, something got tangled on my end! Here's the link to start your free 7-day trial again.",
   };
   const deEscalationMsg = step && DEESCALATION_BY_STEP[step]
     ? DEESCALATION_BY_STEP[step]
@@ -188,6 +190,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_cadence":
       result = await handleCadence({ ...user, onboarding_data: onboardingData }, message);
+      break;
+    case "awaiting_payment":
+      result = await handleAwaitingPayment(user);
       break;
     default:
       result = NextResponse.json({ ok: true });
@@ -1602,6 +1607,28 @@ async function handleTimezone(
   return NextResponse.json({ ok: true });
 }
 
+/**
+ * User messaged back while still in awaiting_payment — re-send the checkout link.
+ */
+async function handleAwaitingPayment(user: { id: string; phone_number: string; name: string | null }) {
+  const { data: userData } = await supabase
+    .from("users")
+    .select("dashboard_token")
+    .eq("id", user.id)
+    .single();
+
+  const dashboardToken = userData?.dashboard_token as string | null;
+  if (!dashboardToken) {
+    return NextResponse.json({ ok: true });
+  }
+
+  const firstName = (user.name ?? "").split(" ")[0] || "Hey";
+  const checkoutUrl = getCheckoutPageUrl(dashboardToken);
+  const message = `${firstName}, your plan is ready and waiting! Start your free 7-day trial here: ${checkoutUrl}`;
+  await sendAndStore(user.id, user.phone_number, message, "awaiting_payment");
+  return NextResponse.json({ ok: true });
+}
+
 async function handleCadence(
   user: { id: string; phone_number: string; name: string | null; onboarding_data: Record<string, unknown> },
   message: string
@@ -1613,20 +1640,20 @@ async function handleCadence(
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 16,
-      system: `The athlete is responding to a question offering three reminder options: morning-of reminders, evening-before reminders, or a weekly Sunday overview only.
+      system: `The athlete is responding to the question: "Would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday."
 
 Classify their reply. Return only one word: "morning", "nightly", "weekly", or "unclear".
 
-- "morning", "day of", "day-of", "morning of", "same day", "that morning", "am", "wake up", "start of day", any specific morning time like "8am", "7am" → morning
-- "evening", "night before", "nightly", "night of", "the night before", "yes", "yeah", "sure", "please", "sounds good", "reminders", "that works" → nightly
-- "weekly", "sunday", "just weekly", "no", "nope", "no thanks", "just the overview" → weekly
+- "morning", "day of", "morning of", "same day", "that morning", "morning works", "morning is fine", any specific morning time like "8am", "7am" → morning
+- "evening", "night before", "nightly", "the night before", "evening before", "evening works", "night works" → nightly
+- "no", "nope", "neither", "no thanks", "just the weekly", "just sunday", "weekly", "sunday", "sunday overview", "weekly plan", "just weekly", "that's fine", "sounds good", "no reminders" → weekly
 - Anything that isn't clearly answering the reminder question (e.g. sharing an injury, asking a question, talking about something else) → unclear`,
       messages: [{ role: "user", content: message }],
     }),
     timezoneAlreadyConfirmed ? Promise.resolve(null) : parseTimezoneFromMessage(message),
   ]);
 
-  const raw = cadenceResponse.content[0].type === "text" ? cadenceResponse.content[0].text.trim().toLowerCase() : "nightly";
+  const raw = cadenceResponse.content[0].type === "text" ? cadenceResponse.content[0].text.trim().toLowerCase() : "weekly";
 
   // If the message wasn't actually answering the cadence question, classify what it
   // actually is (plan feedback vs coaching question) and respond appropriately.
@@ -1682,10 +1709,10 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
 
   const confirmation =
     cadence === "morning_reminders"
-      ? "Perfect — I'll text you the morning of each session. How does the plan look? Let me know if anything needs tweaking."
+      ? "Perfect — I'll remind you the morning of each session. How does the plan look? Let me know if anything needs tweaking."
       : cadence === "nightly_reminders"
         ? "Perfect — I'll send you a heads-up the evening before each session. How does the plan look? Let me know if anything needs tweaking."
-        : "Got it — I'll send you a weekly plan overview every Sunday. How does the plan look? Happy to adjust anything.";
+        : "Got it — I'll send you a weekly plan every Sunday. How does the plan look? Happy to adjust anything.";
 
   await sendAndStore(user.id, user.phone_number, confirmation, "awaiting_cadence");
   return NextResponse.json({ ok: true });
@@ -1706,7 +1733,7 @@ async function handleNonCadenceMessage(
   user: { id: string; phone_number: string; name: string | null },
   message: string
 ): Promise<NextResponse> {
-  const cadenceQuestion = "One last thing — would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?";
+  const cadenceQuestion = "Last thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday.";
 
   // Classify what the athlete actually sent
   const classifyResponse = await anthropic.messages.create({
@@ -1819,7 +1846,7 @@ Classify it. Return only one word:
   await sendAndStore(
     user.id,
     user.phone_number,
-    "Just one last thing before your plan: would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?",
+    "Just one last thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday.",
     "awaiting_cadence"
   );
   return NextResponse.json({ ok: true });
@@ -2026,13 +2053,37 @@ async function completeOnboarding(
     return;
   }
 
+  // Check if billing is enabled for this user. If so, gate on payment before firing initial_plan.
+  const { data: billingUser } = await supabase
+    .from("users")
+    .select("billing_enabled, dashboard_token, phone_number")
+    .eq("id", user.id)
+    .single();
+
+  const billingEnabled = !!(billingUser?.billing_enabled);
+
+  const userUpdatePayload: Record<string, unknown> = {
+    onboarding_data: data as unknown as Json,
+  };
+  if (name) userUpdatePayload.name = name;
+
+  if (billingEnabled) {
+    // Pause at awaiting_payment — initial_plan fires from the Stripe webhook after checkout.
+    // Generate a dashboard_token now if one doesn't exist yet (needed for the checkout URL).
+    let dashboardToken = billingUser?.dashboard_token as string | null;
+    if (!dashboardToken) {
+      dashboardToken = crypto.randomUUID();
+      userUpdatePayload.dashboard_token = dashboardToken;
+    }
+    userUpdatePayload.onboarding_step = "awaiting_payment";
+    userUpdatePayload.payment_link_sent_at = new Date().toISOString();
+  } else {
+    userUpdatePayload.onboarding_step = null;
+  }
+
   const userResult = await supabase
     .from("users")
-    .update({
-      name: name ?? undefined,
-      onboarding_step: null,
-      onboarding_data: data as unknown as Json,
-    })
+    .update(userUpdatePayload)
     .eq("id", user.id);
 
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
@@ -2071,6 +2122,24 @@ async function completeOnboarding(
 
     const { error: racesError } = await supabase.from("races").insert(racesToInsert);
     if (racesError) console.error("[onboarding] races insert failed:", racesError);
+  }
+
+  if (billingEnabled) {
+    // Send payment link SMS — initial_plan fires from Stripe webhook after checkout.
+    const dashboardToken = (userUpdatePayload.dashboard_token as string | null)
+      ?? (billingUser?.dashboard_token as string | null);
+    if (dashboardToken) {
+      const firstName = (name ?? "").split(" ")[0] || "Hey";
+      const trialEndDate = new Date();
+      trialEndDate.setDate(trialEndDate.getDate() + 7);
+      const trialEndFormatted = trialEndDate.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+      const checkoutUrl = getCheckoutPageUrl(dashboardToken);
+      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}:\n\n${checkoutUrl}`;
+      const phoneNumber = billingUser?.phone_number as string;
+      await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
+    }
+    void trackEvent(user.id, "onboarding_completed", { goal, billing_gate: true });
+    return;
   }
 
   // No wrap-up SMS — the initial_plan IS the response, addressed by name.
@@ -2857,7 +2926,7 @@ async function checkOffTopic(
     awaiting_injury_background:{ topic: "their injury history and current physical status",             reAsk: "Can you tell me more about where things stand with the injury right now?" },
     awaiting_goal_time:       { topic: "their finish time goal for the race (or whether they have one)", reAsk: "Do you have a time goal in mind, or are you focused on finishing?" },
     awaiting_timezone:        { topic: "what city or timezone they're in",                              reAsk: "What city or state are you in?" },
-    awaiting_cadence:         { topic: "whether they want morning-of reminders, evening-before reminders, or a weekly Sunday overview", reAsk: "Would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?" },
+    awaiting_cadence:         { topic: "whether they want morning-of reminders, evening-before reminders, or just a weekly Sunday plan", reAsk: "Would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday." },
   };
 
   const ctx = stepContext[step];

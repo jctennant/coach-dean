@@ -45,6 +45,11 @@ vi.mock("@/lib/paces", () => ({
   estimatePacesFromEasyPace: vi.fn(),
 }));
 
+vi.mock("@/lib/stripe", () => ({
+  stripe: {},
+  getCheckoutPageUrl: vi.fn().mockReturnValue("https://coachdean.ai/checkout?token=test"),
+}));
+
 vi.mock("next/server", () => ({
   NextResponse: {
     json: (data: unknown, init?: ResponseInit) => ({ data, init }),

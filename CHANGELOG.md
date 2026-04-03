@@ -4,6 +4,35 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-03 — Fixed onboarding cadence question mismatch causing infinite loop
+
+**Type:** Bug Fix
+**Reported by:** User 0cb902da (P1 incident)
+**User feedback:** Athlete answered "Mainly after workouts" to the cadence question, Dean responded with a completely different timing question they never answered, then a new post_run fired the original cadence question again as if nothing was said.
+**Root cause:** The Haiku classifier in `handleCadence` was trained to recognize answers to a *timing* question (morning/nightly/weekly) but the actual question asked was a *frequency* question (daily/few times/mainly after runs). So "mainly after workouts" was classified as "unclear", fell into `handleNonCadenceMessage`, which sent a different timing question without clearing `onboarding_step`. The step was never cleared to null, so subsequent `post_run_onboarding` triggers kept re-asking the original question.
+**Fix / Change:** Rewrote the Haiku classifier system prompt to match the actual question asked. New classification: "daily" → `morning_reminders`, "sometimes" → `nightly_reminders`, "reactive" (after runs) → `weekly_only`. Updated all re-ask strings, fallback messages, deescalation message, and `checkOffTopic` config to use the frequency-based question consistently. Confirmation messages updated to reflect the frequency-based framing ("I'll check in a few times a week" instead of "evening before each session").
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
+## 2026-04-02 — Stripe subscription billing + payment gate
+
+**Type:** Feature
+**Reported by:** Internal — pre-launch monetization
+**User feedback:** N/A
+**Root cause:** No payment infrastructure existed; all users had free access.
+**Fix / Change:**
+- Added per-user `billing_enabled` feature flag (default `false` — all existing users grandfathered). New signups can be opted in per-user or via the signup route once billing is live.
+- Payment wall fires at the end of onboarding: after all questions are complete, users with `billing_enabled=true` receive a 7-day free trial checkout link instead of immediately getting their plan. `onboarding_step` is set to `awaiting_payment` and `initial_plan` is held until Stripe confirms checkout.
+- Stripe Checkout hosted page at `/checkout?token=<dashboard_token>` — plan picker (monthly $20/mo, annual $10/mo billed yearly). No card form to build; Stripe handles it.
+- Stripe webhook (`/api/webhooks/stripe`) handles: `checkout.session.completed` (fires `initial_plan`), `subscription.updated` (syncs status), `invoice.payment_failed` (sets `past_due`, sends dunning 1), `subscription.deleted` (sets `canceled`, sends dunning 1).
+- Subscription gate in `coach/respond`: users with `billing_enabled=true` and no active subscription get blocked. `user_message` triggers send a resubscribe link; proactive triggers (reminders, post_run, weekly_recap) are silently skipped.
+- 3-message dunning sequence: message 1 sent by webhook immediately on lapse; messages 2 and 3 sent by `/api/cron/dunning` at 4 and 8 days after message 1. Message 3 is the final outreach.
+- Next-day payment reminder cron (`/api/cron/payment-reminder`): if user hasn't clicked the checkout link after 24 hours, sends one follow-up SMS.
+**Files changed:** `supabase/migrations/023_billing.sql`, `src/lib/stripe.ts`, `src/app/api/webhooks/stripe/route.ts`, `src/app/api/billing/checkout/route.ts`, `src/app/checkout/page.tsx`, `src/app/checkout/success/page.tsx`, `src/app/api/cron/payment-reminder/route.ts`, `src/app/api/cron/dunning/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `vercel.json`
+
+---
+
 ## 2026-04-02 — Fix: today's planned sessions shown as "upcoming", causing Dean to call them "tomorrow's"
 
 **Type:** Bug Fix

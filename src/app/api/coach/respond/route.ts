@@ -80,7 +80,7 @@ const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
   awaiting_anything_else: "Anything else I should know before I put your plan together?",
   awaiting_ultra_background: "Have you run any ultras or very long trail races before?",
   awaiting_injury_background: "Any injuries or physical limitations I should keep in mind?",
-  awaiting_cadence: "Last thing — how often do you want to hear from me? Daily, a few times a week, or mainly after runs?",
+  awaiting_cadence: "Last thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday.",
 };
 
 /**
@@ -247,6 +247,34 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  // Subscription gate — only applies to users with billing_enabled.
+  // Grandfathered users (billing_enabled = false) always pass through.
+  // initial_plan is exempt — it's fired by the Stripe webhook right after checkout.
+  if (user.billing_enabled && trigger !== "initial_plan") {
+    const status = user.subscription_status as string | null;
+    const hasAccess = status === "trialing" || status === "active";
+    const isPastDue = status === "past_due";
+
+    if (!hasAccess) {
+      if (trigger === "user_message") {
+        // Reply to user messages so the line isn't dead, but don't run coaching logic.
+        // past_due gets a softer nudge (payment in progress); canceled gets the checkout link.
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+        const dashboardToken = user.dashboard_token as string | null;
+        const checkoutUrl = dashboardToken ? `${appUrl}/checkout?token=${dashboardToken}` : appUrl;
+        const msg = isPastDue
+          ? "Your last payment didn't go through — please update your payment method to continue coaching: " + checkoutUrl
+          : "Your Coach Dean subscription isn't active. Subscribe here to continue: " + checkoutUrl;
+        if (!dry_run) {
+          await sendSMS(user.phone_number as string, msg);
+          await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: msg, message_type: "user_message" });
+        }
+      }
+      // Silently skip all proactive triggers (reminders, post_run, weekly_recap, etc.)
+      return NextResponse.json({ ok: true, gated: true });
+    }
   }
 
   // If post_run, fetch the activity

@@ -1,9 +1,11 @@
 {
   "crons": [
-{ "path": "/api/cron/sunday-recap", "schedule": "0 1 * * 1" },
+    { "path": "/api/cron/sunday-recap", "schedule": "0 1 * * 1" },
     { "path": "/api/cron/nightly-reminder", "schedule": "0 2 * * *" },
     { "path": "/api/cron/morning-reminder", "schedule": "0 14 * * *" },
     { "path": "/api/cron/reengagement", "schedule": "0 16 * * *" },
-    { "path": "/api/cron/analyze-conversations", "schedule": "0 9 * * *" }
+    { "path": "/api/cron/analyze-conversations", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/payment-reminder", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/dunning", "schedule": "0 12 * * *" }
   ]
 }

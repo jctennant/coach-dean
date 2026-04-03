@@ -30,6 +30,11 @@ vi.mock("@/lib/paces", () => ({
   estimatePacesFromEasyPace: vi.fn(),
 }));
 
+vi.mock("@/lib/stripe", () => ({
+  stripe: {},
+  getCheckoutPageUrl: vi.fn().mockReturnValue("https://coachdean.ai/checkout?token=test"),
+}));
+
 vi.mock("next/server", () => ({
   NextResponse: {
     json: (data: unknown, init?: ResponseInit) => ({ data, init }),
@@ -612,7 +617,7 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
     expect(sendSMS).toHaveBeenCalledOnce();
     const smsText = vi.mocked(sendSMS).mock.calls[0][1];
     expect(smsText).toMatch(/rebuild|1-2|cycling/i);
-    expect(smsText).not.toBe("Just one last thing before your plan: would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?");
+    expect(smsText).not.toBe("Just one last thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday.");
 
     // initial_plan should be re-triggered to regenerate the plan with new preferences
     const fetchMock = vi.mocked(global.fetch as ReturnType<typeof vi.fn>);
@@ -636,7 +641,7 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
       .mockResolvedValueOnce({ content: [{ type: "text", text: "unclear" }] })
       .mockResolvedValueOnce({ content: [{ type: "text", text: "America/New_York" }] }) // parseTimezone (parallel)
       .mockResolvedValueOnce({ content: [{ type: "text", text: "coaching_question" }] })
-      .mockResolvedValueOnce({ content: [{ type: "text", text: "For a first half marathon you don't need to run the full distance beforehand. Build up to 10-11 miles and race-day adrenaline carries you the rest.\n\nOne last thing — would you prefer reminders the morning of each session, the evening before, or just a weekly Sunday overview?" }] });
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "For a first half marathon you don't need to run the full distance beforehand. Build up to 10-11 miles and race-day adrenaline carries you the rest.\n\nLast thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday." }] });
 
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       if (table === "users") return chain({ data: { id: "user-001", phone_number: "+12025551234", name: "Vivian", onboarding_step: "awaiting_cadence", onboarding_data: {} }, error: null });
@@ -651,7 +656,7 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
     // Should contain the coaching answer
     expect(smsText).toMatch(/half marathon|training|adrenaline/i);
     // Should still include the cadence question
-    expect(smsText).toMatch(/morning.*session|evening before|weekly.*Sunday/i);
+    expect(smsText).toMatch(/morning of each workout|evening before|weekly plan.*sunday/i);
   });
 
   // ── Bug 7 regression ──────────────────────────────────────────────────────
@@ -659,9 +664,9 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
   // Old behavior: coach/respond stored initial_plan messages as "coach_response",
   // so the planAlreadySent check found nothing and re-triggered plan generation.
   // Fixed: initial_plan trigger now stored with message_type "initial_plan".
-  it("awaiting_cadence: confirming nightly reminders sends confirmation, does NOT re-trigger plan", async () => {
+  it("awaiting_cadence: confirming evening-before reminders sends confirmation, does NOT re-trigger plan", async () => {
     // Claude call order:
-    // 1. handleCadence Haiku → "nightly"
+    // 1. handleCadence Haiku → "nightly" (maps to nightly_reminders)
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce({ content: [{ type: "text", text: "nightly" }] });
 
@@ -677,13 +682,13 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
       training_profiles: { data: null, error: null },
     });
 
-    const req = makeRequest({ userId: "user-001", message: "yeah reminders evening before would be great thanks" });
+    const req = makeRequest({ userId: "user-001", message: "evening before works" });
     await POST(req);
 
-    // Should confirm nightly reminders
+    // Should confirm evening-before reminders
     expect(sendSMS).toHaveBeenCalledOnce();
     const smsText = vi.mocked(sendSMS).mock.calls[0][1];
-    expect(smsText).toMatch(/evening before|heads.up|night before/i);
+    expect(smsText).toMatch(/evening before|heads.up/i);
 
     // Should NOT re-trigger plan generation
     const fetchMock = vi.mocked(global.fetch as ReturnType<typeof vi.fn>);
@@ -695,7 +700,7 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
 
   it("awaiting_cadence: if plan was never sent (timeout recovery), re-triggers plan generation", async () => {
     // Claude call order:
-    // 1. handleCadence Haiku → "nightly"
+    // 1. handleCadence Haiku → "nightly" (maps to nightly_reminders)
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce({ content: [{ type: "text", text: "nightly" }] });
 
@@ -711,7 +716,7 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
       training_profiles: { data: null, error: null },
     });
 
-    const req = makeRequest({ userId: "user-001", message: "yeah evening before" });
+    const req = makeRequest({ userId: "user-001", message: "evening before please" });
     await POST(req);
 
     // Should send the holding message
