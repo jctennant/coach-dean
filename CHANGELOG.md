@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-03 — Fix daily email falsely flagging real Strava data as hallucinations
+
+**Type:** Bug Fix
+**Reported by:** Jake (daily email)
+**User feedback:** "the daily email I get doesn't keep saying there's a ton of data hallucinations going on… I don't think is hallucinated because we do have strava data we are getting"
+**Root cause:** The analyze-conversations cron only had conversation transcripts — no knowledge of what Strava data was actually present for each run. So when it saw "lap-button pacing" or per-lap pace/elevation in a post_run message, it couldn't distinguish real lap data from invented lap data, and flagged both. The prompt instructions about what Strava provides were also too vague.
+**Fix / Change:** For each post_run message, now fetches the corresponding activity from the DB and annotates the transcript with what was actually available: distance, HR monitor yes/no, manual laps recorded yes/no, GPS splits always yes. The analysis prompt now instructs Claude to use these annotations as ground truth — only flag HR/lap references as hallucinations when the annotation confirms that data wasn't present. Also tightened the "NOT a hallucination" list to include pace, splits, elevation, and weekly mileage.
+**Files changed:** `src/app/api/cron/analyze-conversations/route.ts`
+
+## 2026-04-03 — Strengthen no-lap guard in post-run coaching prompt
+
+**Type:** Improvement
+**Reported by:** Internal (related to above)
+**User feedback:** N/A
+**Root cause:** The DATA GLOSSARY described `summary.laps` ("manual lap button presses... warmup, hard effort, cooldown") even when no laps existed, priming Claude to frame GPS split variation in lap terms. The guard was also too vague ("Do NOT invent or estimate lap paces").
+**Fix / Change:** Glossary laps entry now only rendered when `hasLaps` is true. Guard text now explicitly bans: "lap-button" language, named lap segments (warmup/hard/cooldown lap), lap counts, per-lap elevation — and directs Claude to use "your splits show…" framing instead.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-03 — Plan quality eval harness
 
 **Type:** Infra

@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   // Fetch all conversations from yesterday, with user phone for context
   const { data: messages, error } = await supabase
     .from("conversations")
-    .select("user_id, role, content, message_type, created_at")
+    .select("user_id, role, content, message_type, created_at, strava_activity_id")
     .gte("created_at", dayStart.toISOString())
     .lte("created_at", dayEnd.toISOString())
     .order("created_at", { ascending: true });
@@ -51,6 +51,30 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
+  // Fetch activity metadata for post_run messages so the analyzer has ground truth
+  // about what data Strava actually provided (laps, HR) — without this it can't
+  // distinguish real data from hallucinations.
+  const activityIds = [...new Set(
+    messages
+      .filter((m) => m.strava_activity_id)
+      .map((m) => m.strava_activity_id as string)
+  )];
+  const activityMeta: Record<string, { hasLaps: boolean; hasHR: boolean; distanceMiles: number | null }> = {};
+  if (activityIds.length > 0) {
+    const { data: activities } = await supabase
+      .from("activities")
+      .select("strava_activity_id, average_heartrate, distance_meters, summary")
+      .in("strava_activity_id", activityIds);
+    for (const act of activities ?? []) {
+      const rawSummary = act.summary as { laps?: unknown[] } | null;
+      activityMeta[act.strava_activity_id] = {
+        hasLaps: !!(rawSummary?.laps && rawSummary.laps.length > 0),
+        hasHR: act.average_heartrate != null,
+        distanceMiles: act.distance_meters != null ? Math.round((act.distance_meters / 1609.34) * 10) / 10 : null,
+      };
+    }
+  }
+
   // Group by user
   const byUser: Record<string, typeof messages> = {};
   for (const msg of messages) {
@@ -58,7 +82,7 @@ export async function GET(request: Request) {
     byUser[msg.user_id].push(msg);
   }
 
-  // Format transcripts
+  // Format transcripts — annotate post_run messages with what Strava data was present
   const transcripts = Object.entries(byUser)
     .map(([userId, msgs]) => {
       const lines = msgs.map((m) => {
@@ -67,7 +91,20 @@ export async function GET(request: Request) {
           m.role === "user"
             ? "Athlete"
             : `Coach Dean (${m.message_type ?? "response"})`;
-        return `[${time}] ${label}: ${m.content}`;
+        let annotation = "";
+        if (m.message_type === "post_run" && m.strava_activity_id) {
+          const meta = activityMeta[m.strava_activity_id];
+          if (meta) {
+            const facts = [
+              `distance: ${meta.distanceMiles ?? "unknown"} mi`,
+              `HR monitor: ${meta.hasHR ? "YES" : "NO"}`,
+              `manual laps recorded: ${meta.hasLaps ? "YES" : "NO"}`,
+              "per-km GPS splits: YES (always present on Strava)",
+            ];
+            annotation = `\n  [STRAVA DATA AVAILABLE FOR THIS RUN — ${facts.join(", ")}]`;
+          }
+        }
+        return `[${time}] ${label}:${annotation}\n  ${m.content}`;
       });
       return `=== User ${userId.slice(0, 8)} ===\n${lines.join("\n")}`;
     })
@@ -89,12 +126,20 @@ IMPORTANT — what Coach Dean has access to via Strava:
 - Athlete profile: name, location, gear/shoes
 When Dean references any of the above with specific numbers in a post_run message, that is NOT a hallucination — it came from Strava.
 
-A true hallucination is when Dean invents data that Strava would not provide, such as:
-- HR values when the athlete has no HR monitor (check if "No heart rate data" guard appears or if avg/max HR is absent from the overall activity)
-- Specific lap details (lap count, lap paces) when no laps were recorded — note this is different from per-km splits, which are always present
-- Future run outcomes or specific numbers Dean couldn't know
+A true hallucination is when Dean invents data that Strava would not provide. Each post_run message in the transcript is annotated with exactly what Strava data was available — use that annotation as the ground truth when evaluating.
+
+True hallucinations:
+- HR values when "HR monitor: NO" in the annotation
+- Specific lap counts, per-lap paces, or per-lap elevation when "manual laps recorded: NO" in the annotation — this includes phrases like "lap-button pacing", "lap 6 and 7", "X laps", "warmup lap / hard lap / cooldown lap"
 - Data about runs that didn't happen according to Strava
-- Inventing a split progression narrative that contradicts the overall pace (e.g. saying "great negative split" when overall pace was even)
+- Future run outcomes or specific numbers Dean couldn't know
+
+NOT hallucinations (do not flag these):
+- Any pace, distance, elevation, or split data when "per-km GPS splits: YES" — these always come from Strava
+- HR values when "HR monitor: YES"
+- Lap references when "manual laps recorded: YES"
+- Weekly mileage totals — these are computed live from Strava
+- Overall vert, average pace, or any summary stat from the activity itself
 
 Look for:
 1. **Coaching errors** — wrong paces, wrong distances, contradicting previous messages, bad advice

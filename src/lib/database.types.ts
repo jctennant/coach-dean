@@ -427,56 +427,77 @@ export type Database = {
       }
       users: {
         Row: {
+          billing_enabled: boolean
           created_at: string | null
           dashboard_token: string | null
+          dunning_sent_count: number
+          first_dunning_sent_at: string | null
           id: string
           linq_chat_id: string | null
           messaging_opted_out: boolean
           name: string | null
           onboarding_data: Json | null
           onboarding_step: string | null
+          payment_link_sent_at: string | null
           phone_number: string
           reengagement_sent_at: string | null
           strava_access_token: string | null
           strava_athlete_id: number | null
           strava_refresh_token: string | null
           strava_token_expires_at: string | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          subscription_status: string | null
           timezone: string | null
           trial_started_at: string | null
         }
         Insert: {
+          billing_enabled?: boolean
           created_at?: string | null
           dashboard_token?: string | null
+          dunning_sent_count?: number
+          first_dunning_sent_at?: string | null
           id?: string
           linq_chat_id?: string | null
           messaging_opted_out?: boolean
           name?: string | null
           onboarding_data?: Json | null
           onboarding_step?: string | null
+          payment_link_sent_at?: string | null
           phone_number: string
           reengagement_sent_at?: string | null
           strava_access_token?: string | null
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null
           strava_token_expires_at?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string | null
           timezone?: string | null
           trial_started_at?: string | null
         }
         Update: {
+          billing_enabled?: boolean
           created_at?: string | null
           dashboard_token?: string | null
+          dunning_sent_count?: number
+          first_dunning_sent_at?: string | null
           id?: string
           linq_chat_id?: string | null
           messaging_opted_out?: boolean
           name?: string | null
           onboarding_data?: Json | null
           onboarding_step?: string | null
+          payment_link_sent_at?: string | null
           phone_number?: string
           reengagement_sent_at?: string | null
           strava_access_token?: string | null
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null
           strava_token_expires_at?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string | null
           timezone?: string | null
           trial_started_at?: string | null
         }
