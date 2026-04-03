@@ -1,0 +1,57 @@
+{
+  "id": "plan-masters-first-marathon",
+  "description": "58-year-old masters runner (45 mpw, 4 days only) running first marathon in 18 weeks. Recovery needs are higher — must not prescribe daily running or ignore age-related recovery.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Robert",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Twin Cities Marathon",
+    "goal_race_date": "2026-08-22",
+    "goal_race_distance": "marathon (26.2 miles)",
+    "weeks_until_race": 20,
+    "experience_level": "masters runner, age 58 — running consistently for 10 years, multiple half marathons (PR 1:58), first marathon attempt. Slower to recover than younger athletes, prioritizes consistency over volume.",
+    "current_weekly_miles": 45,
+    "vdot": 42,
+    "easy_pace": "10:02/mi",
+    "tempo_pace": "8:02/mi",
+    "interval_pace": "7:13/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 45,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "Occasional knee stiffness after hard efforts — resolves with an easy day. No structural issues.",
+    "notes": "Only wants to run 4 days per week — has explicitly said he needs Monday, Wednesday, Friday completely off. Recovery days are non-negotiable. Goal is sub-4:30, but finishing healthy is the priority.",
+    "recent_activities": [
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 14.0, "pace": "10:15/mi" },
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 6.0, "pace": "10:10/mi" },
+      { "date": "2026-03-26", "type": "Tempo Run", "distance_miles": 8.0, "pace": "8:15/mi" },
+      { "date": "2026-03-24", "type": "Easy Run", "distance_miles": 7.0, "pace": "10:05/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 50,
+    "min_week1_miles": 34,
+    "max_peak_weekly_miles": 60,
+    "min_peak_weekly_miles": 48,
+    "max_long_run_miles": 21,
+    "min_long_run_miles": 18,
+    "sessions_per_week": 4,
+    "required_session_types": ["easy run", "long run", "tempo"],
+    "forbidden_content": [
+      "scheduling more than 4 running days per week",
+      "ignoring masters recovery needs",
+      "daily running with no rest days",
+      "peak week over 62 miles",
+      "long run capped under 17 miles"
+    ],
+    "notes": "20-week first marathon plan for a 58-year-old at 45 mpw who explicitly runs 4 days only. Sessions MUST be 4/week — scheduling 5+ runs ignores both his stated preference and masters recovery reality. Peak week 50-58mi is appropriate; going higher raises injury risk for a first-time marathoner at this age. Long run must reach 18-20 miles — cutting it at 14mi would leave him underprepared for 26.2. Tempo work matters for sub-4:30 pacing. The plan should acknowledge recovery: why rest days matter for masters athletes and how to tell the difference between normal fatigue and warning signs."
+  }
+}

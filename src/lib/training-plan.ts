@@ -245,6 +245,18 @@ export async function generateAndSaveFullPlan(
     ? `This runner already has an established aerobic base at ~${baseMileage}mi/week. Do NOT assign pure easy/base-building weeks — include quality sessions (strides, fartlek, short tempo, easy intervals) from week 1 onward. Reserve "easy aerobic miles" labels only for deload weeks.`
     : `This runner is building their base from scratch. Early base-phase weeks should be easy aerobic miles to develop the aerobic foundation before adding quality.`;
 
+  // Ultra-specific enrichment guidance: back-to-back long runs are the central stimulus
+  // for ultra preparation and must be introduced early — not saved for late in the plan.
+  const isUltraEnrich = ["50k","50 k","100k","100 k","50mi","50 m","100mi","100 m","ultra"]
+    .some(u => (goal ?? "").toLowerCase().includes(u));
+  const ultraGuidance = isUltraEnrich ? `
+
+ULTRA-SPECIFIC REQUIREMENTS (mandatory):
+- Introduce back-to-back long run weekends (e.g. "Sat 18mi + Sun 12mi easy") no later than week ${Math.max(3, Math.round(totalWeeks * 0.25))} of ${totalWeeks}. This is the key ultra stimulus — do NOT delay it to the second half of the plan.
+- Include trail-specific context from week 1: hiking steep uphills (power-hiking is faster than running them in a 50k/100k), running by time-on-feet rather than strict pace, and managing elevation.
+- key_workout for back-to-back weekends should specify both Saturday and Sunday, e.g. "Sat 20mi trail + Sun 14mi easy (back-to-back)".
+- Notes should reference the back-to-back adaptation, hiking uphills, and time-on-feet philosophy when applicable.` : "";
+
   try {
     const enrichResponse = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -259,7 +271,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${bRaceContext}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 

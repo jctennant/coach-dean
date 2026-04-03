@@ -1,0 +1,57 @@
+{
+  "id": "plan-ultra-first-timer",
+  "description": "Road runner (40 mpw, 5 days) transitioning to first 50k trail in 20 weeks. Plan must include back-to-back long runs and trail-specific context — a pure road plan won't prepare them.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "James",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "ultra",
+    "goal_race": "Marin Ultra Challenge 50k",
+    "goal_race_date": "2026-08-29",
+    "goal_race_distance": "50k (~31 miles, trail with significant elevation)",
+    "weeks_until_race": 20,
+    "experience_level": "road runner transitioning to trail — 5 years running, marathon PR 3:45, zero ultra experience",
+    "current_weekly_miles": 40,
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:12/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 42,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "Strong road background but no trail or back-to-back run experience. Race has 6,000ft of gain. Goal is to finish.",
+    "recent_activities": [
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 14.0, "pace": "9:15/mi" },
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:10/mi" },
+      { "date": "2026-03-26", "type": "Tempo Run", "distance_miles": 8.0, "pace": "7:20/mi" },
+      { "date": "2026-03-25", "type": "Easy Run", "distance_miles": 7.0, "pace": "9:05/mi" },
+      { "date": "2026-03-23", "type": "Easy Run", "distance_miles": 7.0, "pace": "9:10/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 48,
+    "min_week1_miles": 36,
+    "max_peak_weekly_miles": 70,
+    "min_peak_weekly_miles": 52,
+    "max_long_run_miles": 28,
+    "min_long_run_miles": 22,
+    "sessions_per_week": 5,
+    "required_session_types": ["easy run", "long run", "back-to-back long runs"],
+    "forbidden_content": [
+      "no mention of back-to-back long runs or weekend double",
+      "no trail-specific guidance or elevation mention",
+      "peak long run under 20 miles for a 31-mile race",
+      "treating this identically to a road marathon plan"
+    ],
+    "notes": "20-week first 50k trail plan for a road runner at 40 mpw. The key ultra-specific elements that MUST appear: (1) back-to-back long runs on Saturday + Sunday (this is the central ultra training stimulus), (2) trail-specific guidance — elevation, hiking uphills, time on feet over strict pace. Peak long run should reach 22-26mi. Peak week 55-65mi is appropriate. Week 1 close to current 40 mpw. 5 sessions/week."
+  }
+}

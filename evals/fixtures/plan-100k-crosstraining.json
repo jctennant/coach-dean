@@ -1,0 +1,59 @@
+{
+  "id": "plan-100k-crosstraining",
+  "description": "Advanced runner (60 mpw) targeting 100k in 24 weeks, wants 2 cycling sessions per week to reduce injury risk. Cross-training must be integrated, not ignored.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Rafael",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "100k ultra",
+    "goal_race": "Leadville 100k",
+    "goal_race_date": "2026-10-03",
+    "goal_race_distance": "100k (~62 miles, mountainous trail with significant elevation gain)",
+    "weeks_until_race": 26,
+    "experience_level": "advanced — 8 years running, two 50k finishes, marathon PR 3:10, wants to add cycling to reduce injury risk and build aerobic base",
+    "current_weekly_miles": 60,
+    "vdot": 52,
+    "easy_pace": "8:28/mi",
+    "tempo_pace": "6:45/mi",
+    "interval_pace": "6:04/mi",
+    "training_days": ["monday", "tuesday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 62,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "History of IT band issues — proactively wants to use cycling as cross-training to reduce running volume without losing aerobic fitness",
+    "notes": "Wants 2 cycling sessions per week (Monday and Wednesday), replacing 2 of the 6 training days with bike. Comfortable with high volume and back-to-back efforts.",
+    "recent_activities": [
+      { "date": "2026-03-30", "type": "Long Run", "distance_miles": 20.0, "pace": "8:45/mi" },
+      { "date": "2026-03-29", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:35/mi" },
+      { "date": "2026-03-27", "type": "Tempo Run", "distance_miles": 10.0, "pace": "7:00/mi" },
+      { "date": "2026-03-26", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:30/mi" },
+      { "date": "2026-03-24", "type": "Easy Run", "distance_miles": 10.0, "pace": "8:40/mi" },
+      { "date": "2026-03-23", "type": "Easy Run", "distance_miles": 6.0, "pace": "8:35/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 65,
+    "min_week1_miles": 38,
+    "max_peak_weekly_miles": 100,
+    "min_peak_weekly_miles": 70,
+    "max_long_run_miles": 28,
+    "min_long_run_miles": 22,
+    "sessions_per_week": 6,
+    "required_session_types": ["back-to-back long runs", "cycling cross-training", "trail running"],
+    "forbidden_content": [
+      "no mention of cycling or cross-training",
+      "treating all 6 days as running",
+      "no back-to-back long runs",
+      "peak long run under 20 miles for a 62-mile race",
+      "ignoring IT band history in training structure"
+    ],
+    "notes": "26-week 100k plan for an advanced runner at 60 mpw who explicitly replaces Monday and Wednesday running with cycling. Week 1 running mileage will be lower than the 60 mpw base because 2 days are now cycling — 38-55mi running across 4 days is correct (not a red flag). The plan MUST mention cycling on Monday and Wednesday — treating all 6 days as running ignores the stated preference and injury history. Back-to-back long runs (Sat+Sun) must appear by Week 7 at the latest (25% of 26 weeks). Peak running 70-85mi plus 2 cycling sessions. Long run must reach 24-26mi. Trail-specific guidance (hiking uphills, elevation management) is critical for Leadville's mountainous terrain."
+  }
+}

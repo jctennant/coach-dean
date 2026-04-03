@@ -1,0 +1,55 @@
+{
+  "id": "plan-three-days-half",
+  "description": "Schedule-constrained runner (20 mpw, 3 days only) targeting a half marathon in 14 weeks. Plan must maximize 3 sessions and never prescribe a 4th run.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Amara",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": false,
+    "goal": "half_marathon",
+    "goal_race": "SF Half Marathon",
+    "goal_race_date": "2026-07-12",
+    "goal_race_distance": "half marathon (13.1 miles)",
+    "weeks_until_race": 14,
+    "experience_level": "intermediate — running 3 years, two 10k finishes, no half yet. Can only train 3 days per week due to work and childcare.",
+    "current_weekly_miles": 20,
+    "vdot": 44,
+    "easy_pace": "9:40/mi",
+    "tempo_pace": "7:44/mi",
+    "interval_pace": "6:57/mi",
+    "training_days": ["tuesday", "thursday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 20,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "Absolutely cannot run more than 3 days per week. Tuesday and Thursday are limited to 60 minutes. Sunday is her long day with no time limit.",
+    "recent_activities": [
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 8.0, "pace": "9:55/mi" },
+      { "date": "2026-03-26", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:50/mi" },
+      { "date": "2026-03-24", "type": "Tempo Run", "distance_miles": 6.0, "pace": "7:55/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 23,
+    "min_week1_miles": 17,
+    "max_peak_weekly_miles": 34,
+    "min_peak_weekly_miles": 26,
+    "max_long_run_miles": 14,
+    "min_long_run_miles": 11,
+    "sessions_per_week": 3,
+    "required_session_types": ["long run", "tempo or quality session", "easy run"],
+    "forbidden_content": [
+      "scheduling 4 or more running sessions per week",
+      "prescribing runs on Monday, Wednesday, Friday, or Saturday",
+      "peak week over 35 miles",
+      "long run capped under 10 miles at peak"
+    ],
+    "notes": "14-week half marathon plan for a runner with a hard 3-day/week constraint. The plan MUST schedule exactly 3 sessions — never 4. The 3 sessions should be optimally structured: Sunday long run (unconstrained), one quality session on Tuesday or Thursday (tempo, intervals — but under 60 min), one easy/medium run. Week 1 close to current 20mi base. Peak 28-32mi is achievable in 3 sessions (Sunday 12-13mi long, Thurs 8mi tempo, Tue 7mi easy = ~28mi). Long run must build to 12-13 miles to prepare for the 13.1 race."
+  }
+}

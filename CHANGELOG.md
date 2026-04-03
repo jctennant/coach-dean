@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-03 — Plan quality eval harness
+
+**Type:** Infra
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Existing evals only tested factual accuracy in coaching responses (mileage, paces, dates). No coverage for whether the training plans Coach Dean generates are structurally appropriate — correct volume, right session types, safe long run caps, appropriate progression for the athlete's fitness and goal distance.
+**Fix / Change:** Added `plan_quality` eval category with a new judge (`evals/judges/plan-quality.mjs`) that evaluates plan structure rather than stated facts. Judge checks: week 1 volume vs current base, peak week appropriateness, sessions per week vs training days, long run cap, quality session types for goal race, progression safety. Added 5 fixtures covering the main failure modes: 5k beginner (volume spike, long runs too long), 5k competitive (missing interval work), half marathon first-timer (underprepared long runs), marathon first-timer (overtraining or underprepared), ultra first-timer (no back-to-back long runs or trail context). Runner updated to use the plan judge when `category === "plan_quality"`, increase max_tokens to 1500, and send a structured plan request rather than a standard initial-plan trigger message.
+**Files changed:** `evals/judges/plan-quality.mjs` (new), `evals/run-evals.mjs`, `evals/fixtures/plan-5k-beginner.json` (new), `evals/fixtures/plan-5k-competitive.json` (new), `evals/fixtures/plan-half-marathon-first-timer.json` (new), `evals/fixtures/plan-marathon-first-timer.json` (new), `evals/fixtures/plan-ultra-first-timer.json` (new)
+
+---
+
 ## 2026-04-03 — Fixed onboarding cadence question mismatch causing infinite loop
 
 **Type:** Bug Fix

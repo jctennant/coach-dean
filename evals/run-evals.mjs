@@ -20,6 +20,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { buildJudgePrompt } from "./judges/factual-accuracy.mjs";
+import { buildPlanJudgePrompt } from "./judges/plan-quality.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
@@ -238,10 +239,12 @@ ${fitnessTier}
 ATHLETE HISTORY:
 - Name: ${user.name || "Athlete"}
 - Strava: ${user.strava_connected ? "connected" : "not connected"}
-- Goal: ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}
+- Goal: ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}${user.goal_race_distance ? ` — ${user.goal_race_distance}` : ""}
+- Experience: ${user.experience_level || "not specified"}
 - Training days: ${(user.training_days || []).join(", ")}
 - Injury / constraints: ${user.injury_notes || "None reported"}
 - Preferred units: ${user.preferred_units || "imperial"} — use ${user.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
+${user.notes ? `- Athlete notes: ${user.notes}` : ""}
 
 ${activitySummary}
 ${activityBlock}
@@ -265,9 +268,16 @@ MILEAGE ACCURACY RULES — follow exactly:
 COMMUNICATION STYLE:
 You are texting over iMessage. Write like a human coach would text.
 
+${fixture.category === "plan_quality" ? `LONG RUN GUIDANCE FOR THIS PLAN:
+${fixture.ground_truth?.max_long_run_miles != null ? `- Hard cap: the designated long run session must not exceed ${fixture.ground_truth.max_long_run_miles} miles. Weekday easy runs and quality sessions are NOT subject to this cap and can still be 6-8 miles.` : ""}
+${fixture.ground_truth?.min_long_run_miles != null ? `- The long run should build to at least ${fixture.ground_truth.min_long_run_miles} miles by the peak phase.` : ""}
+
 LENGTH:
+- This is a plan generation request. Provide a full structured overview: Week 1 day-by-day sessions, week-by-week mileage arc, peak week description, and taper structure.
+- Be specific about distances and paces for Week 1. Approximate mileage targets for remaining weeks.
+- Separate sections with a blank line. Up to 1200 characters is appropriate here.` : `LENGTH:
 - Keep responses under 480 characters. Most replies should be a single short text.
-- Split into 2-3 messages by separating with a blank line only if genuinely needed (e.g. sending a full week plan).
+- Split into 2-3 messages by separating with a blank line only if genuinely needed (e.g. sending a full week plan).`}
 
 TONE:
 - Cut filler openers. Never start with "Great job!", "Awesome!", "That's fantastic!"
@@ -305,6 +315,33 @@ function buildUserMessage(fixture) {
     return `Weekly recap trigger. Week ${user.current_week} completed with ${weekMiles.toFixed(1)} mi over ${user.runs_this_week || 0} runs. Build week ${user.current_week + 1} plan targeting ~${nextWeekTarget} mi. Training days are: ${trainingDays} — schedule a run on EACH training day including Monday. Do NOT skip any training day.`;
   }
 
+  if (trigger === "initial_plan" && fixture.category === "plan_quality") {
+    const weekMiles = user.miles_logged_this_week || 0;
+    const weeksUntilRace = user.weeks_until_race;
+    const hasInjury = user.injury_notes && user.injury_notes !== "None" && user.injury_notes !== "None reported";
+    const goalLower = (user.goal_race_distance || user.goal || "").toLowerCase();
+    const isUltra = ["50k", "100k", "50mi", "100mi", "ultra"].some(u => goalLower.includes(u));
+    const backToBackWeek = Math.max(3, Math.round(weeksUntilRace * 0.25));
+
+    const injuryNote = hasInjury
+      ? `\n⚠️ INJURY CONTEXT — CRITICAL: ${user.injury_notes}. The plan must be built around this injury: prioritize safe return over mileage targets, respect current pain-free limits, and do not introduce intensity until the athlete has been symptom-free for several weeks.`
+      : "";
+
+    const ultraNote = isUltra
+      ? `\nULTRA-SPECIFIC REQUIREMENTS:\n- Introduce back-to-back long runs (Saturday long + Sunday medium-long) by Week ${backToBackWeek} at the latest — this is the central ultra training stimulus, not a late-plan addition\n- Include trail-specific guidance from Week 1: hiking steep uphills (power-hiking is faster than running them in ultras), running by time-on-feet rather than strict pace, elevation management`
+      : "";
+
+    return `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Race is exactly ${weeksUntilRace} weeks away — build a ${weeksUntilRace}-week plan, no more, no fewer.${injuryNote}${ultraNote}
+
+Build a complete training plan overview with:
+1. Week 1 — every session listed (day, type, distance, any pace targets), then the week total
+2. Full training arc — approximate mileage target for each week from Week 1 through race week (${weeksUntilRace} weeks total)
+3. Peak week — total mileage and the types of sessions it includes
+4. Taper — how many weeks and approximate mileage
+
+Be specific about Week 1 sessions. Approximate weekly targets are fine for the rest.`;
+  }
+
   if (trigger === "initial_plan") {
     const weekMiles = user.miles_logged_this_week || 0;
     return `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Build week 1 plan targeting ${user.weekly_mileage_target || 30} mi total. Acknowledge completed runs separately from planned sessions. Do NOT use additive total format ("Total: X + Y already").`;
@@ -326,13 +363,15 @@ async function runEval(fixture) {
   const systemPrompt = buildEvalSystemPrompt(fixture);
   const userMessage = buildUserMessage(fixture);
 
+  const isPlanQuality = fixture.category === "plan_quality";
+
   // Step 1: Get coaching response
   let coachResponse = null;
   let coachError = null;
   try {
     const coachMsg = await client.messages.create({
       model: COACHING_MODEL,
-      max_tokens: 1000,
+      max_tokens: isPlanQuality ? 1500 : 1000,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
@@ -360,7 +399,9 @@ async function runEval(fixture) {
   }
 
   // Step 2: Judge the response
-  const judgePromptStr = buildJudgePrompt(fixture, coachResponse);
+  const judgePromptStr = isPlanQuality
+    ? buildPlanJudgePrompt(fixture, coachResponse)
+    : buildJudgePrompt(fixture, coachResponse);
   let judgment = null;
   let judgeError = null;
 

@@ -1,0 +1,56 @@
+{
+  "id": "plan-half-marathon-first-timer",
+  "description": "Moderate runner (25 mpw, 5 days) running first half marathon in 16 weeks. Long run must build to 12-14mi. Volume must not spike in week 1.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Sandra",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Philadelphia Half Marathon",
+    "goal_race_date": "2026-08-01",
+    "goal_race_distance": "half marathon (13.1 miles)",
+    "weeks_until_race": 16,
+    "experience_level": "intermediate — running 2 years, has done several 5ks and one 10k, no half yet",
+    "current_weekly_miles": 25,
+    "vdot": 44,
+    "easy_pace": "9:40/mi",
+    "tempo_pace": "7:44/mi",
+    "interval_pace": "6:57/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 26,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "First half marathon. Goal is to finish feeling strong, no time goal.",
+    "recent_activities": [
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 8.0, "pace": "9:55/mi" },
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 4.5, "pace": "9:50/mi" },
+      { "date": "2026-03-26", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:45/mi" },
+      { "date": "2026-03-25", "type": "Tempo Run", "distance_miles": 5.0, "pace": "8:00/mi" },
+      { "date": "2026-03-23", "type": "Easy Run", "distance_miles": 4.5, "pace": "9:50/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 30,
+    "min_week1_miles": 22,
+    "max_peak_weekly_miles": 45,
+    "min_peak_weekly_miles": 33,
+    "max_long_run_miles": 15,
+    "min_long_run_miles": 11,
+    "sessions_per_week": 5,
+    "required_session_types": ["easy run", "long run", "tempo"],
+    "forbidden_content": [
+      "peak week over 48 miles",
+      "week 1 over 30 miles",
+      "long run capped under 10 miles at peak"
+    ],
+    "notes": "16-week first half marathon plan for a runner at 25 mpw. Week 1 should be close to current base (25-28mi). Peak week should land 35-42mi — appropriate for a first HM without overtraining. Long run must build toward 12-14 miles to prepare for the 13.1mi race; capping it at 10mi would leave her underprepared. Tempo work is important for half marathon pace development. 5 sessions/week matching training days."
+  }
+}

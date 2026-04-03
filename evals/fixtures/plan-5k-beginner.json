@@ -1,0 +1,56 @@
+{
+  "id": "plan-5k-beginner",
+  "description": "Beginner runner (15 mpw, 4 days) wants first 5k in 10 weeks. Plan must not spike volume or prescribe long marathon-style long runs.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "5k",
+    "goal_race": "local 5k",
+    "goal_race_date": "2026-06-13",
+    "goal_race_distance": "5k (3.1 miles)",
+    "weeks_until_race": 10,
+    "experience_level": "beginner — has been running 6 months, first race",
+    "current_weekly_miles": 15,
+    "vdot": 38,
+    "easy_pace": "10:51/mi",
+    "tempo_pace": "8:42/mi",
+    "interval_pace": "7:50/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 16,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "First race ever. Wants to finish strong and enjoy it.",
+    "recent_activities": [
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 3.5, "pace": "11:05/mi" },
+      { "date": "2026-03-26", "type": "Easy Run", "distance_miles": 4.0, "pace": "11:00/mi" },
+      { "date": "2026-03-24", "type": "Easy Run", "distance_miles": 4.0, "pace": "11:10/mi" },
+      { "date": "2026-03-22", "type": "Easy Run", "distance_miles": 3.5, "pace": "11:15/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 19,
+    "min_week1_miles": 13,
+    "max_peak_weekly_miles": 28,
+    "min_peak_weekly_miles": 20,
+    "max_long_run_miles": 7,
+    "min_long_run_miles": 4,
+    "sessions_per_week": 4,
+    "required_session_types": ["easy run", "long run"],
+    "forbidden_content": [
+      "long run over 7 miles",
+      "peak week over 28 miles",
+      "multiple hard workouts in the same week without recovery",
+      "marathon-pace work"
+    ],
+    "notes": "10-week 5k plan for a beginner at 15 mpw. Week 1 should be close to current base (~15-18mi). Peak should not exceed ~25-28mi — 5k does not require marathon volume. Long run should cap around 6-7mi. Should include strides or light interval work by mid-plan, but easy miles dominate. 4 sessions/week matching training days."
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "id": "plan-shin-splints-10k",
+  "description": "Runner with active shin splints (can only run 3mi pain-free) wants a 10k in 12 weeks. Plan must use run-walk protocol, conservative build, and treat the injury seriously.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Keisha",
+    "timezone": "America/New_York",
+    "strava_connected": false,
+    "goal": "10k",
+    "goal_race": "local 10k road race",
+    "goal_race_date": "2026-06-27",
+    "goal_race_distance": "10k (6.2 miles)",
+    "weeks_until_race": 12,
+    "experience_level": "intermediate — running 2 years, multiple 5k finishes, currently sidelined with shin splints after ramping too fast",
+    "current_weekly_miles": 10,
+    "vdot": 42,
+    "easy_pace": "10:02/mi",
+    "tempo_pace": "8:02/mi",
+    "interval_pace": "7:13/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 10,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "Active medial shin splints — currently limited to 3 miles per run before pain sets in. Has been running through mild discomfort. Doctor cleared her to run but recommended gradual return and no intensity until pain-free for 2 weeks.",
+    "notes": "Goal is to finish the 10k healthy. Open to run-walk approach. Has been cross-training on the bike during flare-ups.",
+    "recent_activities": [
+      { "date": "2026-03-30", "type": "Easy Run", "distance_miles": 2.5, "pace": "10:15/mi" },
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 3.0, "pace": "10:20/mi" },
+      { "date": "2026-03-26", "type": "Easy Run", "distance_miles": 2.5, "pace": "10:10/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 12,
+    "min_week1_miles": 6,
+    "max_peak_weekly_miles": 28,
+    "min_peak_weekly_miles": 18,
+    "max_long_run_miles": 8,
+    "min_long_run_miles": 5,
+    "sessions_per_week": 4,
+    "required_session_types": ["easy run", "run-walk or conservative build"],
+    "forbidden_content": [
+      "running through pain or ignoring the shin splint injury",
+      "introducing intensity (tempo, intervals) in the first 3-4 weeks",
+      "week 1 starting above 12 miles",
+      "prescribing daily running with no recovery days",
+      "no mention of the injury or conservative return-to-run approach"
+    ],
+    "notes": "12-week return-to-running 10k plan for someone with active shin splints. This is an injury rehab context — the plan MUST acknowledge the injury and build conservatively. Week 1 should be 8-12mi max with individual runs capped at 3-4mi (current pain-free limit). No intensity whatsoever for the first 3-4 weeks while she confirms the shins are healing. Run-walk approach for longer efforts is appropriate. Long run caps at 7-8mi — the race is 6.2mi, she doesn't need 12-mile long runs. Cross-training on rest days (bike, pool) should be mentioned as a bridge. If she starts adding intensity too early she'll re-injure."
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "id": "plan-5k-competitive",
+  "description": "Experienced runner (40 mpw, 5 days) chasing sub-20 5k in 8 weeks. Plan must include VO2max interval work — without it, it won't develop the speed needed.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Priya",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "5k",
+    "goal_race": "Stanford Invitational 5k",
+    "goal_race_date": "2026-05-30",
+    "goal_race_distance": "5k (3.1 miles)",
+    "weeks_until_race": 8,
+    "experience_level": "experienced — running 4 years, multiple 5k/10k races, current PR 20:45",
+    "current_weekly_miles": 40,
+    "vdot": 52,
+    "easy_pace": "8:28/mi",
+    "tempo_pace": "6:45/mi",
+    "interval_pace": "6:04/mi",
+    "training_days": ["monday", "tuesday", "thursday", "friday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 42,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "Goal is sub-20:00. Has a strong aerobic base and handles quality well.",
+    "recent_activities": [
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 7.0, "pace": "8:35/mi" },
+      { "date": "2026-03-27", "type": "Tempo Run", "distance_miles": 8.0, "pace": "7:02/mi" },
+      { "date": "2026-03-25", "type": "Interval", "distance_miles": 6.5, "pace": "6:18/mi" },
+      { "date": "2026-03-24", "type": "Easy Run", "distance_miles": 9.0, "pace": "8:40/mi" },
+      { "date": "2026-03-22", "type": "Long Run", "distance_miles": 11.0, "pace": "8:50/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "build"
+  },
+  "ground_truth": {
+    "max_week1_miles": 48,
+    "min_week1_miles": 36,
+    "max_peak_weekly_miles": 55,
+    "min_peak_weekly_miles": 40,
+    "max_long_run_miles": 13,
+    "min_long_run_miles": 9,
+    "sessions_per_week": 5,
+    "required_session_types": ["interval", "tempo", "easy run", "long run"],
+    "forbidden_content": [
+      "no speed work or intervals",
+      "peak week under 38 miles",
+      "long run over 14 miles"
+    ],
+    "notes": "8-week 5k sharpening block for an experienced runner at 40 mpw targeting sub-20. Plan MUST include VO2max interval work (e.g. 400m/800m/mile reps at ~6:04/mi) — this is the key training stimulus for 5k PR. Also needs tempo runs. Long run should stay 10-12mi; 5k doesn't require 16+ mile long runs. Volume should stay close to current 40 mpw — not a big build phase, just a sharpening block. 5 sessions/week matching training days."
+  }
+}

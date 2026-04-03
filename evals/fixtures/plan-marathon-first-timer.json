@@ -1,0 +1,57 @@
+{
+  "id": "plan-marathon-first-timer",
+  "description": "Solid runner (35 mpw, 5 days) attempting first marathon in 18 weeks. Peak must reach 45-50mi with long runs to 20mi — but must not spike week 1 or overdo early volume.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "David",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-08-22",
+    "goal_race_distance": "marathon (26.2 miles)",
+    "weeks_until_race": 18,
+    "experience_level": "intermediate — running 3 years, multiple halfs (PR 1:52), first marathon",
+    "current_weekly_miles": 35,
+    "vdot": 44,
+    "easy_pace": "9:40/mi",
+    "tempo_pace": "7:44/mi",
+    "interval_pace": "6:57/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 36,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "Mild left knee tightness occasionally — responds well to easy days",
+    "notes": "Goal is to finish. Would love sub-4:00 but finishing comfortably is the priority.",
+    "recent_activities": [
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 13.0, "pace": "9:55/mi" },
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:50/mi" },
+      { "date": "2026-03-26", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:55/mi" },
+      { "date": "2026-03-25", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:45/mi" },
+      { "date": "2026-03-23", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:50/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 40,
+    "min_week1_miles": 30,
+    "max_peak_weekly_miles": 58,
+    "min_peak_weekly_miles": 44,
+    "max_long_run_miles": 23,
+    "min_long_run_miles": 18,
+    "sessions_per_week": 5,
+    "required_session_types": ["easy run", "long run", "tempo"],
+    "forbidden_content": [
+      "peak week over 58 miles for a first-time marathoner",
+      "week 1 jumping to 45+ miles",
+      "long run capped under 17 miles",
+      "no mention of marathon pace or long run progression"
+    ],
+    "notes": "18-week first marathon plan for a 35 mpw runner with a half PR. Week 1 should be close to current base (35-38mi). Peak week should reach 45-52mi — under-peaking at 35mi will leave him underprepared for 26.2. Long runs must build to at least 18-20mi; this is non-negotiable for marathon prep. Knee concern means easy days matter — plan should include true recovery days. Tempo and marathon-pace work important. 5 sessions/week."
+  }
+}

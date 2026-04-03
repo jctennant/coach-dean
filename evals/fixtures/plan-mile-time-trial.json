@@ -1,0 +1,56 @@
+{
+  "id": "plan-mile-time-trial",
+  "description": "Track runner (30 mpw, 4 days) preparing for a 1-mile time trial in 8 weeks. Plan must be neuromuscular speed work — fast reps, strides, short intervals. No marathon-style long runs.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Tyler",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "1 mile time trial",
+    "goal_race": "club 1-mile time trial",
+    "goal_race_date": "2026-05-30",
+    "goal_race_distance": "1 mile — track event",
+    "weeks_until_race": 8,
+    "experience_level": "intermediate — running 3 years, track background, current mile PR 5:52, training at 30 mpw",
+    "current_weekly_miles": 30,
+    "vdot": 50,
+    "easy_pace": "8:44/mi",
+    "tempo_pace": "6:58/mi",
+    "interval_pace": "6:16/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 30,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "Goal is to break 5:45. Has done track work before, comfortable with fast intervals.",
+    "recent_activities": [
+      { "date": "2026-03-31", "type": "Interval", "distance_miles": 6.0, "pace": "6:30/mi" },
+      { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:50/mi" },
+      { "date": "2026-03-26", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:10/mi" },
+      { "date": "2026-03-24", "type": "Easy Run", "distance_miles": 6.0, "pace": "8:55/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "build"
+  },
+  "ground_truth": {
+    "max_week1_miles": 34,
+    "min_week1_miles": 22,
+    "max_peak_weekly_miles": 40,
+    "min_peak_weekly_miles": 26,
+    "max_long_run_miles": 5,
+    "min_long_run_miles": 3,
+    "sessions_per_week": 4,
+    "required_session_types": ["interval", "strides or fast reps"],
+    "forbidden_content": [
+      "long run over 5 miles",
+      "no speed work or track intervals",
+      "prescribing marathon-pace or threshold long runs",
+      "peak week over 40 miles"
+    ],
+    "notes": "8-week 1-mile TT prep for an intermediate runner at 30 mpw. Volume stays close to current (30-35mi) across 4 sessions — the race is 4 minutes long, not 4 hours, so no massive volume build needed. The designated long run (Sunday) is capped at 5 miles, but the other 3 sessions can still be 6-8mi easy/quality runs. The entire quality focus is neuromuscular speed: short fast intervals (200m, 400m, 600m), strides, and race-pace reps. A 12-mile long run trains the wrong energy system for a 1-mile effort. 4 sessions/week."
+  }
+}
