@@ -56,10 +56,10 @@ export async function GET(request: Request) {
   // distinguish real data from hallucinations.
   const activityIds = [...new Set(
     messages
-      .filter((m) => m.strava_activity_id)
-      .map((m) => m.strava_activity_id as string)
+      .filter((m) => m.strava_activity_id != null)
+      .map((m) => m.strava_activity_id as number)
   )];
-  const activityMeta: Record<string, { hasLaps: boolean; hasHR: boolean; distanceMiles: number | null }> = {};
+  const activityMeta: Record<number, { hasLaps: boolean; hasHR: boolean; distanceMiles: number | null }> = {};
   if (activityIds.length > 0) {
     const { data: activities } = await supabase
       .from("activities")
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
       .in("strava_activity_id", activityIds);
     for (const act of activities ?? []) {
       const rawSummary = act.summary as { laps?: unknown[] } | null;
-      activityMeta[act.strava_activity_id] = {
+      activityMeta[act.strava_activity_id as number] = {
         hasLaps: !!(rawSummary?.laps && rawSummary.laps.length > 0),
         hasHR: act.average_heartrate != null,
         distanceMiles: act.distance_meters != null ? Math.round((act.distance_meters / 1609.34) * 10) / 10 : null,
