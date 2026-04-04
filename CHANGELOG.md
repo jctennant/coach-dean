@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Plan health check section in daily email + admin regenerate-plan endpoint
+
+**Type:** Feature
+**Reported by:** Jake (internal observation from user "plan looks light" complaint)
+**User feedback:** "I want to build a pipeline like we have for the daily email analyzing conversations that runs every 2-3 days and looks at generated plans and compares them to the conversation and evaluates whether the plan generated correctly and is updating correctly"
+**Root cause:** No monitoring existed for plan-vs-conversation consistency. A user (0cb902da) had their plan start at 9mi/week (conservative default with no Strava history at onboarding), messaged that it was too light, Dean verbally acknowledged but only patched training_state — the full training_plans arc was never regenerated, leaving state/plan mismatched at 9mi.
+**Fix / Change:** (1) Added `/api/admin/regenerate-plan` endpoint — accepts userId + optional prescribedWeek1Miles, calls generateAndSaveFullPlan with skipLinkSms=true. (2) Added `buildPlanHealthSection()` to the daily analyze-conversations cron — fetches all active users, checks state/plan mismatch, conversation drift (promises not reflected in DB), and arc sanity, adds as a second section to the daily email. (3) Manually fixed affected user's plan arc to base 19mi/week.
+**Files changed:** src/app/api/admin/regenerate-plan/route.ts (new), src/app/api/cron/analyze-conversations/route.ts
+
 ## 2026-04-04 — Use Strava easy-run data as pace baseline when VDOT unknown; prefer recent race time over time trial for calibration
 
 **Type:** Improvement
