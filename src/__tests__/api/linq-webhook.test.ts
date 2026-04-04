@@ -187,7 +187,7 @@ describe("POST /api/webhooks/linq — opt-out (STOP keywords)", () => {
   });
 
   it("does NOT opt out when 'stop' appears in a casual training question", async () => {
-    // The coaching path has a 10s debounce — use fake timers to skip it.
+    // The coaching path has a 15s debounce — use fake timers to skip it.
     vi.useFakeTimers();
     try {
       mockTables({
@@ -205,10 +205,10 @@ describe("POST /api/webhooks/linq — opt-out (STOP keywords)", () => {
       // "stop" appears but not followed by texting/messaging/sending/messages
       const req = makeRequest("+12025551234", "Should I stop at mile 10 or push through the full 13?");
       await POST(req);
-      // Start flush (which triggers the after() callback including the 10s debounce),
+      // Start flush (which triggers the after() callback including the 15s debounce),
       // then advance fake timers to resolve the pending setTimeout inside.
       const flushPromise = flush();
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(25_000);
       await flushPromise;
 
       expect(sendSMS).not.toHaveBeenCalledWith(
@@ -299,7 +299,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
       const req = makeRequest("+12025551234", "I want to run a marathon");
       await POST(req);
       const flushPromise = flush();
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(25_000);
       await flushPromise;
 
       expect(global.fetch).toHaveBeenCalledWith(
@@ -338,7 +338,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
       const req = makeRequest("+12025551234", "wait hold up");
       await POST(req);
       const flushPromise = flush();
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(25_000);
       await flushPromise;
 
       // A newer message arrived during the debounce window — this call should be skipped
@@ -456,7 +456,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
       const req = makeRequest("+12025551234", "my plan");
       await POST(req);
       const flushPromise = flush();
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(25_000);
       await flushPromise;
 
       // Should NOT send the old dead-end message

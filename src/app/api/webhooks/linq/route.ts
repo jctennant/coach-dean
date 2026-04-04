@@ -419,9 +419,11 @@ async function handleInboundMessage(
     // regenerate the token and send the link.
   }
 
-  // Coaching flow: debounce 10 seconds so rapid multi-part messages are batched
-  console.log("[linq-webhook] debounce: waiting 10s for user", user.id);
-  await new Promise((resolve) => setTimeout(resolve, 10_000));
+  // Coaching flow: debounce 15 seconds so rapid multi-part messages are batched.
+  // 10s was too short — users often send a second message 12-15 seconds after the first,
+  // causing two independent responses that contradict each other (e.g. different mileage totals).
+  console.log("[linq-webhook] debounce: waiting 15s for user", user.id);
+  await new Promise((resolve) => setTimeout(resolve, 15_000));
 
   // If the conversation insert failed, storedMsg is null — don't silently skip,
   // just fire the response anyway so the message isn't dropped.

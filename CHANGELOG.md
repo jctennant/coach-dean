@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Increase coaching debounce to 15s; fix "already did that" double responses
+
+**Type:** Bug Fix
+**Reported by:** Jake (user observation, Julia's conversation)
+**User feedback:** Coach Dean sent two contradictory responses to two messages sent ~12 seconds apart ("16.3 mi for the week" then "0 mi logged"). Also said "I can't adjust your paces" immediately after adjusting them.
+**Root cause (double response):** Coaching debounce was 10s — messages sent 12-15s apart each triggered their own independent response, causing contradictory outputs (different mileage totals, double acknowledgments).
+**Root cause (pace confusion):** User sent two messages 1 minute apart: "Can you adjust paces based on 1:21:01 half?" then "That is what I ran on March 1st!" Dean updated paces on the first message, then when the second fired, saw paces already at VDOT 54 and said "they're already calibrated" — technically correct but confusing after just telling the user about the update. No prompt instruction to acknowledge already-completed work.
+**Fix / Change:**
+1. Increased coaching debounce from 10s to 15s in the Linq webhook.
+2. Added `ALREADY-COMPLETED UPDATES` rule to `user_message` prompt: if the last coach message already made the update the athlete is now contextualizing, acknowledge briefly ("Already updated 👊") rather than re-processing or saying it can't be done.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/linq-webhook.test.ts`
+
+---
+
 ## 2026-04-04 — Scale initial plan volume by fitness_level when no Strava history exists
 
 **Type:** Bug Fix
