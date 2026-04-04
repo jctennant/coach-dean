@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Use Strava easy-run data as pace baseline when VDOT unknown; prefer recent race time over time trial for calibration
+
+**Type:** Improvement
+**Reported by:** Jake (Curtis conversation)
+**User feedback:** "For this conversation, it seems like Curtis already had Strava connected, so we should be able to give him paces without a VDOT score - however, instead we should probably just ask for a race time (if strava data isn't good) from the past instead of asking to do a 5K time trial (or at least have that as an option)"
+**Root cause:** When `current_easy_pace` is null and VDOT is unknown, the coach had no explicit guidance for using RECENT WORKOUTS data — so it defaulted to blocking on a 5K time trial rather than estimating from available Strava runs. It also only ever offered the time trial path, never asking for a recent race time which is lower friction.
+**Fix / Change:** Added a new WHEN PACES ARE TBD rule to the VDOT-CALIBRATED PACING section: when paces are TBD but RECENT WORKOUTS exist, use typical easy run average pace as a baseline estimate and derive tempo/interval from there (labeled as estimates). When calibration is needed, ask for a recent race time first; only suggest a 5K time trial if no race times exist, and always offer both options in the same message.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-04 — Fix timezone never confirmed for Strava users; add timezone step to onboarding
 
 **Type:** Bug Fix
