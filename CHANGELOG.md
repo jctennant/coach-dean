@@ -7,9 +7,11 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 ## 2026-04-04 — Partial-week arc calibration fix for mid-week onboards
 
 **Type:** Bug Fix
-**Reported by:** Internal observation
-**Root cause:** `generateAndSaveFullPlan` used `prescribedWeek1Miles` (the plan total from the initial_plan message) as `baseMileage` for the entire arc. When a user onboards Thursday–Saturday and the initial_plan only covers the remaining 2-4 days (e.g. 16mi for Sat+Sun), that partial-week total would become the arc's base — massively under-calibrating the entire plan for high-mileage athletes. Julia onboarding Saturday at 60mpw would have had an arc built from a 16mi/week base. Additionally, the same partial-week total was being stored as `weekly_mileage_target` in training_state, causing Dean to show "0/65mi done" in subsequent messages and think the athlete was way behind.
-**Fix / Change:** At `initial_plan` time, compute whether the current day is Thursday or later (`daysToSunday ≤ 3`). If partial week: (1) pass `prescribedWeek1Miles: null` to `generateAndSaveFullPlan` so it falls back to `avgWeeklyMileage` as the arc base, and (2) store the partial-week prescribed total as `weekly_mileage_target` in training_state (not the full-week `suggestedWeeklyMiles`) so Dean's mileage tracking matches what was actually assigned. Full-week onboards (Mon–Wed) are unaffected.
+**Reported by:** Internal observation + Jake follow-up ("this doesn't scale to Wednesday onboards")
+**Root cause:** `generateAndSaveFullPlan` used `prescribedWeek1Miles` (the plan total from the initial_plan message) as `baseMileage` for the entire arc. Since the initial_plan now only covers today through Sunday, the prescribed total is always fewer than 7 days of miles unless the user onboards on Monday. A Wednesday onboard at 60mpw (~43mi for 5 days) would calibrate the arc from 43mi/week. A Saturday onboard (~16mi for 2 days) would be even worse. Any non-Monday onboard was affected.
+**Fix / Change:** Two separate fixes that scale correctly to any onboard day:
+1. **Arc base (avgWeeklyMileage vs prescribedWeek1Miles)**: If Strava history exists (`avgWeeklyMileage != null`), always use it as the arc base — it's an 8-week real average and is immune to partial-week distortion. If no Strava (user stated their mileage verbally), annualize the prescribed total: `prescribedWeek1MilesRaw × (7 / daysInPlan)`. This scales correctly for any day: Mon ×1.0, Wed ×1.4, Sat ×3.5.
+2. **weekly_mileage_target stored in training_state**: Use `prescribedWeek1MilesRaw` for partial weeks (what was actually assigned for those days) rather than `periodization.suggestedWeeklyMiles` (full-week target). This prevents "0/65mi done" when only a 2-day plan was assigned. Sunday recap resets this to the proper full-week target.
 **Files changed:** `src/app/api/coach/respond/route.ts`
 
 ---

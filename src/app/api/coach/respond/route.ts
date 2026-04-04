@@ -694,17 +694,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
 
-    // Determine whether this is a partial Mon-Sun week (user onboarded Thursday or later).
-    // This affects both the mileage target stored in training_state AND the arc calibration.
-    const initPlanNow = new Date();
-    const initPlanLocalDate = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(initPlanNow);
-    const [ipY, ipM, ipD] = initPlanLocalDate.split("-").map(Number);
-    const initPlanDayOfWeek = new Date(Date.UTC(ipY, ipM - 1, ipD)).getUTCDay(); // 0=Sun,6=Sat
-    const daysToSundayForArc = initPlanDayOfWeek === 0 ? 0 : 7 - initPlanDayOfWeek;
-    // ≤ 3 days remaining (Thu/Fri/Sat onboard) = partial week. Sunday is special-cased
-    // (dayOfWeek=0, daysToSunday=0) and plans the full upcoming week, so not partial.
-    const isPartialWeek = daysToSundayForArc <= 3 && initPlanDayOfWeek !== 0;
-
     // Parse the prescribed week total from the plan text.
     // Match various formats Dean uses: "Total: ~18mi", "~18 miles this week", etc.
     const prescribedWeek1Match =
@@ -714,11 +703,22 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       coachMessage.match(/(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+(?:total\s+)?for\s+the\s+week/i);
     const prescribedWeek1MilesRaw = prescribedWeek1Match ? parseFloat(prescribedWeek1Match[1]) : null;
 
-    // For partial-week onboards: the prescribed total (e.g. 16mi for Sat+Sun) is what
-    // Dean told the athlete, so use it as this week's mileage target so Dean doesn't show
-    // "0/65mi done" and think there's a massive deficit. The Sunday recap resets this to
-    // the proper full-week target when it generates next week's plan.
-    // For full-week onboards: use periodization.suggestedWeeklyMiles (the normal path).
+    // Compute how many days this initial plan covers so we can:
+    //   (a) set weekly_mileage_target to match what was actually prescribed (not a phantom full-week target)
+    //   (b) annualize prescribedWeek1Miles for the arc when Strava data isn't available
+    // Sunday (dayOfWeek=0): prompt tells Dean to plan the full upcoming Mon–Sun week → 7 days.
+    // Any other day: today + days remaining until Sunday.
+    const initPlanNow = new Date();
+    const initPlanLocalDate = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(initPlanNow);
+    const [ipY, ipM, ipD] = initPlanLocalDate.split("-").map(Number);
+    const initPlanDayOfWeek = new Date(Date.UTC(ipY, ipM - 1, ipD)).getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+    const daysToSunday = initPlanDayOfWeek === 0 ? 0 : 7 - initPlanDayOfWeek;
+    const daysInPlan = initPlanDayOfWeek === 0 ? 7 : daysToSunday + 1;
+    const isPartialWeek = daysInPlan < 7; // any day other than Mon (7 days) or Sun (7-day upcoming week)
+
+    // weekly_mileage_target stored in training_state: use what was actually prescribed for
+    // the days covered. This prevents "0/65mi done" when only a 2-day plan was assigned.
+    // The Sunday recap will reset this to the proper full-week target for next week.
     const weekMileageTarget = isPartialWeek
       ? (prescribedWeek1MilesRaw ?? periodization.suggestedWeeklyMiles)
       : periodization.suggestedWeeklyMiles;
@@ -736,12 +736,21 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     // (post_run, reminders) use the exact same distances — not independently recalculated.
     await extractAndStorePlanSessions(userId, coachMessage);
 
-    // For the arc: partial-week mileage must NOT be used as baseMileage — it would
-    // calibrate the entire arc far too low. Julia onboarding Saturday gets a 2-day plan
-    // (16mi), but her actual baseline is 60mpw. Use avgWeeklyMileage so the arc reflects
-    // real fitness. Full-week onboards (Mon–Wed) can use prescribedWeek1MilesRaw as a
-    // good full-week proxy that keeps arc Week 1 in sync with what Dean sent.
-    const prescribedWeek1Miles = isPartialWeek ? null : prescribedWeek1MilesRaw;
+    // Arc base mileage calibration:
+    // - If Strava history exists (avgWeeklyMileage != null): always use it — it's an 8-week
+    //   real average and is accurate regardless of what day the user onboarded. The
+    //   prescribedWeek1Miles covers only the days remaining in the current week (as few as 2),
+    //   so it would under-calibrate a high-mileage athlete's entire arc (e.g. Julia at 60mpw
+    //   onboarding Saturday → 16mi prescribed → arc built from 16mi base instead of 60mi).
+    // - If no Strava (user stated their mileage, which is what Dean worked from): annualize
+    //   prescribedWeek1MilesRaw × (7 / daysInPlan) to get the full-week equivalent. This
+    //   scales correctly for any onboard day: Sat (×3.5), Wed (×1.4), Mon (×1.0).
+    const annualizedWeek1Miles = prescribedWeek1MilesRaw != null
+      ? Math.round((prescribedWeek1MilesRaw * 7 / daysInPlan) * 2) / 2
+      : null;
+    const prescribedWeek1Miles = avgWeeklyMileage
+      ? null               // Strava avg is authoritative — don't let partial-week total distort the arc
+      : annualizedWeek1Miles; // no Strava: annualized prescribed total is the best estimate
 
     // Generate and save the full multi-week training arc, then text the dashboard link.
     // Pass B/C races so the arc enrichment Haiku can label those weeks appropriately.
