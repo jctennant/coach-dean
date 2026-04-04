@@ -4,6 +4,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Partial-week arc calibration fix for mid-week onboards
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**Root cause:** `generateAndSaveFullPlan` used `prescribedWeek1Miles` (the plan total from the initial_plan message) as `baseMileage` for the entire arc. When a user onboards Thursday–Saturday and the initial_plan only covers the remaining 2-4 days (e.g. 16mi for Sat+Sun), that partial-week total would become the arc's base — massively under-calibrating the entire plan for high-mileage athletes. Julia onboarding Saturday at 60mpw would have had an arc built from a 16mi/week base. Additionally, the same partial-week total was being stored as `weekly_mileage_target` in training_state, causing Dean to show "0/65mi done" in subsequent messages and think the athlete was way behind.
+**Fix / Change:** At `initial_plan` time, compute whether the current day is Thursday or later (`daysToSunday ≤ 3`). If partial week: (1) pass `prescribedWeek1Miles: null` to `generateAndSaveFullPlan` so it falls back to `avgWeeklyMileage` as the arc base, and (2) store the partial-week prescribed total as `weekly_mileage_target` in training_state (not the full-week `suggestedWeeklyMiles`) so Dean's mileage tracking matches what was actually assigned. Full-week onboards (Mon–Wed) are unaffected.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-04 — Extraction burst fix + initial_plan week boundary + sunday-recap double-plan guard
 
 **Type:** Bug Fix
