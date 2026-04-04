@@ -1828,8 +1828,21 @@ CALIBRATE TO ATHLETE'S ACTUAL FITNESS FIRST:
 Before applying any training philosophy, anchor the plan to what the data shows. The athlete's recent weekly mileage, pace distribution, and workout history in RECENT WORKOUTS are ground truth. The philosophy principles below are defaults — they yield to observed fitness. An athlete already running 40+ miles/week with quality sessions in their history does not need to earn intensity; they need a plan that matches where they actually are. Apply conservative defaults only where the data is thin, the athlete is clearly new to consistent training, or injury history warrants it.
 ${
   avgWeeklyMileage == null
-    ? `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
-⚠️ WEEK 1 VOLUME CAP (no history): Since no mileage data exists, Week 1 must not exceed 10 mi total. Start extremely conservatively — 3 short sessions of 2–3 mi each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.`
+    ? (() => {
+        const fl = (profile?.fitness_level as string | null) ?? "beginner";
+        const isIntermediate = fl === "intermediate";
+        const isAdvanced = fl === "advanced";
+        if (isAdvanced) {
+          return `FITNESS TIER: No Strava history yet, but athlete self-reports as ADVANCED. Treat this like a moderate-to-high volume athlete returning to training — do not apply beginner volume defaults.
+⚠️ WEEK 1 VOLUME CAP (no history, advanced): Start at 25–35 mi for the week. Spread across ${profile?.days_per_week ?? 5}+ days. Include 1 quality session. Do not prescribe fewer than 20 mi — that is inconsistent with advanced fitness.`;
+        } else if (isIntermediate) {
+          return `FITNESS TIER: No Strava history yet, but athlete self-reports as INTERMEDIATE. Treat as an athlete with an established aerobic base — do not apply beginner volume defaults.
+⚠️ WEEK 1 VOLUME CAP (no history, intermediate): Start at 15–25 mi for the week. Spread across ${profile?.days_per_week ?? 4}+ days. Include at least 1 easy quality session (strides or short tempo). Do not prescribe fewer than 12 mi — that is inconsistent with intermediate fitness.`;
+        } else {
+          return `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
+⚠️ WEEK 1 VOLUME CAP (no history, beginner): Since no mileage data exists and this is a beginner, Week 1 must not exceed 10 mi total. Start extremely conservatively — 3 short sessions of 2–3 mi each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.`;
+        }
+      })()
     : avgWeeklyMileage < 10
     ? `FITNESS TIER: LOW VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
 ⚠️ WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${avgWeeklyMileage.toFixed(1)} mi/week. Week 1 MUST NOT exceed ${Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6).toFixed(0)} mi total (current volume × 1.30, floor 6 mi). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. For example, if they run 5 mi/week, prescribing 15 mi is a 200% jump and is wrong. A safe Week 1 for 5 mi/week is 6–7 mi spread across 3 sessions (e.g., 2mi / 2mi / 2.5mi). Do not exceed this cap under any circumstances, regardless of race goals or timelines.

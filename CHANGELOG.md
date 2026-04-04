@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Scale initial plan volume by fitness_level when no Strava history exists
+
+**Type:** Bug Fix
+**Reported by:** Jake (root cause investigation from user "plan looks light")
+**User feedback:** N/A (root cause fix)
+**Root cause:** When a user has no Strava history at plan generation time, the FITNESS TIER block in the system prompt hard-capped week 1 at 10mi regardless of `fitness_level`. An intermediate or advanced user without Strava connected got the same cap as a true beginner. The plan arc fallback in `generateAndSaveFullPlan` also defaulted to 15mi for all users with no history. Result: intermediate users with 7 days/week and 18+ mi/week actual fitness received a 9mi week 1 plan.
+**Fix / Change:** (1) System prompt: FITNESS TIER for null avgWeeklyMileage now branches by fitness_level — beginner keeps the 10mi cap, intermediate gets a 15–25mi range, advanced gets a 25–35mi range. (2) generateAndSaveFullPlan: no-history fallback is now fitness-level-aware (beginner=15mi, intermediate=20mi, advanced=30mi) instead of a flat 15mi for everyone.
+**Files changed:** src/app/api/coach/respond/route.ts, src/lib/training-plan.ts
+
 ## 2026-04-04 — Plan health check section in daily email + admin regenerate-plan endpoint
 
 **Type:** Feature

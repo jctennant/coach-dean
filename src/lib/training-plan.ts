@@ -113,9 +113,13 @@ export async function generateAndSaveFullPlan(
 
   // Base mileage: use the prescribed week 1 total if available (keeps arc week 1 in sync
   // with what Dean actually sent), otherwise fall back to the Strava avg.
+  // When there's no Strava history, use fitness_level to pick a sensible default rather
+  // than a flat 15mi — intermediate/advanced users shouldn't get a beginner-tier arc.
+  const fitnessLevel = (profile?.fitness_level as string | null) ?? "beginner";
+  const noHistoryDefault = fitnessLevel === "advanced" ? 30 : fitnessLevel === "intermediate" ? 20 : 15;
   const baseMileage = prescribedWeek1Miles
     ? Math.max(5, prescribedWeek1Miles)
-    : Math.max(5, Math.round((avgWeeklyMileage ?? 15) * 2) / 2);
+    : Math.max(5, Math.round((avgWeeklyMileage ?? noHistoryDefault) * 2) / 2);
 
   // Compute a race-type-aware peak with both a floor (low-mileage runners still get
   // a plan sufficient for the target distance) and a hard cap (no 100+ mpw marathon
