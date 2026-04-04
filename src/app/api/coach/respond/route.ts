@@ -757,6 +757,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
     // New plan from scratch at the end of onboarding — always start at week 1.
     await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true });
+    // Overwrite the arc's week 1 key_workout and notes with what Dean actually prescribed
+    // (the Haiku arc enrichment in generateAndSaveFullPlan uses estimates; this uses real sessions).
+    void syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
@@ -767,6 +770,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
     await extractAndStorePlanSessions(userId, coachMessage);
+    // Sync the arc's current week with what Dean actually prescribed this week
+    void syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
   }
 
   // For user_message, persist any profile updates extracted above (injuries, cross-training,
@@ -1474,6 +1479,106 @@ If no session list is found, return [].`,
     .from("training_state")
     .update({ weekly_plan_sessions: sessions as unknown as Json })
     .eq("user_id", userId);
+}
+
+/**
+ * After extractAndStorePlanSessions runs, sync the training arc's current week entry
+ * so the dashboard shows what Dean actually prescribed — not what the Haiku arc
+ * generator guessed during plan creation.
+ *
+ * Updates three fields on the current week row in training_plans.weeks:
+ *   - mileage_target  → sum of miles from stored sessions
+ *   - key_workout     → label of the quality session (or long run)
+ *   - notes           → Haiku-generated note based on actual sessions
+ *
+ * Non-fatal: failures are logged and the arc is left as-is.
+ */
+async function syncArcCurrentWeek(
+  userId: string,
+  currentWeekNum: number,
+  phase: string,
+  goal: string,
+): Promise<void> {
+  try {
+    // Fetch the sessions that were just stored
+    const { data: stateRow } = await supabase
+      .from("training_state")
+      .select("weekly_plan_sessions")
+      .eq("user_id", userId)
+      .single();
+
+    const sessions = (stateRow?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+    if (sessions.length === 0) return;
+
+    // Compute actual mileage from session labels
+    function parseMilesFromLabel(label: string): number {
+      const m = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
+      return m ? parseFloat(m[1]!) : 0;
+    }
+    const actualMiles = Math.round(sessions.reduce((sum, s) => sum + parseMilesFromLabel(s.label), 0) * 2) / 2;
+
+    // Detect the key quality session (intervals, tempo, etc.) and the long run
+    function isQualitySession(label: string): boolean {
+      const l = label.toLowerCase();
+      return l.includes("tempo") || l.includes("interval") || l.includes("repeat") ||
+        l.includes("threshold") || l.includes("fartlek") || l.includes("vo2") ||
+        l.includes("hill") || l.includes("stride") || l.includes("progression");
+    }
+    const qualitySession = sessions.find(s => isQualitySession(s.label));
+    const longRunSession = sessions.find(s => s.label.toLowerCase().includes("long"));
+    const keySession = qualitySession ?? longRunSession ?? sessions[0];
+    let derivedKeyWorkout = keySession?.label ?? "";
+    if (derivedKeyWorkout.length > 80) derivedKeyWorkout = derivedKeyWorkout.slice(0, 77) + "...";
+
+    // Generate notes using actual sessions so the dashboard reflects what Dean prescribed
+    let derivedNotes = "";
+    try {
+      const sessionList = sessions.map(s => `${s.day}: ${s.label}`).join("; ");
+      const notesResp = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 180,
+        system: `Write a 2-3 sentence coach's note for an athlete's training week dashboard. Phase: ${phase}. Goal: ${goal || "general running fitness"}.
+First sentence: this week's purpose and why it matters. Then 1-2 sentences on the key session or theme — what it is, target effort, one brief execution tip. Be direct and practical. No filler.
+Return ONLY the note text.`,
+        messages: [{ role: "user", content: `Sessions: ${sessionList}\nTotal: ~${actualMiles}mi` }],
+      });
+      derivedNotes = notesResp.content[0].type === "text" ? notesResp.content[0].text.trim() : "";
+    } catch (err) {
+      console.error("[syncArcCurrentWeek] notes generation failed (non-fatal):", err);
+    }
+
+    // Fetch the latest plan for this user and patch the current week
+    const { data: planRow } = await supabase
+      .from("training_plans")
+      .select("id, weeks")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!planRow) return;
+
+    const planWeeks = (planRow.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>) ?? [];
+    const updatedWeeks = planWeeks.map(w =>
+      w.week_number === currentWeekNum
+        ? {
+            ...w,
+            ...(actualMiles > 0 ? { mileage_target: actualMiles } : {}),
+            ...(derivedKeyWorkout ? { key_workout: derivedKeyWorkout } : {}),
+            ...(derivedNotes ? { notes: derivedNotes } : {}),
+          }
+        : w
+    );
+
+    await supabase
+      .from("training_plans")
+      .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
+      .eq("id", planRow.id as string);
+
+    console.log(`[syncArcCurrentWeek] synced week ${currentWeekNum}: ${actualMiles}mi, key="${derivedKeyWorkout.slice(0, 50)}"`);
+  } catch (err) {
+    console.error("[syncArcCurrentWeek] failed (non-fatal):", err);
+  }
 }
 
 /**

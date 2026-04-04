@@ -318,7 +318,10 @@ export default async function DashboardPage({
   const raceDays = daysUntilRace(raceDate as string | null);
   const currentWeekActualMiles = actualMilesByWeek[currentWeekNum] ?? null;
 
-  const displayMileageTarget = currentWeek?.mileage_target ?? 0;
+  // Prefer the live weekly_mileage_target from training_state (what Dean actually prescribed
+  // for the current week, including partial-week onboards) over the arc blueprint value, which
+  // may have been generated from a different mileage assumption and not yet reconciled.
+  const displayMileageTarget = (stateData?.weekly_mileage_target as number | null) ?? currentWeek?.mileage_target ?? 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
