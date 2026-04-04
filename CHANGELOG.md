@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Fix timezone never confirmed for Strava users; add timezone step to onboarding
+
+**Type:** Bug Fix
+**Reported by:** Jake (user observation)
+**User feedback:** "I think we aren't saving timezone correctly in onboarding... my friend Julia is based in San Francisco but in the DB her timezone is NY so I think that may be why the confusion on today/tomorrow"
+**Root cause:** `awaiting_timezone` was removed from `STEP_ORDER` with a note "moved to post-plan — asked alongside cadence question." But `handleCadence` treated any Strava-connected user as timezone-confirmed without ever asking them. If the user's Strava account timezone was set when they lived elsewhere (or was never updated), they'd silently get the wrong timezone forever. This caused day-of-week errors — a run at 9 PM Pacific is midnight Eastern, making a Friday run appear as Saturday.
+**Fix / Change:**
+1. Added `"awaiting_timezone"` back to `STEP_ORDER` after `awaiting_anything_else`. The question is already designed correctly: Strava users with a city see "Based on your Strava, looks like you're in [City, State] — is that still accurate?" Non-Strava users get "What city are you in?"
+2. `isStepSatisfied("awaiting_timezone")` now returns `!!(data.timezone_confirmed)` instead of always `true`. Strava connection alone no longer satisfies it — only an explicit user confirmation does.
+3. Removed `|| !!(user.onboarding_data.strava_connected)` from `timezoneAlreadyConfirmed` in `handleCadence`.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/multi-race-onboarding.test.ts`
+
+---
+
 ## 2026-04-03 — Fix post-run mileage double-count; add warmup/cooldown to quality session plans
 
 **Type:** Bug Fix

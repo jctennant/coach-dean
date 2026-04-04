@@ -1633,7 +1633,9 @@ async function handleCadence(
   user: { id: string; phone_number: string; name: string | null; onboarding_data: Record<string, unknown> },
   message: string
 ) {
-  const timezoneAlreadyConfirmed = !!(user.onboarding_data.timezone_confirmed) || !!(user.onboarding_data.strava_connected);
+  // Only trust timezone if the user explicitly confirmed it during awaiting_timezone.
+  // Strava-connected alone is no longer sufficient — Strava profile timezone can be stale.
+  const timezoneAlreadyConfirmed = !!(user.onboarding_data.timezone_confirmed);
 
   // Run cadence classification and (when needed) timezone extraction in parallel.
   const [cadenceResponse, parsedTimezone] = await Promise.all([
@@ -2216,8 +2218,8 @@ const STEP_ORDER = [
   "awaiting_mileage_baseline",    // only for non-Strava users who haven't mentioned mileage yet
   "awaiting_ultra_background",    // only shown for 50K+ goals
   "awaiting_injury_background",   // only shown for injury_recovery goals
-  // awaiting_timezone moved to post-plan — asked alongside the cadence/reminder question
   "awaiting_anything_else",
+  "awaiting_timezone",            // confirm city/timezone before plan fires; skipped once timezone_confirmed=true
 ];
 
 /**
@@ -2277,8 +2279,10 @@ function isStepSatisfied(step: string, data: Record<string, unknown>): boolean {
       // Satisfied once we have injury notes captured.
       return !!(data.injury_notes);
     case "awaiting_timezone":
-      // Moved to post-plan — asked alongside the cadence/reminder question. Always skip here.
-      return true;
+      // Skip once the user has explicitly confirmed their city/timezone.
+      // Strava-provided timezone is NOT treated as confirmed — Strava profile timezone
+      // can be stale (e.g. set years ago when the user lived somewhere else).
+      return !!(data.timezone_confirmed);
     case "awaiting_anything_else":
       // Skip if the user already shared mileage AND some fitness/pace reference —
       // that's the core of what this question is designed to capture.

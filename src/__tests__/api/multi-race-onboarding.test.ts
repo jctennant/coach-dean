@@ -603,6 +603,7 @@ describe("completeOnboarding — races table for multi-race athlete", () => {
           name: "Jake",
           days_per_week: 4,
           training_days: ["monday", "wednesday", "friday", "sunday"],
+          timezone_confirmed: true,
         },
       },
       error: null,
