@@ -1922,7 +1922,13 @@ ${(() => {
     let sessionRows = "";
     if (todaySessions.length > 0) {
       const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-      sessionRows += `\n- TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice):\n${todayList}\n`;
+      // For post_run: the run just synced, so today's session IS completed and already
+      // counted in the week-to-date figure. Label it explicitly to prevent Claude from
+      // adding the session miles on top of a week-to-date that already includes them.
+      const todayLabel = trigger === "post_run"
+        ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
+        : `TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice)`;
+      sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
     }
     if (futureSessions.length > 0) {
       const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
@@ -1948,7 +1954,8 @@ ${(() => {
     // authoritative ⚠️ WEEK-TO-DATE figure. Showing a projected total here too is what
     // caused Dean to say "you're at 9.2 miles this week" when only 3.2 had been run:
     // Claude uses the visible projected number instead of the authoritative done-so-far.
-    if (trigger === "post_run") return done;
+    // Also add a parenthetical to make it unambiguous that today's synced run is already counted.
+    if (trigger === "post_run") return `${done} (includes today's synced run — do NOT add it again)`;
     if (projectedWeekMiles !== null && projectedWeekMiles > weekMileageSoFar) {
       return `${done} | Projected week total (done + upcoming sessions): ${mi(projectedWeekMiles)}`;
     }
@@ -2837,6 +2844,12 @@ SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate. When you prescribe a strength session, always follow the session list with a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
 
+QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified. Format the label to show the breakdown in parentheses. Examples:
+- "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
+- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
+- "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"
+Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava. This prevents the plan from understating the week's actual mileage.
+
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
 TOTAL LINE FORMAT: The Total line must show the FULL WEEK total = planned future sessions + miles the athlete has already logged this week. Show ONLY the final number — never show the math or breakdown. Correct: "Total: 25.5 mi". Wrong (any form): "19 mi + your 6.5 mi already", "19 mi planned + 6.5 already done = 25.5 mi", or any other "X + Y = Z" expression. If no miles are done yet, Total = the planned sessions sum.
 ⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.`;
@@ -2931,6 +2944,11 @@ Tue 3/3 · Strength + mobility 20 min
 Wed 3/4 · Tempo 4mi (2mi @ 8:45) — builds lactate threshold, the engine for your goal pace
 Sat 3/7 · Easy 4mi
 SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 3mi"). Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 20 min", "Zwift ride 60 min"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
+QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified. Format the label to show the breakdown in parentheses. Examples:
+- "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
+- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
+- "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"
+Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava.
 QUALITY SESSION "WHY": For any tempo run, interval session (800m repeats, etc.), or race-pace workout in the plan, add a brief purpose note on the same line — one short clause after a dash. Keep it specific to the athlete's goal: "— builds lactate threshold, the engine for your half marathon pace" or "— sharpens the speed you'll need at goal pace" or "— teaches your legs to run fast when tired." Easy runs and long runs do not need this treatment.
 Use short day abbreviations and M/D dates (cross-referenced against DATE CONTEXT — do not compute day names independently). Then close with three short lines on a new line, each as its own sentence:
 1. Invite feedback on the plan — e.g. "How does this look? Happy to adjust anything."

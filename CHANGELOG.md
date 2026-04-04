@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-03 — Fix post-run mileage double-count; add warmup/cooldown to quality session plans
+
+**Type:** Bug Fix
+**Reported by:** Jake (user feedback)
+**User feedback:** "I have done 14.7 mi so far this week, how'd you get to 20.4?" / "my workout didn't include warm up or cool down so mileage turns out to be more than what is written in the plan"
+**Root cause (mileage):** For `post_run`, the system prompt's `TODAY'S PLANNED SESSION` was shown without any "completed" marker. Claude saw the current activity (5.7 mi) and the week-to-date (14.7 mi, which already included that run) and added them: 14.7 + 5.7 = 20.4. The "(this run included)" note in the user message was insufficient to prevent this.
+**Root cause (warmup/cooldown):** Weekly plan session labels stored only the main workout distance (e.g. "5mi treadmill hills") without warmup/cooldown miles. When the athlete ran the full session including WU/CD, the Strava activity was longer than the plan said.
+**Fix / Change:**
+1. For `post_run` trigger, `TODAY'S PLANNED SESSION` in the system prompt is now labeled "(COMPLETED — already included in week-to-date above; do NOT add this distance again)". Also strengthened the mileage line to say "(includes today's synced run — do NOT add it again)".
+2. Added `QUALITY SESSION MILEAGE` rule to both `weekly_recap` and `initial_plan` prompts: quality sessions (tempo, intervals, hill repeats, threshold) must state TOTAL distance including warmup (1mi default) and cooldown (0.5–1mi default), with the breakdown shown in parentheses, e.g. "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)".
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-03 — Fix daily email falsely flagging real Strava data as hallucinations
 
 **Type:** Bug Fix
