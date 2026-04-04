@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Trail race VDOT penalty + week boundary labeling in session rows
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Julia (user feedback via Jake)
+**User feedback:** "I think the trail runs on my strava threw off workout paces but it was easy enough to ask for changes. So a few things 1) if we create pacing zones from races and they are trail, we need to consider that - a trail 100k probably isn't the perfect race to dial in pacing zones, so maybe we look at road races or make adjustments and then ask for confirmation. The second thing is - do we know if we do a good job of adjusting the overall plan / each week based on feedback? we may want to check that we have been properly saving Julia's preferences to training notes or something."
+**Root cause (trail races):** `selectBestRaceForPacing` in onboarding scored all races equally by recency/distance, with no penalty for `TrailRun` activity type. Trail races run slower than road races (terrain/elevation), so using a trail 10K for VDOT estimation would produce overly conservative road training zones. Separately, the onboarding message for Strava-suggested pacing had no caveat when the best race was a trail race.
+**Fix / Change (trail races):** Added a 0.5× score multiplier for `TrailRun` activities in `selectBestRaceForPacing`, so road races are heavily preferred. Also added `is_trail` to the `StravaRaceSuggestion` type and threaded it into the onboarding "does this pace work?" message — when the best race is trail, Dean now explicitly calls this out and asks if the athlete has a road race to use instead.
+**Root cause (week boundary):** `weekly_plan_sessions` spans from current day forward (7 sessions), which can straddle a Mon-Sun calendar week boundary. The system prompt labeled all future sessions "UPCOMING SESSIONS THIS WEEK," causing Dean to say "5 training days left" on Saturday when only 1 calendar day remained in the week.
+**Fix / Change (week boundary):** Session rows now split at the upcoming Sunday boundary: sessions in the current Mon-Sun week are labeled "UPCOMING SESSIONS THIS WEEK (week ends Sunday)" and sessions in next week are labeled "NEXT WEEK'S PLANNED SESSIONS (starts Monday — do NOT count these as part of this week's mileage or day count)."
+**Root cause (HR preference):** Julia's "ignore wrist HR" message wasn't extracted into `other_notes`. Manually patched Julia's `onboarding_data.other_notes` to include "Does not trust wrist-based HR data — ignore HR from non-chest-strap sources; focus on pace, distance, and perceived effort instead."
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-04 — Increase coaching debounce to 15s; fix "already did that" double responses
 
 **Type:** Bug Fix

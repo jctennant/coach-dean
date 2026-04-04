@@ -1867,6 +1867,7 @@ interface StravaRaceSuggestion {
   easy_pace: string;
   tempo_pace: string;
   interval_pace: string;
+  is_trail?: boolean;
 }
 
 /**
@@ -1876,8 +1877,8 @@ interface StravaRaceSuggestion {
  * Returns null if no usable race exists or all are older than 2.5 years.
  */
 function selectBestRaceForPacing(
-  races: Array<{ distance_meters: number | null; moving_time_seconds: number | null; start_date: string }>
-): { distance_meters: number; moving_time_seconds: number; start_date: string } | null {
+  races: Array<{ distance_meters: number | null; moving_time_seconds: number | null; start_date: string; activity_type?: string | null }>
+): { distance_meters: number; moving_time_seconds: number; start_date: string; is_trail: boolean } | null {
   const now = Date.now();
   const STANDARD_KM = [5, 10, 15, 21.097, 42.195]; // 5K, 10K, 15K, half, marathon
 
@@ -1893,9 +1894,13 @@ function selectBestRaceForPacing(
       const distKm = r.distance_meters! / 1000;
       const isStandard = STANDARD_KM.some(d => Math.abs(distKm - d) / d <= 0.03);
       const distScore = isStandard ? 2 : 1;
-      return { race: r, score: recencyScore * distScore };
+      // Trail races run slower due to terrain — deprioritize for VDOT estimation.
+      // A trail 10K at 60min doesn't map to road training zones the same way.
+      const isTrail = r.activity_type === "TrailRun";
+      const trailPenalty = isTrail ? 0.5 : 1;
+      return { race: r, score: recencyScore * distScore * trailPenalty, isTrail };
     })
-    .filter((x): x is { race: typeof races[number]; score: number } => x !== null)
+    .filter((x): x is { race: typeof races[number]; score: number; isTrail: boolean } => x !== null)
     .sort((a, b) => b.score - a.score);
 
   const best = scored[0];
@@ -1904,6 +1909,7 @@ function selectBestRaceForPacing(
     distance_meters: best.race.distance_meters!,
     moving_time_seconds: best.race.moving_time_seconds!,
     start_date: best.race.start_date,
+    is_trail: best.isTrail,
   };
 }
 
@@ -1916,7 +1922,7 @@ async function lookupBestStravaRace(userId: string): Promise<StravaRaceSuggestio
   const [{ data: races }, { data: profile }] = await Promise.all([
     supabase
       .from("activities")
-      .select("distance_meters, moving_time_seconds, start_date")
+      .select("distance_meters, moving_time_seconds, start_date, activity_type")
       .eq("user_id", userId)
       .eq("workout_type", 1)
       .order("start_date", { ascending: false })
@@ -1958,6 +1964,7 @@ async function lookupBestStravaRace(userId: string): Promise<StravaRaceSuggestio
     easy_pace: paces.easy,
     tempo_pace: paces.tempo,
     interval_pace: paces.interval,
+    is_trail: best.is_trail,
   };
 }
 
@@ -2398,7 +2405,10 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       const sbr = data.strava_best_race as StravaRaceSuggestion | null | undefined;
       if (sbr) {
         const easyRange = easyPaceRange(sbr.easy_pace);
-        return `Almost there! I spotted your ${sbr.label} from ${sbr.date_str} (${sbr.time_str}) in your Strava — I'd set your easy training pace at ${easyRange}. Does that work? If your fitness has changed, share a more recent race time or easy pace. Anything else to add (injuries, cross-training, target time)?`;
+        const trailCaveat = sbr.is_trail
+          ? " (heads up: this looks like a trail race — trail paces run slower than road, so your road training zones may be a bit faster than this suggests. If you have a road race time, share it and I'll use that instead.)"
+          : "";
+        return `Almost there! I spotted your ${sbr.label} from ${sbr.date_str} (${sbr.time_str}) in your Strava — I'd set your easy training pace at ${easyRange}${trailCaveat}. Does that work? If your fitness has changed, share a more recent race time or easy pace. Anything else to add (injuries, cross-training, target time)?`;
       }
       // Strava connected but no races found — ask explicitly for a PR or easy pace
       if (data.strava_connected && !data.recent_race_distance_km && !data.easy_pace) {

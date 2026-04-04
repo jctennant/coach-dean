@@ -1946,11 +1946,35 @@ ${(() => {
       sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
     }
     if (futureSessions.length > 0) {
-      const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-      const futureHeader = targetAlreadyMet
-        ? `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n`
-        : `\n- UPCOMING SESSIONS THIS WEEK:\n`;
-      sessionRows += `${futureHeader}${futureList}\n`;
+      if (targetAlreadyMet) {
+        const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+        sessionRows += `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n${futureList}\n`;
+      } else {
+        // Split sessions by calendar week boundary (Mon–Sun). Sessions in the current
+        // Mon–Sun week vs next week should be clearly labeled so Dean doesn't say
+        // "5 training days left this week" when only 1 calendar day remains.
+        const dayOfWeekToday = localTodayUTC.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+        const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
+        const endOfWeekMs = Date.UTC(ty, tm - 1, td + daysToSunday);
+
+        const thisWeekFuture = futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return true;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
+        });
+        const nextWeekFuture = futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return false;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() > endOfWeekMs;
+        });
+
+        if (thisWeekFuture.length > 0) {
+          sessionRows += `\n- UPCOMING SESSIONS THIS WEEK (week ends Sunday):\n${thisWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+        }
+        if (nextWeekFuture.length > 0) {
+          sessionRows += `\n- NEXT WEEK'S PLANNED SESSIONS (starts Monday — do NOT count these as part of this week's mileage or day count):\n${nextWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+        }
+      }
     }
     return {
       sessionRows,
