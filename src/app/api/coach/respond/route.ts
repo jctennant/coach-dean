@@ -385,9 +385,28 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   let computedVdot: number | null = null;
   const originalProfile = profile; // preserve for crosstraining merge in persistence
   if (trigger === "user_message") {
-    const latestMsg = [...recentMessages].reverse().find(m => m.role === "user");
+    // Collect all user messages since the last assistant reply — the debounce can batch
+    // multiple messages from the same send burst into one coach/respond call, and we only
+    // ever fire coach/respond for the LAST message in a burst (earlier ones are skipped by
+    // the debounce check). That means if the user sent "please ignore wrist HR\nI have a
+    // chest strap but don't always wear it", only the second message would be extracted if
+    // we look at latestMsg alone. Join the whole burst so we capture all stated preferences.
+    const lastAssistantIdx = (() => {
+      for (let i = recentMessages.length - 1; i >= 0; i--) {
+        if (recentMessages[i].role === "assistant") return i;
+      }
+      return -1;
+    })();
+    const burstMessages = recentMessages.slice(lastAssistantIdx + 1).filter(m => m.role === "user");
+    const latestMsg = burstMessages.length > 0
+      ? burstMessages[burstMessages.length - 1]
+      : [...recentMessages].reverse().find(m => m.role === "user");
     if (latestMsg) {
-      pendingExtracted = await extractProfileData(latestMsg.content, userTimezone);
+      // Join all messages in the burst so multi-part preferences are fully captured
+      const extractionInput = burstMessages.length > 1
+        ? burstMessages.map(m => m.content).join("\n")
+        : latestMsg.content;
+      pendingExtracted = await extractProfileData(extractionInput, userTimezone);
       const hasRaceData = !!(pendingExtracted?.recent_race_distance_km && pendingExtracted?.recent_race_time_minutes);
       const hasEasyPace = !!pendingExtracted?.easy_pace;
       if (hasRaceData) {
@@ -2898,8 +2917,31 @@ TOTAL LINE FORMAT: The Total line must show the FULL WEEK total = planned future
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
 
-    case "initial_plan":
+    case "initial_plan": {
+      // Compute how many days remain in the current Mon-Sun week, including today.
+      // The Sunday recap cron will send the full next-week plan starting from Monday,
+      // so the initial plan should only cover the current week — not bleed into next week.
+      const initNow = new Date();
+      const initLocalDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(initNow);
+      const [iy, im, id] = initLocalDate.split("-").map(Number);
+      const dayOfWeekLocal = new Date(Date.UTC(iy, im - 1, id)).getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+      const daysToSunday = dayOfWeekLocal === 0 ? 0 : 7 - dayOfWeekLocal;
+      const sundayDate = new Date(Date.UTC(iy, im - 1, id + daysToSunday));
+      const sundayStr = sundayDate.toLocaleDateString("en-US", {
+        timeZone: "UTC", weekday: "long", month: "short", day: "numeric"
+      });
+      const daysRemainingInclToday = daysToSunday + 1; // today + days until Sunday
+      const weekBoundaryNote = dayOfWeekLocal === 0
+        // Today IS Sunday — plan the full upcoming Mon–Sun week so they have something
+        // to run on; the recap cron will have run (or is running) tonight and they'd
+        // otherwise go a full week without a plan.
+        ? `WEEK TIMING: Today is Sunday. Plan the upcoming full week (Monday through next Sunday). Do NOT just plan today.`
+        // Mid-week onboard: plan today through this Sunday only. Sunday recap generates next week.
+        : `WEEK BOUNDARY — IMPORTANT: This athlete just onboarded. Plan sessions from TODAY through this ${sundayStr} only (${daysRemainingInclToday} day${daysRemainingInclToday === 1 ? "" : "s"} remaining in this Mon-Sun week). Do NOT schedule sessions into next week (starting Monday). The Sunday recap will generate a full next-week plan automatically. If very few days remain (1-2), keep this initial plan brief — just get them started.`;
       return `This athlete just finished onboarding. Send them an initial week plan — framed as a starting point, not a finished prescription. The goal is to get something in front of them quickly and invite them to shape it.
+
+${weekBoundaryNote}
+
 
 USE STRAVA DATA — this is critical:
 - All plan decisions must be grounded in WEEKLY MILEAGE, PACE ANALYSIS, and RECENT WORKOUTS — use these as your primary inputs, not the athlete's stated goal alone.
@@ -3000,6 +3042,6 @@ Vary the phrasing each time — these are the ideas, not a script.
 ONE QUESTION RULE: The closing line above is the only question in the entire response. Do not ask anything else — no follow-ups about injuries, niggles, schedule, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.
 ${!hasStrava ? `
 NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so there's no automatic activity sync. Weave a natural, low-key line into the closing of the plan that tells them to text you after each run. Make it feel like a coach thing, not a system requirement. Examples: "Since you're not on Strava, just shoot me a text after each run — even a quick 'done, 5 miles' — and I'll track from there." or "No Strava sync here, so just drop me a message after each workout and I'll keep tabs on your progress." Vary the phrasing. One sentence only — don't dwell on it.` : ""}`;
-
+    }
   }
 }

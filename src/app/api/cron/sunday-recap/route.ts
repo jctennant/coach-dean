@@ -71,6 +71,23 @@ export async function GET(request: Request) {
       }
     }
 
+    // Skip users who already received an initial_plan or weekly_recap in the last 8 hours.
+    // This prevents a double-plan when someone onboards on the same Sunday the cron fires.
+    const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+    const { data: recentPlan } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("role", "assistant")
+      .in("message_type", ["initial_plan", "weekly_recap"])
+      .gte("created_at", eightHoursAgo)
+      .limit(1)
+      .single();
+    if (recentPlan) {
+      console.log(`[sunday-recap] skipping user ${user.id} — received a plan within the last 8 hours`);
+      continue;
+    }
+
     try {
       await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
         method: "POST",

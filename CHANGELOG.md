@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-04 — Extraction burst fix + initial_plan week boundary + sunday-recap double-plan guard
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Julia's HR preference miss) + Jake feedback
+**User feedback:** "why wasn't Julia's HR preference saved, and can we do a better job at making sure these extractions are more reliable? Also we should make sure that we try to work more cleanly in weeks e.g. if a user onboards Friday, give them their workout for Sat/Sun and then Sunday give them the next week"
+**Root cause (extraction miss):** The 15-second debounce means when a user sends multiple quick messages (e.g. "please ignore wrist HR" + "I have a chest strap but don't always wear it"), the webhook for the first message is cancelled (newer message arrived) and only the second message is processed. `extractProfileData` was called with just `latestMsg.content` — the second message alone ("I have a chest strap but don't always wear it") doesn't clearly state a preference, so extraction returned `{}`.
+**Fix / Change (extraction):** Changed extraction input from the single latest user message to all user messages since the last assistant reply (the debounce burst). When multiple messages arrive in one burst, they're joined and passed to `extractProfileData` together, so the full context is captured. Using `recentMessages.slice(lastAssistantIdx + 1)` to find the burst boundary.
+**Root cause (week boundary):** `initial_plan` prompt gave Claude free rein to plan "a week," so it would plan from Saturday forward through the following Friday, straddling the Mon-Sun calendar boundary. Also no guard prevented the Sunday recap cron from firing for users who just got their initial_plan hours earlier on the same Sunday.
+**Fix / Change (week boundary):** `initial_plan` user message now injects a computed `WEEK BOUNDARY` instruction telling Claude to plan sessions from today through this Sunday only (e.g. 2 days if onboarding Saturday). The Sunday recap cron now skips users who received an `initial_plan` or `weekly_recap` within the last 8 hours, preventing double-plans for same-day onboards.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/cron/sunday-recap/route.ts`
+
+---
+
 ## 2026-04-04 — Trail race VDOT penalty + week boundary labeling in session rows
 
 **Type:** Bug Fix / Improvement
