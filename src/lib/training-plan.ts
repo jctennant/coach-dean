@@ -52,9 +52,11 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   } else if ((g.includes("marathon") || g.includes("26.2")) && !g.includes("half")) {
     hardCap = 70; floor = 35;
   } else if (g.includes("half") || g.includes("13.1")) {
-    hardCap = 55; floor = 22;
+    // Floor of 30 ensures peak long runs reach ~10-11mi at a 35-40% fraction.
+    // At 22mi peak (old floor), the long run maxed at 8.4mi — inadequate for a 13.1mi race.
+    hardCap = 55; floor = 30;
   } else if (g.includes("10k") || g.includes("10 k")) {
-    hardCap = 50; floor = 15;
+    hardCap = 50; floor = 18;
   } else if (g.includes("5k") || g.includes("5 k")) {
     hardCap = 45; floor = 12;
   } else {
@@ -192,7 +194,10 @@ export async function generateAndSaveFullPlan(
       if (phase === "peak") peakMileage = buildMileage;
     }
 
-    const longRunFactor = phase === "taper" ? 0.30 : phase === "peak" ? 0.38 : 0.32;
+    // Peak long run takes a larger fraction of weekly volume for race-distance goals.
+    // 0.42 is especially important for 3-day/week athletes where the long run is the primary
+    // quality session — at 30mi/week that gives an 12.6mi long run (appropriate for HM prep).
+    const longRunFactor = phase === "taper" ? 0.30 : phase === "peak" ? 0.42 : 0.33;
     // Goal-specific long run caps: short-race training doesn't need marathon-style long runs.
     const g2 = (goal ?? "").toLowerCase();
     const longRunCap = (g2.includes("5k") || g2.includes("5 k")) ? 7
