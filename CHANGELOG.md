@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-05 — Onboarding: respect athletes who already have a plan
+
+**Type:** Bug Fix / UX
+**Reported by:** Lori (7a704281) conversation review
+**User feedback:** "I don't need a plan right now." — said during timezone step. Dean sent a full 4-week plan anyway.
+**Root cause:** Two failure modes:
+1. `checkOffTopic` classified "I already have a training plan. I'm in week 8/12..." as ON-TOPIC (training history comment) at `awaiting_race_date`, so onboarding continued instead of pivoting.
+2. `handleTimezone` called `completeOnboarding` unconditionally when `findNextStep` returned null — "I don't need a plan right now" in the same message as "Provo" was completely ignored.
+**Fix:**
+1. Added `has_existing_plan` type to `checkOffTopic` system prompt. When detected, Dean answers any coaching question in the message, explains it's available as a coaching resource, and calls `completeOnboarding(skipInitialPlan: true)` to set up the profile without building a plan.
+2. Added regex check in `handleTimezone` before `completeOnboarding` for "don't need a plan / don't want a plan / already have a plan" — sends a brief confirmation and skips plan generation while still writing the profile/state so future messages route through `coach/respond`.
+3. Added `skipInitialPlan` option to `completeOnboarding` — writes `training_profiles` and `training_state` (so coaching works) but skips the `initial_plan` trigger.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-05 — P1 bug batch: watts, mileage, plan validation, onboarding
 
 **Type:** Bug Fix (multiple)

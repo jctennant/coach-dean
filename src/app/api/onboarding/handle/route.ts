@@ -87,6 +87,11 @@ export async function POST(request: Request) {
     if (offTopicResult.offTopic) {
       keepTypingAlive = false;
       await sendAndStore(user.id, user.phone_number, offTopicResult.response, step ?? undefined);
+      if (offTopicResult.hasExistingPlan) {
+        // Complete onboarding with whatever data we have so far, but skip plan generation.
+        // This sets onboarding_step=null so future messages route through coach/respond.
+        await completeOnboarding(user, onboardingData, chatId ?? undefined, { skipInitialPlan: true });
+      }
       return NextResponse.json({ ok: true });
     }
   }
@@ -1616,7 +1621,20 @@ async function handleTimezone(
     const reply = acknowledgment ? `${acknowledgment}\n\n${nextQuestion}` : nextQuestion;
     await sendAndStore(user.id, user.phone_number, reply, nextStep);
   } else {
-    await completeOnboarding(user, mergedData);
+    // Check if the athlete is declining a plan in this same message (e.g. "Provo. I don't need a plan right now").
+    // Must check before completeOnboarding fires initial_plan.
+    const declinesPlan = /don.?t\s+(need|want).*plan|no plan|skip.*plan|already have.*plan|have.*my.*own.*plan/i.test(message);
+    if (declinesPlan) {
+      await sendAndStore(
+        user.id,
+        user.phone_number,
+        "Got it — no plan from me. I'm here whenever you need help with pacing, race strategy, or anything about your training. Just text.",
+        "awaiting_timezone"
+      );
+      await completeOnboarding(user, mergedData, undefined, { skipInitialPlan: true });
+    } else {
+      await completeOnboarding(user, mergedData);
+    }
   }
 
   return NextResponse.json({ ok: true });
@@ -1995,7 +2013,8 @@ async function lookupBestStravaRace(userId: string): Promise<StravaRaceSuggestio
 async function completeOnboarding(
   user: { id: string },
   data: Record<string, unknown>,
-  chatId?: string | null
+  chatId?: string | null,
+  opts?: { skipInitialPlan?: boolean }
 ): Promise<void> {
   const goal = (data.goal as string) || "general_fitness";
   const raceDate = (data.race_date as string) || null;
@@ -2163,6 +2182,13 @@ async function completeOnboarding(
       await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
     }
     void trackEvent(user.id, "onboarding_completed", { goal, billing_gate: true });
+    return;
+  }
+
+  // If the athlete declined a plan, skip initial_plan entirely.
+  // Profile and state are still written above so future messages route through coach/respond.
+  if (opts?.skipInitialPlan) {
+    void trackEvent(user.id, "onboarding_completed", { goal, plan_skipped: true });
     return;
   }
 
@@ -2952,7 +2978,7 @@ async function checkOffTopic(
   step: string,
   message: string,
   userId: string
-): Promise<{ offTopic: false } | { offTopic: true; response: string }> {
+): Promise<{ offTopic: false } | { offTopic: true; response: string; hasExistingPlan?: boolean }> {
   const stepContext: Record<string, { topic: string; reAsk: string }> = {
     awaiting_race_date:       { topic: "their race date or target event",                                reAsk: "When is your race?" },
     awaiting_other_races:     { topic: "whether they have other goal races this season",                 reAsk: "Any other races on the calendar this season?" },
@@ -2997,6 +3023,11 @@ OFF-TOPIC coaching question ({"on_topic": false, "type": "coaching_question"}):
 - Questions about training methodology, race prep, pacing, nutrition, gear
 - Questions about Dean's services or capabilities ("do you coach cycling?")
 - Any genuine advice-seeking question unrelated to the current topic and not about a specific recent run
+
+Athlete already has a plan ({"on_topic": false, "type": "has_existing_plan"}):
+- Saying they already have a training plan ("I already have a plan", "I'm in week 8 of my plan", "I have a plan I paid for", "I'm following a Hal Higdon plan")
+- Explicitly saying they don't want or need a plan from Dean
+- Indicating they just want coaching help, not a full plan
 
 Other off-topic ({"on_topic": false, "type": "other", "response": "..."}):
 - Meta-questions about the onboarding process ("how many more questions?", "how long does this take?")
@@ -3049,6 +3080,21 @@ Other off-topic ({"on_topic": false, "type": "other", "response": "..."}):
           ? answerResponse.content[0].text.trim()
           : ctx.reAsk;
         return { offTopic: true, response: answer };
+      }
+
+      if (parsed.type === "has_existing_plan") {
+        // Athlete already has a plan — pivot to coaching-assistant mode.
+        // Answer any coaching question in their message, then explain Dean's new role.
+        const answerResponse = await anthropic.messages.create({
+          model: "claude-sonnet-4-5-20250929",
+          max_tokens: 200,
+          system: `You are Coach Dean, an expert running and endurance coach. The athlete already has a training plan and doesn't need you to build one. Respond warmly: if their message contains a coaching question, answer it briefly (1-2 sentences). Then let them know you're here as a coaching resource — pace questions, race strategy, checking in on how training's going, whatever they need. Keep it short and natural, like a coach texting. No markdown, no asterisks. Do NOT ask any follow-up questions.`,
+          messages: [{ role: "user", content: message }],
+        });
+        const answer = answerResponse.content[0].type === "text"
+          ? answerResponse.content[0].text.trim()
+          : "Got it — I won't build you a duplicate plan. I'm here for coaching questions, pace help, or talking through your training whenever you need it.";
+        return { offTopic: true, response: answer, hasExistingPlan: true };
       }
 
       if (typeof parsed.response === "string" && parsed.response.trim()) {
