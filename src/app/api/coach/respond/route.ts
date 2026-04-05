@@ -8,7 +8,7 @@ import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness } from "@/lib/training-plan";
-import { enforceVolumeCaps, deduplicateSessionLines } from "@/lib/plan-validation";
+import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors } from "@/lib/plan-validation";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
@@ -642,8 +642,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     longRunCapMiles
   );
 
+  // Detect session mileage that equals the weekly total (copy-paste errors like "Hill reps 33mi")
+  const sessionFixed = fixSessionDistanceErrors(volumeChecked);
   // Remove exact duplicate session lines (e.g. same "Thu 3/26 · Easy 2mi" twice)
-  const coachMessage = deduplicateSessionLines(volumeChecked);
+  const coachMessage = deduplicateSessionLines(sessionFixed);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -1420,11 +1422,18 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
       for (const a of filteredRecent) {
         const d = new Date(a.start_date);
         const dateLabel = d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
-        const miles = a.distance_meters ? (a.distance_meters / 1609.34).toFixed(1) : null;
+        const isRun = RUN_TYPES.has(a.activity_type);
+        // Non-run activities (rides, swims, etc.) show duration, not miles, to prevent
+        // Claude from accidentally summing cross-training distance as running mileage.
+        const milesOrDuration = isRun && a.distance_meters
+          ? `${(a.distance_meters / 1609.34).toFixed(1)}mi`
+          : a.moving_time_seconds
+          ? `${Math.round(a.moving_time_seconds / 60)}min`
+          : null;
         const parts = [
           a.activity_type || "Workout",
-          miles ? `${miles}mi` : null,
-          a.average_pace ? `@ ${a.average_pace}` : null,
+          milesOrDuration,
+          isRun && a.average_pace ? `@ ${a.average_pace}` : null,
           a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
         ].filter(Boolean);
         summary += `  ${dateLabel}: ${parts.join(", ")}\n`;
@@ -1965,7 +1974,13 @@ function buildSystemPrompt(
     if (distMiles) {
       const paceMinsPerMile = goalTimeMinutes / distMiles;
       const pacePerKm = goalTimeMinutes / (distMiles * 1.60934);
-      goalPaceStr = ` — goal pace: ${fmtPace(paceMinsPerMile, "mi")} (${fmtPace(pacePerKm, "km")})`;
+      // Sanity check: pace > 15 min/mi is not a running pace — the goal time was likely
+      // set for a different race distance (e.g. marathon time stored against a half).
+      if (paceMinsPerMile > 15) {
+        goalPaceStr = ` ⚠️ GOAL TIME MISMATCH: stored goal time ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")} implies ${fmtPace(paceMinsPerMile, "mi")} pace for this race, which is not a running pace. The stored time was likely set for a different distance. Ask the athlete to clarify their goal time for this specific race before building the plan.`;
+      } else {
+        goalPaceStr = ` — goal pace: ${fmtPace(paceMinsPerMile, "mi")} (${fmtPace(pacePerKm, "km")})`;
+      }
     }
   }
   // Additional athlete preferences captured during onboarding (strengthening, cross-training
@@ -2865,6 +2880,10 @@ function buildUserMessage(
       if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
       if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead.");
       if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference specific HR values.");
+      // Power/watt guard: only present when there's no actual power data in the DB record.
+      // If average_watts is populated (power meter, Zwift, etc.) Claude can reference it.
+      const hasWatts = !!(activityData?.average_watts != null);
+      if (!hasWatts) dataGuards.push("No power data is available for this activity. Do NOT reference wattage, watts, or power output — not even as a range or estimate. Describe effort using HR, elapsed time, and pace-equivalent language only.");
       // Guard against km-split confusion: splits_metric produces one entry per km, so a
       // 3.1mi (5K) run has 5 splits. Without this guard Claude says "mile 5" for a 3.1mi run.
       if (hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
@@ -2931,6 +2950,10 @@ SESSION DAY LABELING: When referencing a planned session as "today" or "tomorrow
 LENGTH IN CONVERSATION: Check RECENT CONVERSATION. If there are already 4+ messages from today (active back-and-forth), keep this reply to 1 bubble — 2 at most. Answer the question directly and stop. Don't pad with context that was already covered.
 
 NO REPEAT SCHEDULE PREVIEW: If RECENT CONVERSATION already contains a message from you today that mentioned tomorrow's session, next session, or upcoming workouts — do NOT mention it again in this reply. The athlete already has that information. Answer what they asked, then stop. Only re-mention the schedule if they specifically asked about it.
+
+SCHEDULE DAYS — DO NOT INVENT: If the athlete says "X days a week" without specifying which days, do NOT assign specific days in your response (e.g. "Monday and Thursday"). Ask which days work best before locking anything in. Their confirmed training days are in ATHLETE HISTORY — only use those. If you have confirmed days in ATHLETE HISTORY, use them. If you do not, ask.
+
+CONTEXT RETENTION — DO NOT RE-ASK FOR KNOWN DATA: If ATHLETE HISTORY already contains the athlete's race, race date, or goal time, do NOT ask for that information again. Use the stored data. Asking "what distance are you training for?" when you already have their race in ATHLETE HISTORY is a trust failure.
 
 INTERVAL SESSION MATH: When converting interval sessions to time or total distance, always calculate explicitly — never estimate or guess. Formula: (number of reps × rep distance) + warmup + recovery jogs + cooldown = session total. Example: 6×400m = 6 × 0.25 mi = 1.5 mi of fast work. Add warmup (~1 mi), recovery jogs between reps (~0.75 mi for 5 jogs × ~150m each), and cooldown (~0.5 mi) → ~3.75 mi total. Do NOT output a range that spans 4+ miles (e.g. "3.5–7 mi") — that is internally contradictory and wrong. Output a single coherent total. If you are unsure of warmup/cooldown lengths, use reasonable defaults (1 mi warmup, 0.5 mi cooldown, ~150m jog between reps) and state them explicitly.
 

@@ -162,6 +162,62 @@ export function enforceVolumeCaps(
 }
 
 /**
+ * Detect and fix sessions whose stated mileage matches (or nearly matches) the
+ * weekly total — a copy-paste error that produces things like "Thu 4/9 · Hill reps 33mi total".
+ *
+ * When detected, the erroneous session mileage is removed from the session line
+ * (replaced with "X mi" as a placeholder) so it doesn't confuse athletes or cause
+ * correctMileageTotal to emit the wrong Total. A console warning is emitted.
+ *
+ * Heuristic: any non-long-run session > 20 mi is suspicious. If it also matches
+ * the stated weekly Total within 1 mi, treat it as a copy-paste error.
+ */
+export function fixSessionDistanceErrors(message: string): string {
+  const sessions = parseSessionLines(message);
+  if (sessions.length === 0) return message;
+
+  // Extract the stated weekly total from the message, e.g. "Total: 33mi" → 33
+  const totalMatch = message.match(/Total:\s*~?(\d+(?:\.\d+)?)\s*mi/i);
+  const statedTotal = totalMatch ? parseFloat(totalMatch[1]) : null;
+
+  const weeklyTotal = statedTotal ?? sessions.reduce((s, a) => s + a.miles, 0);
+
+  let corrected = message;
+  for (const session of sessions) {
+    if (session.miles === 0) continue;
+    // Flag any session that claims >= the weekly total (it's impossible for a single
+    // session to equal the week), OR > 25mi for a clearly non-long-run session.
+    const isNonLongRun = !/long\s*run|long run|LR\b/i.test(session.desc);
+    const matchesTotal = statedTotal != null && Math.abs(session.miles - statedTotal) <= 1;
+    if (matchesTotal && isNonLongRun && session.miles > 15) {
+      console.warn(
+        `[fixSessionDistanceErrors] session mileage ${session.miles}mi ≈ weekly total ${statedTotal}mi — likely copy-paste error. Session: "${session.fullLine}"`
+      );
+      // Remove the erroneous mileage figure from the session description.
+      // Leave the label intact so the session is still meaningful.
+      const fixedDesc = session.desc.replace(FIRST_MI_RE, "?mi (check distance)");
+      const fixedLine = session.fullLine.replace(session.desc, fixedDesc);
+      corrected = corrected.replace(session.fullLine, fixedLine);
+    }
+  }
+
+  // Recalculate and rewrite the Total line if any sessions were patched
+  if (corrected !== message) {
+    const remaining = parseSessionLines(corrected)
+      .filter(s => !s.desc.includes("?mi"))
+      .reduce((sum, s) => sum + s.miles, 0);
+    if (remaining > 0 && statedTotal != null) {
+      corrected = corrected.replace(
+        /Total:\s*~?(\d+(?:\.\d+)?)\s*mi/gi,
+        `Total: ${Math.round(remaining * 10) / 10}mi (verify session distances)`
+      );
+    }
+  }
+
+  return corrected;
+}
+
+/**
  * Remove exact duplicate session lines from a plan.
  *
  * A duplicate is defined as two lines with the identical "DDD D/M · description"

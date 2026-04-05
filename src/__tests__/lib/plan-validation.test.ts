@@ -3,6 +3,7 @@ import {
   parseSessionLines,
   enforceVolumeCaps,
   deduplicateSessionLines,
+  fixSessionDistanceErrors,
 } from "@/lib/plan-validation";
 
 // ---------------------------------------------------------------------------
@@ -188,5 +189,46 @@ Mon 3/3 · Easy 3mi`;
     const msg = `Tue 3/4 · Easy 3mi
 Tue 3/4 · Strength 30 min`;
     expect(deduplicateSessionLines(msg)).toBe(msg);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixSessionDistanceErrors — Issue 3 (hill reps "33mi total" bug)
+// ---------------------------------------------------------------------------
+
+describe("fixSessionDistanceErrors", () => {
+  const JULIA_PLAN = `Here's your week:
+Mon 4/6 · Easy 6mi
+Tue 4/7 · Tempo 7mi (1mi WU + 5mi @ 6:45 + 1mi CD)
+Thu 4/9 · Hill reps 33mi total (8x90sec uphill @ hard effort, jog down recovery)
+Sat 4/11 · Easy 7mi
+Sun 4/12 · Long run 13mi
+Total: 33mi`;
+
+  it("detects session mileage that matches the weekly total", () => {
+    const result = fixSessionDistanceErrors(JULIA_PLAN);
+    expect(result).not.toContain("Hill reps 33mi");
+    expect(result).toContain("?mi (check distance)");
+  });
+
+  it("does not touch legitimate long runs that happen to be large", () => {
+    const plan = `Sat 4/11 · Long run 20mi
+Total: 35mi`;
+    // Long run 20mi with total 35mi — not a copy-paste error
+    const result = fixSessionDistanceErrors(plan);
+    expect(result).toContain("Long run 20mi");
+  });
+
+  it("is a no-op when no session equals the total", () => {
+    const msg = `Mon 4/6 · Easy 5mi
+Wed 4/8 · Tempo 6mi
+Sat 4/11 · Long run 10mi
+Total: 21mi`;
+    expect(fixSessionDistanceErrors(msg)).toBe(msg);
+  });
+
+  it("is a no-op when no Total line is present", () => {
+    const msg = `Mon 4/6 · Easy 5mi\nWed 4/8 · Tempo 6mi`;
+    expect(fixSessionDistanceErrors(msg)).toBe(msg);
   });
 });

@@ -1433,6 +1433,21 @@ async function handleAnythingElse(
     merged.recent_race_time_minutes = sbr.time_minutes;
   }
 
+  // Safety net: if the message contains a question but the LLM returned isDone:true,
+  // force a response so the question is never silently swallowed at onboarding's end.
+  if (conversational.isDone && message.includes("?")) {
+    const forced = await generateAnythingElseResponse(
+      message,
+      onboardingData,
+      /* forceAnswer */ true
+    );
+    if (forced.response) {
+      void supabase.from("users").update({ onboarding_data: merged as unknown as Json }).eq("id", user.id);
+      await sendAndStore(user.id, user.phone_number, forced.response, "awaiting_anything_else");
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   // If the athlete asked a question or shared something that needs a reply,
   // respond naturally and stay on this step so they can say "that's all" next.
   if (!conversational.isDone && conversational.response) {
@@ -2797,7 +2812,8 @@ Plain text only — no markdown, no asterisks.`,
  */
 async function generateAnythingElseResponse(
   message: string,
-  onboardingData: Record<string, unknown>
+  onboardingData: Record<string, unknown>,
+  forceAnswer = false
 ): Promise<{ response: string | null; isDone: boolean }> {
   const goal = onboardingData.goal as string | null;
   const raceName = onboardingData.race_name as string | null;
@@ -2811,6 +2827,10 @@ async function generateAnythingElseResponse(
     ? `The athlete is training for a ${formatGoalInline(goal)}.`
     : "The athlete is in the process of setting up their training plan.";
 
+  const forceInstruction = forceAnswer
+    ? "\n\nOVERRIDE: The athlete asked a question. You MUST answer it. Return {\"response\": \"...\", \"done\": false}. Do NOT return done: true."
+    : "";
+
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 200,
@@ -2818,14 +2838,16 @@ async function generateAnythingElseResponse(
 
 The athlete replied. Respond appropriately:
 
-- If they said "no", "nope", "nothing", "all good", "nah", "I'm good", or anything that clearly means they're done → return: {"response": null, "done": true}
-- If they asked a question → answer it warmly in 1-2 sentences, then end with a natural re-ask like "Anything else? If not, just say nope!" Return: {"response": "...", "done": false}
-- If they shared info (injury, schedule constraints, secondary goal, training history, preferences) → briefly acknowledge it in 1 sentence, then end with "Anything else? If not, just say nope!" Return: {"response": "...", "done": false}
+- If they said "no", "nope", "nothing", "all good", "nah", "I'm good", or anything that clearly means they're done AND there is no question in their message → return: {"response": null, "done": true}
+- If they asked a question (message contains "?") → you MUST answer it. Even if they also shared info, answer the question first, then end with "Anything else? If not, just say nope!" Return: {"response": "...", "done": false}. NEVER return done: true when the message contains a question.
+- If they shared info only (injury, schedule constraints, secondary goal, training history, preferences) → briefly acknowledge it in 1 sentence, then end with "Anything else? If not, just say nope!" Return: {"response": "...", "done": false}
+
+For questions about how Dean uses Strava data: Dean looks at per-km splits (not just overall pace), so if the athlete pauses their watch, the split paces reflect the running-only segments and are more accurate than the overall average.
 
 Rules:
 - Tone: warm, direct, like a coach texting — no "Love it!" opener, no markdown, no asterisks
 - 1-3 sentences max
-- Output only valid JSON`,
+- Output only valid JSON${forceInstruction}`,
     messages: [{ role: "user", content: message }],
   });
 

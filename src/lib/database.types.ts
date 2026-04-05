@@ -20,6 +20,7 @@ export type Database = {
           average_cadence: number | null
           average_heartrate: number | null
           average_pace: string | null
+          average_watts: number | null
           created_at: string | null
           distance_meters: number | null
           elapsed_time_seconds: number | null
@@ -42,6 +43,7 @@ export type Database = {
           average_cadence?: number | null
           average_heartrate?: number | null
           average_pace?: string | null
+          average_watts?: number | null
           created_at?: string | null
           distance_meters?: number | null
           elapsed_time_seconds?: number | null
@@ -64,6 +66,7 @@ export type Database = {
           average_cadence?: number | null
           average_heartrate?: number | null
           average_pace?: string | null
+          average_watts?: number | null
           created_at?: string | null
           distance_meters?: number | null
           elapsed_time_seconds?: number | null

@@ -110,6 +110,7 @@ async function processStravaEvent(body: {
           average_heartrate: activity.average_heartrate || null,
           max_heartrate: activity.max_heartrate || null,
           average_cadence: activity.average_cadence || null,
+          average_watts: activity.average_watts || null,
           average_pace: averagePace,
           elevation_gain: activity.total_elevation_gain,
           suffer_score: activity.suffer_score || null,

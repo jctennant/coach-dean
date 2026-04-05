@@ -4,6 +4,39 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-05 — P1 bug batch: watts, mileage, plan validation, onboarding
+
+**Type:** Bug Fix (multiple)
+**Reported by:** Internal review (users e6091ea5, 39c51f9b/Julia, 7a704281/Lori, 9471dde2/Dallan, 9f5f67c6, d7aac841)
+
+### #1 — Watts hallucination (e6091ea5)
+**Root cause:** No data guard for power/watt data. Claude invented watt figures for Zwift/cycling even though no power data exists in the DB record.
+**Fix:** Added `average_watts` column to `activities` table (migration 024), stored from Strava webhook when present (power meters, Zwift). Guard is now conditional: shown when `average_watts` is null, skipped when real power data exists.
+
+### #2/#5 — RECENT WORKOUTS bike miles inflating running totals (Julia, 9f5f67c6)
+**Root cause:** `buildActivitySummary` RECENT WORKOUTS listed all activity types with miles. A bike ride showing "Ride 45mi" in the workout log gave Claude material to sum it with running miles and hallucinate a wrong weekly total.
+**Fix:** Non-running activities (Rides, swims, etc.) now show duration (e.g. "Ride 90min") instead of miles in RECENT WORKOUTS. Running-only totals are unaffected.
+
+### #3 — "33mi hill reps" copy-paste error (Julia)
+**Root cause:** Claude copy-pasted the weekly total into an individual session label.
+**Fix:** Added `fixSessionDistanceErrors()` to `plan-validation.ts`. Detects when a non-long-run session's mileage matches the weekly Total, replaces it with "?mi (check distance)" as a visible error flag, and rewrites the Total to match only the valid sessions. Wired into the response pipeline after `enforceVolumeCaps`.
+
+### #4 — Onboarding days fabrication + context loss (Dallan)
+**Root cause:** Claude invented specific training days ("Monday and Thursday") when athlete said "two days a week" without specifying which. Also re-asked for race info already in ATHLETE HISTORY.
+**Fix:** Added two rules to `user_message` prompt: (1) never assign specific days without athlete choosing them; (2) never re-ask for data already present in ATHLETE HISTORY.
+
+### #6 — Goal time applied to wrong race (d7aac841)
+**Root cause:** `goal_time_minutes` stored without race-type context. A 4:00 marathon goal was displayed against a half marathon, producing an implied 18:18/mi pace.
+**Fix:** Added a sanity check in `buildSystemPrompt`: if computed goal pace > 15 min/mi, inject a ⚠️ GOAL TIME MISMATCH warning prompting Dean to clarify with the athlete before building a plan.
+
+### Onboarding question swallowed (Lori, 7a704281)
+**Root cause:** `generateAnythingElseResponse` returned `isDone: true` when message contained both training info and a question. The question was silently dropped and onboarding completed without answering it.
+**Fix:** Prompt now explicitly forbids `done: true` when message contains "?". Added a `forceAnswer` code-level safety net in `handleAnythingElse`.
+
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/lib/plan-validation.ts`, `src/app/api/webhooks/strava/route.ts`, `supabase/migrations/024_average_watts.sql`, `src/__tests__/lib/plan-validation.test.ts`
+
+---
+
 ## 2026-04-05 — Race preparedness floors and under-prepared athlete flag
 
 **Type:** Bug Fix + Feature
