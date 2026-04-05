@@ -7,7 +7,7 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines } from "@/lib/plan-validation";
 import type { Json } from "@/lib/database.types";
 
@@ -486,7 +486,31 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
   const timezoneConfirmed = !!(onboardingData.timezone_confirmed) || !!(user.strava_athlete_id); // Strava users get TZ from athlete profile
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl);
+
+  // For initial_plan: compute whether the athlete can reach an adequate long run in their
+  // remaining weeks. If not, Dean needs to acknowledge this and set realistic expectations.
+  let racePreparednessFlag = "";
+  if (trigger === "initial_plan") {
+    const prep = computeRacePreparedness(
+      (profile?.goal as string | null) ?? null,
+      avgWeeklyMileage,
+      (profile?.race_date as string | null) ?? null,
+    );
+    if (prep && prep.achievableLongRun < prep.minAdequateLongRun * 0.85) {
+      const shortfall = Math.round((prep.minAdequateLongRun - prep.achievableLongRun) * 10) / 10;
+      const goalLabel = ((profile?.goal as string | null) ?? "this race").replace(/_/g, " ");
+      racePreparednessFlag = `\n⚠️ RACE PREPAREDNESS GAP — READ THIS BEFORE WRITING THE PLAN:
+This athlete is at ${(avgWeeklyMileage ?? 0).toFixed(1)} mi/week. At the maximum safe build rate (10%/week), they can reach an estimated peak long run of ~${prep.achievableLongRun.toFixed(1)} mi before race day. The standard guideline for a ${goalLabel} is a ${prep.minAdequateLongRun}+ mi peak long run. Gap: ~${shortfall} mi.
+YOU MUST do ALL of the following in your plan message:
+1. Acknowledge that this timeline is a genuine challenge — the training won't fully prepare them for the distance on fresh legs alone. Be honest but encouraging.
+2. Recommend a run/walk race day strategy (e.g. "run 9 min / walk 1 min throughout") so they can complete the distance safely and comfortably.
+3. Affirm that finishing is the right goal at this stage — not a time target.
+4. Briefly mention that a shorter race option (e.g. a 10K at the same event) is worth considering if one's available — frame it as an option, not a requirement.
+Keep the tone positive. This is not a reason to bail on the goal — it's a reason to go in with the right strategy.`;
+    }
+  }
+
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -2764,7 +2788,8 @@ function buildUserMessage(
   storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
   timezoneConfirmed = true,
   storedPlanAllWeeks?: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>,
-  dashboardUrl?: string | null
+  dashboardUrl?: string | null,
+  racePreparednessFlag = "",
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -3080,7 +3105,7 @@ TOTAL LINE FORMAT: The Total line must show the FULL WEEK total = planned future
       return `This athlete just finished onboarding. Send them an initial week plan — framed as a starting point, not a finished prescription. The goal is to get something in front of them quickly and invite them to shape it.
 
 ${weekBoundaryNote}
-
+${racePreparednessFlag}
 
 USE STRAVA DATA — this is critical:
 - All plan decisions must be grounded in WEEKLY MILEAGE, PACE ANALYSIS, and RECENT WORKOUTS — use these as your primary inputs, not the athlete's stated goal alone.

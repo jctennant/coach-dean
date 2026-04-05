@@ -47,16 +47,39 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   const g = (goal ?? "").toLowerCase();
   let hardCap: number;
   let floor: number;
-  if (g.includes("ultra") || g.includes("50k") || g.includes("50 k") || g.includes("100k") || g.includes("100 m")) {
-    hardCap = 100; floor = 45;
+
+  // Floors are calibrated so that `floor × 0.42` (peak long run factor) reaches the
+  // minimum adequate long run for that race distance. Rule of thumb: peak long run
+  // should be 75-90% of race distance, capped at a sensible ceiling.
+  //
+  //   Race      Race dist  Min long run  Floor needed  (floor × 0.42)
+  //   5K        3.1 mi     5 mi          ~12 mi         5.0 ✓
+  //   10K       6.2 mi     8 mi          ~20 mi         8.4 ✓
+  //   Half      13.1 mi    10 mi         ~25 mi        10.5 ✓  (30 gives headroom)
+  //   Marathon  26.2 mi    18 mi         ~43 mi        18.1 ✓  (45 gives headroom)
+  //   30K       18.6 mi    14 mi         ~34 mi        14.3 ✓
+  //   50K       31 mi      20 mi         ~48 mi        20.2 ✓  (50 gives headroom)
+  //   50mi      50 mi      22 mi         ~52 mi        21.8 ✓  (55 gives headroom)
+  //   100K/mi   62+ mi     24 mi         ~57 mi        23.9 ✓  (65 gives headroom)
+
+  if (g.includes("100k") || g.includes("100mi") || g.includes("100 m")) {
+    hardCap = 110; floor = 65;
+  } else if (g.includes("50mi") || g.includes("50 mi")) {
+    hardCap = 100; floor = 55;
+  } else if (g.includes("50k") || g.includes("50 k")) {
+    hardCap = 90; floor = 50;
+  } else if (g.includes("30k") || g.includes("30 k")) {
+    hardCap = 80; floor = 35;
   } else if ((g.includes("marathon") || g.includes("26.2")) && !g.includes("half")) {
-    hardCap = 70; floor = 35;
+    // Floor raised from 35 → 45 so peak long runs reliably reach 18-19mi.
+    // At the old 35mi floor, the long run was only ~14.7mi — inadequate for a marathon.
+    hardCap = 75; floor = 45;
   } else if (g.includes("half") || g.includes("13.1")) {
-    // Floor of 30 ensures peak long runs reach ~10-11mi at a 35-40% fraction.
-    // At 22mi peak (old floor), the long run maxed at 8.4mi — inadequate for a 13.1mi race.
+    // Floor raised from 22 → 30 so peak long runs reach 10-12mi.
     hardCap = 55; floor = 30;
   } else if (g.includes("10k") || g.includes("10 k")) {
-    hardCap = 50; floor = 18;
+    // Floor raised from 15 → 20 so peak long runs reach 8+ mi.
+    hardCap = 50; floor = 20;
   } else if (g.includes("5k") || g.includes("5 k")) {
     hardCap = 45; floor = 12;
   } else {
@@ -64,6 +87,40 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   }
   // Allow up to 80% growth from base, but never outside [floor, hardCap]
   return Math.max(Math.min(baseMileage * 1.8, hardCap), floor);
+}
+
+/**
+ * Compute the peak long run achievable at a safe build rate (10%/week) in the
+ * available build weeks. Used to flag under-prepared athletes before the initial plan.
+ *
+ * Returns { achievablePeakMiles, achievableLongRunMiles, minAdequateLongRun } or null
+ * if there's not enough data to compute (no base, no race date).
+ */
+export function computeRacePreparedness(
+  goal: string | null,
+  baseMilesPerWeek: number | null,
+  raceDateStr: string | null,
+): { achievablePeak: number; achievableLongRun: number; minAdequateLongRun: number } | null {
+  if (!baseMilesPerWeek || !raceDateStr || !goal) return null;
+
+  const minAdequateLongRunByGoal: Record<string, number> = {
+    "5k": 5, "10k": 8, "half_marathon": 10, "marathon": 18,
+    "30k": 14, "50k": 20, "50mi": 22, "100k": 24, "100mi": 24,
+  };
+  const minAdequateLongRun = minAdequateLongRunByGoal[goal] ?? null;
+  if (!minAdequateLongRun) return null;
+
+  const raceDateMs = new Date(raceDateStr + "T12:00:00Z").getTime();
+  const totalWeeks = Math.max(1, Math.ceil((raceDateMs - Date.now()) / (7 * 24 * 60 * 60 * 1000)));
+  const realBuildWeeks = Math.max(1, totalWeeks - 2); // 2 taper weeks
+
+  // Max achievable peak at 10%/week, capped at getTargetPeakMileage ceiling
+  const rawAchievable = baseMilesPerWeek * Math.pow(1.10, realBuildWeeks);
+  const peakCap = getTargetPeakMileage(goal, baseMilesPerWeek);
+  const achievablePeak = Math.min(rawAchievable, peakCap);
+  const achievableLongRun = Math.round(achievablePeak * 0.42 * 10) / 10;
+
+  return { achievablePeak: Math.round(achievablePeak * 10) / 10, achievableLongRun, minAdequateLongRun };
 }
 
 /**
