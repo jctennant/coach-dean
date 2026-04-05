@@ -75,11 +75,13 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
     // At the old 35mi floor, the long run was only ~14.7mi — inadequate for a marathon.
     hardCap = 75; floor = 45;
   } else if (g.includes("half") || g.includes("13.1")) {
-    // Floor raised from 22 → 30 so peak long runs reach 10-12mi.
-    hardCap = 55; floor = 30;
+    // Floor of 25 → peak long run ~10.5mi at 0.42 factor. Adequate for HM (needs 10+mi)
+    // and achievable in a 14-week plan from 8mi/week. 30mi was slightly too high — it
+    // creates arcs showing an unachievable peak for short plans from low bases.
+    hardCap = 55; floor = 25;
   } else if (g.includes("10k") || g.includes("10 k")) {
-    // Floor raised from 15 → 20 so peak long runs reach 8+ mi.
-    hardCap = 50; floor = 20;
+    // Floor of 18 → peak long run ~7.6mi, more than the 6.2mi race distance.
+    hardCap = 50; floor = 18;
   } else if (g.includes("5k") || g.includes("5 k")) {
     hardCap = 45; floor = 12;
   } else {
