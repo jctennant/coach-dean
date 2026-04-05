@@ -4,6 +4,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-05 — Race preparedness floors and under-prepared athlete flag
+
+**Type:** Bug Fix + Feature
+**Reported by:** Jake (Ellen's plan)
+**User feedback:** "she got a plan with very little mileage (max 11.5 in a single week) for a half marathon and is a very experienced runner"
+**Root cause:** Two compounding issues:
+1. `getTargetPeakMileage` floors were too low to produce adequate long runs. Half marathon floor was 22mi → peak long run of only 8.4mi at 0.38 factor. Marathon was 35mi → only 14.7mi long run. The floors didn't account for the actual long run fraction (38-42% of weekly volume) needed to reach race-distance-appropriate long runs.
+2. `longRunFactor` in peak phase was 0.38 — too low for 3-day/week athletes where the long run is the primary quality session. Should be 0.42.
+3. No feedback mechanism when an athlete's current mileage + weeks available makes it mathematically impossible to reach an adequate long run. Ellen (8mi/week, 10 weeks to half marathon) couldn't get to 10mi long run at safe build rates — but Dean never acknowledged this.
+**Fix / Change:**
+- Raised arc floors: half 22→30, marathon 35→45, 10K 15→20, split ultras into 50K(50)/50mi(55)/100K+100mi(65)
+- Raised peak long run factor 0.38→0.42 across the board
+- Added `computeRacePreparedness()` exported from training-plan.ts: computes achievable peak long run at 10%/week and returns the gap vs minimum adequate
+- Added race preparedness flag injected into Dean's `initial_plan` prompt when achievable long run < 85% of minimum. Flag mandates Dean to: acknowledge the gap, recommend run/walk race day strategy, affirm finishing as goal, mention shorter race option
+- Manually regenerated Ellen's plan after deploy
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-04 — Dashboard alignment: mileage target, key_workout, and Coach's Note from actual sessions
 
 **Type:** Bug Fix

@@ -501,12 +501,13 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       const goalLabel = ((profile?.goal as string | null) ?? "this race").replace(/_/g, " ");
       racePreparednessFlag = `\n⚠️ RACE PREPAREDNESS GAP — READ THIS BEFORE WRITING THE PLAN:
 This athlete is at ${(avgWeeklyMileage ?? 0).toFixed(1)} mi/week. At the maximum safe build rate (10%/week), they can reach an estimated peak long run of ~${prep.achievableLongRun.toFixed(1)} mi before race day. The standard guideline for a ${goalLabel} is a ${prep.minAdequateLongRun}+ mi peak long run. Gap: ~${shortfall} mi.
-YOU MUST do ALL of the following in your plan message:
-1. Acknowledge that this timeline is a genuine challenge — the training won't fully prepare them for the distance on fresh legs alone. Be honest but encouraging.
-2. Recommend a run/walk race day strategy (e.g. "run 9 min / walk 1 min throughout") so they can complete the distance safely and comfortably.
-3. Affirm that finishing is the right goal at this stage — not a time target.
-4. Briefly mention that a shorter race option (e.g. a 10K at the same event) is worth considering if one's available — frame it as an option, not a requirement.
-Keep the tone positive. This is not a reason to bail on the goal — it's a reason to go in with the right strategy.`;
+
+The right response is NOT to prescribe a race-day run/walk strategy — that's presumptuous and demoralizing for an experienced runner. Instead:
+
+1. Acknowledge the timeline is tight (one honest sentence). Frame it as a challenge to approach smartly, not a reason to doubt the goal.
+2. Recommend run/walk intervals specifically for TRAINING LONG RUNS as a tool to safely extend distance beyond what continuous running allows right now. Example framing: "For the longer efforts, we'll use short walk breaks — run 10 min, walk 1 min — to keep the effort honest and let you go further without breaking down." This is the Galloway approach and it's legitimate training methodology, not a concession.
+3. Ask the athlete one question about their preference: whether they've used run/walk training before and are open to it, OR if they'd rather keep runs continuous and shorter (focusing on building pure running base over time). Their answer will shape how Dean structures the long runs.
+4. Do NOT tell the athlete how they should run the race — that's their call on race day based on how training goes.`;
     }
   }
 
