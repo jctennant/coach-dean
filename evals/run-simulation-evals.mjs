@@ -124,7 +124,7 @@ INSTRUCTIONS:
 - If they ask a coaching question, answer it briefly, then continue naturally.
 
 RACE DATE — MANDATORY SEARCH:
-The moment an athlete mentions a specific named race, call web_search immediately to find the exact date. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong. A month alone ("next April", "this fall") is never enough — get the specific day.
+The moment an athlete mentions a specific named race, call web_search immediately to find the exact date. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong, and user-provided dates are often wrong too — always verify via search regardless of what the athlete says. A month alone ("next April", "this fall") is never enough — get the specific day.
 ${isFirstResponse
     ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
     : "- You have already introduced yourself in a previous message. Do NOT re-introduce yourself or repeat what you do. Do NOT open with 'Hey [name]!' or any greeting phrase like 'Great to meet you', 'Great to hear from you', 'Nice to meet you', 'Glad you're here', etc. Acknowledge what they just said and move forward."
@@ -178,8 +178,10 @@ Output format (include only fields that are clearly stated — use null for anyt
   "recent_race_distance_km": number | null,
   "recent_race_time_minutes": number | null,
   "injury_notes": string | null,
+  "ultra_race_history": string | null,
   "other_races": [{"name": string|null, "date": "YYYY-MM-DD"|null, "priority": "B"|"C", "goal": string|null}] | null,
-  "timezone": string | null
+  "timezone": string | null,
+  "strava_skipped": true | null
 }
 
 Rules:
@@ -189,7 +191,9 @@ Rules:
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "2:05:00" → 125.0
 - race_date: use the most specific date mentioned. If a specific date (day + month) was stated by either participant, use that exact date. Only default to first of month if no specific date was ever given. Today is ${today}.
 - timezone: IANA string when a location is mentioned (e.g. "Chicago, IL" → "America/Chicago", "Seattle, WA" → "America/Los_Angeles", "Provo, UT" → "America/Denver")
-- other_races: only B/C secondary races, not the main A race.`,
+- other_races: only B/C secondary races, not the main A race.
+- ultra_race_history: summarize any ultra or trail race background mentioned (e.g. "3 marathons PR 3:45, 2 trail halves, no prior ultras"). Populate whenever the athlete describes their racing/ultra history, even if they say they have none.
+- strava_skipped: set to true if the athlete explicitly says they don't have Strava, won't use it, or skip it. Leave null if the topic hasn't come up.`,
     messages: [{ role: "user", content: transcript }],
   });
 
@@ -229,10 +233,12 @@ async function getDeanResponse(collected, stravaContext, history, isFirstRespons
   });
 
   // Mirror route.ts: take only post-search text blocks
+  // The hosted web_search tool returns "server_tool_use" blocks (not "tool_use")
   let rawText = "";
   let lastToolIdx = -1;
   for (let i = 0; i < response.content.length; i++) {
-    if (response.content[i].type === "tool_use") lastToolIdx = i;
+    const t = response.content[i].type;
+    if (t === "tool_use" || t === "server_tool_use") lastToolIdx = i;
   }
   for (let i = lastToolIdx + 1; i < response.content.length; i++) {
     if (response.content[i].type === "text") rawText += response.content[i].text;

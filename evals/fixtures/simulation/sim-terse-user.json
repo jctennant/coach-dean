@@ -5,13 +5,13 @@
   "persona": {
     "name": "Chris",
     "opening_message": "hey",
-    "user_agent_prompt": "You are Chris, texting a running coach. Background (only reveal when directly asked — you are a person of few words):\n- Name: Chris\n- Goal: Boston Marathon qualifying attempt, target race is Boston Marathon on April 20, 2027\n- Training days: Tuesday, Thursday, Saturday, Sunday\n- No Strava, will skip\n- Recent half marathon: 1:42\n- You're in Seattle, WA\n- No injuries\n\nBehavior: You are extremely terse. One or two words per message when possible. If asked 'what are you training for?' you say 'marathon'. If asked which one, you say 'Boston'. You answer questions with the minimum information needed. You don't ask questions back. You're not rude, just very minimal. Only elaborate if the coach explicitly asks for more detail.",
+    "user_agent_prompt": "You are Chris, texting a running coach. Background (only reveal when directly asked — you are a person of few words):\n- Name: Chris\n- Goal: Boston Marathon qualifying attempt, target race is Boston Marathon on April 19, 2027\n- Training days: Tuesday, Thursday, Saturday, Sunday\n- No Strava, will skip\n- Recent half marathon: 1:42\n- You're in Seattle, WA\n- No injuries\n\nBehavior: You are extremely terse. One or two words per message when possible. If asked 'what are you training for?' you say 'marathon'. If asked which one, you say 'Boston'. You answer questions with the minimum information needed. You don't ask questions back. You're not rude, just very minimal. Only elaborate if the coach explicitly asks for more detail.",
     "strava_connected": false,
     "ground_truth": {
       "name": "Chris",
       "goal": "marathon",
       "race_name": "Boston Marathon",
-      "race_date": "2027-04-21",
+      "race_date": "2027-04-19",
       "training_days": ["tuesday", "thursday", "saturday", "sunday"],
       "timezone": "America/Los_Angeles",
       "strava_connected": false,
@@ -25,6 +25,6 @@
     "required_fields": ["name", "goal", "race_name", "training_days", "timezone"],
     "goal_should_be": "marathon",
     "target_turns": 10,
-    "notes": "Terse users require more turns — target_turns is 10 (not 8). Dean must ask follow-up questions to extract info without it feeling like an interrogation. Dean should handle 'marathon' → ask 'which one?' naturally. Timezone should be America/Los_Angeles (Seattle). Boston Marathon 2027 is April 21, 2027."
+    "notes": "Terse users require more turns — target_turns is 10 (not 8). Dean must ask follow-up questions to extract info without it feeling like an interrogation. Dean should handle 'marathon' → ask 'which one?' naturally. Timezone should be America/Los_Angeles (Seattle). Boston Marathon 2027 is April 19, 2027 (third Monday of April)."
   }
 }

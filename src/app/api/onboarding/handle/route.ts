@@ -219,7 +219,7 @@ INSTRUCTIONS:
 - If they ask a coaching question, answer it briefly, then continue naturally.
 
 RACE DATE — MANDATORY SEARCH:
-The moment an athlete mentions a specific named race, call web_search immediately to find the exact date. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong. A month alone ("next April", "this fall") is never enough — get the specific day.
+The moment an athlete mentions a specific named race, call web_search immediately to find the exact date. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong, and user-provided dates are often wrong too — always verify via search regardless of what the athlete says. A month alone ("next April", "this fall") is never enough — get the specific day.
 ${isFirstResponse
   ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
   : "- You have already introduced yourself in a previous message. Do NOT re-introduce yourself or repeat what you do. Do NOT open with 'Hey [name]!' or any greeting phrase like 'Great to meet you', 'Great to hear from you', 'Nice to meet you', 'Glad you're here', etc. Acknowledge what they just said and move forward."
@@ -246,10 +246,13 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   });
 
   // Extract final text (post-search text blocks only, discarding pre-search reasoning)
+  // The hosted web_search tool returns "server_tool_use" blocks (not "tool_use"),
+  // so we must check both types to correctly discard pre-search text.
   let rawText = "";
   let lastToolIdx = -1;
   for (let i = 0; i < claudeResponse.content.length; i++) {
-    if (claudeResponse.content[i].type === "tool_use") lastToolIdx = i;
+    const t = claudeResponse.content[i].type;
+    if (t === "tool_use" || t === "server_tool_use") lastToolIdx = i;
   }
   for (let i = lastToolIdx + 1; i < claudeResponse.content.length; i++) {
     const block = claudeResponse.content[i];
@@ -436,7 +439,8 @@ Output format (include only fields that are clearly stated — use null for anyt
   "ultra_race_history": string | null,
   "experience_years": number | null,
   "other_races": [{"name": string|null, "date": "YYYY-MM-DD"|null, "priority": "B"|"C", "goal": string|null}] | null,
-  "timezone": string | null
+  "timezone": string | null,
+  "strava_skipped": true | null
 }
 
 Rules:
@@ -449,7 +453,9 @@ Rules:
 - recent_race_time_minutes: finishing time of that race in minutes
 - easy_pace: format "M:SS" (e.g. "8:30" means 8 minutes 30 seconds per mile)
 - timezone: IANA string when a location is mentioned (e.g. "Provo, UT" → "America/Denver", "San Francisco" → "America/Los_Angeles")
-- other_races: only B/C secondary races, not the main A race (goal/race_name/race_date). Use the same date precision rule as race_date — specific date if stated, first-of-month only as last resort.`,
+- other_races: only B/C secondary races, not the main A race (goal/race_name/race_date). Use the same date precision rule as race_date — specific date if stated, first-of-month only as last resort.
+- ultra_race_history: summarize any ultra or trail race background mentioned (e.g. "3 marathons PR 3:45, 2 trail halves, no prior ultras"). Populate whenever the athlete describes their racing/ultra history, even if they say they have none.
+- strava_skipped: set to true if the athlete explicitly says they don't have Strava, won't use it, or skip it. Leave null if the topic hasn't come up.`,
     messages: [{ role: "user", content: transcript }],
   });
 

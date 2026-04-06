@@ -4,6 +4,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Onboarding fixes: web search concatenation, ultra_race_history extraction, strava_skipped field, fixture correction
+
+**Type:** Bug Fix
+**Reported by:** Jake (eval results — simulation-2026-04-06T22-40-55)
+**User feedback:** "by the way the boston marathon 2027 is actually april 19 so maybe the judge was wrong here"
+**Root cause (4 issues):**
+1. Web search text concatenation: The hosted web_search tool returns `server_tool_use` content blocks, not `tool_use`. Our text extraction checked only for `tool_use`, so `lastToolIdx` stayed -1 and ALL text blocks (pre-search and post-search) were concatenated into one message. This caused the malformed first message in sim-international-user and likely similar issues in production.
+2. `ultra_race_history` not extracted: Haiku extraction prompt had no description or rules for the `ultra_race_history` field, so it never populated even when athletes clearly stated their ultra/trail background.
+3. Race date not verified when user provides it: The mandatory search instruction didn't explicitly say to verify user-provided dates. Jordan said "February 7th" for Rocky Raccoon but the actual date is different — Dean should search regardless.
+4. `sim-terse-user` fixture had wrong date: Fixture had `race_date: "2027-04-21"` (a Wednesday) and notes said "April 21, 2027". Boston Marathon is the third Monday of April; in 2027 that's April 19. Dean's web search found the correct date but the judge penalized it.
+**Fix / Change:**
+1. Added `server_tool_use` type check alongside `tool_use` when scanning for the last tool call index in both `route.ts` and `run-simulation-evals.mjs`. This ensures only post-search text is used when Dean calls web search.
+2. Added extraction rule for `ultra_race_history`: summarize any ultra/trail race background mentioned. Also added `strava_skipped: true | null` to the extraction output so users who say "No Strava" upfront get it properly captured.
+3. Updated mandatory search instruction: "user-provided dates are often wrong too — always verify via search regardless of what the athlete says."
+4. Corrected `sim-terse-user` fixture: `race_date` → `2027-04-19`, user_agent_prompt updated, evaluation notes corrected.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`, `evals/fixtures/simulation/sim-terse-user.json`
+
+---
+
 ## 2026-04-06 — Onboarding prompt improvements: goal classification, race dates, ultra fields, Strava skip routing
 
 **Type:** Bug Fix / Improvement
