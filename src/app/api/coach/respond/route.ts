@@ -1574,7 +1574,17 @@ async function syncArcCurrentWeek(
         l.includes("hill") || l.includes("stride") || l.includes("progression");
     }
     const qualitySession = sessions.find(s => isQualitySession(s.label));
-    const longRunSession = sessions.find(s => s.label.toLowerCase().includes("long"));
+    // Identify the long run: prefer explicit "long" keyword, fall back to the
+    // highest-mileage running session (Dean sometimes omits "Long run" and just
+    // writes "Easy 11mi" for the Saturday session).
+    const CROSS_TRAINING_RE = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin)\b/i;
+    const longRunByLabel = sessions.find(s => s.label.toLowerCase().includes("long"));
+    const longRunByMileage = sessions
+      .filter(s => !CROSS_TRAINING_RE.test(s.label))
+      .reduce<{ day: string; date: string; label: string } | null>((best, s) =>
+        parseMilesFromLabel(s.label) > parseMilesFromLabel(best?.label ?? "") ? s : best
+      , null);
+    const longRunSession = longRunByLabel ?? longRunByMileage;
     const longRunMiles = longRunSession ? parseMilesFromLabel(longRunSession.label) : 0;
     const keySession = qualitySession ?? longRunSession ?? sessions[0];
     let derivedKeyWorkout = keySession?.label ?? "";
