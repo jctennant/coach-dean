@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Improve initial plan quality across all fitness tiers
+
+**Type:** Improvement
+**Reported by:** Jake Tennant (internal observation)
+**User feedback:** "I'm a bit worried that some users will get all easy in the first week without much detail and be like 'this plan isn't worth it' - I think even for athletes that were doing like 15 mi/week consistently we need to think about things like strides, etc. And then for real beginners we just need to teach them about pacing zones, ramping up slowly, etc. and our philosophy so they believe it is the right way to approach training."
+**Root cause:** Initial plan instructions only called out the quality-session requirement for HIGH VOLUME athletes. MODERATE and LOW VOLUME athletes could get an all-easy first week with no explanation of why. Beginners had no prompt instruction to explain the reasoning behind the plan structure.
+**Fix / Change:** Extended explicit quality session requirements to all tiers:
+- HIGH VOLUME (30+ mi/week): must include tempo/intervals/strides/hill repeats
+- MODERATE VOLUME (10–30 mi/week): must include strides at minimum (4–6 × 20-sec pickups)
+- LOW VOLUME (<10 mi/week): include strides on at least one run
+Added "EXPLAINING THE PLAN" instruction for beginner/low-volume athletes: include 2–3 sentences in the first bubble explaining what "easy effort" means and why we build gradually — so new athletes trust the approach instead of dismissing it as generic advice.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-06 — Fix: three onboarding bugs (wrong goal bucket, date confusion, 50K display label)
 
 **Type:** Bug Fix
