@@ -313,11 +313,34 @@ Rules:
     const existingName = (onboardingData.name as string | null) ?? (user.name ?? null);
     const name = nameFromMessage || existingName;
 
-    if (nameFromMessage && !existingName) {
-      await supabase
-        .from("users")
-        .update({ name: nameFromMessage, onboarding_data: { ...onboardingData, name: nameFromMessage } })
-        .eq("id", user.id);
+    // Save any structured fields and free-form context from this message into
+    // onboarding_data so later steps can reference it — even though no goal was
+    // detected yet. Fields are only written if not already present (don't overwrite
+    // confirmed data with early guesses).
+    const contextFields: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(extra)) {
+      if (k === "other_notes") continue; // handled separately below
+      if (k === "name") continue;        // name is handled above
+      if (!(k in onboardingData)) contextFields[k] = v; // don't overwrite existing
+    }
+    // Accumulate other_notes into a context_notes[] array so later steps can
+    // reference free-form context the athlete shared early ("first trail race",
+    // "want to combine cycling and running", "not sure I need a rigid plan", etc.)
+    const existingNotes = (onboardingData.context_notes as string[] | null) ?? [];
+    if (typeof extra.other_notes === "string") {
+      contextFields.context_notes = [...existingNotes, extra.other_notes];
+    }
+    if (nameFromMessage) contextFields.name = nameFromMessage;
+
+    const hasChanges = Object.keys(contextFields).length > 0;
+    if (hasChanges) {
+      const updatedData = { ...onboardingData, ...contextFields };
+      await supabase.from("users").update({
+        onboarding_data: updatedData as Json,
+        ...(nameFromMessage && !existingName ? { name: nameFromMessage } : {}),
+      }).eq("id", user.id);
+    } else if (nameFromMessage && !existingName) {
+      await supabase.from("users").update({ name: nameFromMessage }).eq("id", user.id);
     }
 
     // Detect if the user asked a question we should answer before asking ours
@@ -400,16 +423,28 @@ Rules:
   // Pre-fill race_date if:
   // - web search found a specific date, or
   // - athlete explicitly said no event (no_event=true) → null satisfies awaiting_race_date and skips the question
+  // Accumulate other_notes into context_notes[] so free-form context from every
+  // message is available to later steps and to the initial coaching prompt.
+  const existingContextNotes = (onboardingData.context_notes as string[] | null) ?? [];
+  const newContextNotes = typeof extra.other_notes === "string"
+    ? [...existingContextNotes, extra.other_notes]
+    : existingContextNotes.length > 0 ? existingContextNotes : undefined;
+
   const mergedData = {
     ...onboardingData,
     goal: parsed.goal,
     sport_type: sportType,
     ...extra,
+    // Accumulated context notes (other_notes from all messages, not just this one)
+    ...(newContextNotes !== undefined ? { context_notes: newContextNotes } : {}),
     // Pre-fill the date from web search even when multiple races were mentioned.
-    // We still leave race_date_confirmed: false so awaiting_race_date confirms it — but
-    // the A race question (awaiting_other_races) is asked FIRST when secondary_goal is set,
+    // Web-search dates leave race_date_confirmed: false so awaiting_race_date can verify them.
+    // But if the user explicitly stated a date in their message (extra.race_date is set),
+    // treat it as confirmed — no need to ask them to verify their own words.
+    // The A race question (awaiting_other_races) is asked FIRST when secondary_goal is set,
     // and awaiting_race_date is revisited after the A race is confirmed.
     ...(raceInfo.raceDate && !extra.race_date ? { race_date: raceInfo.raceDate } : {}),
+    ...(extra.race_date ? { race_date_confirmed: true } : {}),
     ...(parsed.no_event && !extra.race_date && !raceInfo.raceDate ? { race_date: null, race_date_confirmed: true } : {}),
     ...(raceInfo.secondaryGoal || extra.secondary_goal
       ? { secondary_goal: raceInfo.secondaryGoal ?? extra.secondary_goal }
@@ -2406,6 +2441,11 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
         // classifier and web search can misattribute dates to the wrong race name.
         return `Which of these is your A race — the one the whole plan peaks for? And can you give me the dates for each? Approximate is totally fine.`;
       }
+      // User already explicitly called this their A race, or previously mentioned
+      // having multiple races — skip "is this your main race?" and just ask for details.
+      if (data.a_race_explicit || data.has_multiple_races) {
+        return `What other races do you have on the calendar? Dates and rough distances are helpful, even if they're not locked in yet. If it's just the ${raceRef}, just say so.`;
+      }
       return `Is ${raceRef} your main goal race this season — the one we're building the whole plan around? And do you have any others on the calendar I should know about?`;
     }
 
@@ -2687,7 +2727,7 @@ async function extractAdditionalFields(
     system: `Extract any running/training information present in this message. Be generous with inference — if something is clearly implied, extract it.
 
 Output format (omit fields that are not present):
-{"race_date": "YYYY-MM-DD" | null, "race_month": "Month" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "pr_year": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null, "goal_time_minutes": number, "ultra_race_history": string | null}
+{"race_date": "YYYY-MM-DD" | null, "race_month": "Month" | null, "experience_years": number | null, "weekly_miles": number | null, "easy_pace": "M:SS" | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "pr_year": number | null, "injury_mentioned": boolean, "injury_notes": string | null, "crosstraining_tools": string[] | null, "other_notes": string | null, "name": "FirstName" | null, "secondary_goal": string | null, "goal_time_minutes": number, "ultra_race_history": string | null, "has_multiple_races": true | null, "a_race_explicit": true | null}
 
 Rules:
 - name: Extract if the athlete introduces themselves. Be generous — people introduce themselves in many ways:
@@ -2707,10 +2747,12 @@ Rules:
 - injury_mentioned: true if any injury or physical limitation is mentioned.
 - injury_notes: brief description of injury type, severity, and recovery status if an injury is mentioned (e.g. "IT band syndrome, recovering, avoiding back-to-back days"). null if no injury.
 - crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
-- other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, stroller running, etc. null if nothing else.
+- other_notes: any other training-relevant context not captured by the structured fields above — e.g. "first trail race", "wants to combine cycling and running", "doesn't want a rigid plan", "running with a stroller", lifestyle constraints. null if nothing else.
 - secondary_goal: if the athlete mentions a second distinct race or goal beyond the primary one (e.g. "and then a marathon in the fall", "plus Boston next year", "also want to do a crit series"). Short plain-text description — include any dates or timing mentioned for each race (e.g. "Cirque Series Snowbird (July 11) and half marathon time trial (May 31)"). When multiple secondary races are mentioned, include all of them in one string. null if only one goal is mentioned.
 - goal_time_minutes: ONLY include this field if the athlete EXPLICITLY states a specific finish-time goal (e.g. "sub 3:05" → 185, "under 2 hours" → 120, "1:55" → 115, "around 23 minutes" → 23). Convert to total minutes as a number. OMIT THIS FIELD ENTIRELY if no specific finish time is mentioned — do NOT set it to null. Never infer a time goal that wasn't explicitly stated.
 - ultra_race_history: if the athlete explicitly describes their trail or ultra race background (e.g. "done two 100Ks", "finished a 50-miler last year", "ran Western States in 2022", "completed three 50Ks"). Short plain-text summary. null if not mentioned. IMPORTANT: do NOT set this from lottery attempts, general hiking, or non-race experience — it must describe actual races completed.
+- has_multiple_races: true if the athlete indicates they have several races, multiple events, or a busy race calendar this season ("a number of races", "several events", "races throughout the year", "a few on the calendar"). null otherwise.
+- a_race_explicit: true if the athlete explicitly identifies a specific race as their main, primary, number-one, or A race ("my main race is X", "X is my A race", "primary goal is X", "top priority is X"). null otherwise.
 - Return {} if nothing is present.`,
     messages: [{ role: "user", content: message }],
   });
@@ -2734,6 +2776,8 @@ Rules:
     if (parsed.name != null) result.name = parsed.name;
     if (typeof parsed.goal_time_minutes === "number") result.goal_time_minutes = parsed.goal_time_minutes;
     if (parsed.ultra_race_history != null) result.ultra_race_history = parsed.ultra_race_history;
+    if (parsed.has_multiple_races === true) result.has_multiple_races = true;
+    if (parsed.a_race_explicit === true) result.a_race_explicit = true;
     return result;
   } catch {
     return {};
