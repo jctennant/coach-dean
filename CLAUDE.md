@@ -189,6 +189,43 @@ Add a fixture whenever a conversation bug is reported (repetition, re-asking, wr
 
 ---
 
+## Simulation Evals (`/evals/fixtures/simulation/`)
+
+`npm run eval:simulation` — end-to-end multi-turn onboarding simulations. A user agent (Haiku) plays each persona across multiple turns; Dean (Sonnet) responds; Haiku extracts fields after each exchange; Opus judges the full transcript.
+
+### What the simulations test
+
+| Persona | What it catches |
+|---|---|
+| `sim-trail-multi-race` | Multi-race handling, Strava mid-flow, correct A/B race split, trail_race goal type |
+| `sim-marathon-first-timer` | Standard happy path, PR as fitness baseline, race date extraction |
+| `sim-general-fitness` | No race → general_fitness goal, [READY] without race_date |
+| `sim-injury-runner` | Injury collected before [READY], return_to_running goal, supportive tone |
+| `sim-terse-user` | Minimal answers, follow-up questioning, higher turn budget |
+
+### How it works
+
+Each simulation turn:
+1. Dean (Sonnet) generates a response given current `collected` + conversation history
+2. [STRAVA_LINK] is intercepted — if persona has Strava, OAuth is simulated and Strava connected message injected
+3. User agent (Haiku) replies as the persona
+4. Haiku extraction runs on full history → merges into `collected`
+5. Repeat until [READY] or max_turns
+
+### Key parity points to maintain with `onboarding/handle/route.ts`
+
+- `buildDeanSystemPrompt` → mirrors `handleConversation` system prompt exactly
+- `summarizeCollected` → mirrors same function in route.ts
+- `extractFields` + `mergeCollected` → mirrors Haiku extraction and merge logic
+- VALID_GOAL_BUCKETS set
+
+Use `--verbose` to print the full simulated conversation as it runs:
+```bash
+node evals/run-simulation-evals.mjs --fixture sim-trail-multi-race --verbose
+```
+
+---
+
 ## Database Schema Rule
 
 Whenever a DB migration is needed (new column, table, index, etc.):

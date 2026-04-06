@@ -1,0 +1,33 @@
+{
+  "id": "sim-trail-multi-race",
+  "description": "Trail runner with two races on the calendar, connects Strava mid-conversation",
+  "category": "simulation",
+  "persona": {
+    "name": "Jake",
+    "opening_message": "Hey Dean!",
+    "user_agent_prompt": "You are Jake, texting a running coach for the first time. Here is your background — reveal it naturally as the coach asks, don't dump everything at once:\n- Name: Jake\n- You have two races: Dipsea (iconic trail race, June 14, 2026) and Cirque Series Snowbird (8.9 mile mountain race, July 11, 2026). Cirque Series is your A race, Dipsea is your B race.\n- You run 5 days a week: Tuesday, Wednesday, Thursday, Saturday, Sunday\n- You have Strava — you'll connect it if asked\n- You're in Provo, Utah\n- You have no injuries\n- You're an experienced trail runner, running about 40 miles/week\n\nBehavior: You're enthusiastic. You mention both races upfront when asked about your goal. You answer training days without hesitation. When asked about Strava or fitness data, you connect Strava (the simulation will handle the connection). Keep texts brief and conversational — this is SMS. Don't over-explain.",
+    "strava_connected": true,
+    "strava_summary": "Strava connected Jake! I can see your recent runs — 126 miles across 21 runs in the last 4 weeks. Spotted your recent 30K too — great fitness marker. That's great context.",
+    "ground_truth": {
+      "name": "Jake",
+      "goal": "trail_race",
+      "race_name": "Cirque Series Snowbird",
+      "race_date": "2026-07-11",
+      "goal_distance_miles": 8.9,
+      "training_days": ["tuesday", "wednesday", "thursday", "saturday", "sunday"],
+      "timezone": "America/Denver",
+      "strava_connected": true,
+      "other_races": [{ "name": "Dipsea", "date": "2026-06-14", "priority": "B" }]
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "trail_race",
+    "race_date_should_be": "2026-07-11",
+    "secondary_race_should_include": "Dipsea",
+    "target_turns": 8,
+    "notes": "Dean should identify Cirque Series as the A race and Dipsea as the B race. Race dates should be the specific dates (July 11, June 14) not first-of-month defaults. Goal should be trail_race, not half_marathon or other road category. Strava connecting mid-conversation should not cause Dean to re-ask questions already answered."
+  }
+}

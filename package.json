@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "gen:types": "supabase gen types typescript --project-id irlhhvhmrzwcygctxrbe > src/lib/database.types.ts",
     "eval": "node evals/run-evals.mjs",
-    "eval:onboarding": "node evals/run-onboarding-evals.mjs"
+    "eval:onboarding": "node evals/run-onboarding-evals.mjs",
+    "eval:simulation": "node evals/run-simulation-evals.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

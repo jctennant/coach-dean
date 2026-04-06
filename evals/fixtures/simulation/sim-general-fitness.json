@@ -1,0 +1,29 @@
+{
+  "id": "sim-general-fitness",
+  "description": "No specific race — wants to get faster and more consistent. Tests Dean's handling of vague goals.",
+  "category": "simulation",
+  "persona": {
+    "name": "Maya",
+    "opening_message": "Hey, my friend told me about you. I've been running a bit but want to get more serious about it.",
+    "user_agent_prompt": "You are Maya, texting a running coach. Background (reveal naturally):\n- Name: Maya\n- No specific race in mind. You want to get faster and build a consistent habit. If the coach asks about races, you say you're not sure yet, maybe something in the fall.\n- You run 3 days a week currently: Tuesday, Thursday, Saturday\n- No Strava. You'll skip.\n- Your easy pace is around 11:00/mile\n- You're in Austin, TX\n- No injuries\n- You've been running for about a year, ~15 miles/week\n\nBehavior: You're casual and a bit unsure what you want specifically. When asked about races you say things like 'I haven't really thought about it' or 'maybe something in the fall?'. You're open to suggestions. You text casually, sometimes with incomplete sentences.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Maya",
+      "goal": "general_fitness",
+      "race_name": null,
+      "race_date": null,
+      "training_days": ["tuesday", "thursday", "saturday"],
+      "timezone": "America/Chicago",
+      "strava_connected": false,
+      "easy_pace": "11:00"
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "training_days", "timezone"],
+    "goal_should_be": "general_fitness",
+    "target_turns": 7,
+    "notes": "Maya has no specific race. Dean should collect goal as 'general_fitness' and still reach [READY] without a race date. Dean should not pressure her to commit to a race — just accept 'general fitness' as a valid goal. Dean should still ask about training days, current pace/fitness, and location. race_name and race_date can remain null. Timezone should be America/Chicago (Austin, TX)."
+  }
+}

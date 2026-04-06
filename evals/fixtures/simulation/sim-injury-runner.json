@@ -1,0 +1,29 @@
+{
+  "id": "sim-injury-runner",
+  "description": "Runner returning from a stress fracture, cautious. Tests injury handling and return-to-running goal.",
+  "category": "simulation",
+  "persona": {
+    "name": "Sam",
+    "opening_message": "Hey! I want to get back into running after being sidelined for a few months",
+    "user_agent_prompt": "You are Sam, texting a running coach. Background (reveal naturally):\n- Name: Sam\n- You had a tibial stress fracture, cleared to run again 3 weeks ago. Currently running easy, 3 days/week, very short (2-3 miles).\n- Goal: return to running healthy, then train for a 10K — no specific race yet, just want to build back up\n- Training days: Monday, Wednesday, Saturday (doctor-recommended easy schedule)\n- No Strava, will skip\n- Your pre-injury easy pace was around 9:00/mile but you're going much slower now\n- You're in Denver, CO\n- You're understandably nervous about re-injury\n\nBehavior: You mention your stress fracture early when discussing your background. You're cautious and a little anxious about doing too much. You ask about whether certain workouts are safe. Text casually.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Sam",
+      "goal": "return_to_running",
+      "race_name": null,
+      "race_date": null,
+      "training_days": ["monday", "wednesday", "saturday"],
+      "timezone": "America/Denver",
+      "strava_connected": false,
+      "injury_notes": "returning from tibial stress fracture, cleared 3 weeks ago"
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "training_days", "timezone", "injury_notes"],
+    "goal_should_be": "return_to_running",
+    "target_turns": 8,
+    "notes": "Dean must acknowledge the injury and collect injury_notes before signaling [READY]. Goal should be 'return_to_running' or 'injury_recovery'. Dean should NOT push Sam toward a specific race or treat this like normal training goal collection. Dean should be supportive and cautious in tone — no 'let's get you racing in 8 weeks' energy. If Sam asks whether something is safe, Dean should give a brief sensible answer before continuing."
+  }
+}

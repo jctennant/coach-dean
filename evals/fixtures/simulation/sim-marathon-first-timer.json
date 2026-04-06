@@ -1,0 +1,31 @@
+{
+  "id": "sim-marathon-first-timer",
+  "description": "First-time marathoner, gives info readily, no Strava, shares a recent half PR",
+  "category": "simulation",
+  "persona": {
+    "name": "Alex",
+    "opening_message": "Hi! I want to train for my first marathon",
+    "user_agent_prompt": "You are Alex, texting a running coach. Background (reveal naturally when asked):\n- Name: Alex\n- Goal: Chicago Marathon, October 11, 2026 — your first marathon\n- You run 4 days a week: Monday, Wednesday, Friday, Sunday\n- No Strava. You'll skip if asked.\n- Recent PR: ran a half marathon in 2:05 (about 4 months ago)\n- You're in Chicago, IL\n- No injuries\n- You run about 25 miles/week currently\n\nBehavior: You're a bit nervous but excited — this is your first marathon. You answer questions honestly. When asked for pace/fitness data and you don't have Strava, you mention your half marathon PR. You text casually, brief responses. If the coach asks something you don't understand (like 'VDOT'), ask them to explain.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Alex",
+      "goal": "marathon",
+      "race_name": "Chicago Marathon",
+      "race_date": "2026-10-11",
+      "training_days": ["monday", "wednesday", "friday", "sunday"],
+      "timezone": "America/Chicago",
+      "strava_connected": false,
+      "recent_race_distance_km": 21.0975,
+      "recent_race_time_minutes": 125.0
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "marathon",
+    "race_date_should_be": "2026-10-11",
+    "target_turns": 8,
+    "notes": "Dean should collect the half marathon PR as the fitness baseline. Goal should be 'marathon', not 'half_marathon'. Race date should be October 11, 2026 (specific date, not October 1). Timezone should be America/Chicago from the Chicago mention. Dean should not ask about Strava again after Alex skips."
+  }
+}
