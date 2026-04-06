@@ -379,6 +379,30 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }
   }
 
+  // "Cancel" / "help" keyword: short-circuit before LLM calls.
+  // Send the Stripe portal link directly — no need to route through Claude.
+  if (trigger === "user_message") {
+    const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
+    const isCancelRequest = latestUserMsg && (
+      /^\s*cancel\s*$/i.test(latestUserMsg.content) ||
+      /\b(cancel|unsubscribe|stop\s+subscription|end\s+my\s+subscription|cancel\s+my\s+subscription)\b/i.test(latestUserMsg.content)
+    );
+    const isHelpRequest = latestUserMsg && /^\s*help\s*$/i.test(latestUserMsg.content);
+    if ((isCancelRequest || isHelpRequest) && dashboardToken) {
+      const cancelUrl = `${appUrl}/cancel?token=${dashboardToken}`;
+      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+      if (chatId) await startTyping(chatId);
+      const cancelMsg = isCancelRequest
+        ? `To cancel your subscription, tap here — you can manage everything yourself:\n\n${cancelUrl}\n\nSorry to see you go! Let me know if there's anything I can do.`
+        : `To manage your subscription (cancel, update payment, view invoices), tap here:\n\n${cancelUrl}`;
+      if (!dry_run) {
+        await sendSMS(user.phone_number as string, cancelMsg);
+        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: cancelMsg, message_type: "user_message" });
+      }
+      return NextResponse.json({ ok: true, message: cancelMsg });
+    }
+  }
+
   // For user_message: extract race/pace data BEFORE building the system prompt so the
   // coach responds with accurate paces immediately (not one message later).
   let pendingExtracted: Awaited<ReturnType<typeof extractProfileData>> | null = null;

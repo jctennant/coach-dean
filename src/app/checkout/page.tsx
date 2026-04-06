@@ -107,7 +107,7 @@ function CheckoutContent() {
         {/* Fine print */}
         <p className="text-xs text-gray-400 text-center">
           Your 7-day free trial starts today. You won&apos;t be charged until {trialEndFormatted}.
-          Cancel before then and you&apos;ll never pay a thing.
+          Cancel any time — before or after the trial — by texting &ldquo;cancel&rdquo; to Coach Dean or visiting coachdean.ai/cancel.
         </p>
       </div>
     </div>

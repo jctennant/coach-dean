@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Self-serve subscription cancellation
+
+**Type:** Feature
+**Reported by:** Jake (internal)
+**User feedback:** "It's unclear what the cancel route is — we need to make it easy to do and communicate that in the sign-up flow"
+**Root cause:** No cancellation path existed. The SMS bot promised to send a link that didn't exist. Users had no way to cancel without contacting Jake directly.
+**Fix / Change:** (1) Created `/cancel?token=xxx` page — server-side Stripe Customer Portal redirect, handles cancel/update payment/view invoices. (2) Added cancel keyword shortcut to `coach/respond` — "cancel", "unsubscribe", etc. sends the portal URL instantly without hitting the LLM. Also handles "help" keyword. (3) Updated `handleNonCadenceMessage` to send the real cancel URL instead of a broken promise. (4) Updated payment SMS to include the cancel URL explicitly ("cancel any time — before or after the trial — at coachdean.ai/cancel"). (5) Updated checkout page fine print to say the same. **Note: requires Stripe Customer Portal to be enabled at dashboard.stripe.com/settings/billing/portal.**
+**Files changed:** `src/app/cancel/page.tsx` (new), `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/checkout/page.tsx`
+
+---
+
 ## 2026-04-06 — Post-onboarding UX polish
 
 **Type:** Improvement

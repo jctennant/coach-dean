@@ -367,7 +367,8 @@ describe("POST /api/onboarding/handle — awaiting_cadence step", () => {
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
     const textSent = smsCalls[0]?.[1] as string;
     expect(textSent).toContain("cancel");
-    expect(textSent).toContain("Stripe");
+    // Should either send a portal URL or a fallback contact message
+    expect(textSent.toLowerCase()).toMatch(/cancel|sorry to see you go/);
   });
 
   it("plan not yet sent: sends holding message and re-triggers initial_plan", async () => {

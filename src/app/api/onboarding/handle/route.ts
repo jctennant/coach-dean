@@ -626,8 +626,17 @@ async function handleNonCadenceMessage(
       : "other";
 
   if (msgType.startsWith("cancel")) {
-    const reply =
-      "To cancel, you can manage your subscription at any time through Stripe — just reply 'help' and I'll send you the link. Or text Jake directly at this number and he'll take care of it. Sorry to see you go!";
+    const { data: userData } = await supabase
+      .from("users")
+      .select("dashboard_token")
+      .eq("id", user.id)
+      .single();
+    const dashboardToken = userData?.dashboard_token as string | null;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    const cancelUrl = dashboardToken ? `${appUrl}/cancel?token=${dashboardToken}` : null;
+    const reply = cancelUrl
+      ? `To cancel your subscription, tap here — you can manage everything yourself:\n\n${cancelUrl}\n\nSorry to see you go! Let me know if there's anything I can do.`
+      : "To cancel, just text Jake directly at this number and he'll take care of it right away. Sorry to see you go!";
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_cadence");
     return NextResponse.json({ ok: true });
   }
@@ -1064,7 +1073,8 @@ async function completeOnboarding(
         day: "numeric",
       });
       const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}. Cancel any time before then and you won't pay a thing:\n${checkoutUrl}`;
+      const cancelUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai"}/cancel?token=${dashboardToken}`;
+      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}. Cancel any time — before or after the trial — at ${cancelUrl}\n\n${checkoutUrl}`;
       const phoneNumber = billingUser?.phone_number as string;
       await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
     }
