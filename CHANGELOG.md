@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Extreme ramp guard + mileage regression language fix + manual activity Strava skip
+
+**Type:** Bug Fix / Safety
+**Reported by:** Issue review (users 39c51f9b/Julia, 7f356c80)
+**User feedback:**
+- Issue 2 (Julia): "You're at 60mi this week with one session left (Monday's easy 5mi). That puts you on track for 105mi total — a solid bump from last week's 2.2mi and right in line with your Dipsea prep."
+- Issue 4: "You're at 20.2 mi for the week, closing out week 1 strong. Next week steps up to 17 mi..." (17mi < 20.2mi = step-down, not step-up)
+**Root cause (Issue 2 — confirmed via Julia's activity data and conversation):** Julia texted "It's a 22 mile ride with 2-3,000 feet of climbing." The `user_message` workout extraction parsed this and wrote a manual `activity_type: "Run"` record with `distance_meters: 35405` (22mi) to the activities table — misclassifying a bike ride as a run. Later that day, her real 10.9mi trail run synced via Strava. `computeWeekMileage` then counted both: Apr 5 (10.87mi) + Apr 4 Strava (10.89mi) + Apr 4 manual (22.00mi) + Apr 3 (6.43mi) + Apr 2 (6.01mi) + Apr 1 (3.80mi) = **60.00mi exactly**. The existing dedup only removes manual entries within 15% of the Strava distance — 22mi vs 10.89mi (50% diff) passed through. Julia is a Strava user; her runs are captured automatically via webhook. The manual extraction path was designed for non-Strava users only.
+**Root cause (Issue 4):** When `storedNextPlanWeek.mileage_target < weekMileageSoFar`, there was no prompt instruction preventing Dean from using "steps up" language. The arc's 17mi target was displayed without context that it was lower than the current week's actual.
+**Fix / Change:**
+- In `user_message` handler: skip writing manual workout activities when `user.strava_athlete_id` is set. Strava users' runs arrive via webhook; manual extraction for them creates phantom entries that double-count with real Strava data.
+- In `buildCoachingSignalsBlock`: for ramps >100%, replace the gentle "mention naturally" note with an explicit ⚠️ EXTREME MILEAGE JUMP instruction — Dean must acknowledge the jump directly with the athlete rather than normalize it.
+- In `buildUserMessage` for `user_message`: when `nextWeekContext` target < `weekMileageSoFar`, append a ⚠️ NOTE inline — "This target is LOWER than this week's current mileage. Do NOT say 'steps up' — describe it as a planned lighter week."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-06 — Fix syncArcCurrentWeek being killed by Vercel before it completes
 
 **Type:** Bug Fix

@@ -1461,7 +1461,12 @@ function buildCoachingSignalsBlock(signals: CoachingSignals): string {
   }
 
   if (signals.weekOverWeekRampPct !== null && signals.weekOverWeekRampPct > 10) {
-    lines.push(`- Mileage ramp: current week is +${Math.round(signals.weekOverWeekRampPct)}% above last completed week (above the 10% guideline). This compares the current week's mileage so far vs the prior full week — not the week before that. Mention this naturally in post-run feedback or the weekly recap — bones and tendons adapt slower than cardiovascular fitness, so big jumps are where overuse injuries originate. Keep the tone matter-of-fact, not alarming.`);
+    const pctStr = `+${Math.round(signals.weekOverWeekRampPct)}%`;
+    if (signals.weekOverWeekRampPct > 100) {
+      lines.push(`⚠️ EXTREME MILEAGE JUMP: Current week is ${pctStr} above last completed week. This is a very large spike — well above safe training build rates. Do NOT describe it as "right on track," "solid," or normalize it without comment. Before discussing workouts, explicitly check in with the athlete: "That's a big jump from last week — how's your body feeling with the increased load?" Flag the jump matter-of-factly and gauge their response before recommending more volume. Bones and tendons adapt much slower than the cardiovascular system.`);
+    } else {
+      lines.push(`- Mileage ramp: current week is ${pctStr} above last completed week (above the 10% guideline). This compares the current week's mileage so far vs the prior full week — not the week before that. Mention this naturally in post-run feedback or the weekly recap — bones and tendons adapt slower than cardiovascular fitness, so big jumps are where overuse injuries originate. Keep the tone matter-of-fact, not alarming.`);
+    }
   }
 
   if (signals.totalTrackedMiles > 400) {
@@ -2718,8 +2723,11 @@ async function persistProfileUpdates(
         : (extracted.other_notes as string);
     }
 
-    // Write manual workout to activities table if reported
-    if (hasWorkout && extracted.workout) {
+    // Write manual workout to activities table if reported.
+    // Skip for Strava users — their runs come in via webhook automatically, and writing
+    // a manual entry from conversation creates phantom activities that stack on top of
+    // real Strava data and inflate weekly mileage totals.
+    if (hasWorkout && extracted.workout && !user.strava_athlete_id) {
       const w = extracted.workout;
       const activityDate = new Date();
       activityDate.setDate(activityDate.getDate() + (w.date_offset ?? 0));
@@ -2981,7 +2989,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
     }
     case "user_message": {
       const nextWeekContext = storedNextPlanWeek
-        ? `Week ${storedNextPlanWeek.week_number} (next week): ${storedNextPlanWeek.mileage_target} mi target, long run ${storedNextPlanWeek.long_run_target} mi, key workout: ${storedNextPlanWeek.key_workout}`
+        ? `Week ${storedNextPlanWeek.week_number} (next week): ${storedNextPlanWeek.mileage_target} mi target, long run ${storedNextPlanWeek.long_run_target} mi, key workout: ${storedNextPlanWeek.key_workout}${weekMileageSoFar > storedNextPlanWeek.mileage_target ? ` ⚠️ NOTE: This target (${storedNextPlanWeek.mileage_target}mi) is LOWER than this week's current mileage (${weekMileageSoFar.toFixed(1)}mi). Do NOT say "steps up" or "stepping up the volume" — describe it as a planned lighter week and explain why (pre-race management, recovery, arc design).` : ''}`
         : null;
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
