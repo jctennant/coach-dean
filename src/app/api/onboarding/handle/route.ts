@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       result = await handleConversation(user, message, onboardingData, chatId);
       break;
     case "awaiting_strava":
-      result = await handleStrava(user, message, onboardingData);
+      result = await handleStrava(user, message, onboardingData, chatId);
       break;
     case "awaiting_cadence":
       result = await handleCadence({ ...user, onboarding_data: onboardingData }, message);
@@ -188,20 +188,23 @@ Your job: collect the information below through natural conversation, then signa
 WHAT TO COLLECT:
 Required before signaling [READY]:
 - Athlete's name (ask in your first message if not already known)
-- Training goal (specific race/event name and type, or general fitness)
+- Training goal (specific race/event name and type, or general fitness). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
 - Training schedule (which days of the week work best)
-
-Important — collect naturally, don't skip:
-- Race date (if they have a named race — use web_search to look it up if needed)
+- Race date (if they have a named race — MANDATORY: always web_search the exact date, never state one from memory)
 - Fitness baseline: a recent race PR, current easy pace, OR Strava is connected
 - Location / city (to send reminders at the right time)
+
+Required ONLY for ultra goals (30k, 50k, 50mi, 100k, 100mi) — must collect before [READY]:
+- Ultra and trail race background: how many ultras have they done? Any trail races? This is essential for planning.
+- Injury or physical limitation notes
+
+Required ONLY for return_to_running or injury_recovery goals — must collect before [READY]:
+- Injury or physical limitation notes (what happened, current status)
 
 Optional (only collect if it comes up naturally):
 - Goal finish time for the race
 - Other races this season (B/C tune-up races)
 - Current weekly mileage (only if Strava not connected and not mentioned)
-- Injury or physical limitation notes
-- Ultra / trail background (only for 50K+ goals)
 
 WHAT YOU ALREADY KNOW:
 ${collected || "Nothing yet."}
@@ -214,7 +217,9 @@ INSTRUCTIONS:
 - Be warm and specific to their goal. 3–4 sentences per message max.
 - Plain text only. No markdown, asterisks, or bullet points.
 - If they ask a coaching question, answer it briefly, then continue naturally.
-- Whenever the athlete names a race, always use web_search to find the exact date — never state or assume a date from memory. A month alone (e.g. "July") is not enough; get the specific day.
+
+RACE DATE — MANDATORY SEARCH:
+The moment an athlete mentions a specific named race, call web_search immediately to find the exact date. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong. A month alone ("next April", "this fall") is never enough — get the specific day.
 ${isFirstResponse
   ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
   : "- You have already introduced yourself in a previous message. Do NOT re-introduce yourself or repeat what you do. Do NOT open with 'Hey [name]!' or any greeting phrase like 'Great to meet you', 'Great to hear from you', 'Nice to meet you', 'Glad you're here', etc. Acknowledge what they just said and move forward."
@@ -225,7 +230,11 @@ Ask about Strava early — once you have the athlete's name and goal, it should 
 
 SIGNALING READY:
 When you have goal + training_days + at least one of (pace/PR data OR Strava connected) + location, end your final message with [READY] on its own line. The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
-When you signal [READY], do not ask any more questions in that message. Wrap up warmly and set expectations (e.g. "I'll get your plan put together now") — the plan will be sent right after.`;
+When you signal [READY], do not ask any more questions in that message. Wrap up warmly and set expectations (e.g. "I'll get your plan put together now") — the plan will be sent right after.
+
+ULTRA AND INJURY GOALS — extra required fields:
+For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
+For return_to_running or injury_recovery goals: you MUST ask about the injury/limitation and current status before [READY].`;
 
   // Call Claude Sonnet — web_search handles race date lookups automatically
   const claudeResponse = await anthropic.messages.create({
@@ -432,7 +441,7 @@ Output format (include only fields that are clearly stated — use null for anyt
 
 Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess.
-- goal: use "trail_race" for trail/mountain races that aren't standard road distances (e.g. a 5mi, 8.9mi, 15mi trail race). Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances.
+- goal: use "trail_race" for trail/mountain races that aren't standard road distances (e.g. a 5mi, 8.9mi, 15mi trail race). Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. IMPORTANT: if the athlete says they have no committed race — only aspirational/eventual talk ("maybe a marathon someday", "thinking about eventually") — use "return_to_running" or "general_fitness", NOT the race distance. The goal must reflect what they are actually training for right now, not what they might do later.
 - training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"])
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
 - race_date: use the most specific date mentioned for the goal race. If a specific date (day + month) was stated by either participant, use that exact date. Only default to first of month if no specific date was ever given. Today is ${today}.
@@ -460,7 +469,8 @@ Rules:
 async function handleStrava(
   user: { id: string; phone_number: string; name: string | null },
   message: string,
-  onboardingData: Record<string, unknown>
+  onboardingData: Record<string, unknown>,
+  chatId?: string | null
 ): Promise<NextResponse> {
   const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
   const isSkip = /\b(skip|no strava|don.?t have|no thanks|nope|later|next|without it)\b/i.test(message);
@@ -479,7 +489,10 @@ async function handleStrava(
     return NextResponse.json({ ok: true });
   }
 
-  // User skipped Strava — return to onboarding conversation
+  // User skipped Strava — return to unified conversation handler
+  // Route back through handleConversation so Dean has full context of what
+  // was already asked (avoiding double-asking questions like training days
+  // that may have been bundled in the same message as the Strava link).
   const mergedData = { ...onboardingData, strava_skipped: true };
   await supabase.from("users").update({
     onboarding_step: "onboarding",
@@ -488,33 +501,7 @@ async function handleStrava(
 
   void trackEvent(user.id, "onboarding_strava_skipped", {});
 
-  // Generate a natural "no worries + next question" reply using Haiku
-  const collected = summarizeCollected(mergedData);
-  const nextResponse = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 150,
-    system: `You are Coach Dean, an AI running coach. The athlete just skipped connecting Strava. In 2 sentences max: briefly acknowledge (e.g. "No worries!"), then ask the single most important missing piece.
-
-Already collected:
-${collected || "Nothing yet."}
-
-Ask for training days if missing. If training days are collected, ask for their city/timezone. Plain text only.`,
-    messages: [{ role: "user", content: message }],
-  });
-
-  const replyText =
-    nextResponse.content[0].type === "text"
-      ? nextResponse.content[0].text.trim()
-      : "No worries! Which days of the week work best for your training?";
-
-  await supabase.from("conversations").insert({
-    user_id: user.id,
-    role: "user",
-    content: message,
-    message_type: "user_message",
-  });
-  await sendAndStore(user.id, user.phone_number, replyText, "onboarding");
-  return NextResponse.json({ ok: true });
+  return handleConversation(user, message, mergedData, chatId);
 }
 
 // ---------------------------------------------------------------------------

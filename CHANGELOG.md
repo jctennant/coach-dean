@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Onboarding prompt improvements: goal classification, race dates, ultra fields, Strava skip routing
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (eval results — simulation-2026-04-06T22-23-41)
+**User feedback:** N/A (caught by simulation evals — 6 of 10 fixtures scoring below 9/10)
+**Root cause (4 issues):**
+1. Race dates wrong from memory: despite the "always web_search" instruction, Dean was still stating race dates from memory (London April 1 instead of April 26, Boston April 20 instead of April 21). The instruction was too soft.
+2. Goal misclassification for aspirational mentions: users returning to running or recovering from injury who mentioned a distant "maybe someday" race were classified as marathon/10k instead of return_to_running/injury_recovery.
+3. Ultra required fields missed: ultra_race_history and injury_notes are required for safe 50K+ training plan generation, but were listed as "optional" — Dean was skipping them.
+4. Training days double-asked after Strava skip: the Strava skip path used a hardcoded Haiku snippet ("ask for training days if missing") which re-asked questions that were already asked (but not yet answered) in the same message as the Strava link.
+**Fix / Change:**
+1. Renamed web search instruction to "RACE DATE — MANDATORY SEARCH" with stronger language: "call web_search immediately… do not state, confirm, or summarize any race date without first searching."
+2. Added explicit goal classification rule to both Dean's system prompt and Haiku extraction: aspirational mentions don't override stated primary goal; no committed race = return_to_running or general_fitness.
+3. Moved ultra/trail background + injury notes to "Required ONLY for ultra goals" section; injury notes also required for return_to_running/injury_recovery goals.
+4. Strava skip now routes back through the full handleConversation (Sonnet with full history) instead of an abbreviated Haiku snippet — Dean sees what was already asked and won't re-ask. This also aligns with the "let Claude deal with it" architecture philosophy.
+5. Updated run-simulation-evals.mjs to match all four prompt changes (parity requirement).
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-04-06 — Five onboarding UX fixes (name, repetition, days, plan timing, race dates)
 
 **Type:** Bug Fix / Improvement

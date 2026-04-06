@@ -230,16 +230,18 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 describe("POST /api/onboarding/handle — awaiting_strava step", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("skip: sets step to onboarding and asks next question", async () => {
+  it("skip: sets strava_skipped and routes back through handleConversation", async () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
 
     mockTables({
       users: { data: onboardingUser({ onboarding_step: "awaiting_strava" }), error: null },
-      conversations: { data: null, error: null },
+      conversations: { data: [], error: null },
     });
 
-    // Haiku: next question after skip
+    // Sonnet: conversation response after skip
     mockLLMResponse("No worries! Which days of the week work best for training?");
+    // Haiku: field extraction
+    mockLLMResponse("{}");
 
     await POST(makeRequest({ userId: "user-001", message: "skip" }));
 
