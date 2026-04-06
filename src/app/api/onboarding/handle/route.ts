@@ -456,10 +456,13 @@ Rules:
     // Fall back to web-search-extracted distance (e.g. Dipsea = 7.4mi) when the goal message
     // didn't include an explicit distance for the classifier to parse.
     // completeOnboarding will fall back to the bucket standard if this is null.
+    // Also update the goal bucket when web search provides the distance — the classifier
+    // uses "50k" as a placeholder for unknown-distance named races (e.g. "Cirque Series Snowbird"),
+    // so the bucket must be corrected once the actual distance is known.
     ...(parsed.goal_distance_miles != null
       ? { goal_distance_miles: parsed.goal_distance_miles }
       : raceInfo.distanceMiles != null
-        ? { goal_distance_miles: raceInfo.distanceMiles }
+        ? { goal_distance_miles: raceInfo.distanceMiles, goal: distanceMilesToGoalBucket(raceInfo.distanceMiles) }
         : {}),
   };
 
@@ -725,13 +728,15 @@ async function handleOtherRaces(
   }
 
   const secondaryGoalContext = onboardingData.secondary_goal as string | null;
+  const storedARaceName = onboardingData.race_name as string | null;
+  const storedARaceDate = onboardingData.race_date as string | null;
   const [parseResponse, acknowledgment] = await Promise.all([
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 500,
       system: `The athlete was asked which race is their top priority, and may confirm it or name a different one.
 Return ONLY valid JSON, no other text.
-${secondaryGoalContext ? `\nIMPORTANT — Previously mentioned races: The athlete already mentioned these other races in their first message: "${secondaryGoalContext}". Even if their reply is brief (e.g. "yes", "yep, that's my A race"), include those previously mentioned races in other_races with appropriate priorities. Do not omit them just because they weren't repeated.\n` : ""}
+${storedARaceName || storedARaceDate ? `\nA RACE CONTEXT: The current A race on file is${storedARaceName ? ` "${storedARaceName}"` : ""}${storedARaceDate ? ` on ${storedARaceDate}` : ""}. Use this when applying confirmed_a_race_date rules below.\n` : ""}${secondaryGoalContext ? `\nIMPORTANT — Previously mentioned races: The athlete already mentioned these other races in their first message: "${secondaryGoalContext}". Even if their reply is brief (e.g. "yes", "yep, that's my A race"), include those previously mentioned races in other_races with appropriate priorities. Do not omit them just because they weren't repeated.\n` : ""}
 Output format: {
   "confirmed_a_race_date": "YYYY-MM-DD" | null,
   "other_races": [
@@ -750,10 +755,11 @@ Output format: {
 }
 
 confirmed_a_race_date rules:
-- Set when the athlete confirms or corrects the date for the ORIGINAL asked-about race (not a promoted new A race)
-- If they say "yes" to a pre-filled date: return that same date
-- If they provide a correction ("no, it's June 21"): return the corrected date
-- If they don't mention the A race date at all: return null
+- Set ONLY when the athlete explicitly confirms or corrects the date for the A race itself (the race named in A RACE CONTEXT above, not any other race)
+- If they say "yes" without mentioning a date: return null (the stored date is already correct — no update needed)
+- If they provide a correction to the A race date ("no, it's June 21"): return the corrected date
+- If they mention dates for OTHER races (Dipsea, Half Marathon, etc.): those dates belong in other_races only — do NOT use them as confirmed_a_race_date
+- CRITICAL: A date that belongs to a non-A race (e.g. "Dipsea on June 14th") must NEVER be placed in confirmed_a_race_date. It must appear in other_races with the correct race name.
 - Do NOT set this when new_a_race is set — use new_a_race.date instead
 
 new_a_race rules:
@@ -891,6 +897,12 @@ If no other races mentioned AND no previously mentioned races context, return: {
     // Original A race confirmed — apply the date (may be correction of the pre-fill)
     mergedData = { ...mergedData, race_date: confirmedARaceDate, race_date_confirmed: true };
     console.log(`[onboarding] A race date confirmed inline: ${confirmedARaceDate}`);
+  } else if (!newARace && mergedData.race_date) {
+    // User said "yes" (or similar confirmation) without providing a date — Haiku returned null
+    // for confirmed_a_race_date (correct behavior per the updated prompt rules). Mark the stored
+    // date as confirmed so we don't loop back to awaiting_race_date unnecessarily.
+    mergedData = { ...mergedData, race_date_confirmed: true };
+    console.log(`[onboarding] A race date confirmed by implicit yes, keeping stored date: ${mergedData.race_date as string}`);
   }
 
   mergedData = {

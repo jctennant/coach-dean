@@ -238,6 +238,48 @@ describe("handleGoal — multi-race routing", () => {
     // Single race → awaiting_race_date first (normal flow)
     expect(stepUpdate[0].onboarding_step).toBe("awaiting_race_date");
   });
+
+  it("corrects goal bucket from '50k' placeholder when web search provides actual distance", async () => {
+    // Bug reproduction: classifier returns "50k" as placeholder for unnamed-distance race.
+    // Web search finds the race is 8.9 miles → goal should be updated to "10k", not left as "50k".
+    const cirqueAck = {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ack: "Snowbird's a fun one — 8.9 miles with 3,610' up to Mt. Baldy.",
+          date: "2026-07-11",
+          distance_miles: 8.9,
+          secondary_goal: null,
+          distance_options: null,
+        }),
+      }],
+    };
+
+    vi.mocked(anthropic.messages.create)
+      // Classifier: returns "50k" as placeholder (no distance in race name)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"50k","race_name":"Cirque Series Snowbird","goal_distance_miles":null}' }] })
+      .mockResolvedValueOnce(EXTRACT_JAKE)
+      .mockResolvedValueOnce(DETECT_NULL)
+      .mockResolvedValueOnce(cirqueAck);
+
+    const usersChain = chain({ data: goalUser(), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "Cirque Series Snowbird on July 11th" }));
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
+    expect(stepUpdate).toBeDefined();
+    const data = stepUpdate[0].onboarding_data;
+    // goal must be corrected from "50k" to the proper bucket for 8.9 miles ("10k")
+    expect(data.goal).toBe("10k");
+    expect(data.goal_distance_miles).toBe(8.9);
+    expect(data.race_name).toBe("Cirque Series Snowbird");
+  });
 });
 
 // ============================================================
@@ -459,6 +501,83 @@ describe("handleOtherRaces — date confirmation in same turn", () => {
     // parseCalls[0] = checkOffTopic, parseCalls[1] = parse (first of parallel pair)
     const parseCallSystem = parseCalls[1][0].system as string;
     expect(parseCallSystem).toContain("Sierre Zinal 31k in August");
+  });
+
+  it("includes A race name and date in the LLM system prompt for date disambiguation", async () => {
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce(ON_TOPIC)
+      .mockResolvedValueOnce(otherRacesResponse({ confirmed_a_race_date: null, other_races: [] }))
+      .mockResolvedValueOnce(ACK_NULL);
+
+    const usersChain = chain({ data: multiRaceOtherRacesUser(), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      return chain({ data: null, error: null });
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "Yes, that's my A race" }));
+
+    const parseCalls = vi.mocked(anthropic.messages.create).mock.calls;
+    const parseCallSystem = parseCalls[1][0].system as string;
+    // Should include A race context so Haiku doesn't confuse other races' dates with the A race date
+    expect(parseCallSystem).toContain("A RACE CONTEXT");
+    expect(parseCallSystem).toContain("Dipsea");
+    expect(parseCallSystem).toContain("2026-06-14");
+  });
+
+  it("marks race_date_confirmed when user says yes with stored race_date (implicit confirmation)", async () => {
+    // Bug reproduction: user says "Yes - Dipsea on June 14th" (A race = Snowbird July 11,
+    // Dipsea is a B race). Old behavior: Haiku extracted June 14 as confirmed_a_race_date
+    // (overwriting Snowbird's date). New behavior: Haiku returns null for confirmed_a_race_date
+    // (correct), and the code marks the stored date as confirmed.
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce(ON_TOPIC)
+      // Haiku correctly returns null for confirmed_a_race_date (user said "yes", not a date)
+      .mockResolvedValueOnce(otherRacesResponse({
+        confirmed_a_race_date: null,
+        other_races: [{ date: "2026-06-14", name: "Dipsea", goal: "10k", priority: "B" }],
+      }))
+      .mockResolvedValueOnce(ACK_NULL);
+
+    const snowbirdUser = {
+      id: "user-001",
+      phone_number: "+12025551234",
+      name: "Jake",
+      onboarding_step: "awaiting_other_races",
+      onboarding_data: {
+        goal: "10k",
+        race_name: "Cirque Series Snowbird",
+        goal_distance_miles: 8.9,
+        race_date: "2026-07-11",           // Snowbird's date — must NOT be overwritten
+        race_date_confirmed: false,
+        secondary_goal: null,
+        intro_sent: true,
+        name: "Jake",
+      },
+    };
+
+    const usersChain = chain({ data: snowbirdUser, error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      return chain({ data: null, error: null });
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "Yes - Dipsea on June 14th and a half marathon time trial on May 31st" }));
+
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
+    expect(stepUpdate).toBeDefined();
+
+    const data = stepUpdate[0].onboarding_data;
+    // Snowbird's date must be preserved — NOT overwritten with Dipsea's June 14
+    expect(data.race_date).toBe("2026-07-11");
+    expect(data.race_date_confirmed).toBe(true);
+    // Dipsea should appear in other_races
+    expect(data.other_races).toHaveLength(1);
+    expect(data.other_races[0].name).toBe("Dipsea");
+    expect(data.other_races[0].date).toBe("2026-06-14");
+    // Should NOT loop back to awaiting_race_date
+    expect(stepUpdate[0].onboarding_step).not.toBe("awaiting_race_date");
   });
 });
 

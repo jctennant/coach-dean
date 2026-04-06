@@ -514,8 +514,17 @@ function UpcomingRaces({ races }: { races: Race[] }) {
       <div className="space-y-2">
         {races.map(race => {
           const days = daysUntilRace(race.race_date);
-          const distanceLabel = race.goal_distance_miles
-            ? GOAL_DISTANCE_LABELS[race.goal] ?? `${race.goal_distance_miles} mi`
+          // Prefer the stored specific distance when it's non-standard (e.g. 8.9 mi for Cirque Series).
+          // Use the bucket label (e.g. "50K") only when goal_distance_miles is null (standard distance)
+          // or matches the standard bucket value — avoids showing "50K" for an 8.9-mile race.
+          const STANDARD_BUCKET_MILES: Record<string, number> = {
+            mile: 1.0, "5k": 3.107, "10k": 6.214, half_marathon: 13.109, marathon: 26.219,
+            "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
+          };
+          const isNonStandardDistance = race.goal_distance_miles != null
+            && Math.abs(race.goal_distance_miles - (STANDARD_BUCKET_MILES[race.goal] ?? -1)) > 0.5;
+          const distanceLabel = isNonStandardDistance
+            ? `${race.goal_distance_miles} mi`
             : GOAL_DISTANCE_LABELS[race.goal] ?? race.goal;
           return (
             <div key={race.id} className="flex items-center justify-between gap-3">

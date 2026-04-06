@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Fix: three onboarding bugs (wrong goal bucket, date confusion, 50K display label)
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (testing)
+**User feedback:** "1) my plan was all easy miles for week one, even though my history shows I have a very good base 26+ miles/week for many months. 2) the dashboard didn't show dipsea at all, even though I mentioned it as a race 3) cirque series showed as a 50k in my dashboard even though Dean knew it was 8.9 miles (also shows up as a 50k in coaches note)"
+**Root cause (three separate bugs):**
+1. `handleGoal` set `goal: "50k"` as placeholder for named races with no explicit distance in the name (e.g. "Cirque Series Snowbird"), then updated `goal_distance_miles` from web search (8.9 mi) but never corrected the goal bucket. The whole plan was generated under "50k ultra" logic for an 8.9-mile mountain race.
+2. `handleOtherRaces` prompt didn't tell Haiku what the A race's stored date was. When Jake said "Yes - Dipsea on June 14th…", Haiku set `confirmed_a_race_date: "2026-06-14"` (Dipsea's date), overwriting Snowbird's July 11 date. Dipsea then had no date in `other_races` and was filtered out.
+3. `UpcomingRaces` in the dashboard checked `GOAL_DISTANCE_LABELS[race.goal]` first even when `goal_distance_miles` was set, so "50K" won over "8.9 mi".
+**Fix / Change:**
+1. `handleGoal`: when web search provides `distanceMiles`, also update `goal` via `distanceMilesToGoalBucket(distanceMiles)` so the coaching system uses the correct training approach.
+2. `handleOtherRaces`: pass A race name and stored date in the Haiku prompt. Clarify rules: `confirmed_a_race_date` must only be set for the A race's own date, not for dates belonging to other races. Added implicit-yes handling: when Haiku returns null (user said "yes" with no specific date) and there's a stored date, mark it confirmed without looping back to `awaiting_race_date`.
+3. `UpcomingRaces`: check if `goal_distance_miles` is non-standard (differs from bucket standard by >0.5 mi) and prefer it over the bucket label.
+4. `buildUserMessage` initial_plan: added explicit instructions that HIGH VOLUME athletes must get ≥1 quality session in week 1 (no all-easy sandbagging), and mountain/trail races with elevation gain need vert-specific work from day 1.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/dashboard/page.tsx`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/multi-race-onboarding.test.ts`
+
 ## 2026-04-06 — Fix: onboarding re-asks "What are you training for?" instead of answering multi-race process question
 
 **Type:** Bug Fix
