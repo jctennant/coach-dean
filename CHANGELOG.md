@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Fixed new users getting no response on first message
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal testing)
+**User feedback:** "didn't get a response when I messaged Hey Dean! as a new user"
+**Root cause:** After the onboarding revamp, the unified conversation handler fires on `onboarding_step = "onboarding"`, but new users were still being created with `onboarding_step = "awaiting_goal"`. The switch in `onboarding/handle` has no case for `"awaiting_goal"`, so it hit the default branch and returned `{ ok: true }` silently — no message sent.
+**Fix / Change:** Changed new user insert in the linq webhook to set `onboarding_step: "onboarding"` so they immediately enter the unified conversation handler.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`
+
+---
+
 ## 2026-04-06 — Self-serve subscription cancellation
 
 **Type:** Feature

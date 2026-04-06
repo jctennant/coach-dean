@@ -249,7 +249,7 @@ async function handleInboundMessage(
       .from("users")
       .insert({
         phone_number: senderPhone,
-        onboarding_step: "awaiting_goal",
+        onboarding_step: "onboarding",
         timezone: inferTimezoneFromPhone(senderPhone),
       })
       .select("id")
