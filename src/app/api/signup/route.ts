@@ -33,8 +33,8 @@ export async function POST(request: Request) {
     .from("users")
     .insert({
       phone_number: phone,
-      onboarding_step: "awaiting_goal",
-      onboarding_data: { intro_sent: true },
+      onboarding_step: "onboarding",
+      onboarding_data: {},
     })
     .select("id")
     .single();

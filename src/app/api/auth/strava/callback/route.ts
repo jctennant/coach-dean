@@ -110,7 +110,7 @@ export async function GET(request: Request) {
     ...(stravaState ? { strava_state: stravaState } : {}),
   };
 
-  // Only advance to awaiting_schedule if the user is currently on awaiting_strava.
+  // Only advance to onboarding if the user is currently on awaiting_strava.
   // If they've already progressed past it (e.g. they texted during the Strava step
   // and handleStrava advanced them), leave the step as-is — overwriting it would
   // reset them backwards and repeat already-answered questions.
@@ -124,7 +124,7 @@ export async function GET(request: Request) {
       strava_refresh_token: refresh_token,
       strava_token_expires_at: new Date(expires_at * 1000).toISOString(),
       name: resolvedName,
-      ...(shouldAdvanceToSchedule ? { onboarding_step: "awaiting_schedule" } : {}),
+      ...(shouldAdvanceToSchedule ? { onboarding_step: "onboarding" } : {}),
       ...(timezone ? { timezone } : {}),
       onboarding_data: updatedOnboardingData as unknown as Json,
     })

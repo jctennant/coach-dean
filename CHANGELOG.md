@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Onboarding refactor: unified Claude conversation handler
+
+**Type:** Refactor
+**Reported by:** Internal observation / Jake feedback
+**User feedback:** "It feels like we may want to remove some of our scaffolding and just let claude deal with it more"
+**Root cause:** The 12-step rigid state machine (`awaiting_goal` → `awaiting_race_date` → … → `awaiting_cadence`) required constant patches for edge cases like off-topic detection misfires, loop detection, multi-race confusion, and natural conversation derailing the expected step sequence.
+**Fix / Change:** Replaced ~3300 lines of step handler code with a ~550-line unified handler. Single `onboarding` step drives all pre-Strava, pre-plan conversation through Claude Sonnet (with web_search for race date lookups). One Haiku call extracts all structured fields from the full conversation after each exchange. Off-topic detection, loop detection, de-escalation, and all step-specific handler functions deleted. `awaiting_strava`, `awaiting_cadence`, and `awaiting_payment` remain as hard stops for specific flow gates.
+**Files changed:** `src/app/api/onboarding/handle/route.ts` (rewritten), `src/app/api/signup/route.ts` (step name: `awaiting_goal` → `onboarding`), `src/app/api/auth/strava/callback/route.ts` (step advance: `awaiting_schedule` → `onboarding`), `src/__tests__/api/onboarding-handle.test.ts` (rewritten), `src/__tests__/api/multi-race-onboarding.test.ts` (rewritten)
+
+---
+
 ## 2026-04-06 — Improve initial plan quality across all fitness tiers
 
 **Type:** Improvement
