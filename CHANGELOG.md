@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Fix: onboarding re-asks "What are you training for?" instead of answering multi-race process question
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (testing)
+**User feedback:** "A number of different races actually - should I say all of them or just pick one?" → Coach Dean replied "Hey Jake! What are you training for — a race, general fitness, something else?" (ignored the question entirely)
+**Root cause:** `detectAndAnswerImmediate` only recognized coaching questions and capability questions — not process/guidance questions about how to answer the current onboarding step. So "should I say all of them or just pick one?" returned null, and the fallback re-asked the same question verbatim.
+**Fix / Change:** (1) Added "process/guidance questions" as a recognized question type in `detectAndAnswerImmediate`, with a specific instruction to answer multi-race questions with "Just tell me your main goal race — we can add other races after." (2) When `introAlreadySent` is true and `questionAnswer` is returned, use the question answer alone instead of prepending it before the re-ask — the answer already redirects the athlete, so appending the re-ask was redundant.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
 ## 2026-04-06 — Fix: session swaps not updating dashboard when athlete requests in-week changes
 
 **Type:** Bug Fix

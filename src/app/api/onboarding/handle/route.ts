@@ -348,9 +348,15 @@ Rules:
       responseText = "Sorry, didn't quite catch your name — what should I call you?";
     }
 
-    // Prepend any immediate question answer (Bug 1 fix)
+    // Prepend any immediate question answer (Bug 1 fix).
+    // When the intro has already been sent and the question answer naturally redirects
+    // ("just tell me your main race..."), using it alone avoids a redundant re-ask.
     if (questionAnswer) {
-      responseText = `${questionAnswer}\n\n${responseText}`;
+      if (introAlreadySent) {
+        responseText = questionAnswer;
+      } else {
+        responseText = `${questionAnswer}\n\n${responseText}`;
+      }
     }
 
     const { chatId: learnedChatId } = await sendAndStore(user.id, user.phone_number, responseText, "awaiting_goal");
@@ -2953,10 +2959,10 @@ function removeNulls(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * Detects whether the user's first message contains an immediate question — either a
- * coaching question (pacing, race-day tactics, training advice) or a capability/service
- * question ("do you work with cyclists?", "can you help with triathlon?") — and returns
- * a brief answer. Returns null if no question is present.
+ * Detects whether the user's message contains any question and answers it briefly.
+ * Covers: coaching advice, features/capabilities, pricing, competitor comparisons,
+ * process questions ("should I say all my races?"), skepticism, anything else.
+ * Returns null if no question is present.
  */
 async function detectAndAnswerImmediate(
   message: string,
@@ -2964,17 +2970,23 @@ async function detectAndAnswerImmediate(
 ): Promise<string | null> {
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 250,
-    system: `You are Coach Dean, a friendly AI endurance coach. A new athlete training for ${goal} just sent their first message. It may contain a question alongside background info about themselves.
+    max_tokens: 300,
+    system: `You are Coach Dean, a friendly AI running and endurance coach. A new athlete just signed up and sent their first message. It may contain a question alongside background info or a goal.
 
-If the message contains a genuine question of any of these types:
-- Coaching questions: race prep, pacing advice, training volume, race-day tactics, nutrition, gear
-- Capability/service questions: whether Dean works with a certain type of athlete or sport ("do you work with cyclists?", "can you help with triathlon?", "do you coach beginners?")
-Answer it briefly and helpfully in 1-2 sentences. Be warm and specific. Plain text only — no markdown, no bullet points, no asterisks. Return only your answer.
+If the message contains ANY question, answer it briefly and helpfully in 1-2 sentences. Be warm, direct, and confident. Plain text only — no markdown, no bullet points, no asterisks.
 
-IMPORTANT: Do NOT ask follow-up questions. Do NOT request more information from the athlete. If you would need to ask a question to answer properly, just return {"no_question": true} instead.
+Guidance for common questions:
+- Pricing / cost: "Right now it's free while I'm in early access — no credit card needed."
+- Features / what can you do: "I build personalized training plans, analyze your Strava runs, adjust your plan week to week based on how training's going, and I'm always here by text if you have questions."
+- Competitor comparisons (Runna, Final Surge, TrainingPeaks, a human coach, etc.): Acknowledge the comparison warmly and highlight that Dean is conversational, adapts in real time, and is always reachable by text — don't knock competitors.
+- Capability questions (triathlons, cycling, beginners, etc.): Answer honestly. Dean works with runners and triathletes of all levels.
+- Process/how-to-answer questions ("should I say all my races?", "does it matter which one I pick?"): "Just tell me your main goal race — we can add other races on the calendar after."
+- Coaching questions (pacing, race-day tactics, training volume, nutrition, gear): Answer briefly and specifically.
+- Skepticism ("will this actually work?", "how is an AI going to help me?"): Be honest and confident — Dean learns the athlete's context and adapts, unlike static plans.
 
-If there is no question — just goal-setting, background info, or race/training context — return only: {"no_question": true}`,
+IMPORTANT: Do NOT ask follow-up questions. Do NOT request more information. If you genuinely cannot answer without more context, return {"no_question": true} instead.
+
+If there is no question — just goal-setting context, background info, or a statement — return only: {"no_question": true}`,
     messages: [{ role: "user", content: message }],
   });
 
