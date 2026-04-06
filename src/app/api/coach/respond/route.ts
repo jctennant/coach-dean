@@ -819,7 +819,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           pendingExtracted,
           originalProfile,
           (user.onboarding_data as Record<string, unknown>) || {},
-          userTimezone
+          userTimezone,
+          hasStrava
         );
       }
       const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
@@ -1708,7 +1709,9 @@ If changes WERE made, return the full updated sessions list AND the new key work
 {"changed": true, "sessions": [{"day": "Mon"|"Tue"|..., "date": "M/D", "label": "..."}], "key_workout": "brief label for the defining quality session this week, e.g. '6×800m @ 5K pace' or '4mi tempo'. Null if no quality session was added or changed."}
 
 Rules:
-- Only mark changed=true if the coach explicitly agreed to a change
+- Mark changed=true if the coach agreed to a session change — explicit past-tense ("Done — moved strength to Sunday", "I've moved...", "Switched...") OR explicit future-tense confirmation ("Moving strength to Sunday", "I'll put the easy 3mi on Tuesday instead", "Sure — strength goes to Sunday"). Do NOT require "I've updated" specifically.
+- Mark changed=false if the coach only gave general advice, asked a clarifying question, or suggested a change without agreeing to it.
+- For day swaps: update BOTH the "day" field AND the "date" field. The date for each session should match the calendar date of its new day. Infer dates from the existing sessions (e.g. if Mon is "4/7" and Tue is "4/8", Sun would be "4/13").
 - Preserve all unchanged sessions exactly as-is
 - If a session was cancelled with no replacement, omit it from the list
 - key_workout: pick the most quality-focused session that changed (intervals, tempo, race-specific work). If only easy runs changed, set to null.
@@ -2617,7 +2620,8 @@ async function persistProfileUpdates(
   extracted: ExtractedProfileData,
   profile: Record<string, unknown> | null,
   onboardingData: Record<string, unknown>,
-  timezone?: string
+  timezone?: string,
+  hasStravaConnected?: boolean
 ): Promise<void> {
   void timezone; // received but not used in persistence logic
   try {
@@ -2727,7 +2731,7 @@ async function persistProfileUpdates(
     // Skip for Strava users — their runs come in via webhook automatically, and writing
     // a manual entry from conversation creates phantom activities that stack on top of
     // real Strava data and inflate weekly mileage totals.
-    if (hasWorkout && extracted.workout && !user.strava_athlete_id) {
+    if (hasWorkout && extracted.workout && !hasStravaConnected) {
       const w = extracted.workout;
       const activityDate = new Date();
       activityDate.setDate(activityDate.getDate() + (w.date_offset ?? 0));
@@ -3003,6 +3007,12 @@ ALREADY-COMPLETED UPDATES: Check RECENT CONVERSATION. If your most recent messag
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.
 
 FULL PLAN REQUESTS — HARD RULE: If the athlete asks to see their full plan, training schedule, full training arc, all upcoming weeks, or says anything like "send me my plan" / "show me my plan" — your entire response is the dashboard link${dashboardUrl ? `: ${dashboardUrl}` : " (unavailable — tell them to reply \"my plan\" and the system will generate it)"}. One or two sentences max. Do NOT output a week-by-week schedule in the SMS. Do NOT use web search to research the race and build a plan inline. Do NOT promise to send the plan later. This applies even if web search is available — research does not override this rule.
+
+THIS WEEK SESSION SWAP: If the athlete asks to move, swap, or reschedule a session and their intent is clearly scoped to this week only (e.g. "just this week", "this Sunday only"), make the change immediately and confirm it explicitly: e.g. "Done — moved strength to Sunday and easy 3mi to Tuesday for this week."
+
+If the request is ambiguous about scope (no "just this week" or "from now on"), ask before committing: e.g. "Just for this week, or would you like strength on Sundays going forward?" One question, then stop — don't make the change yet.
+
+If they clearly want it as a permanent schedule change (e.g. "from now on", "every week", "going forward"), confirm the permanent update: e.g. "Done — moving strength to Sundays as your new standing schedule." The system will sync confirmed changes to their dashboard automatically.
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for a easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 

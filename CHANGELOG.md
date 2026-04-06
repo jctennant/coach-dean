@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Fix: session swaps not updating dashboard when athlete requests in-week changes
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth
+**User feedback:** "I see my plan has me running on Sunday, can we switch that for another day and maybe move the strength training to then?" — plan dashboard unchanged after Dean's response
+**Root cause:** Two gaps in the session-swap pipeline: (1) The Dean system prompt had explicit instructions for multi-week plan changes ("state it explicitly so the athlete knows") but nothing equivalent for in-week session swaps — so Dean would respond with future-tense hedging ("I can move that") rather than a firm commitment. (2) The Haiku detection prompt (`maybeUpdatePlanSessions`) required the coach to "explicitly agree to a change" without examples, causing it to return `changed: false` for future-tense confirmations like "Moving strength to Sunday" or "I'll put the easy 3mi on Tuesday instead." Together: Dean responded vaguely → Haiku saw no explicit commit → DB not updated → dashboard unchanged.
+**Fix / Change:** Added a `THIS WEEK SESSION SWAP` instruction block to the `user_message` system prompt directing Dean to agree immediately and state the new arrangement explicitly (e.g. "Done — moved strength to Sunday and easy 3mi to Tuesday"). Updated the Haiku detection prompt to accept both past-tense and future-tense confirmations as "explicitly agreed," and added guidance for correctly updating both the "day" and "date" fields when sessions swap days.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-06 — Extreme ramp guard + mileage regression language fix + manual activity Strava skip
 
 **Type:** Bug Fix / Safety
