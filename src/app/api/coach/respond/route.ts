@@ -511,7 +511,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
   }
 
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial");
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -2860,6 +2860,7 @@ function buildUserMessage(
   storedPlanAllWeeks?: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>,
   dashboardUrl?: string | null,
   racePreparednessFlag = "",
+  preferredUnits: string = "imperial",
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -3093,7 +3094,7 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       const storedPlanContext = storedPlanWeek
         ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${storedPlanWeek.mileage_target}mi | Long run: ~${storedPlanWeek.long_run_target}mi\nKey workout: ${storedPlanWeek.key_workout || "n/a"}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
         : "";
-      const isMetric = profile?.preferred_units === "metric";
+      const isMetric = preferredUnits === "metric";
       const weekVolumeVal = isMetric ? (weekMileageSoFar * 1.60934).toFixed(1) : weekMileageSoFar.toFixed(1);
       const weekVolumeUnit = isMetric ? "km" : "mi";
       const weekVolumeStr = `${weekVolumeVal} ${weekVolumeUnit}`;
