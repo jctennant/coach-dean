@@ -989,6 +989,21 @@ Return ONLY valid JSON: {"goal_time_minutes": number | null, "has_answered": boo
         await sendAndStore(user.id, user.phone_number, researchReply, "awaiting_goal_time");
         return NextResponse.json({ ok: true });
       }
+    } else if (!hasAnswered && !isGoalTimeResearchQuestion(message) && !message.includes("?") && /\d:\d\d:\d\d|\d:\d\d\.\d{2}/.test(message)) {
+      // User pasted race results data (contains time stamps like 1:29:06 or 1:29:04.89) but didn't state a personal goal.
+      // Interpret the data and re-ask what time THEY are targeting.
+      const raceName = onboardingData.race_name as string | null;
+      const interpretResponse = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 120,
+        system: `You are Coach Dean, an AI running coach. An athlete was asked what their finish time goal is${raceName ? ` for the ${raceName}` : ""} and has shared race results data. In 1-2 short, plain-text sentences, briefly note what the data shows (e.g. what top finishers ran) and ask what time THEY personally are targeting. Conversational, no markdown.`,
+        messages: [{ role: "user", content: message }],
+      });
+      const interpText = interpretResponse.content[0].type === "text" ? interpretResponse.content[0].text.trim() : "";
+      if (interpText && !/^\s*\{/.test(interpText)) {
+        await sendAndStore(user.id, user.phone_number, interpText, "awaiting_goal_time");
+        return NextResponse.json({ ok: true });
+      }
     } else if (!isGoalTimeResearchQuestion(message) && message.includes("?")) {
       // They asked a coaching question — answer it, then either advance (if they already said no goal) or re-ask
       const answerResponse = await anthropic.messages.create({

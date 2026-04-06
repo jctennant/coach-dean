@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-05 — Respond intelligently when user pastes race results data at goal_time step
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "Looks like here is last year: 1    Wyatt Sullivan ... 1:29:06.54 ... Expert Division" → no response from Dean
+**Root cause:** `handleGoalTime` had no handler for the case where the user pastes raw race results data (no `?`, no stated personal goal). Haiku returned `has_answered: false`, and the code fell through the logic silently advancing with `goal_time_minutes: null` and sending an unrelated next-step question instead of acknowledging the data.
+**Fix / Change:** Added a new branch that detects timestamp patterns (`1:29:06` / `1:29:04.89` format) in messages where `has_answered: false`. Instead of silently advancing, calls Haiku to interpret the race data and re-ask what time the athlete personally is targeting.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
 ## 2026-04-05 — Don't re-ask for race dates when user already provided them
 
 **Type:** Bug Fix

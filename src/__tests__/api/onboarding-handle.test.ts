@@ -814,3 +814,39 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
     expect(stepUpdate).toBeUndefined();
   });
 });
+
+describe("awaiting_goal_time — pasted race results", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("interprets pasted results data and re-asks for personal goal time", async () => {
+    // 1. goal_time extractor — has_answered: false (no personal goal stated)
+    // 2. acknowledgeSharedInfo — null (bare data)
+    // 3. interpretResponse — interpret the data and re-ask
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"goal_time_minutes": null, "has_answered": false}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "Looks like top 3 last year was 1:29 to 1:34 — solid field. What time are you personally targeting?" }] });
+
+    const usersChain = chain({ data: { id: "user-001", phone_number: "+12025551234", name: "Jake", onboarding_step: "awaiting_goal_time", onboarding_data: { goal: "10k", race_name: "Cirque Series Snowbird", intro_sent: true } }, error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    const raceResultsMsg = "Looks like here is last year: 1    Wyatt Sullivan    1:29:06.54    Expert Divison\n2    Alex Johnson    1:31:26.83    Expert Divison\n3    Sam Haines    1:34:01.58    Expert Divison";
+    await POST(makeRequest({ userId: "user-001", message: raceResultsMsg }));
+
+    // Should re-ask, not advance to next step
+    expect(sendSMS).toHaveBeenCalledOnce();
+    const smsText = vi.mocked(sendSMS).mock.calls[0][1];
+    expect(smsText).toMatch(/1:29|1:34|top 3/i);
+    expect(smsText).toMatch(/target|aiming|goal/i);
+    // Must NOT have advanced the onboarding_step
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
+    expect(stepUpdate).toBeUndefined();
+  });
+});
