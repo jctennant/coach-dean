@@ -4,6 +4,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Five onboarding UX fixes (name, repetition, days, plan timing, race dates)
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (internal testing)
+**User feedback:** "didn't get a response... ask for the user's name in the first step... weird repetition of 'Great to meet you!' throughout... repetition of what days work best for training... Dean sent the plan at the same time as asking for my time goal... the dates are wrong for the races: Dipsea June 1, Cirque July 1"
+**Root cause (5 issues):**
+1. Name: not in required fields, never asked.
+2. "Great to meet you" repeated: no instruction preventing it on follow-up messages.
+3. Training days re-asked: Strava callback always asked "which days work?" when `shouldAdvanceToSchedule=true`, even if `training_days` was already extracted before the user tapped the link.
+4. Plan + question at same time: `[READY]` fired in the same message as "do you have a goal time?", triggering `completeOnboarding` while the question was still outstanding.
+5. Wrong race dates: extraction prompt said "if only month given, default to first of month" and Haiku was applying this even when the Coach had stated the exact date (from a web search). Result: June 1 and July 1 instead of June 14 and July 11.
+**Fix / Change:**
+1. Added "Athlete's name (ask in your first message if not already known)" to required fields.
+2. Added instruction: "Never repeat 'Great to meet you', 'Nice to meet you', or similar greeting phrases after the first message."
+3. Strava callback now checks `onboardingData.training_days` before appending the training-days question.
+4. Added instruction: "When you signal [READY], do not ask any more questions — wrap up warmly, the plan fires right after."
+5. Updated extraction prompt for `race_date` and `other_races.date` to explicitly prefer specific dates mentioned in the conversation over first-of-month defaults.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/auth/strava/callback/route.ts`
+
+---
+
 ## 2026-04-06 — Fixed new users getting no response on first message
 
 **Type:** Bug Fix

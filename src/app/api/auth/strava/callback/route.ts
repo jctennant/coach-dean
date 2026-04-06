@@ -213,9 +213,15 @@ export async function GET(request: Request) {
   // awaiting_strava, ask the next question (schedule) rather than telling them to answer
   // a question they just answered. If they've already progressed past awaiting_strava
   // (shouldAdvanceToSchedule = false), just confirm the connection and stay out of the way.
+  // Don't re-ask for training days if they were already captured during the conversation
+  // before the user tapped the Strava link.
+  const trainingDaysAlreadyKnown =
+    Array.isArray(onboardingData.training_days) &&
+    (onboardingData.training_days as string[]).length > 0;
+
   const smsMsg = alreadyOnboarded
     ? `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`
-    : shouldAdvanceToSchedule
+    : shouldAdvanceToSchedule && !trainingDaysAlreadyKnown
       ? `Strava connected${firstName}! ${stravaSeenLine} Which days of the week work best for training? (e.g. Mon, Wed, Fri, Sun)`
       : `Strava connected${firstName}! ${stravaSeenLine}`;
 

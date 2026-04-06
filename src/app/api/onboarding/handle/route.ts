@@ -184,6 +184,7 @@ Your job: collect the information below through natural conversation, then signa
 
 WHAT TO COLLECT:
 Required before signaling [READY]:
+- Athlete's name (ask in your first message if not already known)
 - Training goal (specific race/event name and type, or general fitness)
 - Training schedule (which days of the week work best)
 
@@ -211,12 +212,15 @@ INSTRUCTIONS:
 - Plain text only. No markdown, asterisks, or bullet points.
 - If they ask a coaching question, answer it briefly, then continue naturally.
 - For named races you don't know the date of, use web_search (e.g. "Cirque Series Snowbird 2026 race date").
+- Never repeat "Great to meet you", "Nice to meet you", or similar greeting phrases after the first message — greet once, then get to business.
+- First message only: briefly introduce yourself — 1–2 sentences on what you do (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text). Then ask for their name. Keep it punchy, not salesy.
 
 STRAVA:
 If Strava is not connected and you don't have pace data, ask about it. Write "[STRAVA_LINK]" as a placeholder in your message — the system will replace it with the actual link. Only do this once.
 
 SIGNALING READY:
-When you have goal + training_days + at least one of (pace/PR data OR Strava connected) + location, end your final message with [READY] on its own line. The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.`;
+When you have goal + training_days + at least one of (pace/PR data OR Strava connected) + location, end your final message with [READY] on its own line. The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
+When you signal [READY], do not ask any more questions in that message. Wrap up warmly and set expectations (e.g. "I'll get your plan put together now") — the plan will be sent right after.`;
 
   // Call Claude Sonnet — web_search handles race date lookups automatically
   const claudeResponse = await anthropic.messages.create({
@@ -425,12 +429,12 @@ Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess.
 - training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"])
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
-- race_date: if only month given, assume ${new Date().getFullYear()} (or next year if that month has passed). Today is ${today}.
+- race_date: use the most specific date mentioned for the goal race. If a specific date (day + month) was stated by either participant, use that exact date. Only default to first of month if no specific date was ever given. Today is ${today}.
 - recent_race_distance_km: distance of their most-cited PR or recent race (not the goal race)
 - recent_race_time_minutes: finishing time of that race in minutes
 - easy_pace: format "M:SS" (e.g. "8:30" means 8 minutes 30 seconds per mile)
 - timezone: IANA string when a location is mentioned (e.g. "Provo, UT" → "America/Denver", "San Francisco" → "America/Los_Angeles")
-- other_races: only B/C secondary races, not the main A race (goal/race_name/race_date)`,
+- other_races: only B/C secondary races, not the main A race (goal/race_name/race_date). Use the same date precision rule as race_date — specific date if stated, first-of-month only as last resort.`,
     messages: [{ role: "user", content: transcript }],
   });
 
