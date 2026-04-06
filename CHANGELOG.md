@@ -4,14 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
-## 2026-04-05 — Respond intelligently when user pastes race results data at goal_time step
+## 2026-04-05 — Fix mileage hallucination from conversational distance phrases in weekly recap
 
 **Type:** Bug Fix
-**Reported by:** Jake Tennant
-**User feedback:** "Looks like here is last year: 1    Wyatt Sullivan ... 1:29:06.54 ... Expert Division" → no response from Dean
-**Root cause:** `handleGoalTime` had no handler for the case where the user pastes raw race results data (no `?`, no stated personal goal). Haiku returned `has_answered: false`, and the code fell through the logic silently advancing with `goal_time_minutes: null` and sending an unrelated next-step question instead of acknowledging the data.
-**Fix / Change:** Added a new branch that detects timestamp patterns (`1:29:06` / `1:29:04.89` format) in messages where `has_answered: false`. Instead of silently advancing, calls Haiku to interpret the race data and re-ask what time the athlete personally is targeting.
+**Reported by:** Curtis (via Jake Tennant)
+**User feedback:** Curtis said his actual mileage was ~26-27mi but Dean reported 36.2mi across 5 runs in the weekly recap. Curtis had said "for the first 9 miles, I was on trails and dirt roads" about his long run. Dean appears to have interpreted this as a separate 9-mile run and added it to the Strava total (27.2 + 9 = 36.2).
+**Root cause:** The weekly recap system prompt instruction said "never sum individual runs yourself" but didn't explicitly guard against treating conversational distance phrases as additional uncounted runs. Claude saw "first 9 miles on trails" in conversation history and counted it as a 5th run not yet reflected in the Strava total.
+**Fix / Change:** Extended the authoritative mileage instruction to explicitly warn: "distance phrases in the athlete's messages (e.g. 'the first 9 miles were on trails') describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-05 — General re-ask fallback when goal_time step gets no clear answer
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (observed via Curtis conversation)
+**User feedback:** When Curtis pasted race results data ("1:29:06.54...") in response to the goal time question, Dean gave no response.
+**Root cause:** `handleGoalTime` had no handler for messages where Haiku returns `has_answered: false` and none of the specific branches (research question, coaching question) matched. The code silently advanced with `goal_time_minutes: null` and sent an unrelated next-step question.
+**Fix / Change:** Replaced a too-specific race-results regex check with a general Haiku-based fallback: whenever `has_answered === false` after all specific branches, Dean generates a contextual re-ask that acknowledges what was shared and asks for the personal goal time. This handles race results, ambiguous replies, off-topic messages, and any future cases.
 **Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
 
 ## 2026-04-05 — Don't re-ask for race dates when user already provided them
 

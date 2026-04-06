@@ -815,15 +815,15 @@ describe("POST /api/onboarding/handle — coaching questions during onboarding",
   });
 });
 
-describe("awaiting_goal_time — pasted race results", () => {
+describe("awaiting_goal_time — no clear answer given", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("interprets pasted results data and re-asks for personal goal time", async () => {
-    // 1. goal_time extractor — has_answered: false (no personal goal stated)
-    // 2. acknowledgeSharedInfo — null (bare data)
-    // 3. interpretResponse — interpret the data and re-ask
+  it("re-asks when user pastes race results without stating a personal goal", async () => {
+    // 1. goal_time extractor — has_answered: false
+    // 2. acknowledgeSharedInfo (parallel) — null
+    // 3. general re-ask fallback
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"goal_time_minutes": null, "has_answered": false}' }] })
       .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] })
@@ -842,9 +842,32 @@ describe("awaiting_goal_time — pasted race results", () => {
     // Should re-ask, not advance to next step
     expect(sendSMS).toHaveBeenCalledOnce();
     const smsText = vi.mocked(sendSMS).mock.calls[0][1];
-    expect(smsText).toMatch(/1:29|1:34|top 3/i);
     expect(smsText).toMatch(/target|aiming|goal/i);
     // Must NOT have advanced the onboarding_step
+    const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
+    expect(stepUpdate).toBeUndefined();
+  });
+
+  it("re-asks when user sends an off-topic or ambiguous message", async () => {
+    // 1. goal_time extractor — has_answered: false
+    // 2. acknowledgeSharedInfo — null
+    // 3. general re-ask fallback
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"goal_time_minutes": null, "has_answered": false}' }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "null" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "No worries! Do you have a time goal in mind, or are you focused on finishing strong?" }] });
+
+    const usersChain = chain({ data: { id: "user-001", phone_number: "+12025551234", name: "Jake", onboarding_step: "awaiting_goal_time", onboarding_data: { goal: "half_marathon", race_name: null, intro_sent: true } }, error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "hmm not sure yet" }));
+
+    expect(sendSMS).toHaveBeenCalledOnce();
     const updateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
     const stepUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => "onboarding_step" in p);
     expect(stepUpdate).toBeUndefined();
