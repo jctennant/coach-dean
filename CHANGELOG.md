@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Post-onboarding UX polish
+
+**Type:** Improvement
+**Reported by:** Jake (onboarding test session)
+**User feedback:** "How does this look?" should come last after dashboard link; checkout iMessage preview should say "Start your free trial"; success page should be more celebratory; clicking checkout link again shouldn't create a duplicate subscription
+**Root cause:** Plan message included feedback/reminder questions before the dashboard link was sent; checkout page had no metadata for iMessage previews; success page was generic; billing/checkout route didn't check for existing active subscriptions
+**Fix / Change:** (1) Removed "How does this look?" and reminders offer from Claude's `initial_plan` prompt — now sent as a dedicated SMS *after* `generateAndSaveFullPlan` sends the dashboard link, preserving the right read order. (2) Added `checkout/layout.tsx` to export metadata for iMessage link previews. (3) Made success page more celebratory. (4) Billing checkout now returns a dashboard redirect if the user already has an active/trialing subscription instead of creating a duplicate Stripe session.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/checkout/layout.tsx` (new), `src/app/checkout/success/page.tsx`, `src/app/api/billing/checkout/route.ts`
+
+---
+
 ## 2026-04-06 — Onboarding refactor: unified Claude conversation handler
 
 **Type:** Refactor

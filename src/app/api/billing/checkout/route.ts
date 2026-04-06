@@ -20,7 +20,7 @@ export async function POST(request: Request) {
 
   const { data: user, error } = await supabase
     .from("users")
-    .select("id, stripe_customer_id, billing_enabled")
+    .select("id, stripe_customer_id, billing_enabled, subscription_status")
     .eq("dashboard_token", token)
     .single();
 
@@ -30,6 +30,14 @@ export async function POST(request: Request) {
 
   if (!user.billing_enabled) {
     return NextResponse.json({ error: "Billing not enabled for this user" }, { status: 403 });
+  }
+
+  // Prevent duplicate subscriptions — if already trialing or active, redirect to dashboard.
+  const activeStatuses = ["trialing", "active"];
+  if (activeStatuses.includes(user.subscription_status as string)) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    const dashboardUrl = `${appUrl}/dashboard?token=${token}`;
+    return NextResponse.json({ url: dashboardUrl });
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
