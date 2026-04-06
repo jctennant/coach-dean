@@ -276,7 +276,7 @@ describe("awaiting_other_races — question content after multi-race goal", () =
     expect(sentMessage).not.toMatch(/I have (January|February|March|April|May|June|July|August|September|October|November|December) \d+/);
   });
 
-  it("asks for dates for all races (not just the A race)", async () => {
+  it("asks for dates when user only gave months (no specific dates)", async () => {
     vi.mocked(anthropic.messages.create)
       .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"10k","race_name":"Dipsea","goal_distance_miles":7.4}' }] })
       .mockResolvedValueOnce(EXTRACT_JAKE)
@@ -293,8 +293,44 @@ describe("awaiting_other_races — question content after multi-race goal", () =
     await POST(makeRequest({ userId: "user-001", message: "Dipsea in June, Sierre Zinal in August, A Basin September" }));
 
     const sentMessage: string = (sendSMS as ReturnType<typeof vi.fn>).mock.calls[0][1];
-    // The combined question should ask for dates for each race
+    // User only gave months, not specific dates — should ask for dates
     expect(sentMessage).toMatch(/dates/i);
+  });
+
+  it("does NOT re-ask for dates when user already provided specific dates for each race", async () => {
+    // secondary_goal includes specific month+day dates like "July 11" and "May 31"
+    const ackWithSpecificDates = {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ack: "Dipsea is a classic — 7.4 miles from Mill Valley to Stinson Beach.",
+          date: "2026-06-14",
+          distance_miles: 7.4,
+          secondary_goal: "Cirque Series Snowbird (July 11) and half marathon time trial (May 31)",
+          distance_options: null,
+        }),
+      }],
+    };
+
+    vi.mocked(anthropic.messages.create)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: '{"complete":true,"no_event":false,"goal":"10k","race_name":"Dipsea","goal_distance_miles":7.4}' }] })
+      .mockResolvedValueOnce(EXTRACT_JAKE)
+      .mockResolvedValueOnce(DETECT_NULL)
+      .mockResolvedValueOnce(ackWithSpecificDates);
+
+    const usersChain = chain({ data: goalUser(), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "conversations") return chain({ data: [], error: null });
+      return chain({ data: null, error: null });
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "Dipsea (June 14) and Cirque Series Snowbird (July 11), and half marathon time trial (May 31)" }));
+
+    const sentMessage: string = (sendSMS as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    // User already gave specific dates — should just ask which is the A race
+    expect(sentMessage).toMatch(/A race/i);
+    expect(sentMessage).not.toMatch(/dates/i);
   });
 });
 

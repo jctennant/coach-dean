@@ -2369,9 +2369,17 @@ function getStepQuestion(step: string, data: Record<string, unknown>, userId?: s
       const raceRef = raceName ? `the ${raceName}` : raceGoal ? `your ${formatGoalInline(raceGoal)}` : "your race";
       // When we already know about multiple races, ask which is the A race without asking "do you have any others?"
       if (data.secondary_goal) {
-        // Combined A race + date question. Don't show a pre-filled date here — the goal
-        // classifier and the web search can pick different races as "primary", so the
-        // date could be misattributed to the wrong race name. Ask for all dates together.
+        // If the user already mentioned specific dates for their races (secondary_goal includes
+        // month+day patterns like "July 11"), just ask which is the A race — don't re-ask for
+        // dates they already provided. Only skip if dates appear in secondary_goal (user-provided),
+        // not just because the A race date was pre-filled by web search.
+        const secondaryGoalStr = data.secondary_goal as string;
+        const hasDatesInSecondaryGoal = /\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\s+\d/i.test(secondaryGoalStr);
+        if (hasDatesInSecondaryGoal) {
+          return `Which of these is your A race — the one the whole plan peaks for?`;
+        }
+        // No specific dates yet — ask for all together. Don't show a pre-filled date here since the goal
+        // classifier and web search can misattribute dates to the wrong race name.
         return `Which of these is your A race — the one the whole plan peaks for? And can you give me the dates for each? Approximate is totally fine.`;
       }
       return `Is ${raceRef} your main goal race this season — the one we're building the whole plan around? And do you have any others on the calendar I should know about?`;
@@ -2676,7 +2684,7 @@ Rules:
 - injury_notes: brief description of injury type, severity, and recovery status if an injury is mentioned (e.g. "IT band syndrome, recovering, avoiding back-to-back days"). null if no injury.
 - crosstraining_tools: normalized array of cross-training activities or equipment mentioned (e.g. ["cycling", "swimming", "gym", "yoga"]). null if none.
 - other_notes: any other training-relevant context not captured above — strengthening preferences, target times, lifestyle constraints, stroller running, etc. null if nothing else.
-- secondary_goal: if the athlete mentions a second distinct race or goal beyond the primary one (e.g. "and then a marathon in the fall", "plus Boston next year", "also want to do a crit series"). Short plain-text description. null if only one goal is mentioned.
+- secondary_goal: if the athlete mentions a second distinct race or goal beyond the primary one (e.g. "and then a marathon in the fall", "plus Boston next year", "also want to do a crit series"). Short plain-text description — include any dates or timing mentioned for each race (e.g. "Cirque Series Snowbird (July 11) and half marathon time trial (May 31)"). When multiple secondary races are mentioned, include all of them in one string. null if only one goal is mentioned.
 - goal_time_minutes: ONLY include this field if the athlete EXPLICITLY states a specific finish-time goal (e.g. "sub 3:05" → 185, "under 2 hours" → 120, "1:55" → 115, "around 23 minutes" → 23). Convert to total minutes as a number. OMIT THIS FIELD ENTIRELY if no specific finish time is mentioned — do NOT set it to null. Never infer a time goal that wasn't explicitly stated.
 - ultra_race_history: if the athlete explicitly describes their trail or ultra race background (e.g. "done two 100Ks", "finished a 50-miler last year", "ran Western States in 2022", "completed three 50Ks"). Short plain-text summary. null if not mentioned. IMPORTANT: do NOT set this from lottery attempts, general hiking, or non-race experience — it must describe actual races completed.
 - Return {} if nothing is present.`,

@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-05 — Don't re-ask for race dates when user already provided them
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake Tennant)
+**User feedback:** "Jake, and I'm training for a few different races. Dipsea (June 14) and Cirque Series Snowbird (July 11), and half marathon time trial (May 31)" → Dean responded asking "can you give me the dates for each?"
+**Root cause:** The `awaiting_other_races` step question always asked "can you give me the dates for each?" regardless of whether the user had already provided specific dates. The `secondary_goal` extraction prompt also didn't preserve dates.
+**Fix / Change:** (1) Updated `extractAdditionalFields` prompt to include dates/timing in `secondary_goal` description. (2) In `getStepQuestion` for `awaiting_other_races`, detect whether `secondary_goal` contains month+day patterns (e.g. "July 11"). If specific dates are already present, ask only "Which of these is your A race?" without requesting dates again.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/multi-race-onboarding.test.ts`
+
 ## 2026-04-05 — Fix dashboard weekly target, long run, and cross-training label bugs
 
 **Type:** Bug Fix
