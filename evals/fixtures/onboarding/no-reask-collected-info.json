@@ -1,0 +1,38 @@
+{
+  "id": "onboarding-no-reask-collected-info",
+  "description": "When training days and A-race are already collected, Dean must not ask about them again",
+  "category": "conversation_flow",
+  "is_first_response": false,
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean, your AI running coach — I build personalized training plans, sync with Strava, and check in over text. What's your name?"
+    },
+    {
+      "role": "user",
+      "content": "Jake. I'm training for the Cirque Series Snowbird in July — it's a mountain trail race. My A race."
+    },
+    {
+      "role": "assistant",
+      "content": "Snowbird is a serious mountain race — great choice for a peak goal. Which days of the week work best for training?"
+    },
+    {
+      "role": "user",
+      "content": "Tuesday through Thursday and Saturday and Sunday."
+    }
+  ],
+  "collected": {
+    "name": "Jake",
+    "goal": "trail_race",
+    "race_name": "Cirque Series Snowbird",
+    "race_date": "2026-07-11",
+    "goal_distance_miles": 8.9,
+    "training_days": ["tuesday", "wednesday", "thursday", "saturday", "sunday"],
+    "days_per_week": 5
+  },
+  "strava_context": "STRAVA: Not connected yet.",
+  "inbound_message": "Tuesday through Thursday and Saturday and Sunday.",
+  "ground_truth": {
+    "notes": "Name, goal (trail_race / Cirque Series Snowbird), race date, and training days are ALL already collected. Dean must not ask about any of these again. He should acknowledge the training days and ask for the next missing thing: fitness baseline (recent race PR or current pace) and/or Strava connection. Asking 'which days work for training?' or 'what is your main race?' would be a clear failure."
+  }
+}

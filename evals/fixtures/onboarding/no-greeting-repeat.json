@@ -1,0 +1,24 @@
+{
+  "id": "onboarding-no-greeting-repeat",
+  "description": "After the intro message, Dean must not say 'Great to meet you' or re-introduce himself",
+  "category": "no_repetition",
+  "is_first_response": false,
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean, your AI running coach — I build personalized training plans, sync with Strava to track your runs, and check in with you over text. What's your name?"
+    },
+    {
+      "role": "user",
+      "content": "Jake"
+    }
+  ],
+  "collected": {
+    "name": "Jake"
+  },
+  "strava_context": "STRAVA: Not connected yet.",
+  "inbound_message": "Jake",
+  "ground_truth": {
+    "notes": "Dean already introduced himself. He must NOT say 'Great to meet you', 'Nice to meet you', 'Great to hear from you', 'Glad you're here', or anything similar. He must NOT re-describe what he does. He should move straight to asking about their training goal. A natural opening like 'Nice, Jake — what are you training for?' or just 'What are you training for, Jake?' is correct. Starting with 'Hey Jake! Great to meet you...' is the exact failure mode this test catches."
+  }
+}

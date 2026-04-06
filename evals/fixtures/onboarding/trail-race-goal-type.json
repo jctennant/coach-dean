@@ -1,0 +1,24 @@
+{
+  "id": "onboarding-trail-race-goal-type",
+  "description": "When user describes a short mountain trail race, Dean should treat it as a trail_race goal and not misclassify it",
+  "category": "conversation_flow",
+  "is_first_response": false,
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean, your AI running coach — personalized plans, Strava integration, SMS check-ins. What's your name?"
+    },
+    {
+      "role": "user",
+      "content": "Sarah. I want to do Cirque Series Snowbird in July — it's an 8.9 mile mountain race with a ton of climbing."
+    }
+  ],
+  "collected": {
+    "name": "Sarah"
+  },
+  "strava_context": "STRAVA: Not connected yet.",
+  "inbound_message": "Sarah. I want to do Cirque Series Snowbird in July — it's an 8.9 mile mountain race with a ton of climbing.",
+  "ground_truth": {
+    "notes": "The user described a non-standard distance trail/mountain race (8.9 miles). Dean should treat this naturally as a trail race goal, NOT try to map it to a road race category like 'half marathon' or '10 mile'. He should acknowledge it as a trail/mountain race, ask about race date if he doesn't have it, and/or ask about which days work for training. He should NOT ask 'what distance are you targeting' when the user already said 8.9 miles. He should NOT ask 'is this a 10K or half marathon' — that would be awkward for a mountain race."
+  }
+}

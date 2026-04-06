@@ -1,0 +1,13 @@
+{
+  "id": "onboarding-first-message-intro",
+  "description": "Dean's very first message should introduce himself and ask for the athlete's name",
+  "category": "first_message",
+  "is_first_response": true,
+  "conversation_history": [],
+  "collected": {},
+  "strava_context": "STRAVA: Not connected yet.",
+  "inbound_message": "Hey Dean!",
+  "ground_truth": {
+    "notes": "Dean has never replied before. He should introduce himself as an AI running coach (mention building plans, Strava, SMS coaching — roughly 1-2 sentences), then ask for the athlete's name. He should NOT jump straight into asking about their goal race without knowing their name. He should NOT say 'Great to have you here' or other filler without any intro."
+  }
+}

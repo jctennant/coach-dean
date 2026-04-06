@@ -163,6 +163,32 @@ Exits 1 if regressions detected, so this can gate a deploy if needed.
 
 ---
 
+## Onboarding Evals (`/evals/fixtures/onboarding/`)
+
+`npm run eval:onboarding` — behavioral correctness checks for the onboarding conversation flow.
+
+### What the onboarding evals test
+
+| Category | What it catches | Fixtures |
+|---|---|---|
+| `first_message` | Dean must intro himself + ask for name on message 1 | 1 |
+| `no_repetition` | No "Great to meet you" / re-intro on message 2+ | 1 |
+| `conversation_flow` | No re-asking for already-collected fields; trail race handled correctly | 2 |
+| `ready_signal` | [READY] must not appear in same message as an open question | 1 |
+
+### Key parity points to maintain between `onboarding/handle/route.ts` and `run-onboarding-evals.mjs`
+
+- `summarizeCollected` function (what Dean sees under "WHAT YOU ALREADY KNOW")
+- `isFirstResponse` instruction branch (intro vs no-repeat)
+- SIGNALING READY instructions (no question with [READY])
+- STRAVA context format
+
+### When to add a new onboarding fixture
+
+Add a fixture whenever a conversation bug is reported (repetition, re-asking, wrong intro behavior). The fixture should freeze the conversation state and inbound message at the point of the failure.
+
+---
+
 ## Database Schema Rule
 
 Whenever a DB migration is needed (new column, table, index, etc.):
