@@ -1509,6 +1509,21 @@ If no session list is found, return [].`,
   } catch {
     // leave empty — no sessions to store
   }
+
+  // Sanitize cross-training labels that incorrectly have "mi" instead of "min".
+  // e.g. "Strength + mobility 3.5 mi" → "Strength + mobility 35 min"
+  // This prevents non-running sessions from being counted as running mileage.
+  const CROSS_TRAINING_KEYWORDS = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin)\b/i;
+  sessions = sessions.map(s => {
+    if (!CROSS_TRAINING_KEYWORDS.test(s.label)) return s;
+    // Replace trailing "X mi" or "X.X mi" with "Xmin" (strip decimal, treat as whole minutes)
+    const fixed = s.label.replace(/(\d+(?:\.\d+)?)\s*mi(?!\w)/gi, (_, num) => {
+      const mins = Math.round(parseFloat(num));
+      return `${mins} min`;
+    });
+    return { ...s, label: fixed };
+  });
+
   await supabase
     .from("training_state")
     .update({ weekly_plan_sessions: sessions as unknown as Json })
@@ -1560,6 +1575,7 @@ async function syncArcCurrentWeek(
     }
     const qualitySession = sessions.find(s => isQualitySession(s.label));
     const longRunSession = sessions.find(s => s.label.toLowerCase().includes("long"));
+    const longRunMiles = longRunSession ? parseMilesFromLabel(longRunSession.label) : 0;
     const keySession = qualitySession ?? longRunSession ?? sessions[0];
     let derivedKeyWorkout = keySession?.label ?? "";
     if (derivedKeyWorkout.length > 80) derivedKeyWorkout = derivedKeyWorkout.slice(0, 77) + "...";
@@ -1598,6 +1614,7 @@ Return ONLY the note text.`,
         ? {
             ...w,
             ...(actualMiles > 0 ? { mileage_target: actualMiles } : {}),
+            ...(longRunMiles > 0 ? { long_run_target: longRunMiles } : {}),
             ...(derivedKeyWorkout ? { key_workout: derivedKeyWorkout } : {}),
             ...(derivedNotes ? { notes: derivedNotes } : {}),
           }
@@ -1608,6 +1625,16 @@ Return ONLY the note text.`,
       .from("training_plans")
       .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
       .eq("id", planRow.id as string);
+
+    // Also sync training_state.weekly_mileage_target to match what Dean actually prescribed
+    // (the value set during weekly_recap is the periodization engine's suggestion, which may
+    // differ from what Claude prescribed after adjusting for the athlete's specific week).
+    if (actualMiles > 0) {
+      await supabase
+        .from("training_state")
+        .update({ weekly_mileage_target: actualMiles })
+        .eq("user_id", userId);
+    }
 
     console.log(`[syncArcCurrentWeek] synced week ${currentWeekNum}: ${actualMiles}mi, key="${derivedKeyWorkout.slice(0, 50)}"`);
   } catch (err) {

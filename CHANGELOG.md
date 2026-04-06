@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-05 — Fix dashboard weekly target, long run, and cross-training label bugs
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "in text and in the schedule on the dashboard it was 23.5 miles but in the weekly target it was 32 mi. Also, it says my long run is 8.5 miles but it was actually 11 mi in Dean's text and in the schedule. My wife got strength prescribed for 3.5 min on Tuesday, but there was no detail on that."
+**Root cause:** Three separate bugs:
+1. `training_state.weekly_mileage_target` was set to `periodization.suggestedWeeklyMiles` (the engine's target) during weekly_recap, but never corrected after `syncArcCurrentWeek` computed the actual session sum. Dashboard "Weekly target" reads from `training_state`, so it showed 32mi instead of 23.5mi.
+2. `syncArcCurrentWeek` updated `mileage_target`, `key_workout`, and `notes` in the arc but never updated `long_run_target`. The dashboard "Long run" reads from the arc blueprint value (8.5mi from initial plan generation), ignoring what Dean actually prescribed (11mi).
+3. Dean occasionally wrote "Strength + mobility 3.5 mi" instead of "35 min" — the cross-training format guard in the prompt was missed at generation. The session extractor stored the label verbatim, causing "3.5 mi" to be parsed as running mileage on the dashboard and the duration to appear as "3.5 min".
+**Fix / Change:**
+- In `syncArcCurrentWeek`: compute `longRunMiles` from the long run session and patch `long_run_target` in `training_plans.weeks`; after patching the arc also update `training_state.weekly_mileage_target` to `actualMiles`
+- In `extractAndStorePlanSessions`: sanitize cross-training session labels that incorrectly contain "mi" — convert "3.5 mi" → "35 min" for strength/mobility/bike/swim/yoga/etc. sessions before storing
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-05 — Onboarding: respect athletes who already have a plan
 
 **Type:** Bug Fix / UX
