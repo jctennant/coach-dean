@@ -2881,10 +2881,9 @@ function buildUserMessage(
                   // Filter out paused-device splits (pace > 20 min/mile = clearly not running).
                   // These appear when the athlete forgets to stop Strava, creating a wildly-slow
                   // final partial split that Claude then flags as a concerning anomaly.
-                  // NOTE: We use splits_metric (one per km, not per mile). Add a cumulative_miles
-                  // field to each split so Claude knows the actual position in the run. This
-                  // prevents Claude from misreading the split index as a "mile number" — e.g. a
-                  // 3.1mi (5K) run has 5 km splits, and without this Claude says "mile 5".
+                  // splits_standard gives one entry per mile (matching what the athlete sees in
+                  // the Strava app). Add cumulative_miles so Claude knows the actual position —
+                  // the last split is often partial (e.g. a 5.1mi run has 5 full splits + 1 partial).
                   splits: (() => {
                     let cumulativeMiles = 0;
                     return rawSummary.splits
@@ -2925,10 +2924,11 @@ function buildUserMessage(
       // If average_watts is populated (power meter, Zwift, etc.) Claude can reference it.
       const hasWatts = !!(activityData?.average_watts != null);
       if (!hasWatts) dataGuards.push("No power data is available for this activity. Do NOT reference wattage, watts, or power output — not even as a range or estimate. Describe effort using HR, elapsed time, and pace-equivalent language only.");
-      // Guard against km-split confusion: splits_metric produces one entry per km, so a
-      // 3.1mi (5K) run has 5 splits. Without this guard Claude says "mile 5" for a 3.1mi run.
+      // splits_standard gives one split per mile, so splitCount ≈ ceil(runDistanceMiles).
+      // Guard: if splits look like km data (far more splits than miles), warn Claude.
+      // This handles legacy activities stored before the switch to splits_standard.
       if (hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
-        dataGuards.push(`SPLIT UNIT WARNING: This run is ${runDistanceMiles.toFixed(2)} miles but has ${splitCount} split entries — the splits are per-kilometer, not per-mile. Each split's "cumulative_miles" field shows its actual position in the run. NEVER reference "mile ${splitCount}" or any mile number beyond ${Math.ceil(runDistanceMiles)} — that mile does not exist in this run. Use cumulative_miles to describe position (e.g. "around mile 2.5" or "in the final stretch").`);
+        dataGuards.push(`SPLIT UNIT WARNING: This run is ${runDistanceMiles.toFixed(2)} miles but has ${splitCount} split entries — the splits appear to be per-kilometer, not per-mile. Each split's "cumulative_miles" field shows its actual position in the run. NEVER reference "mile ${splitCount}" or any mile number beyond ${Math.ceil(runDistanceMiles)} — that mile does not exist in this run. Use cumulative_miles to describe position (e.g. "around mile 2.5" or "in the final stretch").`);
       }
       const dataGuardBlock = dataGuards.length > 0
         ? `\nDATA AVAILABILITY GUARD — the following data is NOT present; do not fabricate it:\n${dataGuards.map(g => `- ${g}`).join("\n")}`
@@ -3087,7 +3087,7 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       const noStravaMileageData = !hasStrava && weekMileageSoFar === 0;
       const weekMileageContext = noStravaMileageData
         ? `⚠️ MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
-        : `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.\n\n`;
+        : `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
       const deloadInstruction = periodization?.isDeloadWeek
         ? `\n⚠️ RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${periodization.suggestedWeeklyMiles.toFixed(1)} mi.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.\n`
         : periodization?.suggestedWeeklyMiles != null

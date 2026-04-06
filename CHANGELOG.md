@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-05 — Switch to per-mile splits (splits_standard) for US athletes
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (Curtis's case)
+**User feedback:** "Splits Dean shared were different from Strava" — Dean was working from per-km splits while the Strava app shows per-mile splits, causing pace figures to describe different intervals.
+**Root cause:** Webhook stored `splits_metric` (one split per km) citing elevation unit ambiguity for `splits_standard`. This was wrong — both split types return `elevation_difference` in meters. The result was Dean saying "around mile 3: 11:00/mi" when Strava showed a different value at mile 3 (they covered different intervals).
+**Fix / Change:** Switched webhook to store `splits_standard` (per-mile) going forward. Updated DATA GUARD to only fire for legacy activities with more splits than miles (km-stored data). Updated `analyze-conversations` route description to match.
+**Files changed:** `src/app/api/webhooks/strava/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/cron/analyze-conversations/route.ts`, `src/__tests__/api/strava-webhook.test.ts`
+
+## 2026-04-05 — Hard-code authoritative mileage phrase in weekly recap
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (Curtis's case — weekly recap showed 36.2mi when actual was ~27mi)
+**Root cause:** System prompt instruction said "use this exact figure" but Claude still derived 36.2 by treating "first 9 miles on trails" in conversation as an additional run. Prompt instructions alone are not sufficient when conversation context strongly suggests a different number.
+**Fix / Change:** Added a mandatory opening phrase to the weekly recap: "YOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: 'Last week: X mi across N runs.'" This forces the authoritative figure into Claude's output rather than relying on it to remember the constraint.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-05 — Fix mileage hallucination from conversational distance phrases in weekly recap
 
 **Type:** Bug Fix

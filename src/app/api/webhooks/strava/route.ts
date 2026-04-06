@@ -118,10 +118,11 @@ async function processStravaEvent(body: {
           gear_name: activity.gear?.name || null,
           start_date: activity.start_date,
           summary: {
-            // Use splits_metric — distance in meters, elevation in meters, guaranteed consistent units.
-            // splits_imperial uses miles as split boundary but elevation_difference unit is ambiguous
-            // (some Strava clients return feet, others meters). splits_metric is always meters.
-            splits: activity.splits_metric,
+            // Use splits_standard (per-mile splits). Both splits_standard and splits_metric
+            // return elevation_difference in meters and average_speed in m/s — the units are
+            // the same regardless of split type. splits_standard aligns with what US athletes
+            // see in the Strava app (mile-by-mile breakdown), so Dean's analysis matches.
+            splits: activity.splits_standard,
             laps: activity.laps,
           },
         },

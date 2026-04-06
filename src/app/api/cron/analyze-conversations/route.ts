@@ -118,7 +118,7 @@ Analyze the transcripts below from ${dateLabel} (${userCount} users, ${messages.
 
 IMPORTANT — what Coach Dean has access to via Strava:
 - Activity data: distance, moving time, elapsed time, pace, elevation gain, sport type, start date/time
-- Per-km splits (splits_metric): ALL GPS-recorded runs on Strava automatically include per-km split data — distance, pace, and HR per km. Dean converts these to per-mile descriptions. Any specific split paces cited in a post_run message are ALWAYS real Strava data, not hallucinations.
+- Per-mile splits (splits_standard): ALL GPS-recorded runs on Strava automatically include per-mile split data — distance, pace, and HR per mile. Any specific split paces cited in a post_run message are ALWAYS real Strava data, not hallucinations.
 - Lap data (when available): manual lap button presses or device auto-laps. Only present when the athlete explicitly recorded laps.
 - Heart rate (when athlete's device records it): average HR, max HR, HR by split/lap
 - Weekly mileage: computed live from Strava activity history

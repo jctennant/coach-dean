@@ -28,7 +28,7 @@ vi.mock("@/lib/strava", () => ({
     total_elevation_gain: 50,
     suffer_score: 42,
     start_date: "2026-03-23T13:00:00Z",
-    splits_metric: [],
+    splits_standard: [],
     laps: [],
     gear: null,
   }),
