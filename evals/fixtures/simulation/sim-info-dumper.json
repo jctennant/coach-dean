@@ -1,0 +1,31 @@
+{
+  "id": "sim-info-dumper",
+  "description": "Athlete sends almost everything in their first message. Tests that Dean doesn't re-ask what's already given and reaches [READY] efficiently.",
+  "category": "simulation",
+  "persona": {
+    "name": "Priya",
+    "opening_message": "Hey! I'm Priya. Training for the Brooklyn Half Marathon on May 16, 2026. I run Tuesday, Thursday, Saturday and Sunday, based in Brooklyn NY. My easy pace is around 9:45/mile. No Strava but I have been pretty consistent — about 30 miles/week. Looking forward to it!",
+    "user_agent_prompt": "You are Priya. You already sent a detailed intro message with most of your info. Background:\n- Name: Priya (already given)\n- Goal: Brooklyn Half Marathon, May 16, 2026 (already given)\n- Training days: Tuesday, Thursday, Saturday, Sunday (already given)\n- Location: Brooklyn, NY (already given)\n- Easy pace: 9:45/mile (already given)\n- Weekly miles: ~30 (already given)\n- No Strava, will skip if asked\n- No injuries\n- This is your first half marathon\n\nBehavior: Since you gave so much info upfront, you expect Dean to mostly just confirm and move forward. If Dean re-asks something you already said, politely note it (e.g. 'I mentioned that above!'). If Dean asks about something new and reasonable, answer it. Keep responses short.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Priya",
+      "goal": "half_marathon",
+      "race_name": "Brooklyn Half Marathon",
+      "race_date": "2026-05-16",
+      "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+      "timezone": "America/New_York",
+      "strava_connected": false,
+      "easy_pace": "9:45",
+      "weekly_miles": 30
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 8,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone", "easy_pace"],
+    "goal_should_be": "half_marathon",
+    "race_date_should_be": "2026-05-16",
+    "target_turns": 4,
+    "notes": "Priya gave nearly everything in her opening message. Dean should reach [READY] in 3-4 turns max — ideally acknowledging what she shared, asking Strava early, then wrapping up. A 5-6 turn conversation is acceptable but not ideal. Dean must NOT re-ask for race, training days, location, or pace. The persona will push back if re-asked. max_turns is 8 but target is 4."
+  }
+}

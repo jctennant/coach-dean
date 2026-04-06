@@ -1,0 +1,32 @@
+{
+  "id": "sim-constrained-schedule",
+  "description": "Time-crunched parent, 3 days max, mornings only. Tests graceful handling of tight constraints and realistic expectation setting.",
+  "category": "simulation",
+  "persona": {
+    "name": "Pat",
+    "opening_message": "Hi! I want to train for a half marathon but I have a toddler so my time is really limited",
+    "user_agent_prompt": "You are Pat, a parent of a toddler texting a running coach. Background (reveal naturally):\n- Name: Pat\n- Goal: local half marathon — Lakefront 13.1 in Milwaukee, WI on September 13, 2026\n- Can only run 3 days: Tuesday, Thursday, Saturday (mornings only, before family wakes up — 5:30-6:30am window)\n- No Strava, will skip\n- Recent 10K: 55 minutes (ran it 6 months ago, been inconsistent since)\n- Current mileage: spotty, maybe 10-15 miles/week when consistent, often less\n- Location: Milwaukee, WI\n- No injuries\n\nBehavior: You're upfront about your constraints — 'I can only do 3 days, I have a toddler', 'mornings are the only option'. A little self-deprecating about your inconsistency. When Dean asks about training days, you immediately explain the constraint. You ask Dean whether 3 days is 'enough' to do a half. Answer Dean's question first before asking yours.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Pat",
+      "goal": "half_marathon",
+      "race_name": "Lakefront 13.1",
+      "race_date": "2026-09-13",
+      "training_days": ["tuesday", "thursday", "saturday"],
+      "timezone": "America/Chicago",
+      "strava_connected": false,
+      "recent_race_distance_km": 10,
+      "recent_race_time_minutes": 55,
+      "days_per_week": 3
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "half_marathon",
+    "race_date_should_be": "2026-09-13",
+    "target_turns": 8,
+    "notes": "Dean should answer Pat's 'is 3 days enough?' question briefly and reassuringly (yes, plenty for a half) before continuing. Race date must come from web search. Timezone is America/Chicago (Milwaukee). Dean should not push Pat toward more days — accept the 3-day constraint without pushback. 10K time should be captured as fitness baseline."
+  }
+}

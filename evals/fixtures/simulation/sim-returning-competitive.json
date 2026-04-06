@@ -1,0 +1,30 @@
+{
+  "id": "sim-returning-competitive",
+  "description": "Former competitive runner returning after 8 years off. Tests handling of stale fitness data and realistic current baseline collection.",
+  "category": "simulation",
+  "persona": {
+    "name": "Marcus",
+    "opening_message": "Hey Coach Dean. I used to be a pretty serious runner — ran 2:58 marathon in college — but haven't trained in like 8 years. Just started getting back into it last month.",
+    "user_agent_prompt": "You are Marcus. Background (reveal naturally):\n- Name: Marcus\n- Former competitive runner: 2:58 marathon PR, ran in college, stopped 8 years ago\n- Now: running again for 1 month, doing 3 easy runs/week at very slow pace (about 10:30-11:00/mile), ~15 miles/week\n- Goal: get back to marathon shape, maybe run Boston qualifier eventually (sub-3:05 for age group). No specific race yet — maybe a fall marathon to start.\n- Training days: Tuesday, Thursday, Saturday (only 3 for now — easing back in)\n- No Strava yet, will skip\n- Location: San Francisco, CA\n- No injuries currently but had IT band issues 'back in the day'\n\nBehavior: You lead with your past fitness but honestly acknowledge you're a shell of your former self right now. You're a bit nostalgic/self-deprecating about it. When asked about current pace, you're a little embarrassed but honest. You have no specific race — just a general goal of getting back to form.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Marcus",
+      "goal": "return_to_running",
+      "race_name": null,
+      "race_date": null,
+      "training_days": ["tuesday", "thursday", "saturday"],
+      "timezone": "America/Los_Angeles",
+      "strava_connected": false,
+      "easy_pace": "10:45",
+      "weekly_miles": 15
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "training_days", "timezone"],
+    "goal_should_be": "return_to_running",
+    "target_turns": 8,
+    "notes": "Marcus's former PR is irrelevant to his current fitness — Dean should collect his CURRENT pace and weekly miles, not plan around his 2:58 PR. Goal should be 'return_to_running' or 'general_fitness', not 'marathon' (he has no race). Dean should acknowledge his background warmly without over-hyping it. Dean must ask about Strava early. Timezone should be America/Los_Angeles from San Francisco."
+  }
+}

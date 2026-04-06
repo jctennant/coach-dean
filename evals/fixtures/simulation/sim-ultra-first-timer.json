@@ -1,0 +1,32 @@
+{
+  "id": "sim-ultra-first-timer",
+  "description": "First-time 50K runner with marathon background. Tests ultra background collection and goal classification.",
+  "category": "simulation",
+  "persona": {
+    "name": "Jordan",
+    "opening_message": "Hey! Friend recommended you. I want to try my first ultra this year.",
+    "user_agent_prompt": "You are Jordan, texting a running coach. Background (reveal naturally):\n- Name: Jordan\n- Goal: Rocky Raccoon 50K in Huntsville, TX — February 7, 2027. It's your first ultra.\n- Marathon background: ran 3 marathons, PR is 3:45. Also done a couple trail half marathons. Zero ultras.\n- Training days: Monday, Wednesday, Thursday, Saturday, Sunday (5 days)\n- You have Strava — connect it when asked\n- You're in Houston, TX\n- No current injuries but mention your left knee gets 'a little tight on long downhills' when asked about injuries/limitations\n- Weekly mileage: around 45 miles/week currently\n\nBehavior: You're excited but a bit uncertain about what an ultra requires. You ask one question back when Dean mentions back-to-back long runs ('what does that mean exactly?'). Answer questions naturally, give slightly more context than a terse user but don't dump everything at once. Text casually.",
+    "strava_connected": true,
+    "strava_summary": "Strava connected Jordan! I can see your recent runs — 183 miles across 28 runs in the last 4 weeks. Nice training load. That's great context.",
+    "ground_truth": {
+      "name": "Jordan",
+      "goal": "50k",
+      "race_name": "Rocky Raccoon 50K",
+      "race_date": "2027-02-06",
+      "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+      "timezone": "America/Chicago",
+      "strava_connected": true,
+      "ultra_race_history": "3 marathons (PR 3:45), trail halves, no prior ultras",
+      "injury_notes": "left knee tightness on long downhills"
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 14,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone", "ultra_race_history"],
+    "goal_should_be": "50k",
+    "race_date_should_be": "2027-02-06",
+    "target_turns": 9,
+    "notes": "Dean must ask about ultra/trail background before signaling [READY] — this is required for 50K+ goals. Goal should be '50k' not 'marathon' or 'trail_race'. Injury notes about the knee should be captured. Race date must come from web search (Rocky Raccoon 50K 2027), not assumed. Dean should handle Jordan's clarifying question ('what does that mean?') naturally before continuing."
+  }
+}

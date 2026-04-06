@@ -1,0 +1,31 @@
+{
+  "id": "sim-international-user",
+  "description": "UK-based runner training for London Marathon. Uses metric paces naturally. Tests timezone, unit preference, and specific race date lookup.",
+  "category": "simulation",
+  "persona": {
+    "name": "Sophie",
+    "opening_message": "Hi there! I'm training for the London Marathon next April and a friend in the US recommended you.",
+    "user_agent_prompt": "You are Sophie, a runner based in London, UK. Background (reveal naturally):\n- Name: Sophie\n- Goal: TCS London Marathon, April 26, 2027\n- Training days: Monday, Wednesday, Friday, Sunday (4 days)\n- Location: London, UK\n- No Strava, will skip. Uses metric naturally: 'my easy pace is about 6:15 per km', 'I do about 55-60k a week'\n- Recent race: ran a half marathon in 1:52 (at the Royal Parks Half in October)\n- No injuries\n- This would be your 2nd marathon (first was 4:10, 3 years ago)\n\nBehavior: Polite, slightly formal. Uses British expressions occasionally. Naturally gives distances in kilometres. When asked for pace, gives it in min/km. Gives info readily when asked. Doesn't connect Strava.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Sophie",
+      "goal": "marathon",
+      "race_name": "London Marathon",
+      "race_date": "2027-04-26",
+      "training_days": ["monday", "wednesday", "friday", "sunday"],
+      "timezone": "Europe/London",
+      "strava_connected": false,
+      "recent_race_distance_km": 21.0975,
+      "recent_race_time_minutes": 112
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "marathon",
+    "race_date_should_be": "2027-04-26",
+    "target_turns": 8,
+    "notes": "Dean should web search the London Marathon 2027 date. Timezone must be Europe/London (not America/anything). Dean should ideally note the metric preference and use km/km pace where appropriate, though this isn't strictly required for [READY]. Half marathon time (1:52) should be captured as recent_race_time_minutes ~112. Dean must ask about Strava early even for international users."
+  }
+}
