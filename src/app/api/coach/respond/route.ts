@@ -786,10 +786,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true });
     // Overwrite the arc's week 1 key_workout and notes with what Dean actually prescribed
     // (the Haiku arc enrichment in generateAndSaveFullPlan uses estimates; this uses real sessions).
-    void syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
+    // Must be awaited — this runs inside after(), and a void fire-and-forget gets killed when
+    // the lambda exits before the async call completes.
+    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
+    // Note: syncArcCurrentWeek below will overwrite weekly_mileage_target with the actual
+    // session sum — this sets the periodization engine's suggestion as a fallback only.
     await supabase.from("training_state").update({
       current_week: periodization.effectiveWeek,
       current_phase: periodization.phase,
@@ -797,8 +801,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
     await extractAndStorePlanSessions(userId, coachMessage);
-    // Sync the arc's current week with what Dean actually prescribed this week
-    void syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
+    // Sync the arc's current week with what Dean actually prescribed this week.
+    // Must be awaited — void fire-and-forget gets killed when the lambda exits inside after().
+    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
   }
 
   // For user_message, persist any profile updates extracted above (injuries, cross-training,
@@ -1514,18 +1519,26 @@ If no session list is found, return [].`,
     // leave empty — no sessions to store
   }
 
-  // Sanitize cross-training labels that incorrectly have "mi" instead of "min".
-  // e.g. "Strength + mobility 3.5 mi" → "Strength + mobility 35 min"
-  // This prevents non-running sessions from being counted as running mileage.
+  // Sanitize cross-training labels with incorrect units or suspiciously short durations.
   const CROSS_TRAINING_KEYWORDS = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin)\b/i;
   sessions = sessions.map(s => {
     if (!CROSS_TRAINING_KEYWORDS.test(s.label)) return s;
-    // Replace trailing "X mi" or "X.X mi" with "Xmin" (strip decimal, treat as whole minutes)
-    const fixed = s.label.replace(/(\d+(?:\.\d+)?)\s*mi(?!\w)/gi, (_, num) => {
+    let label = s.label;
+    // Fix 1: "X mi" on a cross-training session → "X min" (e.g. "3.5 mi" → "4 min", then fix 2 below)
+    // e.g. "Strength + mobility 3.5 mi" → "Strength + mobility 4 min"
+    label = label.replace(/(\d+(?:\.\d+)?)\s*mi(?!\w)/gi, (_, num) => {
       const mins = Math.round(parseFloat(num));
       return `${mins} min`;
     });
-    return { ...s, label: fixed };
+    // Fix 2: suspiciously short decimal durations (< 5 min) like "3.5min" or "3.5 min" are almost
+    // certainly a mis-extracted "35 min" where the Haiku extractor dropped a digit.
+    // e.g. "Strength + mobility 3.5min" → "Strength + mobility 35 min"
+    label = label.replace(/(\d+\.\d+)\s*min\b/gi, (match, num) => {
+      const val = parseFloat(num);
+      if (val < 5) return `${Math.round(val * 10)} min`;
+      return match;
+    });
+    return { ...s, label };
   });
 
   await supabase

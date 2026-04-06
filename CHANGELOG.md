@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Fix syncArcCurrentWeek being killed by Vercel before it completes
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (Gwyneth's account — weekly_recap set target to 9mi but coach text said 10mi; arc still showed original 16mi value)
+**User feedback:** "her coaches note says 10 mi but the weekly target says 9 mi" / "she's only at a 9 mile target this week when she ran more last week and historically was doing 12-13/week"
+**Root cause:** `syncArcCurrentWeek` was called with `void` (fire-and-forget) at the end of `processCoachRequest`, which itself runs inside `after()`. When `processCoachRequest` returned, Vercel terminated the lambda, killing `syncArcCurrentWeek` before it could update `training_state.weekly_mileage_target` or `training_plans.weeks`. This meant the periodization engine's initial `suggestedWeeklyMiles` value (9) persisted in training_state while the arc stayed at its original generated value (16mi), both diverging from what Dean actually prescribed in the SMS (10.5mi from sessions).
+**Fix / Change:** Changed `void syncArcCurrentWeek(...)` to `await syncArcCurrentWeek(...)` in both `initial_plan` and `weekly_recap` branches. The response has already been sent before this code runs (it's all inside `after()`), so awaiting doesn't block anything — it just ensures the lambda stays alive until the sync completes.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-06 — Fix "3.5min" cross-training duration (Haiku digit-drop mis-parse)
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (Gwyneth's account — "she still has 3.5 min for her strength and mobility session")
+**User feedback:** "she still has 3.5 min for her strength and mobility session (odd number, probably will take longer than that - thought we addressed this yesterday)"
+**Root cause:** Yesterday's fix only caught `X mi` patterns (e.g. "Strength + mobility 3.5 mi"). The stored label was `3.5min` — `mi` is followed by `n` (a word character), so the `(?!\w)` lookahead blocked the match. The `3.5min` value appears to be the Haiku session extractor dropping a digit when parsing "35 min" from the plan text (3.5 vs 35).
+**Fix / Change:** Added a second sanitization pass in `extractAndStorePlanSessions`: after fixing `X mi` → `X min`, also detect decimal durations under 5 minutes on cross-training sessions (e.g. "3.5min") and multiply by 10 to recover the likely intended value ("35 min"). Threshold of 5 min ensures this only triggers on clearly-wrong values.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-05 — Switch to per-mile splits (splits_standard) for US athletes
 
 **Type:** Bug Fix
