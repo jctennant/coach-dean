@@ -991,7 +991,11 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
       return d.getTime() - daysBack * 86_400_000;
     };
     const planMonday = getUTCMonday(new Date(earliestSessionMs));
-    const todayMonday = getUTCMonday(new Date());
+    // Subtract 12h from "now" before computing the current Monday. This handles the common
+    // case where a US user engages Sunday evening and the server UTC clock has already rolled
+    // over into Monday — without this buffer, planMonday === todayMonday (same week boundary)
+    // and the guard fails, causing past-week completed miles to inflate a fresh next-week plan.
+    const todayMonday = getUTCMonday(new Date(Date.now() - 12 * 60 * 60 * 1000));
     if (planMonday > todayMonday) effectiveCompleted = 0;
   }
 
@@ -3136,7 +3140,7 @@ QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality 
 Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava. This prevents the plan from understating the week's actual mileage.
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
-TOTAL LINE FORMAT: The Total line must show the FULL WEEK total = planned future sessions + miles the athlete has already logged this week. Show ONLY the final number — never show the math or breakdown. Correct: "Total: 25.5 mi". Wrong (any form): "19 mi + your 6.5 mi already", "19 mi planned + 6.5 already done = 25.5 mi", or any other "X + Y = Z" expression. If no miles are done yet, Total = the planned sessions sum.
+TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the miles from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: 32.5 mi". Wrong: adding past-week miles to next week’s total (e.g. if the plan is 32.5 mi but the recap week had 30.8 mi, the Total is 32.5 mi, not 63.3 mi).
 ⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.`;
     }
     case "workout_image":
