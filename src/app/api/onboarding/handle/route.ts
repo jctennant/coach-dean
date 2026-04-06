@@ -120,7 +120,7 @@ export async function POST(request: Request) {
 const ULTRA_GOALS = ["30k", "50k", "50mi", "100k", "100mi"];
 
 const VALID_GOAL_BUCKETS = new Set([
-  "mile", "5k", "10k", "half_marathon", "marathon", "30k", "50k", "50mi", "100k", "100mi",
+  "mile", "5k", "10k", "half_marathon", "marathon", "trail_race", "30k", "50k", "50mi", "100k", "100mi",
   "sprint_tri", "olympic_tri", "70.3", "ironman", "cycling",
   "general_fitness", "return_to_running", "injury_recovery",
 ]);
@@ -151,6 +151,9 @@ async function handleConversation(
   const history = (historyRows ?? [])
     .reverse()
     .map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
+
+  // True if Dean has never replied yet in this onboarding conversation
+  const isFirstResponse = !history.some((m) => m.role === "assistant");
 
   // Build Strava context (best race for pace suggestion, if available)
   let stravaContext = "";
@@ -212,9 +215,9 @@ INSTRUCTIONS:
 - Plain text only. No markdown, asterisks, or bullet points.
 - If they ask a coaching question, answer it briefly, then continue naturally.
 - For named races you don't know the date of, use web_search (e.g. "Cirque Series Snowbird 2026 race date").
-${history.length === 0
-  ? "- This is your FIRST message. Briefly introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
-  : "- You have already introduced yourself. Do NOT repeat your intro, tagline, or description of what you do. Jump straight to the next thing."
+${isFirstResponse
+  ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
+  : "- You have already introduced yourself in a previous message. Do NOT re-introduce yourself or repeat what you do. Do NOT open with 'Hey [name]!' or any greeting phrase like 'Great to meet you', 'Great to hear from you', 'Nice to meet you', 'Glad you're here', etc. Acknowledge what they just said and move forward."
 }
 
 STRAVA:
@@ -407,7 +410,7 @@ async function extractFields(
 Output format (include only fields that are clearly stated — use null for anything not mentioned):
 {
   "name": string | null,
-  "goal": "mile"|"5k"|"10k"|"half_marathon"|"marathon"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery" | null,
+  "goal": "mile"|"5k"|"10k"|"half_marathon"|"marathon"|"trail_race"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery" | null,
   "race_name": string | null,
   "race_date": "YYYY-MM-DD" | null,
   "goal_distance_miles": number | null,
@@ -429,6 +432,7 @@ Output format (include only fields that are clearly stated — use null for anyt
 
 Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess.
+- goal: use "trail_race" for trail/mountain races that aren't standard road distances (e.g. a 5mi, 8.9mi, 15mi trail race). Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances.
 - training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"])
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
 - race_date: use the most specific date mentioned for the goal race. If a specific date (day + month) was stated by either participant, use that exact date. Only default to first of month if no specific date was ever given. Today is ${today}.
