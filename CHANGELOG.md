@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Fix "trail_race" shown in dashboard + pace consistency in onboarding
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal testing)
+**User feedback:** "under dipsea in my dashboard instead of the mileage of the race like cirque series, it said trail_race in the A / B race section" and "Dean said my easy pace would be 8-8:40/mi on flat ground, but then when he texted me the pace was different in that week's plan"
+**Root cause (1):** B/C races are stored with `goal_distance_miles: null` because the `other_races` extraction schema didn't include `goal_distance_miles`. When the dashboard renders the race, `GOAL_DISTANCE_LABELS` had no entry for `trail_race`, so it fell back to showing the raw `race.goal` value verbatim.
+**Root cause (2):** The onboarding `summarizeCollected` function showed Dean the exact VDOT-calculated pace as a single number ("Easy pace: 7:48/mi"), but Dean would generate his own arbitrary range ("8:00–8:40/mi") rather than using the stored value. The training plan then showed a different range derived via `easyPaceRange(storedPace)`.
+**Fix / Change (1):** Added `goal_distance_miles` to the `other_races` extraction schema and races insertion, so future B/C races with explicit distances get them stored. Added `trail_race`, `sprint_tri`, `olympic_tri`, `general_fitness`, and other non-distance goal types to `GOAL_DISTANCE_LABELS`. Also replaced the raw `race.goal` fallback with a title-cased conversion (e.g., `trail_race` → "Trail Race") for any future unknown goal types.
+**Fix / Change (2):** Changed the `summarizeCollected` function to show Dean the pre-computed `easyPaceRange` ("Easy pace range: 7:50–8:20/mi — use this exact range") instead of a bare exact pace, so what Dean says during onboarding matches what the plan shows.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-07 — Move location/timezone collection to post-plan cadence step
 
 **Type:** Improvement

@@ -420,7 +420,10 @@ function summarizeCollected(data: Record<string, unknown>): string {
   }
   if (data.days_per_week) lines.push(`Days per week: ${data.days_per_week}`);
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
-  if (data.easy_pace) lines.push(`Easy pace: ${data.easy_pace}/mi`);
+  if (data.easy_pace) {
+    const range = easyPaceRange(data.easy_pace as string);
+    lines.push(`Easy pace range: ${range ?? `${data.easy_pace}/mi`} — use this exact range when telling the athlete their easy pace`);
+  }
   if (data.recent_race_distance_km && data.recent_race_time_minutes) {
     const mins = data.recent_race_time_minutes as number;
     const h = Math.floor(mins / 60);
@@ -479,7 +482,7 @@ Output format (include only fields that are clearly stated — use null for anyt
   "injury_notes": string | null,
   "ultra_race_history": string | null,
   "experience_years": number | null,
-  "other_races": [{"name": string|null, "date": "YYYY-MM-DD"|null, "priority": "B"|"C", "goal": string|null}] | null,
+  "other_races": [{"name": string|null, "date": "YYYY-MM-DD"|null, "priority": "B"|"C", "goal": string|null, "goal_distance_miles": number|null}] | null,
   "timezone": string | null,
   "strava_skipped": true | null
 }
@@ -1120,6 +1123,7 @@ async function completeOnboarding(
           name: string | null;
           goal: string | null;
           priority: "B" | "C";
+          goal_distance_miles?: number | null;
         }> | null
       ) ?? [])
         .filter((r) => r.date)
@@ -1130,7 +1134,7 @@ async function completeOnboarding(
           goal: r.goal ?? goal,
           priority: r.priority,
           goal_time_minutes: null,
-          goal_distance_miles: null,
+          goal_distance_miles: r.goal_distance_miles ?? null,
         })),
     ];
 

@@ -504,6 +504,10 @@ const GOAL_DISTANCE_LABELS: Record<string, string> = {
   mile: "Mile", "5k": "5K", "10k": "10K", half_marathon: "Half Marathon",
   marathon: "Marathon", "30k": "30K", "50k": "50K", "50mi": "50 Miles",
   "100k": "100K", "100mi": "100 Miles",
+  trail_race: "Trail Race", sprint_tri: "Sprint Tri", olympic_tri: "Olympic Tri",
+  "70.3": "70.3 Triathlon", ironman: "Ironman",
+  general_fitness: "General Fitness", return_to_running: "Return to Running",
+  injury_recovery: "Injury Recovery",
 };
 
 function UpcomingRaces({ races }: { races: Race[] }) {
@@ -525,7 +529,8 @@ function UpcomingRaces({ races }: { races: Race[] }) {
             && Math.abs(race.goal_distance_miles - (STANDARD_BUCKET_MILES[race.goal] ?? -1)) > 0.5;
           const distanceLabel = isNonStandardDistance
             ? `${race.goal_distance_miles} mi`
-            : GOAL_DISTANCE_LABELS[race.goal] ?? race.goal;
+            : GOAL_DISTANCE_LABELS[race.goal]
+              ?? race.goal.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
           return (
             <div key={race.id} className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
