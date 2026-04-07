@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Move location/timezone collection to post-plan cadence step
+
+**Type:** Improvement
+**Reported by:** Jake (internal observation during onboarding)
+**User feedback:** "I think we should move asking about location for reminders to when we actually tell the user we can send reminders (after the plan is sent!) it's more natural this way. If a user connected Strava, we should also look at their location on that and just confirm it - easier on them."
+**Root cause:** The onboarding system prompt listed "Location / city" as a required field alongside goal, training days, and pace — causing Dean to ask mid-conversation before reminders were even mentioned. Strava users had their city already stored but Dean asked again from scratch.
+**Fix / Change:** Removed location from the required onboarding fields and [READY] condition. Updated the post-plan closing message: Strava users with a known city now get "I have you in [city] from Strava — which reminder timing works better?" Non-Strava users without a timezone are still asked for their city at the natural moment when reminders are introduced.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-07 — Prompt guardrails: intra-lap timestamp hallucination + in-conversation pace overrides
 
 **Type:** Bug Fix

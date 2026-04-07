@@ -816,7 +816,12 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
     // Send the feedback + reminders question AFTER the dashboard link so it lands last.
     // The user will answer the reminders question and handleCadence picks it up.
-    const closingMsg = !timezoneConfirmed
+    const stravaLocation = stravaCity
+      ? (onboardingData.strava_state ? `${stravaCity}, ${onboardingData.strava_state as string}` : stravaCity)
+      : null;
+    const closingMsg = stravaLocation
+      ? `How does this look? Happy to adjust anything.\n\nI can send a reminder the morning of each session or the evening before — I have you in ${stravaLocation} from Strava so I'll get the timing right. Which works better?`
+      : !timezoneConfirmed
       ? `How does this look? Happy to adjust anything.\n\nI can also send a reminder the morning of each session or the evening before — which works better? And what city are you in so I get the timing right?`
       : `How does this look? Happy to adjust anything.\n\nI can also send a reminder the morning of each session or the evening before — just let me know which works better.`;
     if (!dry_run) {
