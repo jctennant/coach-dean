@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Prompt guardrails: intra-lap timestamp hallucination + in-conversation pace overrides
+
+**Type:** Bug Fix
+**Reported by:** Conversation Analysis 2026-04-06 (auto-generated)
+**User feedback:** N/A (caught by automated analysis)
+**Root cause (Issue 1 — intra-lap timestamp hallucination):** When manual laps are recorded, the existing data guard only restricts lap references when `hasLaps` is false. When laps ARE present, Dean was fabricating sub-lap event timestamps (e.g. "at 48:46 into the run, HR jumped to 140") — Strava lap data only provides per-lap averages (avg pace, avg HR per lap) and does not record when within a lap a specific moment occurred.
+**Root cause (Issues 2+3 — state tracking failure / corrected pace zones ignored):** No prompt instruction required Dean to treat athlete-confirmed values as ground truth during a session. When an athlete corrected Dean's stated pace mid-conversation, Dean continued re-deriving the value from stored profile defaults rather than locking what was confirmed. Similarly, when Dean explicitly acknowledged a corrected training zone, the corrected zone was not propagated into subsequent plan outputs.
+**Fix / Change:**
+1. Added precision-limitation note to the laps DATA GLOSSARY entry (shown only when `hasLaps` is true): "Lap data provides per-lap AVERAGES only. Do NOT cite specific elapsed-time markers within a lap — Strava does not record event-level timestamps within a lap."
+2. Added `⚠️ ATHLETE-CONFIRMED IN-CONVERSATION DATA` rule to the MEMORY AND DATA LIMITATIONS block: athlete-confirmed/corrected paces, distances, and training zones are ground truth for the session; always override stored profile defaults; lock and acknowledge before moving on; never flip-flop on a corrected value.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-07 — Robust re-intro stripping: question-anchor approach
 
 **Type:** Bug Fix
