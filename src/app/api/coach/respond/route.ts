@@ -3002,7 +3002,10 @@ function buildUserMessage(
         : "";
 
       const weekMilesStr = weekMileageSoFar.toFixed(1);
-      const weekMileageContext = `\n⚠️ WEEK-TO-DATE (this run included): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.\n`;
+      const isRunActivity = ["Run", "TrailRun", "VirtualRun"].includes((activityData?.type as string) ?? "");
+      const weekMileageContext = isRunActivity
+        ? `\n⚠️ WEEK-TO-DATE (this run included): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.\n`
+        : `\n⚠️ WEEK-TO-DATE RUNNING MILES: ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.\n`;
 
       return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
 
@@ -3048,6 +3051,8 @@ ALREADY-COMPLETED UPDATES: Check RECENT CONVERSATION. If your most recent messag
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.
 
 FULL PLAN REQUESTS — HARD RULE: If the athlete asks to see their full plan, training schedule, full training arc, all upcoming weeks, or says anything like "send me my plan" / "show me my plan" — your entire response is the dashboard link${dashboardUrl ? `: ${dashboardUrl}` : " (unavailable — tell them to reply \"my plan\" and the system will generate it)"}. One or two sentences max. Do NOT output a week-by-week schedule in the SMS. Do NOT use web search to research the race and build a plan inline. Do NOT promise to send the plan later. This applies even if web search is available — research does not override this rule.
+
+EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Do NOT send the dashboard link. Handle it using the THIS WEEK SESSION SWAP rules below.
 
 THIS WEEK SESSION SWAP: If the athlete asks to move, swap, or reschedule a session and their intent is clearly scoped to this week only (e.g. "just this week", "this Sunday only"), make the change immediately and confirm it explicitly: e.g. "Done — moved strength to Sunday and easy 3mi to Tuesday for this week."
 

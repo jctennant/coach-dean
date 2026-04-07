@@ -4,6 +4,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Fix walk mileage counting + session swap dashboard link bug
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth
+**User feedback:** "Dean seems to be counting her 'walk' strava activities towards running mileage. He shouldn't, only runs should count" / "The dashboard still shows a sunday run and tuesday strength" (after asking Dean to swap them)
+**Root cause (bug 1):** In the `post_run` user message, the week-to-date total was labeled "(this run included)" even when the synced activity was a Walk. `weekMileageSoFar` correctly excludes walks (via `RUN_TYPES`), but the misleading label caused Claude to manually add the walk's distance on top of the running total (2.2mi + 1.25mi walk = 3.5mi incorrectly stated).
+**Root cause (bug 2):** The "FULL PLAN REQUESTS — HARD RULE" prompt fired when Gwyneth said "I see my plan has me running on Sunday, can we switch that?" — Dean sent the dashboard link instead of handling the session swap request.
+**Fix / Change:** (1) When the synced activity is not a run type, the week mileage context now explicitly says "WEEK-TO-DATE RUNNING MILES — this [Walk] is NOT included. Do NOT add its distance to this total." (2) Added an explicit EXCEPTION to the full plan request rule: if the athlete mentions the plan while asking to change it (swap, move session), treat it as a session swap request and do not send the dashboard link.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-06 — Onboarding conversion improvements + 5 new simulation evals
 
 **Type:** Feature / Improvement
