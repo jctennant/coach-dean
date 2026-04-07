@@ -260,12 +260,14 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     if (!hasAccess) {
       if (trigger === "user_message") {
         // Reply to user messages so the line isn't dead, but don't run coaching logic.
-        // past_due gets a softer nudge (payment in progress); canceled gets the checkout link.
+        // past_due → Stripe Customer Portal (update payment method on existing subscription).
+        // canceled → new checkout session (re-subscribe, reuses existing Stripe customer).
         const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
         const dashboardToken = user.dashboard_token as string | null;
         const checkoutUrl = dashboardToken ? `${appUrl}/checkout?token=${dashboardToken}` : appUrl;
+        const portalUrl = dashboardToken ? `${appUrl}/cancel?token=${dashboardToken}` : appUrl;
         const msg = isPastDue
-          ? "Your last payment didn't go through — please update your payment method to continue coaching: " + checkoutUrl
+          ? "Your last payment didn't go through — update your payment method here to continue coaching: " + portalUrl
           : "Your Coach Dean subscription isn't active. Subscribe here to continue: " + checkoutUrl;
         if (!dry_run) {
           await sendSMS(user.phone_number as string, msg);

@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Fix past_due SMS sending checkout link instead of customer portal
+
+**Type:** Bug Fix
+**Reported by:** Jake (user testing)
+**User feedback:** "want to make sure these are all ironed out" re: subscription lapse vs payment failure flows
+**Root cause:** When a user's payment fails (`past_due`), the SMS sent them to `/checkout?token=` which creates a brand-new Stripe Checkout session. But the user already has an existing subscription — they just need to update their payment method, which requires the Stripe Customer Portal, not a new checkout.
+**Fix / Change:** `past_due` SMS now sends `/cancel?token=` (the Stripe Customer Portal redirect page). The portal lets them update their card, and Stripe automatically retries the charge when the payment method is updated. `canceled` users still get `/checkout` (correct — new subscription needed). The `/cancel` page already handles non-canceled statuses (including `past_due`) by redirecting straight to the portal.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-07 — Rebuild training plan when VDOT or goal changes mid-conversation
 
 **Type:** Bug Fix
