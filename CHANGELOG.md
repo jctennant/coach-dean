@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Onboarding prompt: name enforcement, farewell loop, re-ask prevention, race date verification
+
+**Type:** Improvement
+**Reported by:** Internal — simulation eval run 2026-04-07T15-00-33
+**User feedback:** N/A
+**Root cause:** Four prompt gaps identified via simulation evals: (1) name not explicitly required in [READY] criteria, allowing Dean to finish onboarding without collecting the user's name; (2) no instruction to stop after a graceful out-of-scope exit, causing a farewell loop with cycling-only users; (3) "don't re-ask" instruction only covered `onboarding_data`, not the live conversation history — causing Dean to re-ask timezone already stated in the first message; (4) user-provided race dates were sometimes accepted without verification despite the mandatory search rule.
+**Fix / Change:** Added `name` to SIGNALING READY criteria with explicit fallback instruction. Added instruction to stop after one farewell when a cycling-only user declines. Expanded "don't re-ask" to explicitly cover conversation history. Strengthened the race date search mandate with "ALWAYS search, even if the athlete gives you a specific date. This is non-negotiable." All changes applied to both route.ts and run-simulation-evals.mjs for parity.
+**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-simulation-evals.mjs
+
 ## 2026-04-07 — Fix "trail_race" shown in dashboard + pace consistency in onboarding
 
 **Type:** Bug Fix
