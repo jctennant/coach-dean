@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Harder no-repeat-intro rule for onboarding messages 2+
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "dean seems to be repeating himself a ton still? ... Hey Jake! I'm Coach Dean, your AI running coach..."
+**Root cause:** The `isFirstResponse = false` instruction was a soft bullet point at the bottom of the INSTRUCTIONS list. Claude's strong instinct to greet and re-introduce when given a name overrode it.
+**Fix / Change:** Changed the non-first-response branch from a single bullet point to a "HARD RULE — NO EXCEPTIONS" block with explicit NEVER statements, making it much harder for the model to ignore. Kept the same parity in run-onboarding-evals.mjs.
+**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-onboarding-evals.mjs
+
 ## 2026-04-06 — Fix "yesterday" misattribution for past activities
 
 **Type:** Bug Fix
