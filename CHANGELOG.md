@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Fix strength/mobility "min" sessions inflating projected weekly mileage
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Gwyneth's post-run message)
+**User feedback:** "She's definitely not going to get to 53.5 mi total, and that is also not close to 16 mi"
+**Root cause:** The regex `/(\d+(?:\.\d+)?)\s*mi/i` used to parse session distances from `weekly_plan_sessions` matched "min" (as in "35 min") because "min" starts with "mi". A "Strength + mobility 35 min" session was being counted as 35 miles, inflating `projectedWeekMiles` and causing Dean to tell Gwyneth she was "on track for 53.3mi total" when her actual run target was ~16mi.
+**Fix / Change:** Added negative lookahead `(?!n)` after `mi` in all three session-parsing regexes so "min" is excluded. Only "mi", "mile", and "miles" tokens (i.e. not followed by "n") now contribute to the mileage projection.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-07 — Prevent repeat free trials on resubscribe
 
 **Type:** Bug Fix

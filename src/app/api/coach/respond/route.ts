@@ -2253,8 +2253,8 @@ ${(() => {
     // Sum remaining session miles for projection (only future; today may be done)
     let remainingSessionMiles = 0;
     for (const s of futureSessions) {
-      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
-      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
+      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
+      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
       const mMatch = explicitTotal || firstMi;
       if (mMatch) remainingSessionMiles += parseFloat(mMatch[1]);
     }
