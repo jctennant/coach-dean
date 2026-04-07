@@ -1470,9 +1470,19 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
         ? `\nTHIS WEEK'S RUNS (do not sum these to compute mileage — use the authoritative figure above):\n`
         : `\nRECENT WORKOUTS (chronological, oldest first):\n`;
       summary += header;
+      const nowForLabels = new Date();
+      const todayLocalStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(nowForLabels);
       for (const a of filteredRecent) {
         const d = new Date(a.start_date);
         const dateLabel = d.toLocaleDateString("en-US", { timeZone: timezone, weekday: "short", month: "short", day: "numeric" });
+        // Compute a server-side relative label so Claude doesn't need to infer recency.
+        const activityLocalStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(d);
+        const [ty2, tm2, td2] = todayLocalStr.split("-").map(Number);
+        const [ay, am, ad] = activityLocalStr.split("-").map(Number);
+        const todayMs = Date.UTC(ty2, tm2 - 1, td2);
+        const actMs = Date.UTC(ay, am - 1, ad);
+        const daysAgo = Math.round((todayMs - actMs) / 86_400_000);
+        const relativeLabel = daysAgo === 0 ? " (today)" : daysAgo === 1 ? " (yesterday)" : daysAgo <= 13 ? ` (${daysAgo} days ago)` : "";
         const isRun = RUN_TYPES.has(a.activity_type);
         // Non-run activities (rides, swims, etc.) show duration, not miles, to prevent
         // Claude from accidentally summing cross-training distance as running mileage.
@@ -1487,7 +1497,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
           isRun && a.average_pace ? `@ ${a.average_pace}` : null,
           a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
         ].filter(Boolean);
-        summary += `  ${dateLabel}: ${parts.join(", ")}\n`;
+        summary += `  ${dateLabel}${relativeLabel}: ${parts.join(", ")}\n`;
       }
     }
   }
@@ -1971,7 +1981,7 @@ function buildSystemPrompt(
   const tomorrowStr = upcomingDays[0];
   const yesterdayStr = dayFormatter.format(new Date(Date.UTC(ty, tm - 1, td - 1)));
 
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- For future scheduled sessions, use specific calendar dates (e.g. "Friday, Feb 27") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- For recent past activities, you may use natural relative terms: "yesterday", "this morning", "Wednesday's run" — these are clearer than repeating calendar dates.\n`;
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- For future scheduled sessions, use specific calendar dates (e.g. "Friday, Feb 27") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- When referencing past activities or events: ONLY say "yesterday" if the event's date or conversation timestamp matches Yesterday above. If it was any earlier, use the weekday name instead ("Monday's double header", "last week's long run"). Recent workouts in the system prompt now include a server-computed label like "(yesterday)" or "(3 days ago)" — use those labels as the authoritative recency signal, not your own inference.\n`;
   if (profile?.race_date) {
     const raceDate = new Date((profile.race_date as string) + "T00:00:00");
     const daysUntil = Math.ceil((raceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));

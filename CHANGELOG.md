@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Fix "yesterday" misattribution for past activities
+
+**Type:** Bug Fix
+**Reported by:** Ian (via Jake)
+**User feedback:** "He just referred to Monday as yesterday on both Thursday and Sunday. Sounds good. He just referred to Monday as yesterday on both Thursday and Sunday. I ghosted Thursday so maybe that contributed but I think if the prompt includes the current date or something he could figure it out."
+**Root cause:** Two gaps: (1) RECENT WORKOUTS in the system prompt had no server-computed recency labels, so Claude had to infer "yesterday" vs "3 days ago" itself — and got it wrong. (2) The dateContext instruction permitted natural relative terms ("yesterday", "this morning") without requiring Claude to verify the actual timestamp. Claude was treating "most recent strenuous event in conversation history" as "yesterday" regardless of when it actually occurred.
+**Fix / Change:** Two-part fix:
+1. RECENT WORKOUTS now includes a server-computed relative label per activity: `(today)`, `(yesterday)`, `(3 days ago)`, etc. up to 13 days. Claude is instructed to use these labels as the authoritative recency signal.
+2. Tightened the dateContext instruction: Claude may only say "yesterday" if the event's timestamp or conversation date matches the explicitly provided Yesterday date. Older events must use the weekday name ("Monday's double header", "last week's long run").
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-06 — Fix walk mileage counting + session swap dashboard link bug
 
 **Type:** Bug Fix
