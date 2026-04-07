@@ -154,6 +154,7 @@ async function handleConversation(
 
   // True if Dean has never replied yet in this onboarding conversation
   const isFirstResponse = !history.some((m) => m.role === "assistant");
+  console.log("[onboarding] isFirstResponse:", isFirstResponse, "history length:", history.length, "roles:", history.map(m => m.role));
 
   // Build Strava context (best race for pace suggestion, if available)
   let stravaContext = "";
@@ -289,6 +290,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   // your AI running coach...") regardless of instructions. Detect by presence of "I'm Coach Dean"
   // near the start, then find the first actual question and start from there.
   if (!isFirstResponse) {
+    console.log("[onboarding] post-processing rawText slice:", JSON.stringify(rawText.slice(0, 200)));
     if (/i'm coach dean/i.test(rawText.slice(0, 400))) {
       const qIdx = rawText.indexOf("?");
       if (qIdx !== -1) {
