@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Fix "give me a sec" dead end + require pace zone labels
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (user testing)
+**User feedback:** "doesn't seem like Dean is going to respond to me after he said he'd update my plan" and "it was unclear what the 7:47 pace that my 30K suggested was...is that my suggested mile pace, tempo pace, interval pace??"
+**Root cause:** (1) When an athlete provides a race result mid-conversation and Dean updates paces, the system prompt allowed Dean to say "I'll rebuild the plan — give me a sec" without actually sending a follow-up. No second message is ever triggered, leaving the athlete waiting indefinitely. (2) Dean was referencing bare pace values (e.g. "the 7:47 pace your 30K suggested") without labeling which zone they belong to. Most athletes don't know what VDOT is or what each zone represents.
+**Fix / Change:** Added two rules to the `user_message` system prompt: (1) When updating paces from race data, Dean must include the rebuilt plan in the current message and is explicitly prohibited from saying "give me a sec" or implying a follow-up. (2) Every pace must be labeled with its zone (Easy/Tempo/Interval/Race pace). When showing zones for the first time, Dean must briefly explain each one's purpose.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-07 — Auto-continue onboarding after Strava connects
 
 **Type:** Bug Fix
