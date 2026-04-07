@@ -1,0 +1,47 @@
+{
+  "id": "date-midweek-miles-remaining",
+  "description": "Friday: 2 of 4 training days done, user asks miles remaining. Dean must use correct day names and accurate math.",
+  "category": "date_week_correctness",
+  "trigger": "user_message",
+  "today": "2026-04-03",
+  "user": {
+    "name": "Morgan",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Marine Corps Marathon",
+    "goal_race_date": "2026-10-25",
+    "goal_time_minutes": null,
+    "current_week": 4,
+    "current_phase": "base",
+    "vdot": 44,
+    "easy_pace": "9:42/mi",
+    "tempo_pace": "7:50/mi",
+    "interval_pace": "7:05/mi",
+    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 28,
+    "miles_logged_this_week": 14.0,
+    "runs_this_week": 2,
+    "recent_activities": [
+      { "date": "2026-03-22", "type": "Run", "distance_miles": 5.0, "pace": "9:50/mi" },
+      { "date": "2026-03-25", "type": "Run", "distance_miles": 8.0, "pace": "9:40/mi" },
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 6.0, "pace": "9:45/mi" },
+      { "date": "2026-04-01", "type": "Run", "distance_miles": 8.0, "pace": "7:55/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Fri", "date": "4/3", "label": "Easy 6mi" },
+      { "day": "Sun", "date": "4/5", "label": "Long run 9mi easy" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "How many miles do I have left this week?",
+  "ground_truth": {
+    "weekly_target": 28,
+    "miles_done": 14.0,
+    "miles_remaining_to_target": 14.0,
+    "sessions_remaining": ["today (Friday 4/3): easy 6mi", "Sunday 4/5: long 9mi"],
+    "forbidden_phrases": ["yesterday", "tomorrow"],
+    "notes": "Today is Friday April 3. 14mi done: Mon 3/30 (6mi easy) and Wed 4/1 (8mi tempo). Two sessions still ahead: today's easy 6mi (Friday 4/3) and Sunday's long 9mi (4/5). Dean MUST NOT say 'yesterday' for Wednesday's run — it was 2 days ago. Dean MUST NOT say 'tomorrow' for Sunday — Sunday is 2 days away, not tomorrow. Saturday is tomorrow (a rest day). The correct terms: 'today' for the Friday run, 'Sunday' for the long run. The math: 14 done + 6 (today) + 9 (Sunday) = 29mi total, just over the 28mi target — that's correct and acceptable."
+  }
+}

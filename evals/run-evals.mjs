@@ -146,7 +146,7 @@ function buildEvalSystemPrompt(fixture) {
       weeklyTotals[weekKey] = (weeklyTotals[weekKey] || 0) + a.distance_miles;
     }
     activitySummary = "WEEKLY MILEAGE (completed weeks, most recent first):\n";
-    const thisWeekMonday = "2026-03-30";
+    const thisWeekMonday = getWeekMonday(todayDateStr);
     const sortedWeeks = Object.entries(weeklyTotals)
       .filter(([k]) => k < thisWeekMonday)
       .sort(([a], [b]) => b.localeCompare(a));
@@ -156,9 +156,15 @@ function buildEvalSystemPrompt(fixture) {
 
     activitySummary += "\nRECENT WORKOUTS (chronological, oldest first):\n";
     const sorted = [...user.recent_activities].sort((a, b) => a.date.localeCompare(b.date));
+    const [todayY, todayM, todayD] = todayDateStr.split("-").map(Number);
+    const todayMs = Date.UTC(todayY, todayM - 1, todayD);
     for (const a of sorted) {
       const weekLabel = getWeekMonday(a.date) >= thisWeekMonday ? "[THIS WEEK]" : "[prior week]";
-      activitySummary += `  ${weekLabel} ${a.date}: ${a.type}, ${a.distance_miles}mi${a.pace ? ` @ ${a.pace}` : ""}\n`;
+      const [ay, am, ad] = a.date.split("-").map(Number);
+      const daysAgo = Math.round((todayMs - Date.UTC(ay, am - 1, ad)) / 86400000);
+      const relLabel = daysAgo === 0 ? " (today)" : daysAgo === 1 ? " (yesterday)" : daysAgo <= 13 ? ` (${daysAgo} days ago)` : "";
+      const dayName = new Date(a.date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      activitySummary += `  ${weekLabel} ${dayName}${relLabel}: ${a.type}, ${a.distance_miles}mi${a.pace ? ` @ ${a.pace}` : ""}\n`;
     }
   } else {
     activitySummary = "No activity history available.";
@@ -178,7 +184,19 @@ function buildEvalSystemPrompt(fixture) {
   if (user.recent_conversation && user.recent_conversation.length > 0) {
     conversationBlock = "\nRECENT CONVERSATION (most recent at bottom):\n";
     for (const m of user.recent_conversation) {
-      conversationBlock += `${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}\n`;
+      const dateLabel = m.date ? `[${m.date}] ` : "";
+      conversationBlock += `${dateLabel}${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}\n`;
+    }
+  }
+
+  // Compute days since last coach message (for user_message fixtures)
+  let daysSinceLastCoachMessage = null;
+  if (fixture.trigger === "user_message" || !fixture.trigger) {
+    const lastCoachMsg = (user.recent_conversation || []).slice().reverse().find(m => m.role === "assistant");
+    if (lastCoachMsg?.date) {
+      const [cy, cm, cd] = lastCoachMsg.date.split("-").map(Number);
+      const [ty2, tm2, td2] = todayDateStr.split("-").map(Number);
+      daysSinceLastCoachMessage = Math.round((Date.UTC(ty2, tm2 - 1, td2) - Date.UTC(cy, cm - 1, cd)) / 86400000);
     }
   }
 
@@ -282,7 +300,11 @@ LENGTH:
 TONE:
 - Cut filler openers. Never start with "Great job!", "Awesome!", "That's fantastic!"
 - No sign-offs, no "Let me know if you have questions", no "You've got this!" at end.
-- Sound like a knowledgeable friend, not a customer service bot.`;
+- Sound like a knowledgeable friend, not a customer service bot.${(fixture.trigger === "user_message" || !fixture.trigger) ? `
+
+ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
+
+CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}` : ""}`;
 }
 
 function getWeekMonday(dateStr) {

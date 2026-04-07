@@ -1,0 +1,59 @@
+{
+  "id": "date-post-silence-reengagement",
+  "description": "Dean hasn't messaged in 6 days; 3 runs happened in the gap. User checks in Saturday. Dean must own the gap, reference runs by day name, not pretend continuity.",
+  "category": "date_week_correctness",
+  "trigger": "user_message",
+  "today": "2026-04-04",
+  "user": {
+    "name": "Riley",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Portland Marathon",
+    "goal_race_date": "2026-10-04",
+    "goal_time_minutes": 225,
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 42,
+    "easy_pace": "10:05/mi",
+    "tempo_pace": "8:09/mi",
+    "interval_pace": "7:22/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 30,
+    "miles_logged_this_week": 18.5,
+    "runs_this_week": 3,
+    "recent_activities": [
+      { "date": "2026-03-25", "type": "Run", "distance_miles": 6.0, "pace": "10:05/mi" },
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 12.0, "pace": "10:20/mi" },
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 6.0, "pace": "10:10/mi" },
+      { "date": "2026-04-01", "type": "Run", "distance_miles": 8.0, "pace": "10:00/mi" },
+      { "date": "2026-04-02", "type": "Run", "distance_miles": 4.5, "pace": "8:15/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Sat", "date": "4/4", "label": "Long run 11mi easy" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "date": "2026-03-29",
+        "content": "Week 6 wrap: 18 miles. Solid long run Sunday. Week 7 starts Monday — Mon easy 6, Wed easy 8, Thu tempo 4.5@8:09, Sat long 11. Target 30mi."
+      }
+    ]
+  },
+  "inbound_sms": "Haven't heard from you in a while — did my runs go okay?",
+  "ground_truth": {
+    "last_dean_message_date": "2026-03-29 (Sunday, 6 days ago)",
+    "runs_since_last_contact": 3,
+    "run_dates_and_distances": ["Monday 3/30: 6mi easy", "Wednesday 4/1: 8mi easy", "Thursday 4/2: 4.5mi tempo"],
+    "miles_logged_this_week": 18.5,
+    "session_still_remaining": "Saturday 4/4 long run 11mi",
+    "forbidden_phrases": ["yesterday", "this morning", "been watching", "been following"],
+    "required_behaviors": [
+      "acknowledge not being in touch / the gap",
+      "reference runs by day name (Monday, Wednesday, Thursday) not 'yesterday' or 'this morning'",
+      "mention today's long run (Sat 4/4) is still ahead"
+    ],
+    "notes": "Today is Saturday April 4. Dean's last message was Sunday March 29 — 6 days ago. Three runs happened in the gap: Mon 3/30 (6mi easy), Wed 4/1 (8mi easy), Thu 4/2 (4.5mi tempo). Dean must acknowledge the gap — not pretend he was watching all week. He should reference the runs by specific day name. Thursday's run was 2 days ago, NOT yesterday (yesterday was Friday, a rest day). Today's long run (11mi easy) is still remaining. Tone: a good coach owns that they went quiet and catches up genuinely, not with hollow reassurance."
+  }
+}

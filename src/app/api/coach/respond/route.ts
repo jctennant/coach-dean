@@ -535,7 +535,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
   }
 
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial");
+  const lastCoachMsgForGap = trigger === "user_message"
+    ? [...recentMessages].reverse().find(m => m.role === "assistant")
+    : null;
+  const daysSinceLastCoachMessage = lastCoachMsgForGap?.created_at
+    ? Math.round((Date.now() - new Date(lastCoachMsgForGap.created_at).getTime()) / 86400000)
+    : null;
+
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -2930,6 +2937,7 @@ function buildUserMessage(
   dashboardUrl?: string | null,
   racePreparednessFlag = "",
   preferredUnits: string = "imperial",
+  daysSinceLastCoachMessage: number | null = null,
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -3094,7 +3102,11 @@ INTERVAL SESSION MATH: When converting interval sessions to time or total distan
 
 FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK:", they are submitting feedback. Decide which of two paths applies:
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
-- If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.${fullArcContext}`;
+- If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.
+
+ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
+
+CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}${fullArcContext}`;
     }
     case "morning_reminder":
       if (missedRunCheckin) {

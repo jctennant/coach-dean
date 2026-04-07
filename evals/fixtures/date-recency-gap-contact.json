@@ -1,0 +1,53 @@
+{
+  "id": "date-recency-gap-contact",
+  "description": "Today is Thursday; Dean last messaged Sunday; user asks how they're doing. Dean must not say 'yesterday' for runs from 2-3 days ago.",
+  "category": "date_week_correctness",
+  "trigger": "user_message",
+  "today": "2026-04-02",
+  "user": {
+    "name": "Jordan",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Nashville Half Marathon",
+    "goal_race_date": "2026-06-06",
+    "goal_time_minutes": 105,
+    "current_week": 6,
+    "current_phase": "build",
+    "vdot": 46,
+    "easy_pace": "9:22/mi",
+    "tempo_pace": "7:31/mi",
+    "interval_pace": "6:47/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 32,
+    "miles_logged_this_week": 11.0,
+    "runs_this_week": 2,
+    "recent_activities": [
+      { "date": "2026-03-28", "type": "Run", "distance_miles": 10.0, "pace": "9:30/mi" },
+      { "date": "2026-03-26", "type": "Run", "distance_miles": 6.5, "pace": "9:20/mi" },
+      { "date": "2026-03-30", "type": "Run", "distance_miles": 6.0, "pace": "9:25/mi" },
+      { "date": "2026-03-31", "type": "Run", "distance_miles": 5.0, "pace": "7:35/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Thu", "date": "4/2", "label": "Easy 6mi" },
+      { "day": "Sat", "date": "4/4", "label": "Long run 12mi easy" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "content": "Good week last week — 16.5 miles across two solid sessions. Long run Sunday was right where it needed to be. This week: Mon easy 6, Tue tempo 5@7:31, Thu easy 6, Sat long 12. That's 29mi for the week."
+      }
+    ]
+  },
+  "inbound_sms": "How am I doing this week?",
+  "ground_truth": {
+    "miles_done_this_week": 11.0,
+    "miles_remaining": 18.0,
+    "runs_done": 2,
+    "runs_remaining": 2,
+    "forbidden_phrases": ["yesterday", "this morning", "last night"],
+    "required_day_references": ["Monday", "Tuesday"],
+    "notes": "Today is Thursday April 2. The two runs this week were Monday March 30 (6mi easy) and Tuesday March 31 (5mi tempo). Neither was yesterday — yesterday was Wednesday April 1, a rest day. Dean MUST NOT say 'yesterday' for either run. They were 2 and 3 days ago. Dean should reference them as 'Monday' and 'Tuesday' (or 'your two runs this week'). 11mi done, 18mi remaining (today's easy 6 + Sat long 12). Dean's last message was Sunday — he hasn't sent anything since then, so he shouldn't pretend he's been watching in real time."
+  }
+}

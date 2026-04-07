@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Fix recency errors and communication gap acknowledgment
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** "Common failure pattern where [Dean] loses trust" — specifically: Dean says "yesterday" for a run from 3 days ago, and doesn't acknowledge when multiple days have passed since he last messaged.
+**Root cause:** Two separate issues: (1) The `user_message` trigger prompt had no rule requiring Dean to verify activity recency from the `(N days ago)` labels already present in RECENT WORKOUTS before using relative terms like "yesterday". (2) No concept of a "contact gap" — Dean had no instruction to acknowledge when his last message was several days ago, causing him to respond as if he'd been watching in real time. The eval runner also had a bug where `thisWeekMonday` was hardcoded and activities lacked relative time labels, making evals less representative of production.
+**Fix / Change:** Added `ACTIVITY RECENCY` rule to the `user_message` trigger: Dean must check the `(N days ago)` label before using "yesterday" or "this morning" — use day name (e.g. "Monday's run") for anything 2+ days ago. Added `CONTACT GAP` rule: when the last coach message was 2+ days ago, computed from `recentMessages`, Dean is told the gap and instructed to acknowledge it naturally. Fixed eval runner to compute dynamic `thisWeekMonday` from `fixture.today`, added `(N days ago)` labels to activity entries, and added optional `date` field support on conversation entries. Added 3 new evals targeting these failure modes.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`, `evals/fixtures/date-recency-gap-contact.json`, `evals/fixtures/date-midweek-miles-remaining.json`, `evals/fixtures/date-post-silence-reengagement.json`
+
+---
+
 ## 2026-04-07 — Onboarding: race time extraction fix, triathlete context, Strava engagement, conversion copy
 
 **Type:** Improvement
