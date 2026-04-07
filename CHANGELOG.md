@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Rebuild training plan when VDOT or goal changes mid-conversation
+
+**Type:** Bug Fix
+**Reported by:** Jake (user testing)
+**User feedback:** "I don't think my plan actually got updated at all with different paces" and "the plan goes up to 49mi, that's too much for a 1mi time trial"
+**Root cause:** Two separate issues: (1) When an athlete provides race data (triggering a VDOT recalculation) or changes their goal race type mid-conversation, the profile paces were saved to the DB but `generateAndSaveFullPlan` was never called — so the stored plan arc and weekly sessions still had old pace labels and volume targets. (2) The `getTargetPeakMileage` function had no "mile" case, so a mile goal fell through to the default 60mi hard cap, producing a 49mi peak week — far too high for a speed-focused mile time trial plan.
+**Fix / Change:** (1) `persistProfileUpdates` now calls `generateAndSaveFullPlan` when `hasRaceData` (VDOT change) or `hasGoalRaceType` (goal change) is true, unless `hasRaceDate` already triggered a full regen. Goal changes use `resetToWeek1: true`; VDOT-only changes preserve the current week. (2) Added "mile" case to `getTargetPeakMileage`: hardCap=40, floor=15 — keeps the plan speed-focused with moderate volume.
+**Files changed:** src/app/api/coach/respond/route.ts, src/lib/training-plan.ts
+
 ## 2026-04-07 — Fix "give me a sec" dead end + require pace zone labels
 
 **Type:** Bug Fix / Improvement

@@ -2860,6 +2860,7 @@ async function persistProfileUpdates(
 
     // When the race date changed, propagate it to the races table (A race) and the
     // training plan arc so the dashboard countdown and week count stay accurate.
+    let didFullRegenerate = false;
     if (hasRaceDate && extracted.race_date) {
       const newRaceDate = extracted.race_date as string;
 
@@ -2897,6 +2898,7 @@ async function persistProfileUpdates(
           // Race date changed to a new, further-out date — this is a genuinely new plan
           // for a different race, so reset to week 1.
           await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, { skipLinkSms: true, resetToWeek1: true });
+          didFullRegenerate = true;
           console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, full plan regenerated (${planWeeks.length} → ${newTotalWeeks} weeks)`);
         } else {
           // Race moved closer — trim the existing arc.
@@ -2912,6 +2914,19 @@ async function persistProfileUpdates(
           console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, arc trimmed to ${updatedWeeks.length} weeks`);
         }
       }
+    }
+    // When VDOT paces change (race data provided) or goal race type changes, regenerate
+    // the full training plan arc so session labels, key workouts, and volume targets
+    // reflect the updated profile. Skip if hasRaceDate already triggered a full regen above.
+    if ((hasRaceData || hasGoalRaceType) && !didFullRegenerate) {
+      const mergedProfile = { ...profile, ...profileUpdate };
+      // Goal change → reset to week 1 (entirely different training paradigm).
+      // VDOT-only update → preserve current week, just rebuild arc with new paces.
+      await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, {
+        skipLinkSms: true,
+        resetToWeek1: hasGoalRaceType,
+      });
+      console.log(`[persistProfileUpdates] ${hasGoalRaceType ? "goal" : "VDOT"} changed, plan regenerated (resetToWeek1=${hasGoalRaceType})`);
     }
   } catch (err) {
     console.error("[coach/respond] persistProfileUpdates failed:", err);

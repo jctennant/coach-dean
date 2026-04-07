@@ -84,6 +84,10 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
     hardCap = 50; floor = 18;
   } else if (g.includes("5k") || g.includes("5 k")) {
     hardCap = 45; floor = 12;
+  } else if (g === "mile" || g.includes("1 mile") || g.includes("1mi") || g.includes("sub-5") || g.includes("sub 5")) {
+    // Mile time trial: speed-focused, moderate volume. No long runs needed.
+    // Peak of 40mi provides enough aerobic base + room for quality sessions.
+    hardCap = 40; floor = 15;
   } else {
     hardCap = 60; floor = 20;
   }
