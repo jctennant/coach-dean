@@ -286,14 +286,20 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   }
 
   // Strip re-introduction on non-first messages. The model re-introduces itself ("I'm Coach Dean,
-  // your AI running coach. I build personalized...") regardless of instructions. Two patterns:
-  // 1. Full re-intro block separated by a paragraph break — strip through the blank line
-  // 2. "Nice/Great to meet you" opener — strip just that phrase
+  // your AI running coach...") regardless of instructions. Detect by presence of "I'm Coach Dean"
+  // near the start, then find the first actual question and start from there.
   if (!isFirstResponse) {
-    const reIntroMatch = rawText.match(/^(?:hey\s+\w+[!,]\s+)?i'm coach dean[\s\S]*?\n\n/i);
-    if (reIntroMatch) {
-      rawText = rawText.slice(reIntroMatch[0].length).trimStart();
+    if (/i'm coach dean/i.test(rawText.slice(0, 400))) {
+      const qIdx = rawText.indexOf("?");
+      if (qIdx !== -1) {
+        const before = rawText.slice(0, qIdx);
+        const nlIdx = before.lastIndexOf("\n");
+        const dotIdx = before.lastIndexOf(". ");
+        const sentenceStart = Math.max(nlIdx + 1, dotIdx + 2);
+        rawText = rawText.slice(sentenceStart > 0 ? sentenceStart : 0).trimStart();
+      }
     } else {
+      // Simpler greeting phrases ("Nice to meet you", "Great to meet you")
       rawText = rawText.replace(
         /^(nice|great|good|wonderful|so nice|really nice|so glad|happy)\s+to\s+(meet|have)\s+you[,!.]?\s*/i,
         ""

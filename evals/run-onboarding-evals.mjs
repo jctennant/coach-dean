@@ -172,9 +172,15 @@ async function runEval(fixture) {
 
     // Mirror route.ts post-processing: strip re-introduction on non-first messages
     if (!fixture.is_first_response) {
-      const reIntroMatch = rawText.match(/^(?:hey\s+\w+[!,]\s+)?i'm coach dean[\s\S]*?\n\n/i);
-      if (reIntroMatch) {
-        rawText = rawText.slice(reIntroMatch[0].length).trimStart();
+      if (/i'm coach dean/i.test(rawText.slice(0, 400))) {
+        const qIdx = rawText.indexOf("?");
+        if (qIdx !== -1) {
+          const before = rawText.slice(0, qIdx);
+          const nlIdx = before.lastIndexOf("\n");
+          const dotIdx = before.lastIndexOf(". ");
+          const sentenceStart = Math.max(nlIdx + 1, dotIdx + 2);
+          rawText = rawText.slice(sentenceStart > 0 ? sentenceStart : 0).trimStart();
+        }
       } else {
         rawText = rawText.replace(
           /^(nice|great|good|wonderful|so nice|really nice|so glad|happy)\s+to\s+(meet|have)\s+you[,!.]?\s*/i,

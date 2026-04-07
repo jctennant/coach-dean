@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Robust re-intro stripping: question-anchor approach
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "deployed and still getting the same response: Hey Jake! I'm Coach Dean, your AI running coach..."
+**Root cause:** First post-processing attempt used `\n\n` as the paragraph boundary to find where the intro ends. But the model produces `\n` (single newline) or no newline at all, so the regex never matched. The "Hey Jake! I'm Coach Dean..." block passed through unstripped.
+**Fix / Change:** Replaced the `\n\n`-dependent regex with a question-anchor approach: detect "I'm Coach Dean" in the first 400 chars, find the first `?` in the response, back-track to the start of that sentence (using last `\n` or `. ` before the `?`), and start the response from there. Works for `\n\n`, `\n`, and no-newline variants. Also updated eval runner to match.
+**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-onboarding-evals.mjs
+
 ## 2026-04-07 — Post-process greeting phrases + fix eval fixture message ordering
 
 **Type:** Bug Fix
