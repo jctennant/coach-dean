@@ -230,6 +230,14 @@ ${isFirstResponse
 
 STRAVA:
 Ask about Strava early — once you have the athlete's name and goal, it should be one of your next questions. Don't wait until the end of onboarding. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
+When you ask, briefly explain the value in one sentence: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed.
+
+DEMONSTRATING VALUE:
+After you receive a fitness baseline (race PR or easy pace), briefly reflect back one specific insight that connects their data to their goal — e.g. "A 2:05 half puts you in the 4:20-4:30 marathon range if we train smart." One sentence. This is not a requirement but shows Dean is a real coach, not just a form.
+
+CYCLING AND TRIATHLON GOALS:
+If the athlete's goal is purely cycling with no running component, be honest: "I specialize in running — I can structure a cycling plan but if pure cycling coaching is your main need, I may not be your best fit. Is running part of the mix at all?" Do not just proceed as if cycling and running coaching are equivalent.
+If the athlete is training for a triathlon, clarify your role upfront: "For triathlons I handle the run leg — I'll build your running program and check in after every run workout. For swim and bike you'd want dedicated coaching, but I'll make sure your run is dialed in."
 
 SIGNALING READY:
 When you have goal + training_days + at least one of (pace/PR data OR Strava connected) + location, end your final message with [READY] on its own line. The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
@@ -721,7 +729,7 @@ async function handleAwaitingPayment(
 ): Promise<NextResponse> {
   const { data: userData } = await supabase
     .from("users")
-    .select("dashboard_token")
+    .select("dashboard_token, onboarding_data")
     .eq("id", user.id)
     .single();
 
@@ -730,9 +738,46 @@ async function handleAwaitingPayment(
 
   const firstName = (user.name ?? "").split(" ")[0] || "Hey";
   const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-  const msg = `${firstName}, your plan is ready and waiting! Start your free 7-day trial here:\n${checkoutUrl}`;
+  const onboardingData = (userData?.onboarding_data as Record<string, unknown>) || {};
+
+  const msg = buildPaymentMessage(firstName, checkoutUrl, onboardingData);
   await sendAndStore(user.id, user.phone_number, msg, "awaiting_payment");
   return NextResponse.json({ ok: true });
+}
+
+/** Build a personalized trial CTA that references the athlete's specific plan. */
+function buildPaymentMessage(
+  firstName: string,
+  checkoutUrl: string,
+  data: Record<string, unknown>
+): string {
+  const raceName = data.race_name as string | null;
+  const raceDate = data.race_date as string | null;
+  const goal = data.goal as string | null;
+
+  // Calculate weeks until race if we have a date
+  let weeksDetail = "";
+  if (raceDate) {
+    const msPerWeek = 1000 * 60 * 60 * 24 * 7;
+    const weeksOut = Math.round((new Date(raceDate + "T12:00:00Z").getTime() - Date.now()) / msPerWeek);
+    if (weeksOut > 0) weeksDetail = `${weeksOut}-week `;
+  }
+
+  // Build goal description
+  let goalDesc = "personalized running plan";
+  if (raceName && raceDate) {
+    const dateStr = new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+    });
+    goalDesc = `${weeksDetail}${raceName} plan (${dateStr})`;
+  } else if (goal === "general_fitness" || goal === "return_to_running") {
+    goalDesc = "personalized training plan";
+  } else if (goal) {
+    goalDesc = `${weeksDetail}${goal.replace(/_/g, " ")} plan`;
+  }
+
+  return `${firstName}, your ${goalDesc} is built and ready. Start your free 7-day trial to unlock it:\n${checkoutUrl}`;
 }
 
 // ---------------------------------------------------------------------------

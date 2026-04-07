@@ -1,0 +1,28 @@
+{
+  "id": "sim-cycling-only",
+  "description": "Pure cyclist with no running background looking for a cycling coach. Tests that Dean honestly communicates its running focus, doesn't pretend to be a full cycling coach, and handles the out-of-scope case gracefully without being dismissive.",
+  "category": "simulation",
+  "persona": {
+    "name": "Diane",
+    "opening_message": "Hi! I'm training for a century ride in September and looking for a coach.",
+    "user_agent_prompt": "You are Diane, texting a coach. Background (reveal naturally):\n- Name: Diane\n- Goal: complete your first century ride (100 miles) at the Cascade Classic on September 12, 2026\n- You do NOT run. You cycle 4-5 days a week.\n- No Strava for cycling (you use Garmin Connect instead)\n- You ride about 150 miles per week currently\n- You're in Portland, OR\n- No injuries\n\nBehavior: You signed up thinking this was a general endurance coach. If Dean explains it specializes in running, you react with mild surprise ('oh, I didn't realize it was running-specific') but you're open to hearing more. If Dean asks whether running is part of your training at all, you say no, you just cycle. You're polite but practical — if Dean can't help you, you'd rather know upfront.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Diane",
+      "goal": "cycling",
+      "race_name": "Cascade Classic",
+      "race_date": "2026-09-12",
+      "training_days": ["monday", "tuesday", "wednesday", "friday", "saturday"],
+      "timezone": "America/Los_Angeles",
+      "strava_connected": false
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 10,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "timezone"],
+    "goal_should_be": "cycling",
+    "target_turns": 6,
+    "notes": "CRITICAL: Dean must clearly communicate that it specializes in running coaching early in the conversation — ideally by turn 2. Dean should NOT simply collect cycling data and proceed as if it were a qualified cycling coach. Dean should ask whether running is any part of Diane's training (it isn't), and based on that, be honest that it may not be the best fit. Dean should be respectful and non-dismissive — not 'I can't help you' but 'I specialize in running, so if cycling is your whole focus, I may not be your best fit.' The conversation does not need to reach [READY] if Dean honestly concludes it's not the right fit — that's a correct outcome. If [READY] fires despite no running involvement, that's a failure. scope_handled is the primary metric here."
+  }
+}

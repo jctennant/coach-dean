@@ -75,25 +75,40 @@ Score each dimension, then give an overall score:
    - Read the transcript carefully — if the user answered training days in turn 2 and Dean asked again in turn 4, that's a failure
    - Greeting phrase repetition ("Great to meet you" repeated) also counts
 
-5. natural_flow (1–10): How natural and smooth did the conversation feel?
+6. natural_flow (1–10): How natural and smooth did the conversation feel?
    - 10: Felt like a real coach — warm, specific, efficient
    - 7–9: Mostly natural, minor awkwardness
    - 4–6: Some robotic moments, awkward question ordering, or missed opportunities to acknowledge what was shared
    - 1–3: Stilted, interrogation-like, missed important context
 
-6. efficiency (1–10): How efficiently did Dean collect the needed info?
+7. efficiency (1–10): How efficiently did Dean collect the needed info?
    - 10: [READY] in ≤6 Dean turns
    - 8: 7–8 turns
    - 6: 9–10 turns
    - 4: 11–12 turns
    - 1: Timed out without [READY], or 13+ turns
 
-7. overall_score (1–10): Holistic quality — would a real user have had a good experience?
+8. scope_handled (boolean | null): Only score this for cycling or triathlon goals. Did Dean correctly explain its scope?
+   - true = Dean honestly explained it specializes in running, and for triathlon clarified it handles the run leg
+   - false = Dean proceeded as if it were a full cycling or triathlon coach without any scope clarification
+   - null = not applicable (running-only goal)
+
+9. conversion_likelihood (1–10): Based on the conversation, how likely is this user to start a free trial?
+   - This measures how well Dean demonstrated VALUE during onboarding — not just data collection
+   - 10: Dean showed specific intelligence (e.g. reflected back what their PR means for their goal), felt like a real coach, user seemed engaged and excited
+   - 7–9: Warm, competent conversation — user seemed satisfied, no friction
+   - 5–6: Functional but no "wow" moment — user got their questions answered but Dean felt like a signup form
+   - 3–4: Some friction — Dean missed obvious opportunities to demonstrate value, or user seemed confused
+   - 1–2: Dean felt robotic or unhelpful — user likely to drop off
+   Key signals that raise conversion_likelihood: Dean reflected specific insight from their fitness data, Dean explained Strava's value proactively, Dean acknowledged their goal with coaching-specific knowledge
+   Key signals that lower it: Dean only asked questions without giving anything back, Dean felt like a form, scope confusion (e.g. Dean acted as a cycling coach without acknowledging its running focus)
+
+10. overall_score (1–10): Holistic quality — would a real user have had a good experience AND be likely to see value in the product?
 
 SCORING RUBRIC:
-- 10: All fields correct, [READY] fired efficiently, natural conversation, no repetition
-- 7–9: [READY] fired, fields mostly correct (1 minor error), mostly natural
-- 4–6: [READY] fired but has 1 significant error (wrong date, wrong goal, re-asked something), or needed 11+ turns
+- 10: All fields correct, [READY] fired efficiently, natural conversation, no repetition, strong conversion signals
+- 7–9: [READY] fired, fields mostly correct (1 minor error), mostly natural, user likely to convert
+- 4–6: [READY] fired but has 1 significant error (wrong date, wrong goal, re-asked something), or needed 11+ turns, or low conversion signals
 - 1–3: Multiple errors, or [READY] never fired, or conversation was confusing/robotic
 - 0: Complete failure
 
@@ -108,6 +123,8 @@ Return ONLY valid JSON:
   "repetition_examples": ["quote any repeated questions or greeting phrases"],
   "natural_flow": 0,
   "efficiency": 0,
+  "scope_handled": true | false | null,
+  "conversion_likelihood": 0,
   "overall_score": 0,
   "score_rationale": "2-3 sentences on what went well and what didn't",
   "flags": ["any notable issues not captured above"]

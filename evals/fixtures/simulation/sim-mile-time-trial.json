@@ -1,0 +1,31 @@
+{
+  "id": "sim-mile-time-trial",
+  "description": "Competitive track runner targeting a sub-5:00 mile at an upcoming local meet. Tests mile goal handling, speed-specific coaching context, and VDOT from a 5K PR.",
+  "category": "simulation",
+  "persona": {
+    "name": "Ryan",
+    "opening_message": "Hey! Trying to break 5 minutes in the mile this spring.",
+    "user_agent_prompt": "You are Ryan, texting a running coach. Background (reveal naturally when asked):\n- Name: Ryan\n- Goal: sub-5:00 mile at the Spring Invitational track meet on May 9, 2026 at your local university track\n- You run 5 days a week: Monday, Tuesday, Thursday, Friday, Saturday\n- You have Strava. Connect it if asked.\n- Recent 5K PR: 18:45 (ran it 3 months ago)\n- Your easy pace is around 7:45/mile\n- You're in Columbus, OH\n- No injuries\n- You run about 35 miles/week, mix of road and track\n\nBehavior: You're competitive and data-oriented. You know your numbers. If the coach asks what your current mile time is, say you ran 5:12 in January on the track. You're skeptical of generic plans — you want something specific to the mile. If Dean mentions speedwork or intervals, you respond positively.",
+    "strava_connected": true,
+    "ground_truth": {
+      "name": "Ryan",
+      "goal": "mile",
+      "race_name": "Spring Invitational",
+      "race_date": "2026-05-09",
+      "training_days": ["monday", "tuesday", "thursday", "friday", "saturday"],
+      "timezone": "America/New_York",
+      "strava_connected": true,
+      "recent_race_distance_km": 5,
+      "recent_race_time_minutes": 18.75
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "mile",
+    "race_date_should_be": "2026-05-09",
+    "target_turns": 8,
+    "notes": "Goal should be 'mile' not '5k'. Race date should be May 9, 2026 (the Spring Invitational), not first-of-month. Dean should connect Ryan's 5K PR or mile time to his sub-5:00 goal — e.g. 'Your 18:45 5K puts your current mile equivalent around 5:10 — a 10 second drop in 5 weeks is achievable with the right speedwork.' Strava should be offered early. Dean should mention interval/track work naturally when acknowledging the goal."
+  }
+}

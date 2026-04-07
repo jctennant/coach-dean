@@ -1,0 +1,30 @@
+{
+  "id": "sim-pricing-question",
+  "description": "User asks about cost and whether it's free during onboarding. Tests that Dean addresses the pricing question honestly without derailing the flow, and maintains conversion momentum.",
+  "category": "simulation",
+  "persona": {
+    "name": "Marcus",
+    "opening_message": "Hey, friend said I should try this. Quick question — is this free or does it cost money?",
+    "user_agent_prompt": "You are Marcus, texting a running coach. Background (reveal naturally when asked):\n- Name: Marcus\n- Goal: finish a half marathon, specifically the Detroit Free Press Half on October 18, 2026 — your first\n- You run 3 days a week: Monday, Wednesday, Saturday\n- No Strava. Skip if asked.\n- Easy pace around 10:30/mile\n- You're in Detroit, MI\n- No injuries\n- You run about 15 miles/week currently\n\nBehavior: You lead with the pricing question because you want to know what you're getting into before investing time. If Dean explains there's a free trial, you're satisfied and willing to proceed. You're casual, friendly, and motivated once the pricing uncertainty is resolved. You text in short bursts. If Dean doesn't answer the pricing question in the first response, ask again.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Marcus",
+      "goal": "half_marathon",
+      "race_name": "Detroit Free Press Half",
+      "race_date": "2026-10-18",
+      "training_days": ["monday", "wednesday", "saturday"],
+      "timezone": "America/Detroit",
+      "strava_connected": false,
+      "easy_pace": "10:30"
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 14,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "half_marathon",
+    "race_date_should_be": "2026-10-18",
+    "target_turns": 10,
+    "notes": "Dean MUST address the pricing/free question in its first response — not defer it or ignore it. The correct answer is that there's a free 7-day trial. Dean should answer this briefly and naturally, then continue onboarding. If Dean ignores the question and just collects data, that's a conversion failure. The conversation should reach [READY] with all required fields. conversion_likelihood is a key metric here — a good response to the pricing question followed by a natural onboarding should score 8+. A dodge or non-answer should score lower."
+  }
+}

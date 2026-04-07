@@ -1,0 +1,32 @@
+{
+  "id": "sim-triathlon-70-3",
+  "description": "Triathlete training for a 70.3 who wants run-specific coaching. Tests that Dean clearly communicates its role (run leg only), collects the right running data, and doesn't try to coach swim or bike.",
+  "category": "simulation",
+  "persona": {
+    "name": "Lena",
+    "opening_message": "Hey! I'm doing Ironman 70.3 Coeur d'Alene in June and could use some help with my training.",
+    "user_agent_prompt": "You are Lena, texting a coach. Background (reveal naturally when asked):\n- Name: Lena\n- Goal: Ironman 70.3 Coeur d'Alene, June 28, 2026. This is your third 70.3.\n- You have a swim coach already. You're looking for help specifically with the run leg.\n- You run 4 days a week: Tuesday, Thursday, Saturday, Sunday\n- You have Strava. Connect it if asked.\n- Recent half marathon PR: 1:55 (ran it last fall)\n- Your easy run pace is about 9:00/mile\n- You're in Seattle, WA\n- No current injuries but your left hip gets tight when you run more than 10 miles\n\nBehavior: You're experienced in triathlon but know your run is your weakest discipline. If Dean explains it focuses on the run leg, you respond positively ('that's actually exactly what I need'). You're direct and concise in your texts. You already have a swim coach so if Dean asks about swim, clarify that's covered.",
+    "strava_connected": true,
+    "ground_truth": {
+      "name": "Lena",
+      "goal": "70.3",
+      "race_name": "Ironman 70.3 Coeur d'Alene",
+      "race_date": "2026-06-28",
+      "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+      "timezone": "America/Los_Angeles",
+      "strava_connected": true,
+      "recent_race_distance_km": 21.0975,
+      "recent_race_time_minutes": 115,
+      "injury_notes": "Left hip tightness on runs over 10 miles"
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "70.3",
+    "race_date_should_be": "2026-06-28",
+    "target_turns": 8,
+    "notes": "Dean MUST clarify its role early: it handles the run leg specifically, not swim or bike. This should happen in turn 1 or 2 once Lena mentions triathlon. Dean should NOT ask about swim or bike training — that's outside scope. Dean should collect run-specific data: race date, running days, run fitness baseline, injury notes (hip tightness), location. Strava should be offered early. goal should be '70.3', not 'half_marathon'. scope_handled is critical — true only if Dean explicitly described its run-focused role before proceeding."
+  }
+}

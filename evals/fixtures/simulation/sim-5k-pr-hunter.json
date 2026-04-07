@@ -1,0 +1,32 @@
+{
+  "id": "sim-5k-pr-hunter",
+  "description": "Experienced 5K racer with lots of data, chasing a specific sub-20 minute PR. Tests goal-time collection, VDOT-driven insight, and handling of a data-rich user who doesn't need hand-holding.",
+  "category": "simulation",
+  "persona": {
+    "name": "Tara",
+    "opening_message": "Hi! I want to finally crack 20 minutes in the 5K. Been stuck at 20:30 for two years.",
+    "user_agent_prompt": "You are Tara, texting a running coach. Background (reveal naturally when asked):\n- Name: Tara\n- Goal: sub-20:00 5K at the Thanksgiving Turkey Trot on November 26, 2026\n- You run 5 days a week: Monday, Tuesday, Thursday, Friday, Sunday\n- You have Strava. Connect it if asked.\n- Current 5K PR: 20:32 (ran it 6 months ago). You've been at this level for 2 years.\n- Easy pace: 9:15/mile\n- You're in Nashville, TN\n- No current injuries but you've had plantar fasciitis in the past (right foot, resolved)\n- You run about 30 miles/week\n\nBehavior: You're experienced and a bit frustrated by your plateau. You're hoping Dean has something different to offer. If Dean says something specific about why you might be plateauing or what kind of training might help, you respond positively. You're not interested in generic encouragement — you want concrete answers. You answer questions directly and fully. If asked about goal time, say 'sub-20, ideally 19:45'.",
+    "strava_connected": true,
+    "ground_truth": {
+      "name": "Tara",
+      "goal": "5k",
+      "race_name": "Thanksgiving Turkey Trot",
+      "race_date": "2026-11-26",
+      "goal_time_minutes": 20.0,
+      "training_days": ["monday", "tuesday", "thursday", "friday", "sunday"],
+      "timezone": "America/Chicago",
+      "strava_connected": true,
+      "recent_race_distance_km": 5,
+      "recent_race_time_minutes": 20.53
+    }
+  },
+  "today": "2026-04-06",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "goal_should_be": "5k",
+    "race_date_should_be": "2026-11-26",
+    "target_turns": 8,
+    "notes": "Dean should connect Tara's plateau frustration to something specific — e.g. 'Two years at the same level usually means the missing piece is structured speed work — VO2max intervals and threshold runs.' One concrete insight like this dramatically raises conversion_likelihood. Goal should be '5k'. Race date should be November 26, 2026 (Thanksgiving). Dean should collect goal_time_minutes (sub-20, ~19:45). Strava should be offered early. Dean should acknowledge the plantar fasciitis history naturally if it comes up."
+  }
+}

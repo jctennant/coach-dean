@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-06 — Onboarding conversion improvements + 5 new simulation evals
+
+**Type:** Feature / Improvement
+**Reported by:** Internal product review
+**User feedback:** N/A
+**Root cause:** Onboarding was pure data collection — no value demonstration, no scope clarity for cycling/tri users, generic trial CTA.
+**Fix / Change:**
+- Strava ask now includes a one-sentence value prop ("auto-calibrates training zones from real data")
+- Dean now reflects one specific insight from the athlete's fitness baseline back at them (e.g. what their half PR implies for marathon target range)
+- Cycling-only users: Dean now honestly acknowledges it specializes in running and asks if running is in the mix
+- Triathlon users: Dean clarifies it handles the run leg specifically, not swim/bike
+- Trial conversion message (`awaiting_payment`) now personalized: references race name, date, and week count — e.g. "Alex, your 24-week Chicago Marathon plan (October 11) is built and ready"
+- 5 new simulation eval fixtures: sim-mile-time-trial, sim-cycling-only, sim-triathlon-70-3, sim-pricing-question, sim-5k-pr-hunter
+- Simulation judge updated with `conversion_likelihood` and `scope_handled` scoring dimensions
+**Files changed:** onboarding/handle/route.ts, run-simulation-evals.mjs, judges/simulation-quality.mjs, 5 new fixture files
+
 ## 2026-04-06 — Onboarding fixes: web search concatenation, ultra_race_history extraction, strava_skipped field, fixture correction
 
 **Type:** Bug Fix
