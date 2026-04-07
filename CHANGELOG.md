@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Prevent repeat free trials on resubscribe
+
+**Type:** Bug Fix
+**Reported by:** Jake (user testing)
+**User feedback:** "if someone already had a free trial, then cancelled, then wants to sign up again, we shouldn't give them a free trial again"
+**Root cause:** `trial_period_days: 7` was hardcoded unconditionally in the Stripe Checkout session creation, so any resubscribing user — even one who had already used their trial — would get another 7-day free trial.
+**Fix / Change:** `checkout/route.ts` now fetches `trial_started_at` for the user. This field is stamped once when the first plan is generated and never overwritten. If set, the checkout session omits `trial_period_days`, so Stripe charges immediately. First-time subscribers still get the 7-day trial.
+**Files changed:** src/app/api/billing/checkout/route.ts
+
 ## 2026-04-07 — Fix past_due SMS sending checkout link instead of customer portal
 
 **Type:** Bug Fix

@@ -20,7 +20,7 @@ export async function POST(request: Request) {
 
   const { data: user, error } = await supabase
     .from("users")
-    .select("id, stripe_customer_id, billing_enabled, subscription_status")
+    .select("id, stripe_customer_id, billing_enabled, subscription_status, trial_started_at")
     .eq("dashboard_token", token)
     .single();
 
@@ -47,12 +47,17 @@ export async function POST(request: Request) {
     ? { customer: user.stripe_customer_id as string }
     : {};
 
+  // Only offer a free trial to first-time subscribers. trial_started_at is stamped
+  // once when the user's initial plan is generated and never overwritten — so if it's
+  // set, they've already had their trial.
+  const hasHadTrial = !!user.trial_started_at;
+
   const session = await getStripe().checkout.sessions.create({
     ...customerParam,
     mode: "subscription",
     line_items: [{ price: priceId, quantity: 1 }],
     subscription_data: {
-      trial_period_days: 7,
+      ...(!hasHadTrial ? { trial_period_days: 7 } : {}),
       metadata: { userId: user.id },
     },
     metadata: { userId: user.id },
