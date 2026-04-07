@@ -4,14 +4,14 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
-## 2026-04-06 — Harder no-repeat-intro rule for onboarding messages 2+
+## 2026-04-07 — Post-process greeting phrases + fix eval fixture message ordering
 
 **Type:** Bug Fix
 **Reported by:** Jake Tennant
 **User feedback:** "dean seems to be repeating himself a ton still? ... Hey Jake! I'm Coach Dean, your AI running coach..."
-**Root cause:** The `isFirstResponse = false` instruction was a soft bullet point at the bottom of the INSTRUCTIONS list. Claude's strong instinct to greet and re-introduce when given a name overrode it.
-**Fix / Change:** Changed the non-first-response branch from a single bullet point to a "HARD RULE — NO EXCEPTIONS" block with explicit NEVER statements, making it much harder for the model to ignore. Kept the same parity in run-onboarding-evals.mjs.
-**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-onboarding-evals.mjs
+**Root cause:** Two issues found. (1) The eval fixture `no-greeting-repeat` had invalid message ordering — started with an assistant turn and duplicated the user "Jake" message, causing the model to see [assistant, user, user] instead of the production-correct [user, assistant, user]. This masked whether the prompt fix was actually working. (2) Even with correct message ordering, the model's deeply-trained "user gives name → say Nice to meet you" reflex overrides any system prompt instruction reliably. Tried 5+ prompt variations (bullet, HARD RULE block, NEVER list, example-based, top-of-prompt placement) — all failed.
+**Fix / Change:** Fixed the eval fixture to mirror production message ordering. Added a post-processing strip on `rawText` (before signals are parsed) that removes "Nice/Great/Good to meet you" opener phrases on non-first messages. This is applied in both the route handler and the eval runner for parity. Simplified system prompt to a single light instruction (no more escalating NEVER blocks).
+**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-onboarding-evals.mjs, evals/fixtures/onboarding/no-greeting-repeat.json
 
 ## 2026-04-06 — Fix "yesterday" misattribution for past activities
 

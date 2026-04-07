@@ -80,7 +80,9 @@ function buildOnboardingSystemPrompt(fixture) {
   const collectedStr = summarizeCollected(collected);
   const stravaCtx = strava_context ?? "STRAVA: Not connected yet.";
 
-  return `You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
+  return `${!is_first_response ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.
+
+` : ""}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
 
 Your job: collect the information below through natural conversation, then signal you're ready with [READY].
 
@@ -166,6 +168,14 @@ async function runEval(fixture) {
       for (const block of response.content) {
         if (block.type === "text") rawText += block.text;
       }
+    }
+
+    // Mirror route.ts post-processing: strip first-meeting greeting openers on non-first messages
+    if (!fixture.is_first_response) {
+      rawText = rawText.replace(
+        /^(nice|great|good|wonderful|so nice|really nice|so glad|happy)\s+to\s+(meet|have)\s+you[,!.]?\s*/i,
+        ""
+      );
     }
 
     deanResponse = rawText.trim();

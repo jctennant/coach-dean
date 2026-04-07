@@ -5,12 +5,12 @@
   "is_first_response": false,
   "conversation_history": [
     {
-      "role": "assistant",
-      "content": "Hey! I'm Coach Dean, your AI running coach — I build personalized training plans, sync with Strava to track your runs, and check in with you over text. What's your name?"
+      "role": "user",
+      "content": "Hey dean"
     },
     {
-      "role": "user",
-      "content": "Jake"
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean, your AI running coach — I build personalized training plans, sync with Strava to track your runs, and check in with you over text. What's your name?"
     }
   ],
   "collected": {

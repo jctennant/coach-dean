@@ -181,7 +181,9 @@ async function handleConversation(
 
   const collected = summarizeCollected(onboardingData);
 
-  const systemPrompt = `You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
+  const systemPrompt = `${!isFirstResponse ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.
+
+` : ""}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
 
 Your job: collect the information below through natural conversation, then signal you're ready with [READY].
 
@@ -221,8 +223,7 @@ INSTRUCTIONS:
 
 ${isFirstResponse
   ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
-  : `- You have already introduced yourself — it's in the conversation history above. Pick up where you left off: acknowledge what they just said and ask your next question. Good example: "Nice — what are you training for right now?" Bad example: "Hey Jake! I'm Coach Dean, your AI running coach..."`
-}
+  : ""}
 
 STRAVA:
 Ask about Strava early — once you have the athlete's name and goal, it should be one of your next questions. Don't wait until the end of onboarding. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
@@ -282,6 +283,16 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
     for (const block of claudeResponse.content) {
       if (block.type === "text") rawText += (block as { type: "text"; text: string }).text;
     }
+  }
+
+  // Strip first-meeting greeting openers on non-first messages — the model generates
+  // "Nice to meet you" / "Great to meet you" when a user gives their name regardless
+  // of system prompt instructions. Post-processing is more reliable than prompting here.
+  if (!isFirstResponse) {
+    rawText = rawText.replace(
+      /^(nice|great|good|wonderful|so nice|really nice|so glad|happy)\s+to\s+(meet|have)\s+you[,!.]?\s*/i,
+      ""
+    );
   }
 
   // Parse signals
