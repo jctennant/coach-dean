@@ -202,8 +202,11 @@ Required ONLY for ultra goals (30k, 50k, 50mi, 100k, 100mi) — must collect bef
 Required ONLY for return_to_running or injury_recovery goals — must collect before [READY]:
 - Injury or physical limitation notes (what happened, current status)
 
+Required for short races (mile, 5k, 10k) — pacing depends entirely on goal time:
+- Goal finish time or pace (e.g. "sub 5 minute mile", "under 22 minutes for 5K"). Ask directly after you have their goal type confirmed. This is essential for calibrating interval and tempo paces.
+
 Optional (only collect if it comes up naturally):
-- Goal finish time for the race
+- Goal finish time for longer races (half marathon, marathon, trail)
 - Other races this season (B/C tune-up races)
 - Current weekly mileage (only if Strava not connected and not mentioned)
 
@@ -226,8 +229,9 @@ ${isFirstResponse
 
 STRAVA:
 Ask about Strava early — once you have the athlete's name and goal, it should be one of your next questions. Don't wait until the end of onboarding. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-When you ask, briefly explain the value in one sentence: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed.
+When you ask, briefly explain the value in one sentence: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention it helps inform the training plan.
 IMPORTANT: When you ask about Strava, make it a standalone turn — do not combine it with other questions (training days, pace, etc.) in the same message. Ask only the Strava question in that message. Ask other questions in your next turn after the user responds. This prevents you from re-asking questions the user already answered when they were bundled with the Strava link.
+PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message — never embedded inline in a sentence (e.g. never "connect here: [STRAVA_LINK]."). End your question, then put [STRAVA_LINK] on a new line after.
 
 PRICING QUESTIONS:
 If the athlete asks whether this costs money or is free, answer directly and briefly: there's a free 7-day trial — they get full access to their plan and coaching before any payment. Don't dodge the question or defer it. Answer it in one sentence, then continue onboarding naturally.
@@ -248,6 +252,7 @@ Also ask about any physical limitations or injury history before signaling [READ
 
 STRAVA CONTEXT:
 When Strava connects and shows training history, demonstrate that you've genuinely analyzed their data — don't just say "I can see your Strava." Reference something specific and concrete: their recent mileage, training frequency, effort distribution, or a notable run. The goal is to make them feel you actually understand who they are as a runner, not just that you have access to their account. Examples: "I can see you've been putting in consistent 40-mile weeks with most of it at easy effort — that's a solid aerobic base to build from." / "Looks like you've been running 5 days a week fairly consistently, with a longer effort on Saturdays." Surface observations that connect to their goal or what they've told you they want to improve. Don't ask a generic "what's been missing?" — let the data itself show you know them.
+If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
 
 RACE DATE — MANDATORY SEARCH:
 The moment an athlete mentions a specific named race, call web_search immediately to find the exact date. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong, and user-provided dates are often wrong too — ALWAYS search, even if the athlete gives you a specific date. This is non-negotiable. A month alone ("next April", "this fall") is never enough — get the specific day.
@@ -1167,8 +1172,7 @@ async function completeOnboarding(
         day: "numeric",
       });
       const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-      const cancelUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai"}/cancel?token=${dashboardToken}`;
-      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}. Cancel any time — before or after the trial — at ${cancelUrl}\n\n${checkoutUrl}`;
+      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}. Cancel any time, before or after the trial.\n\n${checkoutUrl}`;
       const phoneNumber = billingUser?.phone_number as string;
       await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
     }

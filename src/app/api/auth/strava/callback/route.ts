@@ -78,7 +78,7 @@ export async function GET(request: Request) {
   // Fetch current user state to merge onboarding_data and check if already onboarded
   const { data: currentUser } = await supabase
     .from("users")
-    .select("onboarding_data, onboarding_step, name")
+    .select("onboarding_data, onboarding_step, name, linq_chat_id")
     .eq("id", userId)
     .single();
 
@@ -234,6 +234,31 @@ export async function GET(request: Request) {
       message_type: "coach_response",
     }),
   ]);
+
+  // For mid-onboarding users, automatically continue the conversation after Strava connects
+  // so Dean picks up where he left off without the user having to text first.
+  // Recent activities are already imported synchronously above — Claude has good context.
+  if (!alreadyOnboarded) {
+    const chatId = currentUser?.linq_chat_id as string | null;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    after(async () => {
+      // Short delay so the Strava confirmation lands in the conversation first
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        await fetch(`${appUrl}/api/onboarding/handle`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user.id,
+            message: "(strava connected)",
+            ...(chatId ? { chatId } : {}),
+          }),
+        });
+      } catch (err) {
+        console.error("[strava-callback] onboarding continuation failed:", err);
+      }
+    });
+  }
 
   // Redirect browser to confirmation page
   return NextResponse.redirect(

@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Auto-continue onboarding after Strava connects
+
+**Type:** Bug Fix
+**Reported by:** Jake (user testing)
+**User feedback:** "After I connected Strava, I didn't get another message after 15s or so, so I texted him"
+**Root cause:** Strava callback sent the "Strava connected!" confirmation but then went silent. User was left in `onboarding_step = "onboarding"` with no prompt — had to text to trigger Dean's next response. Also, the typing indicator never fired because the callback didn't have the chatId.
+**Fix / Change:** After sending the Strava confirmation SMS, if the user is still mid-onboarding, the callback now fires `POST /api/onboarding/handle` in `after()` with a synthetic `"(strava connected)"` message (2s delay so confirmation lands first). `linq_chat_id` is now fetched in the initial user select so it can be passed to the onboarding handler for the typing indicator. Onboarding prompt updated to ignore the synthetic message string and continue naturally.
+**Files changed:** strava/callback/route.ts, onboarding/handle/route.ts
+
+## 2026-04-07 — Onboarding polish from Jake's test run
+
+**Type:** Improvement
+**Reported by:** Jake (user testing)
+**User feedback:** "For the Strava message, there was a small punctuation error: 'connect to it here: . That way...' / Dean didn't ask about my goal for the mile time trial — I want to go sub 5 but the plan doesn't have any work around there / Two links in 'Your plan is ready' message was a bit confusing / For the confirmation page, can we personalize with the user's name? / Let's remove the 'And this number's always open' / 'How does this look?' should come in the same message as the plan"
+**Root cause:** Multiple small issues: (1) [STRAVA_LINK] was embedded inline in a sentence so removing it left "connect to it here: ."; (2) goal time was "optional" even for short races where it's essential; (3) two links in the payment SMS (checkout + cancel) was confusing; (4) success page was generic; (5) "always open" closing felt redundant; (6) "How does this look?" was sent as a separate message after the plan.
+**Fix / Change:** (1) Prompt now requires [STRAVA_LINK] on its own line at the end of the message; (2) Goal time is now required for mile/5k/10k goals; (3) Cancel URL removed from "plan is ready" SMS — just says "Cancel any time, before or after the trial."; (4) Checkout success page now personalized with user's first name ("Let's do this, Jake!") via token lookup; (5) Removed "always open" closing line from plan prompt; (6) "How does this look? Happy to adjust anything." is now appended in the plan message itself — the separate closing message is now just the reminder cadence question.
+**Files changed:** onboarding/handle/route.ts, coach/respond/route.ts, billing/checkout/route.ts, checkout/success/page.tsx
+
 ## 2026-04-07 — Fix recency errors and communication gap acknowledgment
 
 **Type:** Bug Fix

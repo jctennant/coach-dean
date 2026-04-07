@@ -827,10 +827,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       ? (onboardingData.strava_state ? `${stravaCity}, ${onboardingData.strava_state as string}` : stravaCity)
       : null;
     const closingMsg = stravaLocation
-      ? `How does this look? Happy to adjust anything.\n\nI can send a reminder the morning of each session or the evening before — I have you in ${stravaLocation} from Strava so I'll get the timing right. Which works better?`
+      ? `I can send a reminder the morning of each session or the evening before — I have you in ${stravaLocation} from Strava so I'll get the timing right. Which works better?`
       : !timezoneConfirmed
-      ? `How does this look? Happy to adjust anything.\n\nI can also send a reminder the morning of each session or the evening before — which works better? And what city are you in so I get the timing right?`
-      : `How does this look? Happy to adjust anything.\n\nI can also send a reminder the morning of each session or the evening before — just let me know which works better.`;
+      ? `I can also send a reminder the morning of each session or the evening before — which works better? And what city are you in so I get the timing right?`
+      : `I can also send a reminder the morning of each session or the evening before — just let me know which works better.`;
     if (!dry_run) {
       if (chatId) await startTyping(chatId);
       await new Promise((r) => setTimeout(r, 1500));
@@ -3381,9 +3381,9 @@ QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality 
 - "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"
 Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava.
 QUALITY SESSION "WHY": For any tempo run, interval session (800m repeats, etc.), or race-pace workout in the plan, add a brief purpose note on the same line — one short clause after a dash. Keep it specific to the athlete's goal: "— builds lactate threshold, the engine for your half marathon pace" or "— sharpens the speed you'll need at goal pace" or "— teaches your legs to run fast when tired." Easy runs and long runs do not need this treatment.
-Use short day abbreviations and M/D dates (cross-referenced against DATE CONTEXT — do not compute day names independently). After the session list, add one short closing sentence only:
-- Open line — e.g. "And this number's always open — how a run felt, questions, if something's off. That's what I'm here for."
-Vary the phrasing each time. Do NOT include "How does this look?" or any question about reminders — those will be sent separately after the full plan link.
+Use short day abbreviations and M/D dates (cross-referenced against DATE CONTEXT — do not compute day names independently). End the second bubble (after the session list and Total line) with exactly this line:
+"How does this look? Happy to adjust anything."
+Do NOT add any other closing line — no "this number's always open", no reminders question. The reminders question is sent separately.
 
 ONE QUESTION RULE: Do not ask any questions in this response — no follow-ups about injuries, niggles, schedule, reminders, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.
 ${!hasStrava ? `

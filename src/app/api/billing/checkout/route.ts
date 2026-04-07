@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       metadata: { userId: user.id },
     },
     metadata: { userId: user.id },
-    success_url: `${appUrl}/checkout/success`,
+    success_url: `${appUrl}/checkout/success?token=${token}`,
     cancel_url: `${appUrl}/checkout?token=${token}`,
     allow_promotion_codes: true,
   });
