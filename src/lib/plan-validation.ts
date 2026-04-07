@@ -13,8 +13,9 @@ const SESSION_LINE_RE =
 const SESSION_LINE_GLOBAL_RE =
   /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d+\/\d+\s+·\s+(.+)$/gm;
 
-// Matches the first mileage figure in a session description (e.g. "5" from "Easy 5mi")
-const FIRST_MI_RE = /(\d+(?:\.\d+)?)\s*mi/i;
+// Matches the first mileage figure in a session description (e.g. "5" from "Easy 5mi").
+// (?!n) prevents matching "min" (e.g. "35 min" in strength sessions must not count as 35 miles).
+const FIRST_MI_RE = /(\d+(?:\.\d+)?)\s*mi(?!n)/i;
 
 interface SessionLine {
   fullLine: string; // the entire matched line
@@ -22,10 +23,15 @@ interface SessionLine {
   miles: number;    // extracted mileage (0 if non-running session)
 }
 
+// Cross-training keywords — sessions containing these are never counted as running miles,
+// even if they somehow contain a "Xmi" marker (e.g. "Easy bike 20mi" violating the prompt).
+const CROSS_TRAINING_RE = /\b(bike|biking|cycling|swim|swimming|strength|mobility|stretch|yoga|elliptical|cross.train|zwift|spin)\b/i;
+
 /**
  * Parse all session lines from a plan response.
  * Running sessions have an explicit "Xmi" marker; non-running sessions (strength,
- * cross-training, HIIT, etc.) do not.
+ * cross-training, HIIT, etc.) do not. Cross-training sessions are always 0 miles
+ * even if they contain a distance marker.
  */
 export function parseSessionLines(message: string): SessionLine[] {
   const results: SessionLine[] = [];
@@ -34,11 +40,16 @@ export function parseSessionLines(message: string): SessionLine[] {
   while ((m = re.exec(message)) !== null) {
     const fullLine = m[0];
     const desc = m[2];
+    // Only treat as cross-training (0 miles) if the cross-training keyword appears
+    // before the first mileage marker. This correctly handles hybrid sessions like
+    // "Easy 4mi + Strength" (run first → counts) vs "Easy bike 20mi" (keyword first → 0).
+    const crossMatch = CROSS_TRAINING_RE.exec(desc);
     const miMatch = desc.match(FIRST_MI_RE);
+    const isCrossTraining = crossMatch !== null && (miMatch === null || crossMatch.index < miMatch.index);
     results.push({
       fullLine,
       desc,
-      miles: miMatch ? parseFloat(miMatch[1]) : 0,
+      miles: !isCrossTraining && miMatch ? parseFloat(miMatch[1]) : 0,
     });
   }
   return results;
