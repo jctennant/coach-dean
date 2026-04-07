@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Onboarding: race time extraction fix, triathlete context, Strava engagement, conversion copy
+
+**Type:** Improvement
+**Reported by:** Jake — post-eval review
+**User feedback:** N/A
+**Root cause:** Four gaps: (1) `recent_race_time_minutes` extraction rule had no M:SS format examples, so Haiku could misinterpret "18:45" (5K) as a longer time like 1:52:30; (2) triathlete "weakest leg" context was never explored — Dean moved on without asking why or collecting injury notes; (3) Strava connection was treated as data-only, missing the opportunity to ask what the athlete is trying to change; (4) wrap-up messages were generic rather than referencing the athlete's specific constraint or race.
+**Fix / Change:** Added explicit M:SS examples to `recent_race_time_minutes` rule ("18:45" → 18.75) in both route.ts and sim runner. Added triathlon-specific instruction to ask why the run is the weakest leg and to collect injury history before [READY]. Added STRAVA CONTEXT section instructing Dean to use connected data as a hook for one contextual "what's been missing?" question. Added two new DEMONSTRATING VALUE bullets: name the specific mechanism for a stated struggle, and personalize the wrap-up using the athlete's own constraint/race language. All changes mirrored in run-simulation-evals.mjs.
+**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-simulation-evals.mjs
+
 ## 2026-04-07 — Onboarding prompt: name enforcement, farewell loop, re-ask prevention, race date verification
 
 **Type:** Improvement
