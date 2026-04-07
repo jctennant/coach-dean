@@ -285,14 +285,20 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
     }
   }
 
-  // Strip first-meeting greeting openers on non-first messages — the model generates
-  // "Nice to meet you" / "Great to meet you" when a user gives their name regardless
-  // of system prompt instructions. Post-processing is more reliable than prompting here.
+  // Strip re-introduction on non-first messages. The model re-introduces itself ("I'm Coach Dean,
+  // your AI running coach. I build personalized...") regardless of instructions. Two patterns:
+  // 1. Full re-intro block separated by a paragraph break — strip through the blank line
+  // 2. "Nice/Great to meet you" opener — strip just that phrase
   if (!isFirstResponse) {
-    rawText = rawText.replace(
-      /^(nice|great|good|wonderful|so nice|really nice|so glad|happy)\s+to\s+(meet|have)\s+you[,!.]?\s*/i,
-      ""
-    );
+    const reIntroMatch = rawText.match(/^(?:hey\s+\w+[!,]\s+)?i'm coach dean[\s\S]*?\n\n/i);
+    if (reIntroMatch) {
+      rawText = rawText.slice(reIntroMatch[0].length).trimStart();
+    } else {
+      rawText = rawText.replace(
+        /^(nice|great|good|wonderful|so nice|really nice|so glad|happy)\s+to\s+(meet|have)\s+you[,!.]?\s*/i,
+        ""
+      );
+    }
   }
 
   // Parse signals
