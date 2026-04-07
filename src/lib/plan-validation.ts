@@ -44,7 +44,7 @@ export function parseSessionLines(message: string): SessionLine[] {
     // before the first mileage marker. This correctly handles hybrid sessions like
     // "Easy 4mi + Strength" (run first → counts) vs "Easy bike 20mi" (keyword first → 0).
     const crossMatch = CROSS_TRAINING_RE.exec(desc);
-    const miMatch = desc.match(FIRST_MI_RE);
+    const miMatch = FIRST_MI_RE.exec(desc);
     const isCrossTraining = crossMatch !== null && (miMatch === null || crossMatch.index < miMatch.index);
     results.push({
       fullLine,
