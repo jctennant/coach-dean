@@ -105,7 +105,7 @@ export default function Home() {
               </div>
               <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Daily adaptation — sick, busy, overtrained? We adjust.</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Human-quality review of every Strava run</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Analysis of every Strava run</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Direct text access, always</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Zero apps. Just text &amp; Strava.</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Full season plan visible on your dashboard</li>
