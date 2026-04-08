@@ -222,6 +222,7 @@ INSTRUCTIONS:
 - Plain text only. No markdown, asterisks, or bullet points.
 - If they ask a coaching question, answer it briefly, then continue naturally.
 - Training days: if the athlete says "X days a week" or "I run X times a week" without naming the specific days, always ask which days before moving on.
+- Day ranges: if the athlete says "X through Y" or "X-Y" (e.g. "Tues-Thursday", "Mon to Wed"), interpret this as ALL days in that range, inclusive. "Tues-Thursday" means Tuesday, Wednesday, AND Thursday — not just Tuesday and Thursday.
 
 ${isFirstResponse
   ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
@@ -267,7 +268,11 @@ When you signal [READY], do not ask any more questions in that message. Wrap up 
 
 ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
-For return_to_running or injury_recovery goals: you MUST ask about the injury/limitation and current status before [READY].`;
+For return_to_running or injury_recovery goals: you MUST ask about the injury/limitation and current status before [READY].
+
+PACE CALIBRATION — trail race on Strava:
+If Strava is connected and the STRAVA note says "this is a trail race", ask ONCE before signaling [READY]: "Your best Strava effort is a trail race, which tends to run slower than road races due to elevation. Do you have a recent road 5K, 10K, or half marathon time I can use for more accurate training paces? No worries if not — I can work with what's there."
+Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).`;
 
   // Call Claude Sonnet — web_search handles race date lookups automatically
   const claudeResponse = await anthropic.messages.create({
@@ -504,7 +509,7 @@ Output format (include only fields that are clearly stated — use null for anyt
 Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess.
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances (e.g. a 5mi, 8.9mi, 15mi trail race). Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. IMPORTANT: if the athlete says they have no committed race — only aspirational/eventual talk ("maybe a marathon someday", "thinking about eventually") — use "return_to_running" or "general_fitness", NOT the race distance. The goal must reflect what they are actually training for right now, not what they might do later.
-- training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"])
+- training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"]). When the athlete specifies a range with "through", "to", or "-" (e.g. "Tuesday through Thursday", "Tues-Thursday", "Mon-Wed"), expand it to ALL days in that range inclusive — "Tues-Thursday" → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
 - race_date: use the most specific date mentioned for the goal race. If a specific date (day + month) was stated by either participant, use that exact date. Only default to first of month if no specific date was ever given. Today is ${today}.
 - recent_race_distance_km: distance of their most-cited PR or recent race (not the goal race)
@@ -1172,7 +1177,7 @@ async function completeOnboarding(
         day: "numeric",
       });
       const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}. Cancel any time, before or after the trial.\n\n${checkoutUrl}`;
+      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}. Cancel any time, before or after the trial.\n${checkoutUrl}`;
       const phoneNumber = billingUser?.phone_number as string;
       await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
     }
