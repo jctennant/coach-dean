@@ -1,0 +1,15 @@
+{
+  "id": "extract-no-change",
+  "description": "Dean gave pacing advice but made no plan changes. Haiku must return changed: false and not touch the sessions.",
+  "current_sessions": [
+    { "day": "Thu", "date": "4/9", "label": "Tempo 7mi (1.5mi WU, 4mi @ 7:44/mi, 1.5mi CD)" },
+    { "day": "Sat", "date": "4/11", "label": "Easy 6mi" },
+    { "day": "Sun", "date": "4/12", "label": "Long run 9mi" }
+  ],
+  "user_message": "Should I run the tempo at goal pace or VDOT tempo pace? They're different",
+  "coach_response": "Use VDOT tempo pace (7:44/mi) — that's the right training stimulus for building threshold fitness. Goal pace is what you run on race day; tempo pace is what makes race day possible. Stick with 7:44 Thursday.",
+  "expected": {
+    "changed": false,
+    "notes": "Dean gave pacing advice but agreed to no plan changes. Sessions are identical to input. Haiku must not hallucinate a change."
+  }
+}

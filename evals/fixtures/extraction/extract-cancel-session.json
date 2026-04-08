@@ -1,0 +1,20 @@
+{
+  "id": "extract-cancel-session",
+  "description": "Athlete's knee flared up, Dean cancelled Saturday's interval workout with no replacement. Haiku must drop Saturday from the sessions list and leave others unchanged.",
+  "current_sessions": [
+    { "day": "Thu", "date": "4/9", "label": "Easy 7mi" },
+    { "day": "Sat", "date": "4/11", "label": "Interval workout 9mi (6×800m @ 6:41/mi)" },
+    { "day": "Sun", "date": "4/12", "label": "Long run 13mi" }
+  ],
+  "user_message": "My knee started aching after yesterday's run. Should I do the intervals Saturday?",
+  "coach_response": "Skip Saturday's intervals — not worth the risk with a flare-up. Keep Thursday easy and Sunday long but back off the pace if the knee talks to you. Let the knee settle, we'll pick up quality next week.",
+  "expected": {
+    "changed": true,
+    "sessions": [
+      { "day": "Thu", "date": "4/9", "label": "Easy 7mi" },
+      { "day": "Sun", "date": "4/12", "label": "Long run 13mi" }
+    ],
+    "key_workout": null,
+    "notes": "Saturday intervals cancelled with no replacement — omitted from sessions. Thursday and Sunday preserved unchanged. key_workout null (no quality session this week)."
+  }
+}

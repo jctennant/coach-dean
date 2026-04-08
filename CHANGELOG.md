@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Extraction evals for plan session persistence
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Plan update evals only tested Dean's SMS response text, not whether the Haiku extraction step (`maybeUpdatePlanSessions`) correctly parsed the change into session JSON for the dashboard.
+**Fix / Change:** Added `npm run eval:extraction` — 5 fixtures that feed real coach response text into the exact Haiku extraction prompt from `route.ts` and assert the output JSON is correct: reschedule long run, lighter week (all sessions replaced), easy→tempo conversion, cancel-without-replacement, and no-change (must return `changed: false`). All 5 passing.
+**Files changed:** `evals/run-extraction-evals.mjs`, `evals/fixtures/extraction/*.json`, `package.json`
+
 ## 2026-04-08 — Plan update evals + prompt fixes for load reduction, quality requests, and strength training
 
 **Type:** Improvement

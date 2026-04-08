@@ -1,0 +1,21 @@
+{
+  "id": "extract-reschedule-long-run",
+  "description": "Long run swapped from Sunday to Saturday. Haiku must move the long run session to Sat, keep Thursday and Sunday as rest/easy, update the date fields correctly.",
+  "current_sessions": [
+    { "day": "Thu", "date": "4/9", "label": "Tempo 6mi (2mi WU, 3mi @ 8:20/mi, 1mi CD)" },
+    { "day": "Sat", "date": "4/11", "label": "Easy 6mi" },
+    { "day": "Sun", "date": "4/12", "label": "Long run 11mi @ easy pace" }
+  ],
+  "user_message": "Hey can we move my long run to Saturday this week? Have family stuff Sunday",
+  "coach_response": "Done — swapping the long run to Saturday. Saturday Apr 11 becomes your long run (11mi easy), Sunday's free.\n\nThu Apr 9 · Tempo 6mi (2mi WU, 3mi @ 8:20/mi, 1mi CD)\nSat Apr 11 · Long run 11mi @ easy pace\nSun Apr 12 · Rest",
+  "expected": {
+    "changed": true,
+    "sessions": [
+      { "day": "Thu", "date": "4/9", "label": "Tempo 6mi (2mi WU, 3mi @ 8:20/mi, 1mi CD)" },
+      { "day": "Sat", "date": "4/11", "label": "Long run 11mi @ easy pace" }
+    ],
+    "key_workout": "either null or the tempo label — acceptable either way since the tempo didn't change but IS this week's key quality session",
+    "key_workout_nullable": true,
+    "notes": "Long run moved to Saturday. Sunday removed (rest). Thursday tempo unchanged. key_workout may be null (tempo didn't change) or the tempo label (correct quality session for the week) — both are acceptable."
+  }
+}

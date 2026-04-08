@@ -1,0 +1,22 @@
+{
+  "id": "extract-lighter-week",
+  "description": "Athlete asked for a lighter week. Dean replaced the remaining 4 sessions (including tempo and intervals) with 3 short easy runs. Haiku must produce the 3 short runs and drop the quality sessions.",
+  "current_sessions": [
+    { "day": "Wed", "date": "4/8", "label": "Tempo 9mi (2mi WU, 5mi @ 7:01/mi, 2mi CD)" },
+    { "day": "Fri", "date": "4/10", "label": "Easy 7mi" },
+    { "day": "Sat", "date": "4/11", "label": "Interval workout 10mi total" },
+    { "day": "Sun", "date": "4/12", "label": "Long run 16mi" }
+  ],
+  "user_message": "Work has been brutal this week, I'm exhausted. Can we dial it back? Maybe just 3 easy runs",
+  "coach_response": "Totally get it. Let's adjust.\n\nHere's a lighter week to recharge:\nWed Apr 8 · Easy 6mi\nFri Apr 10 · Easy 5mi\nSun Apr 12 · Easy 8mi\nTotal: 19mi\n\nThat's ~40% cut from the 47mi target. We'll ramp back up next week when work eases up.",
+  "expected": {
+    "changed": true,
+    "sessions": [
+      { "day": "Wed", "date": "4/8", "label": "Easy 6mi" },
+      { "day": "Fri", "date": "4/10", "label": "Easy 5mi" },
+      { "day": "Sun", "date": "4/12", "label": "Easy 8mi" }
+    ],
+    "key_workout": null,
+    "notes": "All 4 original sessions replaced with 3 short easy runs. Tempo and intervals dropped entirely. Saturday dropped. key_workout null because no quality session remains."
+  }
+}

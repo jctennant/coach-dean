@@ -1,0 +1,23 @@
+{
+  "id": "extract-easy-to-tempo",
+  "description": "Athlete asked to convert Thursday's easy run to a tempo. Dean agreed and confirmed the swap. Haiku must update Thursday's label to tempo and set key_workout.",
+  "current_sessions": [
+    { "day": "Tue", "date": "4/8", "label": "Easy 5mi" },
+    { "day": "Thu", "date": "4/10", "label": "Easy 5mi" },
+    { "day": "Sat", "date": "4/11", "label": "Easy 6mi" },
+    { "day": "Sun", "date": "4/12", "label": "Long run 6mi" }
+  ],
+  "user_message": "I want to start adding some speed work. Can we make Thursday a tempo instead of easy?",
+  "coach_response": "Your instinct is right — let's do it. Swapping Thursday to a tempo: 2mi warmup, 3mi @ 8:02/mi, 1mi cooldown. Keep everything else easy.\n\nThu Apr 10 · Tempo 6mi (2mi WU, 3mi @ 8:02/mi, 1mi CD)",
+  "expected": {
+    "changed": true,
+    "sessions": [
+      { "day": "Tue", "date": "4/8", "label": "Easy 5mi" },
+      { "day": "Thu", "date": "4/10", "label": "Tempo 6mi (2mi WU, 3mi @ 8:02/mi, 1mi CD)" },
+      { "day": "Sat", "date": "4/11", "label": "Easy 6mi" },
+      { "day": "Sun", "date": "4/12", "label": "Long run 6mi" }
+    ],
+    "key_workout": "3mi tempo @ 8:02/mi",
+    "notes": "Thursday label updated from easy to tempo. All other sessions unchanged. key_workout reflects the new quality session."
+  }
+}
