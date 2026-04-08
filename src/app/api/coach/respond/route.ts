@@ -263,7 +263,11 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         // past_due → Stripe Customer Portal (update payment method on existing subscription).
         // canceled → new checkout session (re-subscribe, reuses existing Stripe customer).
         const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-        const dashboardToken = user.dashboard_token as string | null;
+        let dashboardToken = user.dashboard_token as string | null;
+        if (!dashboardToken && !dry_run) {
+          dashboardToken = crypto.randomUUID();
+          await supabase.from("users").update({ dashboard_token: dashboardToken }).eq("id", userId);
+        }
         const checkoutUrl = dashboardToken ? `${appUrl}/checkout?token=${dashboardToken}` : appUrl;
         const portalUrl = dashboardToken ? `${appUrl}/cancel?token=${dashboardToken}` : appUrl;
         const msg = isPastDue

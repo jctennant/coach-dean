@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Fix billing gate sending plain website URL when dashboard_token is missing
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake's mom)
+**User feedback:** "I put my mom's billing_status = true (she already has an account), but she got the regular website landing page link instead of the stripe portal to sign up"
+**Root cause:** In the billing gate block of `coach/respond`, when `dashboard_token` is null the code fell back to `appUrl` (plain `https://coachdean.ai`) for both the checkout and portal URLs. Existing users whose tokens weren't set (e.g. provisioned manually by admin) would receive an unhelpful homepage link instead of a direct checkout link.
+**Fix / Change:** Generate a `crypto.randomUUID()` token and persist it to the DB on-the-fly (same pattern used in `dashboard/request-link`) when `dashboard_token` is null, so the checkout/portal URLs are always user-specific.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-08 — Landing page: "Dean" → "Coach Dean" + comparison section redesign
 
 **Type:** Improvement
