@@ -825,7 +825,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // (the Haiku arc enrichment in generateAndSaveFullPlan uses estimates; this uses real sessions).
     // Must be awaited — this runs inside after(), and a void fire-and-forget gets killed when
     // the lambda exits before the async call completes.
-    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
+    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "", (user.name as string | null) ?? null);
 
     // Send the feedback + reminders question AFTER the dashboard link so it lands last.
     // The user will answer the reminders question and handleCadence picks it up.
@@ -862,7 +862,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     await extractAndStorePlanSessions(userId, coachMessage);
     // Sync the arc's current week with what Dean actually prescribed this week.
     // Must be awaited — void fire-and-forget gets killed when the lambda exits inside after().
-    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "");
+    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "", (user.name as string | null) ?? null);
   }
 
   // For user_message, persist any profile updates extracted above (injuries, cross-training,
@@ -1639,6 +1639,7 @@ async function syncArcCurrentWeek(
   currentWeekNum: number,
   phase: string,
   goal: string,
+  athleteName?: string | null,
 ): Promise<void> {
   try {
     // Fetch the sessions that were just stored
@@ -1689,9 +1690,11 @@ async function syncArcCurrentWeek(
       const notesResp = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 180,
-        system: `Write a 2-3 sentence coach's note for an athlete's training week dashboard. Phase: ${phase}. Goal: ${goal || "general running fitness"}.
-First sentence: this week's purpose and why it matters. Then 1-2 sentences on the key session or theme — what it is, target effort, one brief execution tip. Be direct and practical. No filler.
-Return ONLY the note text.`,
+        system: `Write a 2-3 sentence coach's note for an athlete's training week dashboard. Phase: ${phase}. Goal: ${goal || "general running fitness"}.${athleteName ? ` Athlete's first name: ${athleteName.split(" ")[0]}.` : ""}
+First sentence: this week's purpose and why it matters. Then 1-2 sentences on the key session or theme — what it is, target effort, one brief execution tip.
+If the session list includes strides, briefly explain what they are (e.g. "Strides are short 15-20 second accelerations to near-full speed — they sharpen leg turnover without adding fatigue."). If it includes tempo, intervals, or another quality type, explain that too in plain language. Do not assume the athlete knows training jargon.
+${athleteName ? `Personalize the note by using the athlete's first name (${athleteName.split(" ")[0]}) naturally in one sentence.` : ""}
+Be direct and practical. No filler. Return ONLY the note text.`,
         messages: [{ role: "user", content: `Sessions: ${sessionList}\nTotal: ~${actualMiles}mi` }],
       });
       derivedNotes = notesResp.content[0].type === "text" ? notesResp.content[0].text.trim() : "";
@@ -3344,6 +3347,10 @@ GOAL PACE — never compute this yourself:
 
 RACE TIMELINE — never compute this yourself:
 - The days and weeks until the race are pre-calculated in DATE CONTEXT above (e.g. "Race date: YYYY-MM-DD (X days / ~Y weeks away)"). Use those exact numbers. Do not compute the timeline yourself and do not convert between units (do not say "7.5 months" if DATE CONTEXT says "32 weeks"). If you reference the timeline at all, use the weeks figure from DATE CONTEXT verbatim.
+- For general fitness goals with no race date in DATE CONTEXT: the training arc is a 12-week base/build cycle. When referencing the plan length, say "12-week" — do not invent a different number.
+
+GENERAL FITNESS GOAL — SET EXPECTATIONS:
+- When the athlete has a general fitness goal (no race target), include 1-2 sentences in your first text bubble about what they can expect to achieve by the end of this training cycle. Be specific and concrete — not "you'll feel better" but something like: "By week 12 you'll be running comfortably through both days each week, and we'll look to steadily add a third day and more miles as you find your rhythm." Ground it in their current mileage and days/week.
 
 VOLUME AND SAFETY:
 - ⚠️ CRITICAL: The FITNESS TIER section in your system prompt contains a "⚠️ WEEK 1 VOLUME CAP" and a "⚠️ LONG RUN CAP" — both are hard limits calculated from the athlete's actual current mileage. You MUST respect both caps. Prescribing 2–3× current volume is a documented injury risk. If the cap says Week 1 max is 7 mi, do not write a plan with 15 mi. If the long run cap is 2 mi, do not prescribe a 9 mi long run.

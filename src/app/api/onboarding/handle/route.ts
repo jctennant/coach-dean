@@ -194,6 +194,7 @@ Required before signaling [READY]:
 - Training schedule (which days of the week work best)
 - Race date (if they have a named race — MANDATORY: always web_search the exact date, never state one from memory)
 - Fitness baseline: a recent race PR, current easy pace, OR Strava is connected
+- Current weekly mileage — REQUIRED if Strava is not connected. Ask directly: "How many miles are you running per week right now?" or "Are you currently running, and if so, about how many miles per week?" If they say they're not running yet or just starting out, that is also useful — record as 0. Do not skip this even if you have their pace — mileage and pace are independent.
 
 Required ONLY for ultra goals (30k, 50k, 50mi, 100k, 100mi) — must collect before [READY]:
 - Ultra and trail race background: how many ultras have they done? Any trail races? This is essential for planning.
@@ -208,7 +209,6 @@ Required for short races (mile, 5k, 10k) — pacing depends entirely on goal tim
 Optional (only collect if it comes up naturally):
 - Goal finish time for longer races (half marathon, marathon, trail)
 - Other races this season (B/C tune-up races)
-- Current weekly mileage (only if Strava not connected and not mentioned)
 
 WHAT YOU ALREADY KNOW:
 ${collected || "Nothing yet."}
@@ -1177,7 +1177,7 @@ async function completeOnboarding(
         day: "numeric",
       });
       const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-      const sms = `${firstName}, your plan is ready! Start your free 7-day trial to unlock it — no charge until ${trialEndFormatted}. Cancel any time, before or after the trial.\n${checkoutUrl}`;
+      const sms = `${firstName}, your plan is ready! Start your free 7-day trial — no charge until ${trialEndFormatted}. Cancel any time: ${checkoutUrl}`;
       const phoneNumber = billingUser?.phone_number as string;
       await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
     }
