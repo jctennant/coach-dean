@@ -52,9 +52,14 @@ export async function POST(request: Request) {
   // set, they've already had their trial.
   const hasHadTrial = !!user.trial_started_at;
 
-  const session = await getStripe().checkout.sessions.create({
+  const betaCouponId = process.env.STRIPE_BETA_COUPON_ID;
+
+  // Try to apply the beta coupon if configured. If it's exhausted or invalid,
+  // fall back to a session without it so checkout still works.
+  let session;
+  const sessionParams = {
     ...customerParam,
-    mode: "subscription",
+    mode: "subscription" as const,
     line_items: [{ price: priceId, quantity: 1 }],
     subscription_data: {
       ...(!hasHadTrial ? { trial_period_days: 7 } : {}),
@@ -63,8 +68,26 @@ export async function POST(request: Request) {
     metadata: { userId: user.id },
     success_url: `${appUrl}/checkout/success?token=${token}`,
     cancel_url: `${appUrl}/checkout?token=${token}`,
-    allow_promotion_codes: true,
-  });
+  };
+
+  if (betaCouponId) {
+    try {
+      session = await getStripe().checkout.sessions.create({
+        ...sessionParams,
+        discounts: [{ coupon: betaCouponId }],
+      });
+    } catch (err: unknown) {
+      const stripeErr = err as { code?: string };
+      if (stripeErr?.code === "resource_missing" || stripeErr?.code === "coupon_expired") {
+        console.log("[billing/checkout] beta coupon exhausted or missing, falling back to full price");
+        session = await getStripe().checkout.sessions.create(sessionParams);
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    session = await getStripe().checkout.sessions.create(sessionParams);
+  }
 
   if (!session.url) {
     return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 });

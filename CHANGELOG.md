@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-07 — Auto-apply beta coupon at checkout
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** N/A
+**Fix / Change:** Checkout session now auto-applies the beta coupon (`STRIPE_BETA_COUPON_ID` env var) for the first 100 beta users. Gracefully falls back to full price if the coupon is exhausted or missing. Removed `allow_promotion_codes` (mutually exclusive with `discounts` in Stripe Checkout).
+**Files changed:** `src/app/api/billing/checkout/route.ts`
+
+---
+
 ## 2026-04-07 — Fix strength/mobility "min" sessions inflating projected weekly mileage
 
 **Type:** Bug Fix
