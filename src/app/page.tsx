@@ -12,19 +12,19 @@ const valueProps = [
   {
     title: "A personalized plan in minutes",
     description:
-      "Answer a few questions over text and Dean builds a training plan tailored to your goal, schedule, and fitness level — ready to go before you put your phone down.",
+      "Answer a few questions over text and Coach Dean builds a training plan tailored to your goal, schedule, and fitness level — ready to go before you put your phone down.",
     screenshot: "/screenshot-1.png",
   },
   {
     title: "Instant coaching after every run",
     description:
-      "Connect Strava and Dean analyzes every activity the moment it syncs — pace trends, effort, whether you went out too hard. Real coaching feedback on your actual runs, not a generic \"great job\" notification.",
+      "Connect Strava and Coach Dean analyzes every activity the moment it syncs — pace trends, effort, whether you went out too hard. Real coaching feedback on your actual runs, not a generic \"great job\" notification.",
     screenshot: "/screenshot-2.png",
   },
   {
     title: "Ask anything, any time",
     description:
-      "Nutrition, race strategy, taper, cross-training — text Dean like you'd text a coach who actually knows your history. He gives you specific answers, not generic advice.",
+      "Nutrition, race strategy, taper, cross-training — text Coach Dean like you'd text a coach who actually knows your history. Specific answers, not generic advice.",
     screenshot: "/screenshot-3.png",
   },
 ];
@@ -37,7 +37,7 @@ export default function Home() {
   const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
   // Use `?` (not `&`) per RFC 5724, and a literal space so the OS SMS app
   // doesn't pass "%20" through as literal characters in the message body.
-  const smsUrl = `sms:${smsPhone}?body=Hi Dean!`;
+  const smsUrl = `sms:${smsPhone}?body=Hi Coach Dean!`;
   return (
     <div className="flex min-h-screen flex-col" style={{ minHeight: "100vh" }}>
       <Navbar smsUrl={smsUrl} />
@@ -52,7 +52,7 @@ export default function Home() {
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
               You signed up for a race. Now what?
-              Dean builds a plan, analyzes every run, and adjusts when life gets in the way — all over text. The guidance of a professional coach, for a fraction of the price.
+              Coach Dean builds a plan, analyzes every run, and adjusts when life gets in the way — all over text. The guidance of a professional coach, for a fraction of the price.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -67,58 +67,98 @@ export default function Home() {
 
       <RaceMarquee />
 
-      {/* Comparison: Dean vs alternatives */}
+      {/* Comparison: Coach Dean vs alternatives */}
       <section className="border-t px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
+          {/* Header */}
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              A professional coach for 1/10 of the price
+              The elite coaching experience, minus the elite price tag.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Most runners are stuck choosing between a $15/month app that can&apos;t adapt and a $200/month coach they can&apos;t afford. Dean is the middle ground.
+              Static plans don&apos;t win races. Most runners are stuck in a gap: a $15/month app that can&apos;t think, or a $200/month coach they can&apos;t afford. Coach Dean is the bridge — high-performance coaching delivered via text, powered by your data, priced for everyone.
             </p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          {/* Comparison cards */}
+          <div className="grid gap-4 md:grid-cols-3 mb-16">
             {/* Training app */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Training apps</p>
-                <p className="font-serif text-lg font-normal text-gray-700">Runna, TrainingPeaks, others</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Generic apps</p>
+                <p className="font-serif text-lg font-normal text-gray-700">Runna, TrainingPeaks</p>
               </div>
-              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
-                You get a plan, a calendar, and pace zones. But the app can&apos;t see that you barely slept, can&apos;t adjust when you get sick, and has no one to ask when your knee starts acting up.
-              </p>
-              <p className="text-sm font-medium text-gray-500">~$15–20 / month</p>
+              <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Stick to the plan or fail — zero adaptation</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> &ldquo;Workout Complete&rdquo; is the only feedback you get</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Support tickets &amp; FAQs</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Another app, another dashboard to manage</li>
+              </ul>
+              <p className="text-sm font-medium text-gray-500">~$10–20 / month</p>
             </div>
 
             {/* Coach Dean — featured */}
             <div className="rounded-2xl bg-gray-900 p-6 flex flex-col gap-4 text-white md:-mt-4 md:-mb-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">The alternative</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Zero-friction coaching</p>
                 <p className="font-serif text-lg font-normal">Coach Dean</p>
               </div>
               <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Personalized plan built around your race and fitness</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Real coaching feedback on every Strava activity</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Adapts when you&apos;re sick, traveling, or overtrained</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Full season plan visible on your dashboard</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> Text any question, get a specific answer</li>
-                <li className="flex gap-2"><span className="text-white mt-0.5">✓</span> No app to download. No calls to schedule.</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Daily adaptation — sick, busy, overtrained? We adjust.</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Human-quality review of every Strava run</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Direct text access, always</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Zero apps. Just text &amp; Strava.</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Full season plan visible on your dashboard</li>
               </ul>
-              <p className="text-sm font-medium text-gray-300">Free during beta</p>
+              <p className="text-sm font-medium text-gray-300">Free to start, then $10 / month</p>
             </div>
 
             {/* Human coach */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Human coach</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Private coach</p>
                 <p className="font-serif text-lg font-normal text-gray-700">The gold standard</p>
               </div>
-              <p className="text-sm leading-relaxed text-muted-foreground flex-1">
-                Truly personalized, deeply experienced, and available for real conversation. But at $150–300/month, a 30-minute weekly check-in, and a whole lot of scheduling, most runners never get access to one.
-              </p>
+              <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Weekly adaptation — requires a call to change anything</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Detailed feedback, but often delayed</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Scheduled calls &amp; email only</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> High friction: schedules, logins, check-ins</li>
+              </ul>
               <p className="text-sm font-medium text-gray-500">$150–300 / month</p>
+            </div>
+          </div>
+
+          {/* The Coach Dean Difference */}
+          <div>
+            <h3 className="mb-8 text-center font-serif text-xl font-normal md:text-2xl">
+              The Coach Dean Difference
+            </h3>
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
+                <p className="mb-2 font-semibold text-gray-900">The &ldquo;Life Happens&rdquo; Button</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  Apps break when you get a cold or a late meeting. Coach Dean doesn&apos;t. Text your schedule change and your plan evolves in real-time — no missed workouts logged as failures.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
+                <p className="mb-2 font-semibold text-gray-900">Contextual Intelligence</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  An app sees a &ldquo;Slow Pace.&rdquo; Coach Dean sees poor sleep, high humidity, and tells you that you actually crushed it. Your data tells a story — Coach Dean reads it.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
+                <p className="mb-2 font-semibold text-gray-900">The Pocket Expert</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  Stop Googling &ldquo;why does my IT band hurt?&rdquo; Text Coach Dean. Get a specific protocol tailored to your training load — not a generic blog post with 14 possible causes.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
+                <p className="mb-2 font-semibold text-gray-900">Invisible Tech</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  No new dashboard to learn, no app to download. Coach Dean syncs with Strava and talks to you where you already are: your messages.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -168,7 +208,7 @@ export default function Home() {
               Your full season, laid out before you start
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Every phase from base building to race-day taper, visible in one view. Dean texts you the specifics each week and updates the plan as your training evolves.
+              Every phase from base building to race-day taper, visible in one view. Coach Dean texts you the specifics each week and updates the plan as your training evolves.
             </p>
           </div>
 
@@ -260,22 +300,22 @@ export default function Home() {
                 q: "How is Coach Dean different from Runna or using ChatGPT to plan my workouts?",
                 a: (
                   <>
-                    <p>Runna builds a solid plan, but it&apos;s static. It doesn&apos;t know you ran your long run too hard, skipped a week because of travel, or have a 100K six weeks after your target race. Dean sees all of that — and adjusts.</p>
-                    <p className="mt-3">The biggest difference people notice: connect Strava and Dean sends you coaching feedback within minutes of every run finishing. Not a generic notification — actual analysis of your pace, effort, and how it fits your training. That alone is something no app does.</p>
-                    <p className="mt-3">ChatGPT has no memory of your training, no structured plan, and no one proactively checking in. Dean combines a real plan with real-time adaptation and an always-available coaching voice — all over text, no app required.</p>
+                    <p>Runna builds a solid plan, but it&apos;s static. It doesn&apos;t know you ran your long run too hard, skipped a week because of travel, or have a 100K six weeks after your target race. Coach Dean sees all of that — and adjusts.</p>
+                    <p className="mt-3">The biggest difference people notice: connect Strava and Coach Dean sends you coaching feedback within minutes of every run finishing. Not a generic notification — actual analysis of your pace, effort, and how it fits your training. That alone is something no app does.</p>
+                    <p className="mt-3">ChatGPT has no memory of your training, no structured plan, and no one proactively checking in. Coach Dean combines a real plan with real-time adaptation and an always-available coaching voice — all over text, no app required.</p>
                   </>
                 ),
               }, 
               {
                 q: "What type of races can Coach Dean help me prepare for?",
-                a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. If you're training for a triathlon, he can factor in your swimming and cycling alongside your run training. Not sure what distance is right for you? Tell Dean where you're at and he'll help you figure it out.",
+                a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. If you're training for a triathlon, he can factor in your swimming and cycling alongside your run training. Not sure what distance is right for you? Tell Coach Dean where you're at and he'll help you figure it out.",
               },
               {
                 q: "How does Coach Dean know what paces to assign my workouts?",
                 a: (
                   <>
-                    <p>The best way is to connect Strava during onboarding. Dean pulls your full activity history — recent paces, long run efforts, workout splits — and uses that to build a real picture of your current fitness before your first plan is written. No questionnaire can replace actual data.</p>
-                    <p className="mt-3">If you don&apos;t use Strava, Dean asks for a recent race time or your comfortable conversational pace and calculates your training zones from there using established pace formulas (the same ones elite coaches use). As you train and share feedback over text, those zones get refined over time.</p>
+                    <p>The best way is to connect Strava during onboarding. Coach Dean pulls your full activity history — recent paces, long run efforts, workout splits — and uses that to build a real picture of your current fitness before your first plan is written. No questionnaire can replace actual data.</p>
+                    <p className="mt-3">If you don&apos;t use Strava, Coach Dean asks for a recent race time or your comfortable conversational pace and calculates your training zones from there using established pace formulas (the same ones elite coaches use). As you train and share feedback over text, those zones get refined over time.</p>
                   </>
                 ),
               },
@@ -283,14 +323,14 @@ export default function Home() {
                 q: "Do I need a GPS watch or Strava to use Coach Dean?",
                 a: (
                   <>
-                    <p>No — all you need is a phone number. Dean works entirely over SMS with no app, account, or device required.</p>
-                    <p className="mt-3">That said, connecting Strava unlocks the best version of Dean. He&apos;ll analyze your history to build a sharper plan from day one, and send you coaching feedback within minutes of every run finishing — pace trends, effort level, whether the workout matched the intent. It&apos;s the feature testers have found most valuable.</p>
+                    <p>No — all you need is a phone number. Coach Dean works entirely over SMS with no app, account, or device required.</p>
+                    <p className="mt-3">That said, connecting Strava unlocks the best version of Coach Dean. He&apos;ll analyze your history to build a sharper plan from day one, and send you coaching feedback within minutes of every run finishing — pace trends, effort level, whether the workout matched the intent. It&apos;s the feature testers have found most valuable.</p>
                   </>
                 ),
               },
               {
                 q: "How much does Coach Dean cost?",
-                a: "Coach Dean is currently free during beta. We're focused on building something genuinely useful before charging for it. When pricing is introduced, early beta users will be the first to know — and we plan to take care of the people who believed in Dean early.",
+                a: "It's free for the first 7 days — cancel with no penalties. After that, $10/mo on an annual plan or $20/mo month-to-month.",
               },
               {
                 q: "What training philosophy does Coach Dean follow?",
@@ -298,25 +338,25 @@ export default function Home() {
               },
               {
                 q: "What happens if I miss a workout or need to take a week off?",
-                a: "Just tell Dean. Seriously — text him like you'd text a coach. Whether you missed a run, got sick, or needed a mental break, Dean will adjust your upcoming week to account for it and keep you on track toward your goal. Life happens, and a good coach works around it rather than ignoring it.",
+                a: "Just tell Coach Dean. Seriously — text him like you'd text a coach. Whether you missed a run, got sick, or needed a mental break, Coach Dean will adjust your upcoming week to account for it and keep you on track toward your goal. Life happens, and a good coach works around it rather than ignoring it.",
               },
               {
-                q: "Are there any special commands I can text Dean?",
+                q: "Are there any special commands I can text Coach Dean?",
                 a: (
                   <>
                     <p>Beyond just chatting, a few keywords trigger specific actions:</p>
                     <ul className="mt-3 space-y-2">
-                      <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Dean got wrong.</li>
-                      <li><span className="font-mono font-semibold text-foreground">MY PLAN</span> — get a link to your training plan dashboard, where you can see your full season schedule.</li>
-                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — unsubscribe from all messages at any time. You can always restart by texting Dean again.</li>
+                      <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Coach Dean got wrong.</li>
+<li><span className="font-mono font-semibold text-foreground">MY PLAN</span> — get a link to your training plan dashboard, where you can see your full season schedule.</li>
+                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — unsubscribe from all messages at any time. You can always restart by texting Coach Dean again.</li>
                     </ul>
-                    <p className="mt-3">Everything else is just plain conversation — ask questions, report a run, tell Dean your knee hurts. He handles it.</p>
+                    <p className="mt-3">Everything else is just plain conversation — ask questions, report a run, tell Coach Dean your knee hurts. He handles it.</p>
                   </>
                 ),
               },
               {
                 q: "Is my data private?",
-                a: "Your training data, pace information, and conversations with Dean are used solely to power your coaching experience — nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is read-only and only used to pull your workout history into Dean. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
+                a: "Your training data, pace information, and conversations with Coach Dean are used solely to power your coaching experience — nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is read-only and only used to pull your workout history into Coach Dean. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
               },
             ].map(({ q, a }) => (
               <details key={q} className="group py-4">

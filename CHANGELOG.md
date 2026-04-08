@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Landing page: "Dean" → "Coach Dean" + comparison section redesign
+
+**Type:** Improvement
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Inconsistent branding (bare "Dean" throughout) and a text-heavy comparison section that didn't sharply communicate Coach Dean's value vs. the alternatives.
+**Fix / Change:** (1) Replaced every bare "Dean" reference across page.tsx with "Coach Dean" — hero, value props, FAQ, season plan callout, smsUrl body. (2) Redesigned comparison section: new headline ("The elite coaching experience, minus the elite price tag"), performance-gap framing, switched competitor cards to pros/cons bullets, added "The Coach Dean Difference" 2×2 grid (Life Happens Button, Contextual Intelligence, Pocket Expert, Invisible Tech).
+**Files changed:** src/app/page.tsx
+
 ## 2026-04-08 — Extraction evals for plan session persistence
 
 **Type:** Feature
