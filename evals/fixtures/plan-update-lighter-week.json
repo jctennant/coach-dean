@@ -1,0 +1,61 @@
+{
+  "id": "plan-update-lighter-week",
+  "description": "Athlete asks for a lighter week due to work stress. Dean should reduce this week's volume temporarily and give a concrete adjusted plan — without treating it as a permanent change or skipping quality entirely.",
+  "category": "plan_update",
+  "trigger": "user_message",
+  "today": "2026-04-08",
+  "inbound_sms": "Work has been brutal this week, I'm exhausted. Can we dial it back? Maybe just 3 easy runs",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Boston Marathon",
+    "goal_race_date": "2026-07-20",
+    "goal_race_distance": "marathon (26.2 miles)",
+    "weeks_until_race": 15,
+    "experience_level": "experienced — running 6 years, marathon PR 3:28, targeting sub-3:20",
+    "current_weekly_miles": 45,
+    "vdot": 50,
+    "easy_pace": "8:45/mi",
+    "tempo_pace": "7:01/mi",
+    "interval_pace": "6:18/mi",
+    "training_days": ["monday", "tuesday", "wednesday", "friday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 47,
+    "miles_logged_this_week": 8,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "notes": null,
+    "plan_sessions_remaining": [
+      { "day": "Wednesday", "date": "Apr 8", "label": "Tempo 9mi (2mi WU, 5mi @ 7:01/mi, 2mi CD)" },
+      { "day": "Friday", "date": "Apr 10", "label": "Easy 7mi" },
+      { "day": "Saturday", "date": "Apr 11", "label": "Interval workout 10mi total" },
+      { "day": "Sunday", "date": "Apr 12", "label": "Long run 16mi" }
+    ],
+    "recent_activities": [
+      { "date": "2026-04-07", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:50/mi" },
+      { "date": "2026-04-04", "type": "Long Run", "distance_miles": 15.0, "pace": "9:00/mi" },
+      { "date": "2026-04-02", "type": "Tempo Run", "distance_miles": 9.0, "pace": "7:05/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 9,
+    "current_phase": "build"
+  },
+  "ground_truth": {
+    "expected_change": "Reduce this week to ~3 easy runs as requested. Drop the interval workout and shorten or drop the long run. This week becomes an ad hoc recovery week.",
+    "change_scope": "This week only. Next week resumes normal plan.",
+    "must_include": [
+      "3 easy runs with approximate distances",
+      "acknowledgment that next week picks back up normally",
+      "validation that this is the right call when exhausted"
+    ],
+    "must_not_include": [
+      "insisting Marcus must keep the interval workout or tempo",
+      "treating this as a permanent restructure of the whole plan",
+      "total week mileage exceeding ~25mi given 3 easy runs + already-logged 8mi"
+    ],
+    "tradeoff_to_flag": "Missing one big build week is fine this far out. Dean should reassure without over-explaining.",
+    "notes": "Rest and stress-driven load reduction is legitimate coaching. Dean should be supportive, give 3 specific easy run days with distances, confirm next week resumes. Keep it short — this doesn't need a dissertation. Do NOT prescribe a quality session when the athlete asked for easy runs only."
+  }
+}

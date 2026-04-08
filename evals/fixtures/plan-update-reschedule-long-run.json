@@ -1,0 +1,59 @@
+{
+  "id": "plan-update-reschedule-long-run",
+  "description": "Athlete asks to move Sunday long run to Saturday this week due to family conflict. Dean should confirm the swap, give the updated week, and not rewrite anything else.",
+  "category": "plan_update",
+  "trigger": "user_message",
+  "today": "2026-04-08",
+  "inbound_sms": "Hey can we move my long run to Saturday this week? Have family stuff Sunday",
+  "user": {
+    "name": "Sarah",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Chicago Half Marathon",
+    "goal_race_date": "2026-06-21",
+    "goal_race_distance": "half marathon (13.1 miles)",
+    "weeks_until_race": 11,
+    "experience_level": "intermediate — running 2 years, 10k PR 53:00, first half marathon",
+    "current_weekly_miles": 28,
+    "vdot": 40,
+    "easy_pace": "10:25/mi",
+    "tempo_pace": "8:20/mi",
+    "interval_pace": "7:29/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 28,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": null,
+    "plan_sessions_remaining": [
+      { "day": "Thursday", "date": "Apr 9", "label": "Tempo 6mi (2mi WU, 3mi @ 8:20/mi, 1mi CD)" },
+      { "day": "Saturday", "date": "Apr 11", "label": "Easy 6mi" },
+      { "day": "Sunday", "date": "Apr 12", "label": "Long run 11mi @ easy pace" }
+    ],
+    "recent_activities": [
+      { "date": "2026-04-05", "type": "Long Run", "distance_miles": 9.5, "pace": "10:35/mi" },
+      { "date": "2026-04-03", "type": "Easy Run", "distance_miles": 5.0, "pace": "10:25/mi" },
+      { "date": "2026-04-01", "type": "Tempo Run", "distance_miles": 6.0, "pace": "8:25/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 6,
+    "current_phase": "build"
+  },
+  "ground_truth": {
+    "expected_change": "Long run moved from Sunday Apr 12 → Saturday Apr 11. Saturday easy run (6mi) should move to Sunday or be dropped/shortened.",
+    "change_scope": "This week only — one session swap. Do not restructure future weeks.",
+    "must_include": [
+      "Saturday is now the long run day",
+      "confirmation that the swap is done"
+    ],
+    "must_not_include": [
+      "rewriting the entire week plan when only one session needs to move",
+      "telling Sarah she can't do this or it's a bad idea",
+      "changing future weeks"
+    ],
+    "tradeoff_to_flag": "If Saturday tempo was hard and long run follows the next day, note recovery. In this case Saturday was easy so no major caveat needed.",
+    "notes": "Simple reschedule request. Dean should confirm the swap concisely (1-2 sentences max). Updated plan should show long run Saturday, easy or rest Sunday. No lecture needed — this is a minor, reasonable change."
+  }
+}

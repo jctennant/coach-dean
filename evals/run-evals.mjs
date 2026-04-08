@@ -21,6 +21,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { buildJudgePrompt } from "./judges/factual-accuracy.mjs";
 import { buildPlanJudgePrompt } from "./judges/plan-quality.mjs";
+import { buildPlanUpdateJudgePrompt } from "./judges/plan-update.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
@@ -289,6 +290,8 @@ You are texting over iMessage. Write like a human coach would text.
 ${fixture.category === "plan_quality" ? `LONG RUN GUIDANCE FOR THIS PLAN:
 ${fixture.ground_truth?.max_long_run_miles != null ? `- Hard cap: the designated long run session must not exceed ${fixture.ground_truth.max_long_run_miles} miles. Weekday easy runs and quality sessions are NOT subject to this cap and can still be 6-8 miles.` : ""}
 ${fixture.ground_truth?.min_long_run_miles != null ? `- The long run should build to at least ${fixture.ground_truth.min_long_run_miles} miles by the peak phase.` : ""}
+${fixture.ground_truth?.max_peak_weekly_miles != null ? `- PEAK VOLUME CAP: The plan's peak week total MUST NOT exceed ${fixture.ground_truth.max_peak_weekly_miles} miles. This is a hard ceiling — plan the arc so you never need to exceed it.` : ""}
+${fixture.ground_truth?.min_peak_weekly_miles != null ? `- The plan should reach a peak of at least ${fixture.ground_truth.min_peak_weekly_miles} miles/week to adequately prepare the athlete.` : ""}
 
 LENGTH:
 - This is a plan generation request. Provide a full structured overview: Week 1 day-by-day sessions, week-by-week mileage arc, peak week description, and taper structure.
@@ -304,7 +307,33 @@ TONE:
 
 ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
 
-CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}` : ""}`;
+CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}` : ""}
+
+WHEN AN ATHLETE REQUESTS A LIGHTER WEEK OR LOAD REDUCTION:
+If an athlete explicitly asks to scale back (e.g., "can we dial it back", "just 3 easy runs", "I'm exhausted", "need an easier week"), honor that request literally:
+- "3 easy runs" means 3 SHORT runs — cap each run at 5–6 mi maximum regardless of the athlete's normal training volume. Total added mileage should be 15–18 mi (3 × 5–6 mi). A 45 mpw athlete who has already run 8 mi and asks for "3 easy runs" should get three 5–6 mi runs, not 7/8/10 mi runs that total 30+ mi.
+- Shorter distance IS the point — not just dropping quality sessions while keeping long distances at easy pace. Distance is load. A 10 mi "easy" run is not a recovery run for an exhausted athlete.
+- Stick to the athlete's existing training days — don't schedule sessions on non-training days when scaling back.
+- "Easy only" means remove all quality sessions (tempo, intervals) entirely — not a lighter tempo.
+- Never push back or suggest they keep a hard session. Validate in one sentence, give the lighter schedule, confirm next week returns to normal.
+
+WHEN AN ATHLETE REQUESTS MORE QUALITY WORK:
+If an athlete asks for more speed, intervals, or tempo — add it now, this week. Validate their instinct in at most one sentence. Do NOT defer to "next week" or explain aerobic base theory. Do NOT say they need more base mileage before adding quality.
+- For 5k/10k athletes, 2 quality sessions per week is appropriate even in early plan weeks — "base phase" does not mean zero intensity.
+- Add the session with specifics: session type, distance, exact pace from stored VDOT values. Keep the response short.
+- If the fitness tier says "1–2 quality sessions appropriate", implement 2 when the athlete is asking for more.
+
+WHEN AN ATHLETE REQUESTS A STRUCTURAL CHANGE (fewer or more training days):
+Make a concrete recommendation — don't ask the athlete to decide. Analyze their training days and quality session placement and give them a specific N-day schedule. For dropping a day:
+- Recommend dropping an easy day, not a quality session or long run
+- Prefer dropping a day that is adjacent to the long run (e.g., Monday after a Sunday long run creates back-to-back load) — that's the most natural cut
+- State explicitly which day to drop and why (one sentence)
+- Show the resulting updated day list
+
+STRENGTH & CROSS-TRAINING SCHEDULING:
+- Schedule strength sessions on easy run days or dedicated off-days — NEVER the day before or day of a tempo run, interval workout, or long run.
+- If athlete does 2+ days/week of strength training, reduce peak running volume by 10–15% vs. a running-only athlete.
+- When asked to add strength, give specific days (e.g., "Monday and Thursday after your easy runs"), runner-specific exercises (glutes, hips, core), and warn about DOMS for the first few weeks.`;
 }
 
 function getWeekMonday(dateStr) {
@@ -386,6 +415,7 @@ async function runEval(fixture) {
   const userMessage = buildUserMessage(fixture);
 
   const isPlanQuality = fixture.category === "plan_quality";
+  const isPlanUpdate = fixture.category === "plan_update";
 
   // Step 1: Get coaching response
   let coachResponse = null;
@@ -423,6 +453,8 @@ async function runEval(fixture) {
   // Step 2: Judge the response
   const judgePromptStr = isPlanQuality
     ? buildPlanJudgePrompt(fixture, coachResponse)
+    : isPlanUpdate
+    ? buildPlanUpdateJudgePrompt(fixture, coachResponse)
     : buildJudgePrompt(fixture, coachResponse);
   let judgment = null;
   let judgeError = null;

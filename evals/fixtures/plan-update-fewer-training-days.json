@@ -1,0 +1,63 @@
+{
+  "id": "plan-update-fewer-training-days",
+  "description": "Athlete's schedule changed — they can only run 4 days instead of 5 going forward. Dean should restructure the plan for 4 days, keep the key sessions (long run, quality), and tell them what to cut.",
+  "category": "plan_update",
+  "trigger": "user_message",
+  "today": "2026-04-08",
+  "inbound_sms": "My schedule changed and I can only run 4 days a week now. What should I drop?",
+  "user": {
+    "name": "Tom",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Denver Marathon",
+    "goal_race_date": "2026-07-05",
+    "goal_race_distance": "marathon (26.2 miles)",
+    "weeks_until_race": 12,
+    "experience_level": "intermediate — running 4 years, half PR 1:48, first marathon",
+    "current_weekly_miles": 38,
+    "vdot": 46,
+    "easy_pace": "9:18/mi",
+    "tempo_pace": "7:26/mi",
+    "interval_pace": "6:41/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 38,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": null,
+    "plan_sessions_remaining": [
+      { "day": "Monday", "date": "Apr 8", "label": "Easy 6mi" },
+      { "day": "Tuesday", "date": "Apr 9", "label": "Tempo 8mi (2mi WU, 4mi @ 7:26/mi, 2mi CD)" },
+      { "day": "Thursday", "date": "Apr 10", "label": "Easy 7mi" },
+      { "day": "Saturday", "date": "Apr 11", "label": "Interval workout 9mi total" },
+      { "day": "Sunday", "date": "Apr 12", "label": "Long run 13mi" }
+    ],
+    "recent_activities": [
+      { "date": "2026-04-05", "type": "Long Run", "distance_miles": 13.0, "pace": "9:25/mi" },
+      { "date": "2026-04-03", "type": "Easy Run", "distance_miles": 7.0, "pace": "9:20/mi" },
+      { "date": "2026-04-01", "type": "Tempo Run", "distance_miles": 8.0, "pace": "7:30/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 7,
+    "current_phase": "build"
+  },
+  "ground_truth": {
+    "expected_change": "Move from 5 days to 4 days per week. Keep: long run, tempo (quality), and at least 1-2 easy days. Drop: one of the two easy days (Monday or Thursday — either works; Monday is the typical drop since Sunday long run is adjacent). Can consolidate volume from dropped day into remaining easy days slightly.",
+    "change_scope": "Permanent restructure going forward. Not just this week.",
+    "must_include": [
+      "a specific 4-day structure (which days to run)",
+      "which session to drop (recommendation, not just 'you decide')",
+      "confirmation that long run and quality work are preserved"
+    ],
+    "must_not_include": [
+      "dropping the long run to accommodate fewer days",
+      "dropping both quality sessions",
+      "keeping 5 sessions and just shortening them (this doesn't solve the day constraint)",
+      "vague advice like 'cut one easy run' without saying which one"
+    ],
+    "tradeoff_to_flag": "Weekly volume will drop slightly (~8-10%) — that's acceptable 12 weeks out. Not a big deal to flag, but can mention if natural.",
+    "notes": "The right call is to drop one easy day (likely Monday given the Sun/Mon adjacency after long run) and keep tempo, intervals, and long run. Dean should give a concrete 4-day structure and explain the rationale briefly. This is a permanent change so next week's plan should reflect it. Keep the answer practical."
+  }
+}

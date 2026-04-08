@@ -1,0 +1,56 @@
+{
+  "id": "plan-strength-integrated-marathon",
+  "description": "Marathon runner (32 mpw, 5 days) who explicitly wants to keep 2x/week strength training. Initial plan must schedule runs on non-strength days or at minimum not double up hard efforts — and the 5 run days must not conflict with existing S&C days.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-08",
+  "user": {
+    "name": "Jordan",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-08-29",
+    "goal_race_distance": "marathon (26.2 miles)",
+    "weeks_until_race": 20,
+    "experience_level": "intermediate — running 4 years, multiple halfs (PR 1:55), first marathon",
+    "current_weekly_miles": 32,
+    "vdot": 43,
+    "easy_pace": "9:51/mi",
+    "tempo_pace": "7:53/mi",
+    "interval_pace": "7:05/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 32,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "Wants to keep strength training 2x/week — currently lifts on Tuesday and Friday. Does not want to give up the gym. Plan should work around this. Tuesday runs should be shorter/easier since lifting happens that day. Friday is a gym day (no run). Goal is to finish and enjoy the experience — no time goal.",
+    "recent_activities": [
+      { "date": "2026-04-06", "type": "Long Run", "distance_miles": 10.0, "pace": "10:00/mi" },
+      { "date": "2026-04-03", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:55/mi" },
+      { "date": "2026-04-01", "type": "Tempo Run", "distance_miles": 6.0, "pace": "8:05/mi" },
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 9.0, "pace": "10:05/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 36,
+    "min_week1_miles": 28,
+    "max_peak_weekly_miles": 52,
+    "min_peak_weekly_miles": 40,
+    "max_long_run_miles": 21,
+    "min_long_run_miles": 18,
+    "sessions_per_week": 5,
+    "required_session_types": ["easy run", "long run", "tempo"],
+    "forbidden_content": [
+      "scheduling a hard quality session (tempo or intervals) on Tuesday when Jordan also lifts",
+      "scheduling any run on Friday (Jordan's gym day — no run on Friday)",
+      "ignoring the strength training constraint entirely",
+      "peak week over 54 miles"
+    ],
+    "notes": "20-week first marathon plan for a 32 mpw runner who cross-trains with strength. Friday is lift-only — no run. Tuesday has lifting too so Tuesday runs must be easy/short (5-6mi max, no tempo). Running days: Mon, Tue (easy only), Thu, Sat, Sun. Long run on Saturday or Sunday. Tempo on Thursday. The plan should explicitly acknowledge S&C integration. Peak week 42-50mi is appropriate given the cross-training load. Jordan's goal is completion, not time — no need for aggressive volume."
+  }
+}

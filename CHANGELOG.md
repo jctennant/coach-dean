@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Plan update evals + prompt fixes for load reduction, quality requests, and strength training
+
+**Type:** Improvement
+**Reported by:** Internal observation / eval harness
+**User feedback:** N/A
+**Root cause:** Three prompt gaps found via new evals: (1) "dial it back / 3 easy runs" requests were being honored in intensity but not distance — Dean would drop the tempo but still prescribe 7-10mi runs; (2) "I want more speed work" requests were refused with aerobic-base lectures even for 5k athletes 8+ weeks out with established fitness; (3) initial plans for athletes doing 2x/week strength training were building to 56-58mi peak, ignoring the additional training load from lifting.
+**Fix / Change:** Added explicit prompt guidance in both `route.ts` and `run-evals.mjs` for: (a) load reduction requests — cap runs at 5-6mi, total week at ~50-60% of normal; (b) quality work requests — implement now, don't defer, validate instinct without lecturing; (c) structural day changes — make a concrete recommendation rather than asking the athlete; (d) cross-training athletes — reduce peak volume 10-15%, never schedule hard runs adjacent to lifting days. Also added peak volume caps to the eval system prompt for `plan_quality` fixtures.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+
+## 2026-04-08 — Plan update and strength training evals
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** No evals existed for whether Dean correctly handles plan modification requests or integrates strength training.
+**Fix / Change:** Added 5 `plan_update` fixtures (reschedule long run, lighter week, add strength training, fewer training days, more quality work), 1 `plan_quality` fixture for strength-integrated initial plans, a new `plan-update.mjs` judge, and wired up the new category in `run-evals.mjs`. Baseline: 5/5 passing, avg 8.8/10.
+**Files changed:** `evals/fixtures/plan-update-*.json`, `evals/fixtures/plan-strength-integrated-marathon.json`, `evals/judges/plan-update.mjs`, `evals/run-evals.mjs`
+
 ## 2026-04-07 — Auto-apply beta coupon at checkout
 
 **Type:** Feature

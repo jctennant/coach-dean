@@ -1,0 +1,63 @@
+{
+  "id": "plan-update-add-strength-training",
+  "description": "Athlete asks to add strength training to their plan. Dean should give concrete guidance on how to integrate S&C — specific days, what to focus on, and how it fits around runs — without rewriting the whole plan.",
+  "category": "plan_update",
+  "trigger": "user_message",
+  "today": "2026-04-08",
+  "inbound_sms": "I want to start adding some strength training. Can you build that into my plan? Maybe 2x a week",
+  "user": {
+    "name": "Priya",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "SF Half Marathon",
+    "goal_race_date": "2026-07-26",
+    "goal_race_distance": "half marathon (13.1 miles)",
+    "weeks_until_race": 15,
+    "experience_level": "intermediate — running 3 years, 10k PR 48:00, second half marathon",
+    "current_weekly_miles": 30,
+    "vdot": 44,
+    "easy_pace": "9:40/mi",
+    "tempo_pace": "7:44/mi",
+    "interval_pace": "6:57/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 30,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": null,
+    "plan_sessions_remaining": [
+      { "day": "Monday", "date": "Apr 8", "label": "Easy 5mi" },
+      { "day": "Wednesday", "date": "Apr 9", "label": "Tempo 7mi (1.5mi WU, 4mi @ 7:44/mi, 1.5mi CD)" },
+      { "day": "Thursday", "date": "Apr 10", "label": "Easy 5mi" },
+      { "day": "Saturday", "date": "Apr 11", "label": "Easy 6mi" },
+      { "day": "Sunday", "date": "Apr 12", "label": "Long run 9mi" }
+    ],
+    "recent_activities": [
+      { "date": "2026-04-06", "type": "Long Run", "distance_miles": 9.0, "pace": "9:50/mi" },
+      { "date": "2026-04-03", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:50/mi" },
+      { "date": "2026-04-01", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:45/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 5,
+    "current_phase": "build"
+  },
+  "ground_truth": {
+    "expected_change": "Add 2 strength sessions per week. They should be on easy run days or after easy runs — NOT before/after tempo or long run days. Focus areas should be relevant to running: glutes, hips, core, single-leg work.",
+    "change_scope": "Ongoing integration into the plan going forward.",
+    "must_include": [
+      "specific days recommended for strength (e.g. Monday and Thursday after easy runs)",
+      "what to focus on in the sessions (glutes, hips, core — runner-specific)",
+      "guidance that strength should not be done day before or day of hard quality sessions or long runs"
+    ],
+    "must_not_include": [
+      "vague advice like 'add some gym work' with no specifics",
+      "scheduling strength the day before tempo or long run",
+      "reducing running volume to accommodate strength without being asked",
+      "a full bodybuilding program — this is running-specific S&C"
+    ],
+    "tradeoff_to_flag": "First few weeks of strength training may cause DOMS — warn Priya to start light and expect some leg fatigue. Keep easy run paces easy.",
+    "notes": "Strength training is a legitimate and valuable part of half marathon prep. Dean should enthusiastically support it, give specific day recommendations (easy run days make sense here: Mon/Thu), and outline what runner-relevant strength looks like. Keep it actionable — not a physiology lecture. The response can be slightly longer than a typical SMS since it's giving a new structure."
+  }
+}
