@@ -2158,11 +2158,11 @@ function buildSystemPrompt(
     const raceNameForContext = (onboardingDataForRace.race_name as string | null) ?? (profile?.goal ? formatGoalLabel(profile.goal as string) : "their goal race");
     let recoveryGuidance: string;
     if (daysSinceRace <= 7) {
-      recoveryGuidance = `Days 1–7 post-race: full recovery only. No structured workouts — easy walks or very short easy jogs (20–30 min) at most, only if the athlete feels good. Don't prescribe any quality sessions or mileage targets. Check in on how they're feeling physically and emotionally after the race.`;
+      recoveryGuidance = `Week 1 post-race: easy running only. No tempo, intervals, or quality sessions. Keep efforts short and comfortable — this is active recovery, not training. Celebrate what they accomplished.`;
     } else if (daysSinceRace <= 14) {
-      recoveryGuidance = `Days 8–14 post-race: return to easy running only. No tempo, intervals, or quality sessions. Mileage should be 50–60% of their normal weekly volume. Keep it conversational and celebrate what they accomplished.`;
+      recoveryGuidance = `Week 2 post-race: reduced volume (roughly 60–70% of normal). Easy running is fine. One light quality session (strides or very short tempo) is okay if they feel good, but don't push it.`;
     } else {
-      recoveryGuidance = `Weeks 3–6 post-race: gradual return to normal training. Easy mileage can rebuild toward their baseline. One light quality session (strides or short tempo) is fine if they feel ready. No hard race-specific work yet.`;
+      recoveryGuidance = `Weeks 3–6 post-race: fairly normal training. Rebuild toward their usual volume and reintroduce quality sessions. Follow their lead on how they're feeling.`;
     }
     dateContext += `
 POST-RACE CONTEXT:
