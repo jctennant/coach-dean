@@ -97,7 +97,7 @@ async function handlePostRunOnboarding(
   const [userResult, activityResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id, phone_number, name, onboarding_step, linq_chat_id")
+      .select("id, phone_number, name, onboarding_step, linq_chat_id, messaging_opted_out")
       .eq("id", userId)
       .single(),
     activityId
@@ -111,6 +111,11 @@ async function handlePostRunOnboarding(
 
   const user = userResult.data;
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  if (user.messaging_opted_out) {
+    console.log(`[coach/respond] user ${userId} is opted out, skipping post_run_onboarding`);
+    return NextResponse.json({ ok: true, skipped: "opted_out" });
+  }
 
   const activity = activityResult.data as Record<string, unknown> | null;
   const onboardingStep = user.onboarding_step as string | null;
@@ -247,6 +252,12 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  // Opt-out gate — never send messages to users who have unsubscribed.
+  if (user.messaging_opted_out) {
+    console.log(`[coach/respond] user ${userId} is opted out, skipping trigger: ${trigger}`);
+    return NextResponse.json({ ok: true, skipped: "opted_out" });
   }
 
   // Subscription gate — only applies to users with billing_enabled.
@@ -2136,6 +2147,29 @@ function buildSystemPrompt(
         }
       }
     }
+  }
+
+  // Post-race recovery context: inject when the athlete's goal race has passed within the
+  // last 6 weeks. Tells Dean the race is done, gives recovery guidance, and opens the door
+  // to next-goal conversation — without requiring any new trigger or flow.
+  if (profileRaceDaysUntil !== null && profileRaceDaysUntil <= 0 && profileRaceDaysUntil >= -42) {
+    const daysSinceRace = Math.abs(profileRaceDaysUntil);
+    const onboardingDataForRace = (user.onboarding_data as Record<string, unknown>) || {};
+    const raceNameForContext = (onboardingDataForRace.race_name as string | null) ?? (profile?.goal ? formatGoalLabel(profile.goal as string) : "their goal race");
+    let recoveryGuidance: string;
+    if (daysSinceRace <= 7) {
+      recoveryGuidance = `Days 1–7 post-race: full recovery only. No structured workouts — easy walks or very short easy jogs (20–30 min) at most, only if the athlete feels good. Don't prescribe any quality sessions or mileage targets. Check in on how they're feeling physically and emotionally after the race.`;
+    } else if (daysSinceRace <= 14) {
+      recoveryGuidance = `Days 8–14 post-race: return to easy running only. No tempo, intervals, or quality sessions. Mileage should be 50–60% of their normal weekly volume. Keep it conversational and celebrate what they accomplished.`;
+    } else {
+      recoveryGuidance = `Weeks 3–6 post-race: gradual return to normal training. Easy mileage can rebuild toward their baseline. One light quality session (strides or short tempo) is fine if they feel ready. No hard race-specific work yet.`;
+    }
+    dateContext += `
+POST-RACE CONTEXT:
+This athlete completed their goal race — ${raceNameForContext} on ${profile!.race_date} (${daysSinceRace} day${daysSinceRace === 1 ? "" : "s"} ago). The training plan they built with you led them to this race.
+${recoveryGuidance}
+Next goal: At the right moment, ask what's next — a new race, a fitness goal, or just maintaining. Don't force it; let the athlete bring it up or ask once naturally when they seem ready (typically week 2–3 post-race). When they share a new goal, handle it conversationally — update the plan from there without needing a full re-onboarding.
+Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, race-week, or race-prep protocols. The race is done.\n`;
   }
 
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};

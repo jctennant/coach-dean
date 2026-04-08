@@ -62,13 +62,18 @@ async function processStravaEvent(body: {
     // Look up user by Strava athlete ID
     const { data: user } = await supabase
       .from("users")
-      .select("id, phone_number, onboarding_step")
+      .select("id, phone_number, onboarding_step, messaging_opted_out")
       .eq("strava_athlete_id", owner_id)
       .single();
 
     if (!user) {
       console.warn(`No user found for Strava athlete ${owner_id}`);
       return NextResponse.json({ ok: true });
+    }
+
+    if (user.messaging_opted_out) {
+      console.log(`[strava-webhook] user ${user.id} is opted out, skipping coaching for activity ${object_id}`);
+      return;
     }
 
     // Users who are mid-onboarding still get a brief run reaction + nudge to finish setup.

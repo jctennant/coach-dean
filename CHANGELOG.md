@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Post-race recovery context injected into system prompt
+
+**Type:** Feature
+**Reported by:** Internal (Jake)
+**User feedback:** N/A
+**Root cause:** After an athlete's race date passed, Dean had no context that a race had just happened — it was just coaching with no goal and no guidance. Athletes got incoherent responses or stale race references.
+**Fix / Change:** When `profile.race_date` has passed within the last 42 days, a POST-RACE CONTEXT block is injected into the system prompt. It tells Dean the race is complete, gives tiered recovery guidance (days 1–7: full rest; days 8–14: easy running only; weeks 3–6: gradual rebuild), and prompts Dean to ask about the next goal at the right moment — without a new trigger, new flow, or re-onboarding. Handled conversationally.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-04-08 — Opted-out users no longer receive Strava post-run messages
+
+**Type:** Bug Fix
+**Reported by:** Julia (user feedback via screenshot)
+**User feedback:** User sent "Can I unsubscribe?" and "Unsubscribe" — both correctly set `messaging_opted_out = true` — but Strava activity webhook fired 3 coaching messages afterward anyway.
+**Root cause:** The Strava webhook (`/api/webhooks/strava`) did not fetch `messaging_opted_out` and had no opt-out check before calling `coach/respond`. Additionally, `coach/respond` had no opt-out guard of its own, so even if called directly (e.g. by crons that don't check the flag), it would still generate and send messages.
+**Fix / Change:**
+1. `strava/route.ts`: Added `messaging_opted_out` to the user select query; added early return before firing `coach/respond` if user is opted out.
+2. `coach/respond/route.ts`: Added opt-out guard in `processCoachRequest` (fires after user fetch, before any SMS logic) and in the `handlePostRunOnboarding` early-exit path. Acts as belt-and-suspenders for any trigger path that reaches the route.
+**Files changed:** `src/app/api/webhooks/strava/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-08 — Three P1/P2 bug fixes: dashboard link UX, reasoning leak, stale race context
 
 **Type:** Bug Fix
