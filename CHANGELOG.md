@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Three P1/P2 bug fixes: dashboard link UX, reasoning leak, stale race context
+
+**Type:** Bug Fix
+**Reported by:** User feedback (users 2201ddfe, 7a704281, b1b308cf)
+**User feedback:**
+- (Issue 4) Dean said "I'll pull up your dashboard link" then immediately reversed: "I don't have a dashboard link to send you directly." (trust-eroding contradiction)
+- (Issue 5) Internal chain-of-thought reasoning ("The athlete is asking for advice... Key considerations:...") was sent as a visible SMS message to the athlete
+- (Issue 6) Post-run message referenced a race that had already occurred 10 days prior; a second duplicate post-run fired 7 minutes later re-asking the same stomach question
+**Root cause:**
+- Issue 4: (a) "Show me the entire week by week plan" didn't match the `isPlanRequest` regex (extra words between "the" and "plan"), so it fell through to Claude. (b) System prompt stated "No app, no web dashboard" which is false — there IS a plan dashboard, triggerable by "my plan". Claude then contradicted itself.
+- Issue 5: Claude emitted its reasoning scratchpad as regular text blocks separated from the actual response by a `---` divider. `splitIntoMessages` split these into separate SMS bubbles that were sent to the athlete.
+- Issue 6: `profile.race_date` in `training_profiles` is never cleared after a race passes. The system prompt showed the athlete's goal as an upcoming race even when the date was 10+ days in the past. The Strava webhook dedup window was also only 5 minutes — a second webhook 7 minutes later bypassed it.
+**Fix / Change:**
+- Issue 4: Extended `isPlanRequest` regex to catch verbose phrasings with up to 6 intermediate words ("show me the entire week by week plan"). Updated system prompt PRODUCT CAPABILITIES to accurately describe the plan link feature and instruct Dean never to say it can't send a link.
+- Issue 5: Added `stripReasoningPreamble()` post-processing function that detects and strips content before a `---` separator (or leading paragraphs) when it matches reasoning-scratchpad patterns ("The athlete is asking...", "Key considerations:", "I should...").
+- Issue 6: Added `profileRaceDaysUntil` check in `buildSystemPrompt` — race date is only shown in the DATE CONTEXT and ATHLETE header when `daysUntil > 0`. If the race has passed, Claude gets no stale race context. Extended Strava webhook dedup window from 5 to 10 minutes.
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/webhooks/strava/route.ts
+
 ## 2026-04-08 — Onboarding: weekly mileage required, plan arc week count, coach's note quality
 
 **Type:** Improvement

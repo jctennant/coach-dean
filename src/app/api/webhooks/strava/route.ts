@@ -203,7 +203,7 @@ async function processStravaEvent(body: {
       // events arrive before either stores the activity. A recent post_run message
       // in the conversations table is a reliable late-stage gate.
       if (isNew && !suppressCoaching) {
-        const recentCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const recentCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
         const { data: recentPostRun } = await supabase
           .from("conversations")
           .select("id")

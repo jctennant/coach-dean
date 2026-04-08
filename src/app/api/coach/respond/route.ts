@@ -346,7 +346,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     const isPlanRequest = latestUserMsg && (
       /^\s*my\s+plan\s*$/i.test(latestUserMsg.content) ||
       /\bsend\s+(?:me\s+)?(?:my|the)\s+(?:training\s+)?plan\b/i.test(latestUserMsg.content) ||
-      /\b(?:show|see|view)\s+(?:me\s+)?(?:my|the)\s+(?:training\s+)?plan\b/i.test(latestUserMsg.content)
+      /\b(?:show|see|view)\s+(?:me\s+)?(?:my|the)\s+(?:training\s+)?plan\b/i.test(latestUserMsg.content) ||
+      // Catches "show me the entire week by week plan", "show me my full plan", etc.
+      // Allows up to 6 intermediate words between "show/see/view/send me" and "plan".
+      /\b(?:show|see|view|send)\s+me\s+(?:\w+\s+){0,6}plan\b/i.test(latestUserMsg.content)
     );
     if (isPlanRequest) {
       if (!dashboardToken) {
@@ -633,7 +636,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   }, "");
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
-  const strippedRaw = rawText.replace(/\[NO_REPLY\]/gi, "").trim();
+  // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
+  const strippedRaw = stripReasoningPreamble(rawText.replace(/\[NO_REPLY\]/gi, "").trim());
   // correctMileageTotal catches math errors where Claude states a weekly total that
   // doesn't match the sum of session distances in the response.
   // - post_run: uses correctProjectedTotal instead — no session plan in the response
@@ -1124,6 +1128,54 @@ function stripMarkdown(text: string): string {
  * so it feels like a real person sending a few short follow-up texts.
  */
 const MAX_MSG_CHARS = 480;
+
+/**
+ * Strip Claude's internal chain-of-thought reasoning before it reaches the athlete.
+ * Claude occasionally outputs a reasoning scratchpad as regular text — either as
+ * leading paragraphs or separated from the actual response with a "---" divider.
+ * Both patterns are detected and stripped here so no reasoning reaches the SMS layer.
+ */
+function stripReasoningPreamble(text: string): string {
+  // Pattern 1: preamble + "---" separator + actual response.
+  // Strip the preamble if it reads like internal reasoning (not a coaching message).
+  const sepIdx = text.indexOf("\n---\n");
+  if (sepIdx !== -1) {
+    const preamble = text.slice(0, sepIdx);
+    const reasoningMarkers = [
+      /^The athlete is (asking|looking|trying|requesting|wondering)/im,
+      /^I should (keep|answer|respond|address|be|make)/im,
+      /^Key considerations:/im,
+      /^This is a (training|general|coaching|question|philosophy)/im,
+      /^(Let me|I'll|I need to) (think|answer|address|keep|make|write)/im,
+      /^Based on (the|this|their|what the athlete)/im,
+    ];
+    if (reasoningMarkers.some(p => p.test(preamble.trim()))) {
+      return text.slice(sepIdx + 5).trim(); // 5 = "\n---\n".length
+    }
+  }
+
+  // Pattern 2: leading paragraph(s) that look like reasoning scratchpad.
+  // Strip them until we reach the first paragraph that looks like coaching content.
+  const reasoningStartPatterns = [
+    /^The athlete is (asking|looking|trying|requesting|wondering)/i,
+    /^I should (keep|answer|respond|address|be|make)/i,
+    /^Key considerations:/i,
+    /^This is a (training|general|coaching|question|philosophy)/i,
+  ];
+  const paragraphs = text.split(/\n{2,}/);
+  let firstCoachingPara = 0;
+  while (
+    firstCoachingPara < paragraphs.length - 1 &&
+    reasoningStartPatterns.some(p => p.test(paragraphs[firstCoachingPara].trim()))
+  ) {
+    firstCoachingPara++;
+  }
+  if (firstCoachingPara > 0) {
+    return paragraphs.slice(firstCoachingPara).join("\n\n").trim();
+  }
+
+  return text;
+}
 
 function splitIntoMessages(text: string): string[] {
   const trimmed = text.trim();
@@ -2002,10 +2054,14 @@ function buildSystemPrompt(
   const tomorrowStr = upcomingDays[0];
   const yesterdayStr = dayFormatter.format(new Date(Date.UTC(ty, tm - 1, td - 1)));
 
+  // Pre-compute days until the profile race date. Used in both dateContext and the
+  // ATHLETE header section so we can gate both on the race being in the future.
+  const profileRaceDate = profile?.race_date ? new Date((profile.race_date as string) + "T00:00:00") : null;
+  const profileRaceDaysUntil = profileRaceDate ? Math.ceil((profileRaceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
+
   let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- For future scheduled sessions, use specific calendar dates (e.g. "Friday, Feb 27") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- When referencing past activities or events: ONLY say "yesterday" if the event's date or conversation timestamp matches Yesterday above. If it was any earlier, use the weekday name instead ("Monday's double header", "last week's long run"). Recent workouts in the system prompt now include a server-computed label like "(yesterday)" or "(3 days ago)" — use those labels as the authoritative recency signal, not your own inference.\n`;
-  if (profile?.race_date) {
-    const raceDate = new Date((profile.race_date as string) + "T00:00:00");
-    const daysUntil = Math.ceil((raceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  if (profile?.race_date && profileRaceDaysUntil !== null && profileRaceDaysUntil > 0) {
+    const daysUntil = profileRaceDaysUntil;
     const weeksUntil = Math.round(daysUntil / 7);
     dateContext += `- Race date: ${profile.race_date} (${daysUntil} days / ~${weeksUntil} weeks away)\n`;
     dateContext += `- Plan backwards from race date: allocate taper (2 weeks), peak (2-3 weeks), build, and base phases\n`;
@@ -2136,12 +2192,16 @@ function buildSystemPrompt(
   const goalDisplay = raceName
     ? `${raceName}${exactDistanceSuffix}`
     : (profile?.goal ? formatGoalLabel(profile.goal as string) : "general fitness");
-  return `${profile?.race_date ? `ATHLETE: ${user.name || "this athlete"}
-GOAL: ${goalDisplay} on ${profile.race_date}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : ""}
+  // Only show the ATHLETE/GOAL header and race date references when the race is in the future.
+  // If the race has already passed, profile.race_date is stale — don't tell Claude the athlete
+  // is still training for a race that occurred days ago.
+  const raceIsUpcoming = profileRaceDaysUntil !== null && profileRaceDaysUntil > 0;
+  return `${raceIsUpcoming ? `ATHLETE: ${user.name || "this athlete"}
+GOAL: ${goalDisplay} on ${profile!.race_date}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : ""}
 ⚠️ This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.
 ⚠️ GOAL DISCREPANCY — RAISE ONCE ONLY: If there is a discrepancy between the stored goal above and something the athlete said, flag it at most once per conversation. Check RECENT CONVERSATION — if you (Coach Dean) have already asked "which race is it?" or flagged a goal mismatch in a prior message, do NOT raise it again. If the athlete has answered, treat their answer as ground truth and proceed. Repeating the same goal-conflict flag three times in a row when the athlete already answered is a serious trust failure.
 
-` : ""}You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${profile?.race_date ? ` on ${profile.race_date}` : ""}.
+` : ""}You are Coach Dean, an expert endurance coach communicating via text message. You specialize in running, triathlon, cycling, and multi-sport periodized training. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${raceIsUpcoming ? ` on ${profile!.race_date}` : ""}.
 
 CRITICAL — OUTPUT RULES:
 Your response is sent directly to the athlete as an SMS text message. Never include any of the following in your output:
@@ -2465,7 +2525,7 @@ ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports
 - Activity tracking: Strava only. If an athlete has connected Strava, their activities sync automatically. No Garmin, Apple Watch, Wahoo, or other platform sync.
 - If an athlete asks how to connect Strava, tell them to text "connect strava" and you'll send them the link.
 - If an athlete asks how to connect Garmin, Apple Health, or any other service, tell them clearly: "I only have Strava sync right now — just text me after your workouts and I'll track from there."
-- Communication: SMS only. No app, no web dashboard, no email.
+- Communication: SMS only. Athletes can text "my plan" at any time to receive a link to their full week-by-week training plan dashboard. There is no separate app, calendar export, or email — but the plan link is always available on request. When an athlete asks to see their plan (in any phrasing), either send the link directly if you have it, or tell them to text "my plan" and you'll send it immediately — do NOT say you cannot send it.
 - Proactive reminders: three options are supported: (1) morning-of reminders, (2) evening-before reminders, (3) weekly Sunday overview only.
 - Morning reminders go out at approximately 6am PT / 7am MT / 8am CT / 9am ET. If an athlete asks what time, give them the appropriate time for their timezone.
 - Evening reminders go out at approximately 6pm PT / 7pm MT / 8pm CT / 9pm ET (the evening before the session).

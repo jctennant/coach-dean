@@ -425,6 +425,9 @@ describe("coach/respond — 'my plan' keyword early-exit", () => {
       "send me my training plan",
       "can you show me my plan",
       "I want to view my training plan",
+      // Verbose phrasing that previously fell through to Claude (Issue 4 regression)
+      "Show me the entire week by week plan",
+      "show me my full plan",
     ];
 
     const { sendSMS } = await import("@/lib/linq");
