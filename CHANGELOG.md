@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Subscription event tracking and PostHog user_id fix
+
+**Type:** Feature / Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Stripe webhook handled subscription lifecycle but never called trackEvent, so PostHog had no visibility into trial starts, activations, failures, or cancellations. signup/route.ts also never tracked user_signed_up. PostHog user_id was only available as distinctId (person identifier), not as an event property — making it invisible when filtering by event properties.
+**Fix / Change:** Added trackEvent calls to stripe/route.ts for trial_started, subscription_activated, subscription_past_due, payment_failed, and subscription_canceled. Added user_signed_up to signup/route.ts. Updated trackEvent in track.ts to always include user_id in event properties so it's filterable in PostHog without needing to switch to Person filters.
+**Files changed:** src/app/api/webhooks/stripe/route.ts, src/app/api/signup/route.ts, src/lib/track.ts
+
 ## 2026-04-08 — Fix billing gate sending plain website URL when dashboard_token is missing
 
 **Type:** Bug Fix

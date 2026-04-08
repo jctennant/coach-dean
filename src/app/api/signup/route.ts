@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
+import { trackEvent } from "@/lib/track";
 
 const E164_REGEX = /^\+1\d{10}$/;
 
@@ -67,6 +68,8 @@ export async function POST(request: Request) {
   if (chatId) {
     void supabase.from("users").update({ linq_chat_id: chatId }).eq("id", user.id);
   }
+
+  void trackEvent(user.id, "user_signed_up");
 
   return NextResponse.json({ ok: true });
 }

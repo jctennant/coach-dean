@@ -3,6 +3,7 @@ import { getStripe } from "@/lib/stripe";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import { getCheckoutPageUrl } from "@/lib/stripe";
+import { trackEvent } from "@/lib/track";
 
 export const maxDuration = 60;
 
@@ -58,6 +59,11 @@ export async function POST(request: Request) {
           })
           .eq("id", userId);
 
+        void trackEvent(userId, "trial_started", {
+          stripe_customer_id: session.customer as string,
+          stripe_subscription_id: subscriptionId,
+        });
+
         // Fire initial_plan now that the user has subscribed and onboarding is complete.
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
           method: "POST",
@@ -86,6 +92,12 @@ export async function POST(request: Request) {
           .update({ subscription_status: status })
           .eq("id", user.id);
 
+        if (status === "active") {
+          void trackEvent(user.id, "subscription_activated", { stripe_subscription_id: sub.id });
+        } else if (status === "past_due") {
+          void trackEvent(user.id, "subscription_past_due", { stripe_subscription_id: sub.id });
+        }
+
         console.log(`[stripe/webhook] subscription updated for user ${user.id}: ${status}`);
         break;
       }
@@ -108,6 +120,8 @@ export async function POST(request: Request) {
           .eq("id", user.id);
 
         // Send dunning message 1 (only if not already sent)
+        void trackEvent(user.id, "payment_failed", { dunning_count: user.dunning_sent_count });
+
         if ((user.dunning_sent_count as number) === 0) {
           const dashboardToken = user.dashboard_token as string | null;
           if (dashboardToken) {
@@ -140,6 +154,8 @@ export async function POST(request: Request) {
           .from("users")
           .update({ subscription_status: "canceled" })
           .eq("id", user.id);
+
+        void trackEvent(user.id, "subscription_canceled", { stripe_subscription_id: sub.id });
 
         // Send dunning message 1 if not already sent (payment_failed may have already sent it)
         if ((user.dunning_sent_count as number) === 0) {

@@ -18,7 +18,11 @@ export async function trackEvent(
       (async () => {
         const ph = getPostHogClient();
         if (!ph) return;
-        ph.capture({ distinctId: userId, event: eventName, properties });
+        ph.capture({
+          distinctId: userId,
+          event: eventName,
+          properties: { ...properties, user_id: userId },
+        });
         // flushAt: 1 sends immediately on capture — no shutdown needed.
         // Calling shutdown() here closes the HTTP client and breaks all
         // subsequent events in the same Lambda instance.
