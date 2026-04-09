@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Block ⚠️ ANALYSIS leaks; require strides in mile TT plans; eval stripping parity
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Internal eval failure
+**User feedback:** N/A
+**Root cause:** (1) Claude was generating self-created `⚠️ ANALYSIS:` reasoning blocks (mimicking the system prompt's ⚠️ style) that `stripReasoningPreamble` didn't catch — these would leak to SMS. (2) Mile TT plans were omitting strides despite instructions listing them as key sessions — no hard requirement. (3) Eval runner wasn't applying the stripping function, so the judge scored the raw leaked response.
+**Fix / Change:** Added `⚠️ ANALYSIS/REASONING/PLANNING/THINKING` to `stripReasoningPreamble` patterns (both separator and leading-paragraph variants). Added explicit prompt rule: "Do NOT create your own ⚠️-prefixed analysis blocks." Upgraded strides to a hard `⚠️ STRIDES REQUIRED` requirement in MILE TIME TRIAL GOAL section (route.ts and eval runner). Added `stripReasoningPreamble` to the eval runner so the judge sees post-stripping output (matches prod behavior).
+**Files changed:** src/app/api/coach/respond/route.ts, evals/run-evals.mjs
+
 ## 2026-04-09 — Week 1 volume cap for moderate/high volume athletes
 
 **Type:** Improvement

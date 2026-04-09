@@ -385,6 +385,7 @@ CRITICAL — OUTPUT RULES:
 Your response is sent directly to the athlete as an SMS text message. Never include:
 - Internal reasoning, self-corrections, or meta-commentary
 - Internal system-prompt instruction labels — NEVER echo ⚠️-prefixed directive headers (e.g. ⚠️ GOAL DISCREPANCY DETECTED, ⚠️ RECOVERY WEEK) in your response
+- Do NOT create your own ⚠️-prefixed analysis blocks (e.g. "⚠️ ANALYSIS:", "⚠️ REASONING:") — those are system-prompt-only directives. The FIRST thing you output must be the coaching message itself.
 Do all reasoning silently. Output only the message the athlete should receive.
 
 CRITICAL — TRAINING PACES:
@@ -430,6 +431,16 @@ ${fixture.ground_truth?.max_long_run_miles != null ? `- Hard cap: the designated
 ${fixture.ground_truth?.min_long_run_miles != null ? `- The long run should build to at least ${fixture.ground_truth.min_long_run_miles} miles by the peak phase.` : ""}
 ${fixture.ground_truth?.max_peak_weekly_miles != null ? `- PEAK VOLUME CAP: The plan's peak week total MUST NOT exceed ${fixture.ground_truth.max_peak_weekly_miles} miles. This is a hard ceiling — plan the arc so you never need to exceed it.` : ""}
 ${fixture.ground_truth?.min_peak_weekly_miles != null ? `- The plan should reach a peak of at least ${fixture.ground_truth.min_peak_weekly_miles} miles/week to adequately prepare the athlete.` : ""}
+
+${(() => {
+  const goalLower = (fixture.user?.goal_race_distance || fixture.user?.goal || "").toLowerCase();
+  const isMileTT = goalLower.includes("mile") && (goalLower.includes("time trial") || goalLower.includes("tt") || goalLower.includes("1 mile") || goalLower.includes("1-mile"));
+  return isMileTT ? `MILE TIME TRIAL GOAL:
+- Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
+- ⚠️ STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description.
+- Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides, and one tempo run (3-5mi) for aerobic support.
+- Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes.` : "";
+})()}
 
 LENGTH:
 - This is a plan generation request. Provide a full structured overview: Week 1 day-by-day sessions, week-by-week mileage arc, peak week description, and taper structure.
@@ -545,6 +556,54 @@ Be specific about Week 1 sessions. Approximate weekly targets are fine for the r
 }
 
 // ─────────────────────────────────────────────
+// Mirrors stripReasoningPreamble() from route.ts
+// so the eval sees what users actually receive.
+// ─────────────────────────────────────────────
+
+function stripReasoningPreamble(text) {
+  const reasoningMarkers = [
+    /^⚠️\s*(ANALYSIS|REASONING|PLANNING|THINKING)/i,
+    /^The athlete is (asking|looking|trying|requesting|wondering)/im,
+    /^I should (keep|answer|respond|address|be|make)/im,
+    /^Key considerations:/im,
+    /^This is a (training|general|coaching|question|philosophy)/im,
+    /^(Let me|I'll|I need to) (think|answer|address|keep|make|write)/im,
+    /^Based on (the|this|their|what the athlete)/im,
+  ];
+
+  // Pattern 1: preamble + "---" separator
+  const sepIdx = text.indexOf("\n---\n");
+  if (sepIdx !== -1) {
+    const preamble = text.slice(0, sepIdx);
+    if (reasoningMarkers.some((p) => p.test(preamble.trim()))) {
+      return text.slice(sepIdx + 5).trim();
+    }
+  }
+
+  // Pattern 2: leading paragraph(s) that look like reasoning
+  const paragraphs = text.split(/\n{2,}/);
+  let firstCoachingPara = 0;
+  const leadPatterns = [
+    /^⚠️\s*(ANALYSIS|REASONING|PLANNING|THINKING)/i,
+    /^The athlete is (asking|looking|trying|requesting|wondering)/i,
+    /^I should (keep|answer|respond|address|be|make)/i,
+    /^Key considerations:/i,
+    /^This is a (training|general|coaching|question|philosophy)/i,
+  ];
+  while (
+    firstCoachingPara < paragraphs.length - 1 &&
+    leadPatterns.some((p) => p.test(paragraphs[firstCoachingPara].trim()))
+  ) {
+    firstCoachingPara++;
+  }
+  if (firstCoachingPara > 0) {
+    return paragraphs.slice(firstCoachingPara).join("\n\n").trim();
+  }
+
+  return text;
+}
+
+// ─────────────────────────────────────────────
 // Main eval runner
 // ─────────────────────────────────────────────
 
@@ -565,11 +624,13 @@ async function runEval(fixture) {
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
-    coachResponse = coachMsg.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text.trim())
-      .join("\n\n")
-      .trim();
+    coachResponse = stripReasoningPreamble(
+      coachMsg.content
+        .filter((b) => b.type === "text")
+        .map((b) => b.text.trim())
+        .join("\n\n")
+        .trim()
+    );
   } catch (err) {
     coachError = err.message;
   }

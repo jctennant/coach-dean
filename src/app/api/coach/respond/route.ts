@@ -1336,6 +1336,7 @@ function stripReasoningPreamble(text: string): string {
   if (sepIdx !== -1) {
     const preamble = text.slice(0, sepIdx);
     const reasoningMarkers = [
+      /^⚠️\s*(ANALYSIS|REASONING|PLANNING|THINKING)/i,
       /^The athlete is (asking|looking|trying|requesting|wondering)/im,
       /^I should (keep|answer|respond|address|be|make)/im,
       /^Key considerations:/im,
@@ -1351,6 +1352,7 @@ function stripReasoningPreamble(text: string): string {
   // Pattern 2: leading paragraph(s) that look like reasoning scratchpad.
   // Strip them until we reach the first paragraph that looks like coaching content.
   const reasoningStartPatterns = [
+    /^⚠️\s*(ANALYSIS|REASONING|PLANNING|THINKING)/i,
     /^The athlete is (asking|looking|trying|requesting|wondering)/i,
     /^I should (keep|answer|respond|address|be|make)/i,
     /^Key considerations:/i,
@@ -2719,7 +2721,7 @@ ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): 
 - RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
 ⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace you write that is ${tsEasyGuard} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.
 ⚠️ LABEL/PACE CONSISTENCY — CRITICAL: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.
-- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any of: "⚠️ GOAL DISCREPANCY", "Now I need to provide", "Let me craft the response", "Now let me search", or any internal analysis paragraph. The FIRST thing you output must be the coaching message itself — nothing before it.
+- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any of: "⚠️ ANALYSIS", "⚠️ REASONING", "⚠️ GOAL DISCREPANCY", "Now I need to provide", "Let me craft the response", "Now let me search", or any internal analysis paragraph. Do NOT create your own ⚠️-prefixed analysis blocks — those are system-prompt-only directives. The FIRST thing you output must be the coaching message itself — nothing before it.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}${remainingPlanLine}`;
 })()}
@@ -3736,7 +3738,8 @@ FOCUSED WORKOUT FORMAT — use this instead of a day-by-day schedule when the at
 
 MILE TIME TRIAL GOAL:
 - Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
-- Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides (6-10x 20 sec) 2-3x/week, and one longer tempo run (3-5mi) for aerobic support.
+- ⚠️ STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description, e.g., "Easy 5mi + 6×20sec strides".
+- Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides (see above), and one tempo run (3-5mi) for aerobic support.
 - Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes. More is not better here.
 - Intensity distribution flips compared to longer events: 60-70% of sessions are genuinely easy, but the quality sessions are sharper and shorter than anything needed for a 5K or 10K.
 - No traditional taper — the final 7 days before the time trial, reduce total volume ~30% and do one short sharpening session (4-6x400m).
