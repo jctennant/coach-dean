@@ -15,10 +15,22 @@ function effectiveTrainingDays(
 }
 
 /**
+ * Compute "tomorrow" as a Date that is reliably in the next local calendar day for `tz`.
+ * We can't use `now + 24h` because cron runs serving 8-9pm local time cross UTC midnight,
+ * making `now + 24h` land on the wrong UTC day. Instead, advance the local date string by
+ * one day and use noon UTC of that date — noon UTC is always "tomorrow local" for any
+ * timezone (offsets are within ±14h).
+ */
+function localTomorrowNoon(now: Date, tz: string): Date {
+  const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+  const [y, m, d] = localTodayStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1, 12, 0, 0));
+}
+
+/**
  * GET /api/cron/nightly-reminder
- * Runs daily at 02:00 UTC (6pm PST / 7pm PDT).
- * Sends a workout reminder to users who opted into nightly reminders and have a
- * training session scheduled for tomorrow.
+ * Runs every 2 hours. Sends a workout reminder to users who opted into nightly reminders,
+ * have a training session scheduled for tomorrow, and are currently between 8pm–10pm local.
  */
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
@@ -44,10 +56,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, sent: 0 });
   }
 
-  // Cron fires at 02:00 UTC (6pm PST). "Tomorrow" in Pacific time is the same
-  // calendar day at 02:00 UTC, so just use the current UTC date + 1 day.
   const now = new Date();
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const todayUTC = now.toISOString().slice(0, 10); // "YYYY-MM-DD" — dedup key
 
   // Skip nightly reminders on Sunday — the sunday-recap cron fires instead and
@@ -69,8 +78,13 @@ export async function GET(request: Request) {
     if (profile.last_nightly_reminder_date === todayUTC) continue;
     const user = profile.users as unknown as { timezone: string | null; strava_access_token: string | null };
     const tz = user.timezone || "America/New_York";
-    const skipDates = (profile.skip_dates as string[]) || [];
 
+    // Only send during 8pm–10pm in the user's local timezone.
+    // The cron runs every 2 hours so each user is caught in their correct window.
+    const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10) % 24;
+    if (localHour < 20 || localHour >= 22) continue;
+
+    const skipDates = (profile.skip_dates as string[]) || [];
     const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
     const trainingDays = effectiveTrainingDays(
       (profile.training_days as string[]) || [],
@@ -79,9 +93,12 @@ export async function GET(request: Request) {
       todayDateStr
     );
 
-    const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrow);
+    // Use local-date-based tomorrow so the correct weekday is computed regardless of
+    // which UTC hour the cron fires (8-9pm local often crosses UTC midnight).
+    const tomorrowDate = localTomorrowNoon(now, tz);
+    const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrowDate);
     if (!trainingDays.includes(tomorrowWeekday.toLowerCase())) continue;
-    const tomorrowDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(tomorrow);
+    const tomorrowDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(tomorrowDate);
     if (skipDates.includes(tomorrowDateStr)) continue;
 
     if (!user.strava_access_token) {
@@ -134,6 +151,10 @@ export async function GET(request: Request) {
       continue;
     }
 
+    // Only send during 8pm–10pm in the user's local timezone.
+    const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10) % 24;
+    if (localHour < 20 || localHour >= 22) continue;
+
     const skipDates = (profile.skip_dates as string[]) || [];
     const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
     const trainingDays = effectiveTrainingDays(
@@ -143,11 +164,12 @@ export async function GET(request: Request) {
       todayDateStr
     );
 
-    const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrow);
+    const tomorrowDate = localTomorrowNoon(now, tz);
+    const tomorrowWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(tomorrowDate);
     const tomorrowDay = tomorrowWeekday.toLowerCase();
     if (!trainingDays.includes(tomorrowDay)) continue;
 
-    const tomorrowDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(tomorrow);
+    const tomorrowDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(tomorrowDate);
     if (skipDates.includes(tomorrowDateStr)) {
       console.log(`[nightly-reminder] skipping ${profile.user_id} — ${tomorrowDateStr} is a one-off skip`);
       continue;

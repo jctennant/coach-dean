@@ -58,6 +58,12 @@ export async function GET(request: Request) {
     if (profile.last_morning_reminder_date === todayUTC) continue; // already deduped
     const user = profile.users as unknown as { timezone: string | null; strava_access_token: string | null };
     const tz = user.timezone || "America/New_York";
+
+    // Only send during 6am–9am in the user's local timezone.
+    // The cron runs every 2 hours so each user is caught in the right window.
+    const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10) % 24;
+    if (localHour < 6 || localHour >= 10) continue;
+
     const skipDates = (profile.skip_dates as string[]) || [];
 
     const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
@@ -120,6 +126,11 @@ export async function GET(request: Request) {
       console.log(`[morning-reminder] skipping ${profile.user_id} — already sent today (${todayUTC})`);
       continue;
     }
+
+    // Only send during 6am–9am in the user's local timezone (checked again here to guard
+    // against edge cases where the first-pass filter and main loop see different times).
+    const localHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(now), 10) % 24;
+    if (localHour < 6 || localHour >= 10) continue;
 
     // Skip Monday morning reminder if a weekly recap was sent last night (Sunday)
     const todayWeekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now);
