@@ -963,9 +963,12 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
     // weekly_mileage_target stored in training_state: use what was actually prescribed for
     // the days covered. This prevents "0/65mi done" when only a 2-day plan was assigned.
+    // For partial weeks, add miles already done this week so the dashboard shows the TRUE
+    // weekly total (done + planned), not just the planned sessions. E.g. if a user has run
+    // 17mi Mon-Thu and Dean prescribes 19mi for Fri-Sun, the target should display as 36mi.
     // The Sunday recap will reset this to the proper full-week target for next week.
     const weekMileageTarget = isPartialWeek
-      ? (prescribedWeek1MilesRaw ?? periodization.suggestedWeeklyMiles)
+      ? Math.round(((prescribedWeek1MilesRaw ?? periodization.suggestedWeeklyMiles ?? 0) + weekMileageSoFar) * 2) / 2
       : periodization.suggestedWeeklyMiles;
 
     // Persist week counter, phase, and computed target. Clear taper_peak_miles so the

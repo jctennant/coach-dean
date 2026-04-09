@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Extend plan through post-A B races; fix partial-week mileage target
+
+**Type:** Bug Fix / Feature
+**Reported by:** Jake Tennant (internal)
+**User feedback:** "As you can see, it only goes to Dipsea" (plan ended June 14; Snowbird July 11 was not included) and "the 'this week' view shows a goal of 19 mi but that excludes what I've already done, I think week 1 should sum up to my total mileage (done + planned)"
+**Root cause:**
+1. `generateAndSaveFullPlan` computed `totalWeeks` from `profile.race_date` (A race) only. B races after the A race were labeled in arc notes only if they fell within `totalWeeks` — so a B race 4 weeks after the A race was entirely outside the plan and invisible.
+2. `weekly_mileage_target` for partial-week onboards was set to `prescribedWeek1MilesRaw` only — the miles already run earlier in the week (e.g. 17.2mi) were not included, making the dashboard show "17.2 / 19 mi" instead of "17.2 / 36 mi".
+**Fix / Change:**
+1. After computing `totalWeeks` from the A race date, check if any B/C race falls after the A race within 8 weeks. If so, extend `totalWeeks` to cover the last such race. The arc phases naturally taper to the new endpoint; the intermediate A race week appears as a peak/tune-up week and Haiku labels it via the existing B race annotation system.
+2. For partial-week `initial_plan` triggers, add `weekMileageSoFar` to `prescribedWeek1MilesRaw` when storing `weekly_mileage_target`. This gives the dashboard the true weekly total (done + planned) rather than just the planned sessions.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-09 — Separate SMS opt-out from subscription cancellation
 
 **Type:** Bug Fix / Improvement

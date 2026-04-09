@@ -166,14 +166,33 @@ export async function generateAndSaveFullPlan(
   // is sensitive to the time of day — if the plan is generated after noon UTC, a race that's
   // exactly N weeks out can round down to N-1 weeks, leaving the race outside the plan.
   let totalWeeks = 12;
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
+  monday.setUTCHours(0, 0, 0, 0);
   if (raceDate) {
-    const now = new Date();
     const race = new Date(raceDate + "T12:00:00Z");
-    const monday = new Date(now);
-    monday.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
-    monday.setUTCHours(0, 0, 0, 0);
     const weeksUntil = Math.ceil((race.getTime() - monday.getTime()) / (7 * 24 * 60 * 60 * 1000));
     totalWeeks = Math.max(4, Math.min(52, weeksUntil));
+  }
+
+  // Extend plan to cover B/C races that fall after the A race but within 8 weeks of it.
+  // This ensures a runner with e.g. Dipsea (A, June 14) + Snowbird (B, July 11) gets a
+  // single continuous plan rather than a plan that ends at Dipsea and leaves Snowbird
+  // unplanned. The arc phases naturally taper to the last race; intermediate races are
+  // labeled via bRaceWeekLabels so Haiku can annotate them as tune-up efforts.
+  if (bRaces?.length && raceDate) {
+    const lastPostARace = bRaces
+      .filter(r => r.race_date > raceDate)
+      .sort((a, b) => a.race_date.localeCompare(b.race_date))
+      .pop();
+    if (lastPostARace) {
+      const lastRaceMs = new Date(lastPostARace.race_date + "T12:00:00Z").getTime();
+      const weeksToLast = Math.ceil((lastRaceMs - monday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+      if (weeksToLast > totalWeeks && weeksToLast <= totalWeeks + 8) {
+        totalWeeks = Math.min(52, weeksToLast);
+      }
+    }
   }
 
   // Base mileage: use the prescribed week 1 total if available (keeps arc week 1 in sync
@@ -285,16 +304,13 @@ export async function generateAndSaveFullPlan(
 
   // Enrich each week with key_workout and notes via Claude Haiku (single call).
   // Include B/C race dates so Haiku can flag those weeks appropriately.
-  const now = new Date();
-  const week1Monday = new Date(now);
-  week1Monday.setDate(now.getDate() - ((now.getDay() + 6) % 7)); // back to Monday
-  week1Monday.setHours(0, 0, 0, 0);
+  // (now and monday were computed above for totalWeeks; reuse them here)
 
   // Map each B/C race to a week number so Haiku can reference them by week.
   const bRaceWeekLabels: string[] = [];
   for (const r of bRaces ?? []) {
     const raceMs = new Date(r.race_date + "T12:00:00Z").getTime();
-    const weekNum = Math.round((raceMs - week1Monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    const weekNum = Math.round((raceMs - monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
     if (weekNum >= 1 && weekNum <= totalWeeks) {
       const label = r.race_name ?? (r.priority === "B" ? "B race" : "C race");
       bRaceWeekLabels.push(`Week ${weekNum}: ${r.priority} race — ${label} on ${r.race_date}`);
