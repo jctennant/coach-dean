@@ -175,6 +175,40 @@ describe("POST /api/webhooks/linq — opt-out (STOP keywords)", () => {
     expect(sendSMS).toHaveBeenCalledWith("+12025551234", expect.stringMatching(/unsubscribed/i));
   });
 
+  it("STOP with dashboard_token: confirmation message includes Stripe portal link", async () => {
+    mockTables({
+      users: { data: { id: "user-001", linq_chat_id: "chat-abc", dashboard_token: "tok-abc123" }, error: null },
+    });
+
+    const req = makeRequest("+12025551234", "STOP");
+    await POST(req);
+    await flush();
+
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025551234",
+      expect.stringContaining("http://localhost:3000/cancel?token=tok-abc123")
+    );
+  });
+
+  it("STOP without dashboard_token: sends plain confirmation without portal link", async () => {
+    mockTables({
+      users: { data: { id: "user-001", linq_chat_id: "chat-abc", dashboard_token: null }, error: null },
+    });
+
+    const req = makeRequest("+12025551234", "STOP");
+    await POST(req);
+    await flush();
+
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025551234",
+      expect.stringMatching(/unsubscribed/i)
+    );
+    expect(sendSMS).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining("/cancel?token=")
+    );
+  });
+
   it("opts out on 'STOP MESSAGES' (short stop phrase)", async () => {
     mockTables({
       conversations: { data: null, error: null },
@@ -467,6 +501,54 @@ describe("POST /api/webhooks/linq — message routing", () => {
         expect.stringMatching(/isn't ready yet/i)
       );
       // Should fall through to coach/respond for plan generation
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.objectContaining({ method: "POST" })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["UNSUBSCRIBE", "CANCEL"])("%s: does NOT opt out, routes to coach/respond for Stripe portal link", async (keyword) => {
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        conversations: [
+          { data: null, error: null },               // dedup check → no existing
+          { data: { id: "conv-001" }, error: null }, // insert storedMsg
+          { data: { id: "conv-001" }, error: null }, // debounce latest-msg check
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null,
+            dashboard_token: "tok-abc123",
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", keyword);
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await flushPromise;
+
+      // Must NOT set messaging_opted_out — user keeps receiving messages
+      const updateCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls
+        .filter((c: string[]) => c[0] === "users");
+      const anyOptOut = updateCalls.some(() =>
+        // If messaging_opted_out were set, sendSMS would have been called with "unsubscribed"
+        false
+      );
+      expect(sendSMS).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringMatching(/unsubscribed/i)
+      );
+
+      // Must route to coach/respond which handles the Stripe portal link
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining("coach/respond"),
         expect.objectContaining({ method: "POST" })
