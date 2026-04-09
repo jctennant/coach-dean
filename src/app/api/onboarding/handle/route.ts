@@ -244,7 +244,7 @@ ${isFirstResponse
   : ""}
 
 STRAVA:
-Ask about Strava early — once you have the athlete's name and goal, it should be one of your next questions. Don't wait until the end of onboarding. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
+Ask about Strava as your NEXT question once you have the athlete's name and goal — before asking for race times, pace, or weekly mileage. Strava can provide all of that automatically, so don't collect fitness data manually if Strava might have it. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 When you ask, briefly explain the value in one sentence: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention it helps inform the training plan.
 IMPORTANT: When you ask about Strava, make it a standalone turn — do not combine it with other questions (training days, pace, etc.) in the same message. Ask only the Strava question in that message. Ask other questions in your next turn after the user responds. This prevents you from re-asking questions the user already answered when they were bundled with the Strava link.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message — never embedded inline in a sentence (e.g. never "connect here: [STRAVA_LINK]."). End your question, then put [STRAVA_LINK] on a new line after.
