@@ -64,8 +64,8 @@ export default function PrivacyPage() {
           </ul>
           <p className="mt-2">
             For additional support, email{" "}
-            <a href="mailto:jake.c.tennant@gmail.com" className="underline hover:text-foreground">
-              jake.c.tennant@gmail.com
+            <a href="mailto:hello@coachdean.ai" className="underline hover:text-foreground">
+              hello@coachdean.ai
             </a>.
           </p>
         </section>
@@ -82,8 +82,8 @@ export default function PrivacyPage() {
           <h2 className="mb-3 text-base font-semibold text-foreground">6. Your Rights &amp; Deletion Requests</h2>
           <p>
             You can request access to or deletion of your data at any time by emailing{" "}
-            <a href="mailto:jake.c.tennant@gmail.com" className="underline hover:text-foreground">
-              jake.c.tennant@gmail.com
+            <a href="mailto:hello@coachdean.ai" className="underline hover:text-foreground">
+              hello@coachdean.ai
             </a>{" "}
             with the subject line "Data Deletion Request" and your phone number. We will respond
             within 10 business days.
@@ -103,8 +103,8 @@ export default function PrivacyPage() {
           <h2 className="mb-3 text-base font-semibold text-foreground">8. Contact</h2>
           <p>
             Questions about this policy? Email{" "}
-            <a href="mailto:jake.c.tennant@gmail.com" className="underline hover:text-foreground">
-              jake.c.tennant@gmail.com
+            <a href="mailto:hello@coachdean.ai" className="underline hover:text-foreground">
+              hello@coachdean.ai
             </a>.
           </p>
         </section>

@@ -58,8 +58,8 @@ export default function TermsPage() {
           </ul>
           <p className="mt-2">
             For support, contact{" "}
-            <a href="mailto:jake.c.tennant@gmail.com" className="underline hover:text-foreground">
-              jake.c.tennant@gmail.com
+            <a href="mailto:hello@coachdean.ai" className="underline hover:text-foreground">
+              hello@coachdean.ai
             </a>.
           </p>
         </section>
@@ -123,8 +123,8 @@ export default function TermsPage() {
           <h2 className="mb-3 text-base font-semibold text-foreground">9. Contact</h2>
           <p>
             Questions about these terms? Email{" "}
-            <a href="mailto:jake.c.tennant@gmail.com" className="underline hover:text-foreground">
-              jake.c.tennant@gmail.com
+            <a href="mailto:hello@coachdean.ai" className="underline hover:text-foreground">
+              hello@coachdean.ai
             </a>.
           </p>
         </section>

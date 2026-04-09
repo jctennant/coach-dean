@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Separate SMS opt-out from subscription cancellation
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Internal (pre-launch review)
+**User feedback:** N/A
+**Root cause:** CANCEL and UNSUBSCRIBE were treated as hard SMS opt-out keywords in the linq webhook, meaning a user who texted either would get silently opted out of messages but never receive the Stripe portal link — leaving their subscription billing with no way to cancel via text.
+**Fix / Change:**
+1. Removed CANCEL and UNSUBSCRIBE from `isHardStop` and `isSoftStop` in `linq/route.ts` — they now fall through to `coach/respond` which sends the Stripe portal link (existing behavior, newly reachable).
+2. STOP confirmation message now includes the Stripe portal link when a `dashboard_token` is available, so STOP is a complete exit path (messages off + billing cancel link).
+3. Updated FAQ on landing page to distinguish UNSUBSCRIBE (subscription management) from STOP (stop all messages).
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/app/page.tsx`, `src/__tests__/api/linq-webhook.test.ts`
+
+---
+
+## 2026-04-09 — Day-2 welcome tips SMS + beta email address
+
+**Type:** Feature
+**Reported by:** Internal (pre-launch prep)
+**User feedback:** N/A
+**Root cause:** No onboarding follow-up told users about keyboard shortcuts (MY PLAN, FEEDBACK, STOP), and all public contact emails pointed to a personal address.
+**Fix / Change:**
+1. New daily cron `/api/cron/welcome-tips` (15:00 UTC) sends a one-time SMS to users whose `initial_plan` landed 20–48 hours ago. Deduped via `message_type = 'welcome_tips'` in conversations — no DB migration needed.
+2. Updated all public-facing email addresses (footer, terms, privacy) from `jake.c.tennant@gmail.com` to `hello@coachdean.ai`.
+**Files changed:** `src/app/api/cron/welcome-tips/route.ts` (new), `vercel.json`, `src/app/page.tsx`, `src/app/terms/page.tsx`, `src/app/privacy/page.tsx`
+
+---
+
 ## 2026-04-09 — Add sanity check on extracted race times before VDOT calculation
 
 **Type:** Bug Fix

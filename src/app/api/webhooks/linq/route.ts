@@ -185,10 +185,13 @@ async function handleInboundMessage(
   // Hard stop: exact TCPA keywords, or "STOP" as the first word with nothing meaningful after
   // (e.g. "STOP MESSAGES", "STOP TEXTING ME", "STOP ALL"). Limit to ≤30 chars to avoid
   // catching conversational mentions like "stop sending me so many plans".
+  // CANCEL and UNSUBSCRIBE are intentionally excluded here — they route to coach/respond
+  // which sends the Stripe portal link, so the user can cancel billing rather than just
+  // opting out of SMS without cancelling their subscription.
   const isHardStop = normalizedBody === "STOP" || normalizedBody === "STOPALL" ||
-    normalizedBody === "UNSUBSCRIBE" || normalizedBody === "CANCEL" || normalizedBody === "QUIT" ||
+    normalizedBody === "QUIT" ||
     (normalizedBody.length <= 30 && /^STOP\b/.test(normalizedBody));
-  const isSoftStop = !isHardStop && /don['']?t (want|send|text)|no more (messages|texts)|stop (texting|messaging|sending|messages?)|opt.?out|unsubscribe/i.test(body);
+  const isSoftStop = !isHardStop && /don['']?t (want|send|text)|no more (messages|texts)|stop (texting|messaging|sending|messages?)|opt.?out/i.test(body);
 
   const isRestart = normalizedBody === "START" || normalizedBody === "UNSTOP" || normalizedBody === "RESUME" || normalizedBody === "YES";
 
@@ -212,14 +215,19 @@ async function handleInboundMessage(
   if (isHardStop || isSoftStop) {
     const { data: optOutUser } = await supabase
       .from("users")
-      .select("id, linq_chat_id")
+      .select("id, linq_chat_id, dashboard_token")
       .eq("phone_number", senderPhone)
       .maybeSingle();
 
     if (optOutUser) {
       await supabase.from("users").update({ messaging_opted_out: true }).eq("id", optOutUser.id);
       void trackEvent(optOutUser.id, "messaging_opted_out");
-      await sendSMS(senderPhone, "You've been unsubscribed from Coach Dean and won't receive any more messages. Text RESUME anytime to start back up.");
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+      const token = optOutUser.dashboard_token as string | null;
+      const confirmMsg = token
+        ? `You've been unsubscribed from Coach Dean messages. To also cancel your billing, tap here: ${appUrl}/cancel?token=${token}\n\nText START anytime to resume.`
+        : "You've been unsubscribed from Coach Dean and won't receive any more messages. Text START anytime to resume.";
+      await sendSMS(senderPhone, confirmMsg);
     }
     console.log("[linq-webhook] opt-out received from:", senderPhone);
     return;

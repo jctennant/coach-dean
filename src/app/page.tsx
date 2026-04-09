@@ -347,8 +347,9 @@ export default function Home() {
                     <p>Beyond just chatting, a few keywords trigger specific actions:</p>
                     <ul className="mt-3 space-y-2">
                       <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Coach Dean got wrong.</li>
-<li><span className="font-mono font-semibold text-foreground">MY PLAN</span> — get a link to your training plan dashboard, where you can see your full season schedule.</li>
-                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — unsubscribe from all messages at any time. You can always restart by texting Coach Dean again.</li>
+                      <li><span className="font-mono font-semibold text-foreground">MY PLAN</span> — get a link to your training plan dashboard, where you can see your full season schedule.</li>
+                      <li><span className="font-mono font-semibold text-foreground">UNSUBSCRIBE</span> — get a link to cancel your subscription at any time.</li>
+                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — stop all messages immediately. You'll also receive a link to cancel billing. Text START to resume at any time.</li>
                     </ul>
                     <p className="mt-3">Everything else is just plain conversation — ask questions, report a run, tell Coach Dean your knee hurts. He handles it.</p>
                   </>
@@ -390,10 +391,10 @@ export default function Home() {
           <p>
             Questions or feedback?{" "}
             <a
-              href="mailto:jake.c.tennant@gmail.com"
+              href="mailto:hello@coachdean.ai"
               className="underline hover:text-foreground"
             >
-              jake.c.tennant@gmail.com
+              hello@coachdean.ai
             </a>
           </p>
           <div className="flex gap-4 text-xs">

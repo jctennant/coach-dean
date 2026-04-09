@@ -158,7 +158,9 @@ describe("POST /api/webhooks/linq — opt-out (STOP keywords)", () => {
     delete process.env.LINQ_WEBHOOK_SECRET;
   });
 
-  const hardStopKeywords = ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "QUIT"];
+  // UNSUBSCRIBE and CANCEL are intentionally excluded — they now route to coach/respond
+  // which sends the Stripe portal link, rather than triggering a hard SMS opt-out.
+  const hardStopKeywords = ["STOP", "STOPALL", "QUIT"];
 
   it.each(hardStopKeywords)("opts out user on hard-stop keyword: %s", async (keyword) => {
     mockTables({
