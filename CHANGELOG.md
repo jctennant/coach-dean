@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fixed plan rebuild corrupting A-race date + stale session display after rebuild
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "the dashboard is labeled dipsea but has the race day as july 11 which is for cirque series snowbird. And then both races are labeled as 93 days away in upcoming races with the same date. Then I asked to have the Friday workout removed - it was removed from the weekly target mileage but not from the actual this week view."
+**Root cause:** Three separate issues: (1) `extractProfileData` extracted the Snowbird B-race date ("july 11") as `race_date` and `persistProfileUpdates` blindly applied it to the A-race, overwriting Dipsea's date and making both races show July 11. (2) `generateAndSaveFullPlan` never cleared `weekly_plan_sessions` in training_state, so old sessions (including Friday) persisted after the rebuild; the dashboard showed stale sessions rather than falling back to training_days. (3) `handleRebuildPlan` computed Strava avg mileage using `.eq("activity_type", "Run")` only, excluding TrailRun/VirtualRun/Treadmill activities — trail runners would get `avgWeeklyMileage = null`, causing the arc to default to `fitness_level` hardcoded value (e.g. 30mi/week for advanced) instead of their real history.
+**Fix / Change:** (1) Updated `extractProfileData` prompt to only set `race_date` when the athlete is CHANGING their primary race — explicitly not when adding a secondary/B-race (phrases like "too", "also", "build towards that too"). (2) `generateAndSaveFullPlan` now always sets `weekly_plan_sessions: null` in the training_state update so the dashboard re-derives sessions from training_days after any rebuild. (3) Dashboard now fetches `this_week_override_days` + `this_week_override_expires` from training_profiles and uses the override days (instead of standing training_days) when the override is still active — ensures a "just this week" schedule change is reflected in the dashboard fallback view. (4) Fixed activity type filter in `handleRebuildPlan` to include TrailRun, VirtualRun, and Treadmill.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`, `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-09 — Fix initial plan scheduling wrong training days (run on Friday instead of Thursday)
 
 **Type:** Bug Fix

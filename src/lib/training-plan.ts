@@ -399,6 +399,10 @@ No other text.`,
     .update({
       ...(resetToWeek1 ? { current_week: 1 } : {}),
       ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
+      // Clear the cached session list so the dashboard falls back to training_days-based
+      // display. After a full plan rebuild the old sessions are stale (wrong days, wrong
+      // distances). They'll be re-derived from Dean's next plan message.
+      weekly_plan_sessions: null,
     })
     .eq("user_id", userId);
 

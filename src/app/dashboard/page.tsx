@@ -211,7 +211,7 @@ export default async function DashboardPage({
       .single(),
     supabase
       .from("training_profiles")
-      .select("goal, race_date, goal_distance_miles, training_days")
+      .select("goal, race_date, goal_distance_miles, training_days, this_week_override_days, this_week_override_expires")
       .eq("user_id", user.id)
       .single(),
     supabase
@@ -245,12 +245,17 @@ export default async function DashboardPage({
   const currentWeekNum = (stateData?.current_week as number | null) ?? 1;
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
   const trainingDays = (profileData?.training_days as string[] | null) ?? null;
+  const overrideDays = (profileData?.this_week_override_days as string[] | null) ?? null;
+  const overrideExpires = (profileData?.this_week_override_expires as string | null) ?? null;
+  const todayStr = new Date().toISOString().split("T")[0]!;
+  const isOverrideActive = overrideDays !== null && overrideExpires !== null && overrideExpires >= todayStr;
+  const effectiveTrainingDays = isOverrideActive ? overrideDays : trainingDays;
   const upcomingRaces = (racesData ?? []) as Race[];
   const weeklyPlanSessions = (stateData?.weekly_plan_sessions as PlanSession[] | null) ?? null;
   const dailyPlan = weeklyPlanSessions && weeklyPlanSessions.length > 0
     ? buildDailyPlanFromSessions(weeklyPlanSessions)
-    : (currentWeek && trainingDays && trainingDays.length > 0
-      ? buildDailyPlan(currentWeek, trainingDays)
+    : (currentWeek && effectiveTrainingDays && effectiveTrainingDays.length > 0
+      ? buildDailyPlan(currentWeek, effectiveTrainingDays)
       : null);
 
   // Partial-week logic — must run before week1Monday is used so date anchors are correct.
