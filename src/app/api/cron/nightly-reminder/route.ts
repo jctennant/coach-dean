@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { localTomorrowNoon } from "@/lib/cron-utils";
 
 /** Returns the active training days for a profile — override if valid, else standing schedule. */
 function effectiveTrainingDays(
@@ -14,18 +15,6 @@ function effectiveTrainingDays(
   return trainingDays;
 }
 
-/**
- * Compute "tomorrow" as a Date that is reliably in the next local calendar day for `tz`.
- * We can't use `now + 24h` because cron runs serving 8-9pm local time cross UTC midnight,
- * making `now + 24h` land on the wrong UTC day. Instead, advance the local date string by
- * one day and use noon UTC of that date — noon UTC is always "tomorrow local" for any
- * timezone (offsets are within ±14h).
- */
-function localTomorrowNoon(now: Date, tz: string): Date {
-  const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
-  const [y, m, d] = localTodayStr.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + 1, 12, 0, 0));
-}
 
 /**
  * GET /api/cron/nightly-reminder
