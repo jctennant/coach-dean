@@ -4,6 +4,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fix daily audit email false positives (cadence, power, per-lap elevation)
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** "every email I get daily now mentions strava splits or HR as hallucinated — it keeps giving me false positives of stuff it thinks is off but isn't"
+**Root cause:** The `analyze-conversations` cron was annotating each post_run message with only `hasLaps`, `hasHR`, `distanceMiles` — it did not track `hasCadence`, `hasWatts`, or `activityType`. As a result, Claude (the analyzer) had no way to know whether power/watt values, cadence values, or per-lap elevation were real Strava data or fabricated. It was flagging legitimate coaching responses as hallucinations:
+- Cadence per lap (real when cadence sensor present — `average_cadence` field)
+- Power/watts on Zwift rides (Zwift always provides `average_watts`)
+- Per-lap elevation gain (`total_elevation_gain_feet` is a real Strava lap field)
+- Per-mile elevation from GPS splits (`elevation_difference_feet` is a real split field)
+- Fast pace figures on VirtualRide activities (speed-based, not GPS)
+Also: the plan health section crashed with an Anthropic API `invalid_request_error` when conversation content contained invalid Unicode surrogate pairs (bare emoji codepoints).
+**Fix / Change:**
+1. Extended activity metadata fetch to include `average_cadence`, `average_watts`, `activity_type`
+2. Added `cadence data`, `power/watts data`, `activity type` to the per-message Strava annotation
+3. Rewrote the "NOT hallucinations" section of the analyzer prompt to explicitly enumerate all real Strava fields (per-lap elevation, cadence, power, fast Zwift paces)
+4. Stripped bare surrogate characters from conversation content before passing to Anthropic API to fix the plan health JSON encoding crash
+**Files changed:** `src/app/api/cron/analyze-conversations/route.ts`
+
+---
+
 ## 2026-04-09 — Block ⚠️ ANALYSIS leaks; require strides in mile TT plans; eval stripping parity
 
 **Type:** Bug Fix + Improvement

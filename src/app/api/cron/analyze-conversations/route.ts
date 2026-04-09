@@ -59,18 +59,24 @@ export async function GET(request: Request) {
       .filter((m) => m.strava_activity_id != null)
       .map((m) => m.strava_activity_id as number)
   )];
-  const activityMeta: Record<number, { hasLaps: boolean; hasHR: boolean; distanceMiles: number | null }> = {};
+  const activityMeta: Record<number, {
+    hasLaps: boolean; hasHR: boolean; hasCadence: boolean; hasWatts: boolean;
+    distanceMiles: number | null; activityType: string | null;
+  }> = {};
   if (activityIds.length > 0) {
     const { data: activities } = await supabase
       .from("activities")
-      .select("strava_activity_id, average_heartrate, distance_meters, summary")
+      .select("strava_activity_id, average_heartrate, average_cadence, average_watts, activity_type, distance_meters, summary")
       .in("strava_activity_id", activityIds);
     for (const act of activities ?? []) {
       const rawSummary = act.summary as { laps?: unknown[] } | null;
       activityMeta[act.strava_activity_id as number] = {
         hasLaps: !!(rawSummary?.laps && rawSummary.laps.length > 0),
         hasHR: act.average_heartrate != null,
+        hasCadence: act.average_cadence != null,
+        hasWatts: act.average_watts != null,
         distanceMiles: act.distance_meters != null ? Math.round((act.distance_meters / 1609.34) * 10) / 10 : null,
+        activityType: act.activity_type ?? null,
       };
     }
   }
@@ -96,15 +102,19 @@ export async function GET(request: Request) {
           const meta = activityMeta[m.strava_activity_id];
           if (meta) {
             const facts = [
+              `activity type: ${meta.activityType ?? "unknown"}`,
               `distance: ${meta.distanceMiles ?? "unknown"} mi`,
               `HR monitor: ${meta.hasHR ? "YES" : "NO"}`,
+              `cadence data: ${meta.hasCadence ? "YES" : "NO"}`,
+              `power/watts data: ${meta.hasWatts ? "YES" : "NO"}`,
               `manual laps recorded: ${meta.hasLaps ? "YES" : "NO"}`,
-              "per-km GPS splits: YES (always present on Strava)",
+              "per-mile GPS splits: YES (always present on GPS activities)",
             ];
             annotation = `\n  [STRAVA DATA AVAILABLE FOR THIS RUN — ${facts.join(", ")}]`;
           }
         }
-        return `[${time}] ${label}:${annotation}\n  ${m.content}`;
+        const content = (m.content as string ?? "").replace(/[\uD800-\uDFFF]/g, "");
+        return `[${time}] ${label}:${annotation}\n  ${content}`;
       });
       return `=== User ${userId.slice(0, 8)} ===\n${lines.join("\n")}`;
     })
@@ -116,29 +126,34 @@ export async function GET(request: Request) {
   const analysisPrompt = `You are reviewing coaching conversations from an AI running coach called Coach Dean.
 Analyze the transcripts below from ${dateLabel} (${userCount} users, ${messages.length} messages total) and identify any issues.
 
-IMPORTANT — what Coach Dean has access to via Strava:
-- Activity data: distance, moving time, elapsed time, pace, elevation gain, sport type, start date/time
-- Per-mile splits (splits_standard): ALL GPS-recorded runs on Strava automatically include per-mile split data — distance, pace, and HR per mile. Any specific split paces cited in a post_run message are ALWAYS real Strava data, not hallucinations.
-- Lap data (when available): manual lap button presses or device auto-laps. Only present when the athlete explicitly recorded laps.
-- Heart rate (when athlete's device records it): average HR, max HR, HR by split/lap
+IMPORTANT — what Coach Dean has access to via Strava for each annotated post_run message:
+- Activity summary: distance, moving time, pace, total elevation gain (feet), sport type, start date/time — ALWAYS present
+- Per-mile GPS splits: pace, distance, net elevation change per mile, HR per mile (if HR monitor YES), cadence per mile (if cadence data YES) — ALWAYS present on GPS activities; "per-mile GPS splits: YES" in annotation means all of these are available
+- Lap data (when "manual laps recorded: YES"): per-lap pace, per-lap distance, per-lap total elevation gain, per-lap avg HR (if HR monitor YES), per-lap cadence (if cadence data YES), per-lap power (if power/watts data YES)
+- Heart rate: average HR, max HR — only when "HR monitor: YES"
+- Cadence: average cadence, per-split cadence, per-lap cadence — only when "cadence data: YES"
+- Power/watts: activity average watts, per-lap watts — only when "power/watts data: YES". NOTE: Zwift rides ALWAYS have power data; power meters (Stryd, Garmin, bike power meters) also populate this.
 - Weekly mileage: computed live from Strava activity history
-- All-time and YTD stats: total distance, run count
 - Athlete profile: name, location, gear/shoes
-When Dean references any of the above with specific numbers in a post_run message, that is NOT a hallucination — it came from Strava.
 
-A true hallucination is when Dean invents data that Strava would not provide. Each post_run message in the transcript is annotated with exactly what Strava data was available — use that annotation as the ground truth when evaluating.
+A true hallucination is when Dean cites specific numbers that Strava does not provide. Use the annotation as ground truth.
 
-True hallucinations:
-- HR values when "HR monitor: NO" in the annotation
-- Specific lap counts, per-lap paces, or per-lap elevation when "manual laps recorded: NO" in the annotation — this includes phrases like "lap-button pacing", "lap 6 and 7", "X laps", "warmup lap / hard lap / cooldown lap"
+TRUE hallucinations (flag these):
+- HR values when "HR monitor: NO"
+- Cadence values (spm) when "cadence data: NO"
+- Power/watt values when "power/watts data: NO"
+- Specific lap counts, per-lap detail when "manual laps recorded: NO" — phrases like "lap-button pacing", "lap 6 and 7", "warmup lap / hard lap / cooldown lap"
 - Data about runs that didn't happen according to Strava
-- Future run outcomes or specific numbers Dean couldn't know
 
-NOT hallucinations (do not flag these):
-- Any pace, distance, elevation, or split data when "per-km GPS splits: YES" — these always come from Strava
+NOT hallucinations (do NOT flag these):
+- Any pace, split pace, or mile-by-mile breakdown — always from GPS splits
+- Per-mile elevation changes or references to climbs/descents at specific mile markers — from GPS split elevation_difference field
 - HR values when "HR monitor: YES"
-- Lap references when "manual laps recorded: YES"
-- Weekly mileage totals — these are computed live from Strava
+- Cadence values when "cadence data: YES"
+- Power/watt values when "power/watts data: YES" — including Zwift rides, which always have power
+- Per-lap pace, distance, elevation, HR, cadence, or power when "manual laps recorded: YES" (and the relevant sensor is YES for HR/cadence/power)
+- Fast pace figures on VirtualRide/Zwift activities — these are speed-based virtual environments, not GPS, and paces like 2:56/mi equivalent are plausible at high Zwift speeds
+- Weekly mileage totals — computed live from Strava
 - Overall vert, average pace, or any summary stat from the activity itself
 
 Look for:
@@ -299,7 +314,9 @@ async function buildPlanHealthSection(now: Date): Promise<string> {
       const convoLines = convos.map((c) => {
         const time = new Date(c.created_at ?? Date.now()).toISOString().slice(5, 16); // MM-DD HH:MM
         const speaker = c.role === "user" ? "Athlete" : `Dean(${c.message_type ?? "msg"})`;
-        return `  [${time}] ${speaker}: ${(c.content as string ?? "").slice(0, 300)}`;
+        // Strip surrogate pairs and non-BMP chars that can cause JSON encoding errors in the API
+        const content = (c.content as string ?? "").replace(/[\uD800-\uDFFF]/g, "").slice(0, 300);
+        return `  [${time}] ${speaker}: ${content}`;
       });
 
       return [
