@@ -181,6 +181,7 @@ export async function generateAndSaveFullPlan(
   // single continuous plan rather than a plan that ends at Dipsea and leaves Snowbird
   // unplanned. The arc phases naturally taper to the last race; intermediate races are
   // labeled via bRaceWeekLabels so Haiku can annotate them as tune-up efforts.
+  console.log("[training-plan] generateAndSaveFullPlan: raceDate=", raceDate, "totalWeeks=", totalWeeks, "bRaces=", JSON.stringify(bRaces ?? []));
   if (bRaces?.length && raceDate) {
     const lastPostARace = bRaces
       .filter(r => r.race_date > raceDate)
@@ -189,8 +190,10 @@ export async function generateAndSaveFullPlan(
     if (lastPostARace) {
       const lastRaceMs = new Date(lastPostARace.race_date + "T12:00:00Z").getTime();
       const weeksToLast = Math.ceil((lastRaceMs - monday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+      console.log("[training-plan] B/C race extension check: lastPostARace=", lastPostARace.race_date, "weeksToLast=", weeksToLast, "totalWeeks=", totalWeeks);
       if (weeksToLast > totalWeeks && weeksToLast <= totalWeeks + 8) {
         totalWeeks = Math.min(52, weeksToLast);
+        console.log("[training-plan] Extended totalWeeks to", totalWeeks, "to cover", lastPostARace.race_name ?? lastPostARace.race_date);
       }
     }
   }

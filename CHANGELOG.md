@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fix initial plan scheduling wrong training days (run on Friday instead of Thursday)
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (internal)
+**User feedback:** "I say my training days but Dean had me do a run on a day I didn't say" and "he said let's start with 4 sessions this week, but there are 3 on the calendar" — Training days: Tue, Wed, Thu, Sat, Sun. Today (Thursday), Dean scheduled Fri/Sat/Sun instead of Sat/Sun (the remaining training days after today).
+**Root cause:** The `initial_plan` user message said "start from tomorrow or later" without constraining to confirmed training days. Claude saw "tomorrow = Friday" and scheduled there, ignoring the SCHEDULE CONSTRAINT saying to only use confirmed training days. The two instructions conflicted and Claude followed "tomorrow or later" literally. The count mismatch ("4 sessions" / 3 on calendar) followed from this: Claude was also scheduling a phantom Thursday session in its preamble text without listing it.
+**Fix / Change:**
+1. Added pre-computation of `remainingInitialPlanDays` in `processCoachRequest` for the `initial_plan` trigger — filters the athlete's confirmed training days to only those falling after today (mid-week) or the full next Mon–Sun (if today is Sunday). Handles the Sunday=0 vs Mon=1…Sun=7 ordering issue so Sunday isn't incorrectly treated as the first day of the week.
+2. Passes the computed days with calendar dates (e.g. "Saturday 4/11, Sunday 4/12 — 2 sessions") as `initialPlanDaysConstraint` into `buildUserMessage`. This replaces the vague "start from tomorrow" instruction with an explicit enumerated list.
+3. Added debug logging to `generateAndSaveFullPlan` to capture `bRaces` and the totalWeeks extension check — this will help diagnose the Snowbird dashboard issue (plan only extending to Dipsea, not Snowbird).
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`
+
+---
+
 ## 2026-04-09 — Fix trail race misclassification when Strava activity_type is "Run"
 
 **Type:** Bug Fix

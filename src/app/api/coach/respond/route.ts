@@ -716,7 +716,57 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return `⚠️ MOST RECENT RUN: ${dayName} (${daysAgo} days ago). Always reference as "${dayName}'s run" — do NOT say "yesterday". Yesterday was ${yesterdayDayName}${yesterdayHadRun ? " (also a run day)" : " (a rest day — no runs)"}.`;
   })();
 
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef);
+  // For initial_plan: pre-compute the remaining training days in the current week so we can
+  // inject them explicitly into the user message. This prevents Claude from scheduling runs
+  // on non-training days (e.g. picking "tomorrow=Friday" when Friday isn't a training day).
+  let initialPlanDaysConstraint: string | null = null;
+  if (trigger === "initial_plan") {
+    const rawDays = (profile?.training_days as string[] | null) ?? [];
+    if (rawDays.length > 0) {
+      const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
+      const [ily, ilm, ild] = localDate.split("-").map(Number);
+      const todayJsDow = new Date(Date.UTC(ily, ilm - 1, ild)).getUTCDay(); // 0=Sun, 1=Mon...
+      // Use Mon=1 through Sun=7 so Sunday doesn't collide with 0 and appear "before" weekdays
+      const WEEK_ORDER: Record<string, number> = {
+        monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7,
+      };
+      const dayNamesByDow = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+      const todayName = dayNamesByDow[todayJsDow]!;
+      const todayOrder = WEEK_ORDER[todayName] ?? 0;
+
+      let availableDays: string[];
+      if (todayJsDow === 0) {
+        // Sunday: plan the full upcoming Mon–Sun week — all training days are candidates
+        availableDays = rawDays
+          .sort((a, b) => (WEEK_ORDER[a.toLowerCase()] ?? 0) - (WEEK_ORDER[b.toLowerCase()] ?? 0))
+          .map(d => d.charAt(0).toUpperCase() + d.slice(1).toLowerCase());
+      } else {
+        // Mid-week: only training days that fall AFTER today (skip today — athlete needs
+        // prep time after onboarding; today's workout window is effectively closed)
+        availableDays = rawDays
+          .filter(d => (WEEK_ORDER[d.toLowerCase()] ?? 0) > todayOrder)
+          .sort((a, b) => (WEEK_ORDER[a.toLowerCase()] ?? 0) - (WEEK_ORDER[b.toLowerCase()] ?? 0))
+          .map(d => d.charAt(0).toUpperCase() + d.slice(1).toLowerCase());
+      }
+
+      // Attach calendar dates to each available day
+      const baseDate = new Date(Date.UTC(ily, ilm - 1, ild));
+      const daysWithDates = availableDays.map(day => {
+        const dayOrder = WEEK_ORDER[day.toLowerCase()] ?? 0;
+        const daysAhead = todayJsDow === 0 ? dayOrder : (dayOrder - todayOrder + 7) % 7;
+        const dt = new Date(baseDate.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+        return `${day} ${dt.getUTCMonth() + 1}/${dt.getUTCDate()}`;
+      });
+
+      if (daysWithDates.length > 0) {
+        initialPlanDaysConstraint = `CONFIRMED TRAINING DAYS REMAINING THIS WEEK: ${daysWithDates.join(", ")} — exactly ${daysWithDates.length} session${daysWithDates.length !== 1 ? "s" : ""}. Schedule running sessions ONLY on these days. Do NOT put a run on any other day this week. Do NOT add a session for today (athlete needs time to prepare after onboarding).`;
+      } else {
+        initialPlanDaysConstraint = `NO TRAINING DAYS REMAIN THIS WEEK after today. Do NOT schedule any sessions this week. Send a brief note telling the athlete their plan starts next week, then show their full week plan starting Monday.`;
+      }
+    }
+  }
+
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -3407,6 +3457,7 @@ function buildUserMessage(
   daysSinceLastCoachMessage: number | null = null,
   wantsSpeedWork = false,
   mostRecentRunRef: string | null = null,
+  initialPlanDaysConstraint: string | null = null,
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -3851,7 +3902,7 @@ SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed
 
 DATES AND DAY LABELS:
 - CRITICAL: Use the day names from DATE CONTEXT above — do not compute weekdays yourself. DATE CONTEXT lists tomorrow and the next 7 days with correct day names. Copy them directly. "Wed, Mar 11" → use "Wed 3/11". Getting these wrong destroys trust.
-- Start the plan from tomorrow or later — do not add a session for today.
+${initialPlanDaysConstraint ?? "- Do NOT add a session for today. Start from the athlete's next training day."}
 - If "Mileage so far this week" in CURRENT TRAINING STATE is > 0, acknowledge it in the first bubble with a separate sentence — e.g. "You've already got X miles in this week." DO NOT add those miles to the Total line. The Total line must equal ONLY the sum of the planned future sessions you are prescribing. Never write "Total: X mi + your Y mi already this week" — that format is confusing and implies a combined 65-mile week when you mean 28 miles of new work. If the current week's mileage is already very high relative to the athlete's normal weekly target (e.g. they ran a long race mid-week), flag the overload risk explicitly rather than silently stacking more miles on top.
 
 B/C RACE PLANNING (if B or C races appear in DATE CONTEXT above):
