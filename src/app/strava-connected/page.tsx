@@ -4,7 +4,7 @@ export default function StravaConnectedPage() {
       <div className="flex max-w-sm flex-col items-center gap-3 text-center">
         <h1 className="text-2xl font-bold">Strava Connected!</h1>
         <p className="text-muted-foreground">
-          Your training history is coming in. Head back to your texts — Dean
+          Your training history is coming in. Head back to your texts — Coach Dean
           will take it from here.
         </p>
       </div>

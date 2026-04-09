@@ -12,7 +12,7 @@ interface SignupFormProps {
 export function SignupForm({ smsPhone, centered }: SignupFormProps) {
   // Use `?` (not `&`) per RFC 5724, and a literal space so the OS SMS app
   // doesn't pass "%20" through as literal characters in the message body.
-  const smsUrl = `sms:${smsPhone ?? "+18336373002"}?body=Hi Dean!`;
+  const smsUrl = `sms:${smsPhone ?? "+18336373002"}?body=Hi Coach Dean!`;
   const location = centered ? "bottom" : "hero";
 
   function trackCta(device: "mobile" | "desktop") {
@@ -42,7 +42,7 @@ export function SignupForm({ smsPhone, centered }: SignupFormProps) {
           <div className="flex flex-col items-center gap-3 rounded-2xl border bg-white p-4 shadow-xl">
             <QRCodeSVG value={smsUrl} size={128} />
             <p className="text-xs text-muted-foreground">
-              On desktop? Text Dean on your phone
+              On desktop? Text Coach Dean on your phone
             </p>
           </div>
         </div>
