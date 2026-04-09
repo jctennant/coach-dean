@@ -332,6 +332,21 @@ ${a.hr ? `- Avg HR: ${a.hr} bpm\n` : ""}`;
     ? `\n⚠️ GOAL DISCREPANCY — RAISE ONCE ONLY: Athlete may be changing their race goal. Acknowledge the change naturally. Do NOT echo this label.\n`
     : "";
 
+  // Detect and enforce time-constrained training days (e.g. "Tuesday and Thursday limited to 60 minutes")
+  let timeConstraintBlock = "";
+  if (user.notes) {
+    const timeMatch = user.notes.match(/(\w+day)\s+and\s+(\w+day)\s+are\s+limited\s+to\s+(\d+)\s+minutes?/i);
+    if (timeMatch) {
+      const [, day1, day2, minutes] = timeMatch;
+      const paceMatch = paces.easy.match(/(\d+):(\d+)/);
+      if (paceMatch) {
+        const paceSeconds = parseInt(paceMatch[1]) * 60 + parseInt(paceMatch[2]);
+        const maxMiles = (parseInt(minutes) * 60 / paceSeconds).toFixed(1);
+        timeConstraintBlock = `\n⚠️ TIME CONSTRAINT — HARD CAP: ${day1} and ${day2} sessions are strictly limited to ${minutes} minutes. At this athlete's easy pace (${paces.easy}), that is a maximum of ~${maxMiles} miles. NEVER prescribe more than ${maxMiles} miles on ${day1} or ${day2} — in any week, including peak week.`;
+      }
+    }
+  }
+
   return `${raceDate ? `ATHLETE: ${user.name || "this athlete"}
 GOAL: ${user.goal_race || user.goal} on ${raceDate}
 ⚠️ This is the authoritative source for the athlete's goal race. If any prior message references a different race, disregard it.
@@ -355,10 +370,10 @@ ATHLETE HISTORY:
 - Strava: ${user.strava_connected ? "connected" : "not connected"}
 - Goal: ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}${user.goal_race_distance ? ` — ${user.goal_race_distance}` : ""}
 - Experience: ${user.experience_level || "not specified"}
-- Training days: ${(user.training_days || []).join(", ")}${user.training_days && user.training_days.length > 0 ? `\n- ⚠️ TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${user.training_days.length} running session${user.training_days.length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)` : ""}
+- Training days: ${(user.training_days || []).join(", ")}${user.training_days && user.training_days.length > 0 ? `\n- ⚠️ TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${user.training_days.length} running session${user.training_days.length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${user.training_days.length <= 3 ? ` With only ${user.training_days.length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${user.training_days.length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}` : ""}
 - Injury / constraints: ${user.injury_notes || "None reported"}
 - Preferred units: ${user.preferred_units || "imperial"} — use ${user.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
-${user.notes ? `- Athlete notes: ${user.notes}` : ""}
+${user.notes ? `- Athlete notes: ${user.notes}` : ""}${timeConstraintBlock}
 
 ${activitySummary}
 ${activityBlock}
@@ -366,7 +381,7 @@ CURRENT TRAINING STATE:
 - Week ${user.current_week} of training, phase: ${phase.charAt(0).toUpperCase() + phase.slice(1)}${isDeload ? " — RECOVERY WEEK" : ""}
 ${isDeload ? `⚠️ RECOVERY WEEK: This week's target is ${weeklyTarget} mi — already reflects the recovery volume reduction. Use the stored target, do NOT compute a further reduction from recent average. No new quality sessions. Same number of runs, shorter distances.\n` : ""}
 - Weekly mileage target: ${weeklyTarget ? weeklyTarget + " mi" : "TBD"}${trigger === "weekly_recap" ? `\n- Progression target for NEXT week (week ${user.current_week + 1}): ~${Math.round(avgWeekly * 1.08)} mi (8% step up from recent average — use this as the plan total, not the stored weekly target)` : ""}
-⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${weekMileageSoFar.toFixed(1)} mi done so far this week (${user.runs_this_week || 0} run${(user.runs_this_week || 0) !== 1 ? "s" : ""}). This is the ONLY authoritative source for current week mileage — computed directly from Strava. NEVER compute week mileage yourself by summing individual run mentions. Each week resets on Monday.
+⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${weekMileageSoFar.toFixed(1)} mi done so far this week (${user.runs_this_week || 0} run${(user.runs_this_week || 0) !== 1 ? "s" : ""}). This is the ONLY authoritative source for current week mileage — computed directly from Strava. NEVER compute week mileage yourself by summing individual run mentions. Each week resets on Monday. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to this figure immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.
 - Athlete preferred units: ${user.preferred_units || "imperial"}
 - Athlete VDOT: ${user.vdot}
 - Current paces (Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth):

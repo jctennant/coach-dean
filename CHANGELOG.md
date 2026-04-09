@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fix time-constrained training day distance caps
+
+**Type:** Bug Fix
+**Reported by:** Internal (eval run)
+**User feedback:** N/A
+**Root cause:** `plan-three-days-half` still scoring 4/10 after session count fix: Dean prescribed a 12mi easy run on Tuesday despite athlete notes stating "Tuesday and Thursday are limited to 60 minutes." At 9:40/mi, 60 min = ~6.2mi max. Notes were present in the system prompt but no computed distance cap was injected, so Claude ignored the time constraint when building peak week volume.
+**Fix / Change:** Added server-side detection of "X-day and Y-day limited to N minutes" pattern in athlete notes. When found, computes max distance from easy pace and injects `⚠️ TIME CONSTRAINT — HARD CAP: ... NEVER prescribe more than Xmi on [days]` into the system prompt. Matched in both `route.ts` and `run-evals.mjs`. Fixture went from 4/10 to 9/10.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+
+---
+
+## 2026-04-09 — Fix mileage self-correction and 3-day quality session distribution
+
+**Type:** Bug Fix
+**Reported by:** Internal (eval run)
+**User feedback:** N/A
+**Root cause:**
+1. `mileage-strava-correction` (5-6/10): System prompt correctly labels Strava mileage as authoritative, but no rule prevented Dean from defending its own wrong prior messages. When athlete corrected "phantom 3.5mi run" twice, Dean kept re-citing conversation history instead of re-anchoring to the system prompt figure.
+2. `plan-three-days-half` (4-6/10): Session count constraint ("EXACTLY 3 sessions") was satisfied, but Dean structured peak week as tempo + intervals + long run — all three hard sessions. Ground truth requires 1 long run + 1 quality (tempo OR intervals, not both) + 1 easy run.
+**Fix / Change:**
+1. Added explicit override to the Strava mileage authority line: "If your own prior messages stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to this figure immediately."
+2. For athletes with ≤ 3 training days, appended to the session count constraint: "With only N training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + 1 easy/medium run."
+3. Both changes mirrored in `run-evals.mjs` for eval parity.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+
+---
+
 ## 2026-04-09 — Eval harness improvements + server-side pre-computation for date/math accuracy
 
 **Type:** Improvement
