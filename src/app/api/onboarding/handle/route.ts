@@ -717,14 +717,14 @@ async function handleNonCadenceMessage(
   if (msgType.startsWith("plan_feedback")) {
     const ackResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 100,
-      system: `You are Coach Dean. The athlete asked to change their training plan. Acknowledge their request specifically in 1-2 short sentences. Confirm you'll rebuild around their preference. Do NOT ask any questions.`,
+      max_tokens: 120,
+      system: `You are Coach Dean. The athlete asked to change their training plan. Write 1-2 short sentences acknowledging what they asked for and confirming you're rebuilding the plan. Tell them the updated dashboard link will arrive in a moment. Do NOT ask any questions. Do NOT include a session list.`,
       messages: [{ role: "user", content: message }],
     });
-    const ack =
+    const ackRaw =
       ackResponse.content[0].type === "text"
         ? ackResponse.content[0].text.trim()
-        : "Absolutely — I'll rebuild your plan around those preferences.";
+        : "On it — rebuilding your plan around those preferences. Dashboard link coming shortly.";
 
     await supabase.from("conversations").insert({
       user_id: user.id,
@@ -732,11 +732,16 @@ async function handleNonCadenceMessage(
       content: message,
       message_type: "user_message",
     });
-    await sendAndStore(user.id, user.phone_number, ack, "awaiting_cadence");
-    void fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+    await sendAndStore(user.id, user.phone_number, ackRaw, "awaiting_cadence");
+
+    // Fire the rebuild_plan trigger — it persists profile updates from the conversation
+    // first, then regenerates the full arc with the corrected profile. This replaces the
+    // old initial_plan fire-and-forget which didn't persist pace corrections first.
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    void fetch(`${appUrl}/api/coach/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user.id, trigger: "initial_plan" }),
+      body: JSON.stringify({ userId: user.id, trigger: "rebuild_plan" }),
     });
     return NextResponse.json({ ok: true });
   }

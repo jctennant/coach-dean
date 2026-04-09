@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Two-phase plan rebuild + 2-bubble cap + speed work flag
+
+**Type:** Feature + Bug Fix
+**Reported by:** Jake Tennant (Gwyneth's onboarding — plan update didn't apply pace corrections; too many messages)
+**User feedback:** "when Gwyneth asked to update the plan, he rewrote this week instead of updating the next week... also didn't update the whole rest of the plan"
+**Root cause:**
+- Plan update path (`plan_feedback` in `awaiting_cadence`) fired `initial_plan` immediately without persisting the pace corrections Gwyneth stated in conversation. So the full arc was regenerated from stale profile data (wrong tempo pace).
+- 2-bubble instruction was being ignored; Claude generated 3 blocks (strength as a separate bubble).
+- Speed work flag ("I want to work on speed") was in a generic system prompt instruction that got overridden by the conservative injury path.
+**Fix / Change:**
+- **`[REBUILD_PLAN]` tag**: Dean emits this when the athlete asks to rebuild the whole plan. The system strips it before sending. After the confirmation message, `rebuild_plan` trigger fires.
+- **`handleRebuildPlan`**: new function in coach/respond. Extracts profile updates from recent conversation → persists them → 300ms pause → re-fetches fresh profile → calls `generateAndSaveFullPlan(resetToWeek1: false)`. Profile writes are guaranteed to land before plan generation.
+- **`awaiting_cadence` plan_feedback** now fires `rebuild_plan` instead of `initial_plan`.
+- **`user_message` rebuild path**: detects `[REBUILD_PLAN]` in coach response, fires `rebuild_plan` in `after()` after profile persisted.
+- **2-bubble hard cap**: `splitIntoMessages` result for `initial_plan` is capped to 2 entries in code — any overflow merged into bubble 2.
+- **`wants_speed_work` flag**: extracted from onboarding conversation by Haiku, stored in `onboarding_data`. At plan generation, injected as a ⚠️ hard constraint block into the system prompt — overrides conservative defaults. No longer a generic prose instruction.
+**Files changed:** `coach/respond/route.ts`, `onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-08 — Onboarding quality fixes: VDOT recalculation, verbosity, pace accuracy, dashboard messaging
 
 **Type:** Bug Fix + Improvement

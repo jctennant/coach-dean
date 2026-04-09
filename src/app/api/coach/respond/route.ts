@@ -13,7 +13,7 @@ import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan";
 
 interface CoachRequest {
   userId: string;
@@ -82,6 +82,121 @@ const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
   awaiting_injury_background: "Any injuries or physical limitations I should keep in mind?",
   awaiting_cadence: "Last thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday.",
 };
+
+/**
+ * Full plan rebuild triggered by a [REBUILD_PLAN] signal from Dean.
+ *
+ * Sequencing is the key guarantee here: profile updates from the conversation are
+ * persisted FIRST (so corrected paces, training days, etc. are in the DB), then
+ * generateAndSaveFullPlan runs against the fresh profile. This prevents the
+ * "paces corrected in conversation but plan regenerated from stale profile" failure.
+ *
+ * Does NOT reset current_week — the athlete stays on their current week in the arc.
+ * generateAndSaveFullPlan sends the dashboard link SMS automatically.
+ */
+async function handleRebuildPlan(userId: string, dryRun: boolean): Promise<NextResponse> {
+  // Load user, profile, and recent conversation
+  const [userResult, profileResult, conversationsResult] = await Promise.all([
+    supabase.from("users").select("*").eq("id", userId).single(),
+    supabase.from("training_profiles").select("*").eq("user_id", userId).single(),
+    supabase.from("conversations")
+      .select("role, content")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
+
+  const user = userResult.data as Record<string, unknown> | null;
+  const profile = profileResult.data as Record<string, unknown> | null;
+  if (!user || !profile) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const phoneNumber = user.phone_number as string;
+  const timezone = (user.timezone as string | null) ?? "America/New_York";
+  const hasStrava = !!(user.strava_athlete_id as number | null);
+
+  // Extract profile updates from the recent conversation — this is what makes the
+  // rebuild reflect pace corrections and preferences stated during the conversation.
+  const recentMessages = (conversationsResult.data ?? [])
+    .reverse()
+    .filter(m => m.role === "user");
+  if (recentMessages.length > 0) {
+    const recentUserText = recentMessages
+      .slice(-8) // last 8 user messages — enough context without blowing the extraction
+      .map(m => m.content)
+      .join("\n");
+    try {
+      const extracted = await extractProfileData(recentUserText, timezone);
+      await persistProfileUpdates(
+        userId,
+        phoneNumber,
+        extracted,
+        profile,
+        (user.onboarding_data as Record<string, unknown>) || {},
+        timezone,
+        hasStrava
+      );
+    } catch (err) {
+      // Non-fatal — rebuild continues with whatever profile state exists
+      console.error("[handleRebuildPlan] profile extraction failed (non-fatal):", err);
+    }
+  }
+
+  // Brief pause so the profile writes above are visible to the subsequent fetch
+  await new Promise(r => setTimeout(r, 300));
+
+  // Re-fetch the now-updated profile
+  const { data: freshProfile } = await supabase
+    .from("training_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .single();
+
+  // Fetch 8-week avg mileage from Strava activities (same window as initial_plan)
+  let avgWeeklyMileage: number | null = null;
+  if (hasStrava) {
+    const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentActs } = await supabase
+      .from("activities")
+      .select("distance_meters, start_date")
+      .eq("user_id", userId)
+      .gte("start_date", eightWeeksAgo)
+      .eq("activity_type", "Run");
+    if (recentActs && recentActs.length > 0) {
+      const totalMiles = recentActs.reduce((sum, a) => sum + ((a.distance_meters as number) / 1609.34), 0);
+      avgWeeklyMileage = Math.round((totalMiles / 8) * 10) / 10;
+    }
+  }
+
+  // Fetch B/C races so the arc enrichment labels those weeks correctly
+  const now = new Date();
+  const { data: upcomingRaces } = await supabase
+    .from("races")
+    .select("race_date, race_name, priority")
+    .eq("user_id", userId)
+    .gt("race_date", now.toISOString().slice(0, 10))
+    .in("priority", ["B", "C"]);
+  const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
+
+  if (!dryRun) {
+    try {
+      await generateAndSaveFullPlan(
+        userId,
+        phoneNumber,
+        freshProfile as Record<string, unknown> | null,
+        avgWeeklyMileage,
+        { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined }
+      );
+      void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
+    } catch (err) {
+      console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
+      return NextResponse.json({ error: "Plan generation failed" }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ ok: true });
+}
 
 /**
  * Handles a Strava activity event for a user who hasn't finished onboarding yet.
@@ -184,6 +299,13 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Avoids the heavy data fetching the full post_run path requires.
   if (trigger === "post_run_onboarding") {
     return await handlePostRunOnboarding(userId, activityId, dry_run ?? false, requestChatId);
+  }
+
+  // Rebuild plan early exit: persists profile updates from recent conversation, then
+  // regenerates the full plan arc without resetting the week counter. No Claude call needed.
+  // Fired after Dean sends a [REBUILD_PLAN] confirmation to the athlete.
+  if (trigger === "rebuild_plan") {
+    return await handleRebuildPlan(userId, dry_run ?? false);
   }
 
   // Fetch user context in parallel
@@ -649,7 +771,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
-  const strippedRaw = stripReasoningPreamble(rawText.replace(/\[NO_REPLY\]/gi, "").trim());
+  const wantsRebuild = /\[REBUILD_PLAN\]/i.test(rawText);
+  const strippedRaw = stripReasoningPreamble(
+    rawText.replace(/\[NO_REPLY\]/gi, "").replace(/\[REBUILD_PLAN\]/gi, "").trim()
+  );
   // correctMileageTotal catches math errors where Claude states a weekly total that
   // doesn't match the sum of session distances in the response.
   // - post_run: uses correctProjectedTotal instead — no session plan in the response
@@ -907,13 +1032,30 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           hasStrava
         );
       }
-      const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
-      await maybeUpdatePlanSessions(
-        userId, currentSessions, latestUserMsg.content, coachMessage,
-        storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek,
-      );
-      if (storedPlanId && storedPlanAllWeeks.length > 0) {
-        await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
+      // If Dean committed to a full plan rebuild, fire it now that profile is persisted.
+      // Skip the per-week patch — the full rebuild supersedes it.
+      if (wantsRebuild) {
+        after(async () => {
+          try {
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+            await fetch(`${appUrl}/api/coach/respond`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, trigger: "rebuild_plan" }),
+            });
+          } catch (err) {
+            console.error("[coach/respond] rebuild_plan trigger failed:", err);
+          }
+        });
+      } else {
+        const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
+        await maybeUpdatePlanSessions(
+          userId, currentSessions, latestUserMsg.content, coachMessage,
+          storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek,
+        );
+        if (storedPlanId && storedPlanAllWeeks.length > 0) {
+          await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
+        }
       }
     }
   }
@@ -3276,7 +3418,9 @@ If they clearly want it as a permanent schedule change (e.g. "from now on", "eve
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
 
-DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." Confirm the change you're making and tell them the dashboard will reflect it within moments. The system updates the dashboard automatically whenever you commit to a plan change in your response.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
+DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." Confirm the change you're making and tell them the dashboard will reflect it within moments. The system updates the dashboard automatically whenever you commit to a plan change in your response.
+
+FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "update the whole plan", "rebuild my plan with more tempo", "add speed work throughout" — send a short 1-2 sentence confirmation of what's changing, then add [REBUILD_PLAN] on its own line at the very end. The tag is stripped before sending. Do NOT include a session list or week-by-week schedule in this message — just the confirmation and the tag. The updated dashboard link will arrive in a separate message automatically. Example: "On it — rebuilding your plan with tempo sessions added from week 2 onward. Dashboard link coming shortly.\n\n[REBUILD_PLAN]"${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 
