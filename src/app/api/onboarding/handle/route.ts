@@ -508,7 +508,8 @@ Output format (include only fields that are clearly stated — use null for anyt
   "experience_years": number | null,
   "other_races": [{"name": string|null, "date": "YYYY-MM-DD"|null, "priority": "B"|"C", "goal": string|null, "goal_distance_miles": number|null}] | null,
   "timezone": string | null,
-  "strava_skipped": true | null
+  "strava_skipped": true | null,
+  "wants_speed_work": true | null
 }
 
 Rules:
@@ -523,7 +524,8 @@ Rules:
 - timezone: IANA string when a location is mentioned (e.g. "Provo, UT" → "America/Denver", "San Francisco" → "America/Los_Angeles")
 - other_races: only B/C secondary races, not the main A race (goal/race_name/race_date). Use the same date precision rule as race_date — specific date if stated, first-of-month only as last resort.
 - ultra_race_history: summarize any ultra or trail race background mentioned (e.g. "3 marathons PR 3:45, 2 trail halves, no prior ultras"). Populate whenever the athlete describes their racing/ultra history, even if they say they have none.
-- strava_skipped: set to true if the athlete explicitly says they don't have Strava, won't use it, or skip it. Leave null if the topic hasn't come up.`,
+- strava_skipped: set to true if the athlete explicitly says they don't have Strava, won't use it, or skip it. Leave null if the topic hasn't come up.
+- wants_speed_work: set to true if the athlete explicitly says they want to work on speed, get faster, improve their speed, or add speed work. Leave null if not mentioned.`,
     messages: [{ role: "user", content: transcript }],
   });
 

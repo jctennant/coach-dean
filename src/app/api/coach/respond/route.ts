@@ -562,7 +562,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     ? Math.round((Date.now() - new Date(lastCoachMsgForGap.created_at).getTime()) / 86400000)
     : null;
 
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage);
+  const wantsSpeedWork = !!((user.onboarding_data as Record<string, unknown> | null)?.wants_speed_work);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -713,6 +714,15 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // with its own typing indicator so it feels like a real person composing
   // multiple follow-up messages.
   const parts = splitIntoMessages(coachMessage);
+
+  // For initial_plan, hard-cap at 2 SMS bubbles regardless of how many blank-line
+  // separators Claude generated. A 3rd bubble (e.g. strength block detail) overloads
+  // the user at a critical moment. Merge any overflow into the 2nd bubble.
+  if (trigger === "initial_plan" && parts.length > 2) {
+    const merged = parts.slice(1).join("\n\n");
+    parts.splice(1, parts.length - 1, merged);
+  }
+
   const msgType =
     trigger === "post_run"
       ? "post_run"
@@ -2332,10 +2342,14 @@ ${(() => {
   // Parse remaining session miles from the label text so we can compute the projected total.
   // Positive matching: only sessions with an explicit "mi" marker contribute to the projection.
   // Non-running sessions are instructed in the prompt to never include distance in miles.
-  const { sessionRows, projectedWeekMiles } = (() => {
+  const { sessionRows, projectedWeekMiles, remainingPlanLine } = (() => {
     const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
-    if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: null };
+    if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: null, remainingPlanLine: "" };
     const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
+    // Compute week boundary once — used for both session labeling and remaining-plan summary
+    const dayOfWeekToday = localTodayUTC.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+    const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
+    const endOfWeekMs = Date.UTC(ty, tm - 1, td + daysToSunday);
     const todaySessions = sessions.filter(s => {
       const [m, d] = s.date.split("/").map(Number);
       if (isNaN(m) || isNaN(d)) return false;
@@ -2349,15 +2363,21 @@ ${(() => {
       return sessionDate > localTodayUTC;
     });
     const activeSessions = [...todaySessions, ...futureSessions];
-    if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar };
-    // Sum remaining session miles for projection (only future; today may be done)
-    let remainingSessionMiles = 0;
-    for (const s of futureSessions) {
+    if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
+    // Helper: parse miles from a session label (same regex as extractAndStorePlanSessions)
+    const parseSessionMiles = (s: { label: string }) => {
       const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
       const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
       const mMatch = explicitTotal || firstMi;
-      if (mMatch) remainingSessionMiles += parseFloat(mMatch[1]);
-    }
+      return mMatch ? parseFloat(mMatch[1]) : 0;
+    };
+    // Sum future session miles for projected total (future only — today may already be done)
+    const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
+    // For non-post_run: today's session may not be completed yet — include it in remaining plan miles
+    const todaySessionMiles = trigger !== "post_run"
+      ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0)
+      : 0;
+    const totalRemainingPlanMiles = todaySessionMiles + remainingSessionMiles;
     const targetAlreadyMet = targetMiles > 0 && weekMileageSoFar >= targetMiles;
     let sessionRows = "";
     if (todaySessions.length > 0) {
@@ -2378,10 +2398,6 @@ ${(() => {
         // Split sessions by calendar week boundary (Mon–Sun). Sessions in the current
         // Mon–Sun week vs next week should be clearly labeled so Dean doesn't say
         // "5 training days left this week" when only 1 calendar day remains.
-        const dayOfWeekToday = localTodayUTC.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
-        const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
-        const endOfWeekMs = Date.UTC(ty, tm - 1, td + daysToSunday);
-
         const thisWeekFuture = futureSessions.filter(s => {
           const [mm, dd] = s.date.split("/").map(Number);
           if (isNaN(mm) || isNaN(dd)) return true;
@@ -2401,9 +2417,35 @@ ${(() => {
         }
       }
     }
+    // Pre-compute the "miles remaining" answer so Claude never needs to do arithmetic.
+    // When an athlete asks "how many miles do I have left?", Claude reads this line directly
+    // rather than computing target-delta (wrong) or adding session distances itself (error-prone).
+    let remainingPlanLine = "";
+    if (totalRemainingPlanMiles > 0 && !targetAlreadyMet && trigger !== "post_run") {
+      const thisWeekRemaining = [
+        ...todaySessions,
+        ...futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return true;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
+        }),
+      ];
+      const breakdown = thisWeekRemaining.map(s => {
+        const [mm, dd] = s.date.split("/").map(Number);
+        const isToday = !isNaN(mm) && !isNaN(dd) && new Date(Date.UTC(ty, mm - 1, dd)).getTime() === localTodayUTC.getTime();
+        return `${isToday ? "today's" : `${s.day} ${s.date}`} ${s.label}`;
+      }).join(" + ");
+      const projTotal = weekMileageSoFar + totalRemainingPlanMiles;
+      remainingPlanLine = `\n- MILES REMAINING IN PLAN THIS WEEK: ${mi(totalRemainingPlanMiles)} across ${thisWeekRemaining.length} session${thisWeekRemaining.length !== 1 ? "s" : ""} (${breakdown}) → projected week total: ${mi(projTotal)}`;
+    }
     return {
       sessionRows,
-      projectedWeekMiles: weekMileageSoFar + remainingSessionMiles,
+      // For non-post_run: projected total includes today's unfinished session so the
+      // mileageLine and MILES REMAINING line are consistent with each other.
+      projectedWeekMiles: trigger === "post_run"
+        ? weekMileageSoFar + remainingSessionMiles
+        : weekMileageSoFar + totalRemainingPlanMiles,
+      remainingPlanLine,
     };
   })();
   const mileageLine = (() => {
@@ -2471,7 +2513,7 @@ ${deloadBlock}${progressionLine}- Weekly mileage target (athlete baseline): ${ta
 ⚠️ LABEL/PACE CONSISTENCY — CRITICAL: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.
 - RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any of: "⚠️ GOAL DISCREPANCY", "Now I need to provide", "Let me craft the response", "Now let me search", or any internal analysis paragraph. The FIRST thing you output must be the coaching message itself — nothing before it.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
-- Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}`;
+- Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}${remainingPlanLine}`;
 })()}
 
 COMMUNICATION STYLE:
@@ -3078,6 +3120,7 @@ function buildUserMessage(
   racePreparednessFlag = "",
   preferredUnits: string = "imperial",
   daysSinceLastCoachMessage: number | null = null,
+  wantsSpeedWork = false,
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -3447,7 +3490,9 @@ RACE TIMELINE — never compute this yourself:
 GENERAL FITNESS GOAL — SET EXPECTATIONS:
 - When the athlete has a general fitness goal (no race target), include 1-2 sentences in your first text bubble about what they can expect to achieve by the end of this training cycle. Be specific and concrete — not "you'll feel better" but something like: "By week 12 you'll be running comfortably through both days each week, and we'll look to steadily add a third day and more miles as you find your rhythm." Ground it in their current mileage and days/week.
 
-VOLUME AND SAFETY:
+${wantsSpeedWork ? `⚠️ SPEED WORK REQUIRED: This athlete explicitly requested speed work as a training goal. Week 1 MUST include at minimum strides or a short tempo segment — do not send an all-easy plan. This requirement overrides conservative defaults. Strides are low-impact and appropriate even when being cautious about injury history.
+
+` : ""}VOLUME AND SAFETY:
 - ⚠️ CRITICAL: The FITNESS TIER section in your system prompt contains a "⚠️ WEEK 1 VOLUME CAP" and a "⚠️ LONG RUN CAP" — both are hard limits calculated from the athlete's actual current mileage. You MUST respect both caps. Prescribing 2–3× current volume is a documented injury risk. If the cap says Week 1 max is 7 mi, do not write a plan with 15 mi. If the long run cap is 2 mi, do not prescribe a 9 mi long run.
 - SELF-CONSISTENCY CHECK: Before sending any plan, verify that (1) the sum of running session distances matches your stated weekly total, and (2) no single session exceeds the long run cap from FITNESS TIER. If you state a safety cap in one sentence and prescribe a plan that violates it in the next sentence, that is a direct contradiction and must be corrected before sending.
 - HIGH VOLUME athletes: week 1 MUST include at least one quality session (tempo, intervals, strides, or hill repeats). An athlete running 30+ mi/week should NOT get an all-easy first week — prescribing all easy miles for an established runner is sandbagging them.
@@ -3456,7 +3501,6 @@ VOLUME AND SAFETY:
 - For mountain or technical trail races with significant elevation gain (Snowbird, Cirque Series, Dipsea, Black Canyon, etc.): include at least one vert-specific session in week 1 — this applies regardless of race distance category. Do NOT delay climbing work to "later in the build"; athletes preparing for elevation gain need it from the start. Vert work can be a hilly easy run, power hiking intervals, or a designated hill session.
 - For athletes coming back from injury, returning after a long break, or with low current mileage: start shorter than you might think. It's easier to add than to walk back an overambitious first week.
 - Address any injury or physical limitation directly in the plan itself — briefly note how the plan accounts for it. Do NOT ask a follow-up question about it.
-- SPEED GOAL OVERRIDE: If the athlete explicitly said they want to work on speed (any phrasing: "I want to get faster", "improve my speed", "work on speed", etc.), include at minimum strides or a short tempo segment in week 1 regardless of injury history or volume tier. Being conservative does not mean all-easy — strides are low-impact and can be included even when erring on the side of caution.
 
 EXPLAINING THE PLAN (beginner and low-volume athletes only):
 - When FITNESS TIER is "No activity data yet" (beginner self-report), LOW VOLUME (<10 mi/week), or no Strava history: include 2–3 sentences explaining the WHY behind the plan structure. Athletes who are new or just getting consistent need to understand why easy effort is the right approach — otherwise an all-easy-looking plan feels like generic advice, not coaching.

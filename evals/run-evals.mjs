@@ -171,12 +171,84 @@ function buildEvalSystemPrompt(fixture) {
     activitySummary = "No activity history available.";
   }
 
-  // Session rows for plan
+  // Session rows for plan — mirror production route's today/future classification
   let sessionRows = "";
+  let remainingPlanLine = "";
   if (user.plan_sessions_remaining && user.plan_sessions_remaining.length > 0) {
-    sessionRows = "\n- UPCOMING SESSIONS THIS WEEK:\n";
-    for (const s of user.plan_sessions_remaining) {
-      sessionRows += `${s.day} ${s.date} · ${s.label}\n`;
+    const [todayY, todayM, todayD] = todayDateStr.split("-").map(Number);
+    const localTodayUTC = new Date(Date.UTC(todayY, todayM - 1, todayD));
+    const dayOfWeekToday = localTodayUTC.getUTCDay();
+    const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
+    const endOfWeekMs = Date.UTC(todayY, todayM - 1, todayD + daysToSunday);
+
+    const parseSessionMiles = (s) => {
+      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
+      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
+      const mMatch = explicitTotal || firstMi;
+      return mMatch ? parseFloat(mMatch[1]) : 0;
+    };
+
+    const sessions = user.plan_sessions_remaining;
+    const todaySessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      return new Date(Date.UTC(todayY, m - 1, d)).getTime() === localTodayUTC.getTime();
+    });
+    const futureSessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return true;
+      return new Date(Date.UTC(todayY, m - 1, d)) > localTodayUTC;
+    });
+
+    const trigger = fixture.trigger;
+    if (todaySessions.length > 0) {
+      const todayLabel = trigger === "post_run"
+        ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
+        : `TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice)`;
+      sessionRows += `\n- ${todayLabel}:\n${todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+    }
+    if (futureSessions.length > 0) {
+      const thisWeekFuture = futureSessions.filter(s => {
+        const [mm, dd] = s.date.split("/").map(Number);
+        if (isNaN(mm) || isNaN(dd)) return true;
+        return new Date(Date.UTC(todayY, mm - 1, dd)).getTime() <= endOfWeekMs;
+      });
+      const nextWeekFuture = futureSessions.filter(s => {
+        const [mm, dd] = s.date.split("/").map(Number);
+        if (isNaN(mm) || isNaN(dd)) return false;
+        return new Date(Date.UTC(todayY, mm - 1, dd)).getTime() > endOfWeekMs;
+      });
+      if (thisWeekFuture.length > 0) {
+        sessionRows += `\n- UPCOMING SESSIONS THIS WEEK (week ends Sunday):\n${thisWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+      }
+      if (nextWeekFuture.length > 0) {
+        sessionRows += `\n- NEXT WEEK'S PLANNED SESSIONS (starts Monday — do NOT count these as part of this week's mileage or day count):\n${nextWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+      }
+    }
+
+    // Pre-computed remaining miles fact — mirrors production route
+    if (trigger !== "post_run") {
+      const todayMiles = todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
+      const futureMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
+      const totalRemaining = todayMiles + futureMiles;
+      const weeklyMilesDone = user.miles_logged_this_week ?? 0;
+      if (totalRemaining > 0) {
+        const thisWeekRemaining = [
+          ...todaySessions,
+          ...futureSessions.filter(s => {
+            const [mm, dd] = s.date.split("/").map(Number);
+            if (isNaN(mm) || isNaN(dd)) return true;
+            return new Date(Date.UTC(todayY, mm - 1, dd)).getTime() <= endOfWeekMs;
+          }),
+        ];
+        const breakdown = thisWeekRemaining.map(s => {
+          const [m, d] = s.date.split("/").map(Number);
+          const isToday = !isNaN(m) && !isNaN(d) && new Date(Date.UTC(todayY, m - 1, d)).getTime() === localTodayUTC.getTime();
+          return `${isToday ? "today's" : `${s.day} ${s.date}`} ${s.label}`;
+        }).join(" + ");
+        const projTotal = (weeklyMilesDone + totalRemaining).toFixed(1);
+        remainingPlanLine = `\n- MILES REMAINING IN PLAN THIS WEEK: ${totalRemaining.toFixed(1)}mi across ${thisWeekRemaining.length} session${thisWeekRemaining.length !== 1 ? "s" : ""} (${breakdown}) → projected week total: ${projTotal}mi`;
+      }
     }
   }
 
@@ -277,7 +349,7 @@ ${isDeload ? `⚠️ RECOVERY WEEK: This week's target is ${weeklyTarget} mi —
 - Current paces (Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth):
   Easy ${paces.easyRange}, Tempo ${paces.tempo}, Interval ${paces.interval}
 - RULE: NEVER recalculate VDOT or training paces. The stored paces above are correct.
-⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace. This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or SLOWER is a documented error — use the stored Tempo (${paces.tempo}) instead; never compute a quality pace from scratch. Warm-up and cool-down pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit ("/mi" or "/km") on every pace.${sessionRows}
+⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace. This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or SLOWER is a documented error — use the stored Tempo (${paces.tempo}) instead; never compute a quality pace from scratch. Warm-up and cool-down pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit ("/mi" or "/km") on every pace.${sessionRows}${remainingPlanLine}
 ${conversationBlock}
 MILEAGE ACCURACY RULES — follow exactly:
 - When listing planned sessions for a week, the Total line shows ONLY planned future sessions. Never write "Total: X mi + your Y mi already this week". If the athlete has run some miles already, acknowledge them in a separate sentence. The Total shows what is still to be done (or the full week target).

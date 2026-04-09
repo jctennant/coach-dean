@@ -30,11 +30,7 @@
     },
     {
       "role": "assistant",
-      "content": "No worries. What's your current easy run pace, or a recent race time I can use to set your training zones?"
-    },
-    {
-      "role": "user",
-      "content": "My easy pace is around 9:30 per mile. I'm in Provo, Utah."
+      "content": "No worries. What's your current easy run pace, or a recent race time I can use to set your training zones? And roughly how many miles are you running per week right now?"
     }
   ],
   "collected": {
@@ -46,11 +42,12 @@
     "training_days": ["tuesday", "wednesday", "thursday", "saturday", "sunday"],
     "days_per_week": 5,
     "easy_pace": "9:30",
+    "weekly_miles": 25,
     "strava_skipped": true,
     "timezone": "America/Denver"
   },
   "strava_context": "STRAVA: User skipped Strava. Collect mileage + pace data manually.",
-  "inbound_message": "My easy pace is around 9:30 per mile. I'm in Provo, Utah.",
+  "inbound_message": "My easy pace is around 9:30 per mile and I'm running about 25 miles a week. I'm in Provo, Utah.",
   "ground_truth": {
     "notes": "Dean now has everything required: name, goal (trail_race / Cirque Series Snowbird), race date, training days, easy pace, and location/timezone. He should signal [READY] at the end of his response. Crucially, if he signals [READY], he must NOT also ask a question in the same message. The correct behavior is a warm wrap-up like 'Perfect — I have everything I need, I'll put your plan together now. [READY]'. The known failure mode: Dean asks 'Do you have a goal finish time?' AND signals [READY] in the same message — this causes the plan to fire while the question is left unanswered."
   }
