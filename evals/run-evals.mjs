@@ -355,7 +355,7 @@ ATHLETE HISTORY:
 - Strava: ${user.strava_connected ? "connected" : "not connected"}
 - Goal: ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}${user.goal_race_distance ? ` — ${user.goal_race_distance}` : ""}
 - Experience: ${user.experience_level || "not specified"}
-- Training days: ${(user.training_days || []).join(", ")}${user.training_days && user.training_days.length > 0 ? `\n- ⚠️ TRAINING SESSION COUNT — HARD CONSTRAINT: This athlete trains EXACTLY ${user.training_days.length} day${user.training_days.length !== 1 ? "s" : ""} per week. Every week in the plan must have EXACTLY ${user.training_days.length} running sessions — never more. No optional, bonus, or supplementary running sessions beyond these days.` : ""}
+- Training days: ${(user.training_days || []).join(", ")}${user.training_days && user.training_days.length > 0 ? `\n- ⚠️ TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${user.training_days.length} running session${user.training_days.length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)` : ""}
 - Injury / constraints: ${user.injury_notes || "None reported"}
 - Preferred units: ${user.preferred_units || "imperial"} — use ${user.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 ${user.notes ? `- Athlete notes: ${user.notes}` : ""}

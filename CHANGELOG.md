@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Eval harness improvements + server-side pre-computation for date/math accuracy
+
+**Type:** Improvement
+**Reported by:** Internal (eval run)
+**User feedback:** N/A
+**Root cause:** Three classes of recurring failures found in eval run:
+1. "Tomorrow" for today's session — eval runner injected ALL plan sessions as "UPCOMING SESSIONS THIS WEEK" regardless of date, so Claude couldn't distinguish today's session from future ones. Production route already classified them correctly; eval runner was behind.
+2. Math errors on "how many miles do I have left?" — Claude was computing target-delta (28-14=14) instead of session-remaining (6+9=15), because it was given raw numbers and asked to do arithmetic at inference time.
+3. "Yesterday" for a run 2+ days ago — the existing ACTIVITY RECENCY advisory rule ("check the N-days-ago label") was insufficient; Claude's trained "most recent = yesterday" reflex overrode it.
+**Fix / Change:**
+1. **Eval runner parity**: ported production route's today/future session classification into `run-evals.mjs` — sessions on today's date now get "TODAY'S PLANNED SESSION" label; future sessions split into "this week" vs "next week."
+2. **Pre-computed miles remaining**: added server-side `MILES REMAINING IN PLAN THIS WEEK: Xmi across N sessions (breakdown) → projected week total: Ymi` injected into training state block. Claude reads the pre-computed answer instead of doing arithmetic. Updated projected total to include today's uncompleted session for non-post_run triggers. Mirrored in eval runner.
+3. **Pre-computed most recent run reference**: server-side computes `⚠️ MOST RECENT RUN: [DayName] (N days ago). Always reference as "[DayName]'s run" — do NOT say "yesterday". Yesterday was [DayName] (a rest day — no runs).` Injected before the ACTIVITY RECENCY rule in user_message responses. Removes the need for Claude to reason about recency — gives it the exact phrase to use.
+4. **Training session count constraint**: injected "PLAN GENERATION RULE: include EXACTLY N running sessions per week — never more" derived from `training_days.length`. Scoped to plan generation to avoid it surfacing in post-run/conversational responses.
+5. **Onboarding fixture fix**: `ready-signal-no-question.json` had a duplicate last user message in conversation_history and was missing `weekly_miles` from `collected`. Fixed both — Dean now correctly fires [READY] when all required fields are present.
+**Results:** Coaching evals: 27/41 → 38/41 passed, 8.3 → 9.0 avg. Onboarding evals: 4/5 → 5/5, avg 8.8 → 10.0. Date accuracy category: 5/7 → 7/7.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`, `evals/fixtures/onboarding/ready-signal-no-question.json`
+
+---
+
 ## 2026-04-08 — Fix Dean re-asking for race time after user already provided one
 
 **Type:** Bug Fix
