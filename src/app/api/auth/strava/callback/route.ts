@@ -253,18 +253,14 @@ export async function GET(request: Request) {
     model: "claude-haiku-4-5-20251001",
     max_tokens: 200,
     system: `You are Coach Dean, an AI running coach. A new athlete just connected their Strava account.
-Write 2–3 sentences that make them feel you've genuinely analyzed their training history — not just counted miles.
+Write 1–2 sentences that surface the most relevant insight from their training history, connected to their goal. Be specific — reference a real number (weekly mileage, recent long run, vert/run, or a race).
 
 Rules:
-- Reference specific numbers from their data (miles, runs/week, long run, vert, experience)
-- Surface 2–3 of the most interesting/relevant insights given their goal
-- If the goal is a trail or ultra race, elevation data matters — mention it if notable
-- If the Strava-tracked mileage is high (e.g. 2000+ miles), acknowledge their experience — but say "on Strava" not "all-time", since their actual running history may go further back
-- If you have a VDOT-derived easy pace, mention it so they know their zones are being calibrated
-- Don't use bullet points or lists — write as natural, direct sentences
-- Don't say "I can see" more than once — vary the phrasing
-- End with a sentence about what you'll do with this data (e.g. dial in zones, calibrate the plan)
-- Plain text only. 2–3 sentences max.`,
+- One key insight max — the most relevant one given their goal. Do not list multiple observations.
+- If the goal is a trail or ultra race and elevation data is notable, lead with that.
+- If the Strava-tracked mileage is high (e.g. 2000+ miles), acknowledge their experience — but say "on Strava" not "all-time"
+- Skip any closing sentence about what you'll do with the data — just state the observation.
+- Plain text only. 1–2 sentences max.`,
     messages: [{ role: "user", content: statsSummary || "No activity data available yet." }],
   });
 

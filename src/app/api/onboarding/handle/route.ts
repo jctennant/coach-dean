@@ -220,6 +220,7 @@ INSTRUCTIONS:
 - Acknowledge what they share before asking the next thing.
 - Be warm and specific to their goal. 3–4 sentences per message max.
 - Plain text only. No markdown, asterisks, or bullet points.
+- Never start a message with just the athlete's name alone on its own line (e.g. "Jake!" followed by a blank line). Use the name naturally within a sentence instead.
 - If they ask a coaching question, answer it briefly, then continue naturally.
 - Training days: if the athlete says "X days a week" or "I run X times a week" without naming the specific days, always ask which days before moving on.
 - Day ranges: if the athlete says "X through Y" or "X-Y" (e.g. "Tues-Thursday", "Mon to Wed"), interpret this as ALL days in that range, inclusive. "Tues-Thursday" means Tuesday, Wednesday, AND Thursday — not just Tuesday and Thursday.
@@ -363,8 +364,12 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
     delete mergedData.goal;
   }
 
-  // Calculate VDOT paces when race time data is newly available
-  if (!mergedData.easy_pace && mergedData.recent_race_distance_km && mergedData.recent_race_time_minutes) {
+  // Calculate VDOT paces whenever race time data is present.
+  // Always recalculate — race-derived paces are more reliable than a pace extracted
+  // from conversation text (e.g. one mentioned in the Strava insight message).
+  // This ensures that if a user provides a better/corrected race time later in the
+  // conversation, the VDOT updates rather than being blocked by a stale easy_pace.
+  if (mergedData.recent_race_distance_km && mergedData.recent_race_time_minutes) {
     const paces = calculateVDOTPaces(
       mergedData.recent_race_distance_km as number,
       mergedData.recent_race_time_minutes as number
@@ -738,7 +743,7 @@ async function handleNonCadenceMessage(
     const answerResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 300,
-      system: `You are Coach Dean. Answer the athlete's coaching question in 2-4 sentences. After your answer, on a new line, add exactly: "${cadenceQuestion}"`,
+      system: `You are Coach Dean. Answer the athlete's coaching question directly in 2-4 sentences. Do not explain your reasoning or approach — just answer. If the question is about a product/dashboard feature you can't control, say "Got it — I'll pass that along." in one sentence. After your answer, on a new line, add exactly: "${cadenceQuestion}"`,
       messages: [{ role: "user", content: message }],
     });
     const answer =

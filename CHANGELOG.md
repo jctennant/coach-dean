@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Onboarding quality fixes: VDOT recalculation, verbosity, pace accuracy, dashboard messaging
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Jake Tennant (internal observation from onboarding sessions with Jake and Gwyneth)
+**User feedback:** "I don't think the VDOT calculation is working correctly. I was given a 9:30-10min easy pace for a 17:50 5k." / "When given plan there are way too many messages coming in" / "The Strava analysis we added is too long" / "Cut down the coaches note - too long. 2 sentences max. Don't need to personalize it" / "Dean said he can't update the dashboard" / "No speed work until week 7 even though she said she wanted to work on speed"
+**Root cause:**
+1. VDOT bug: `!mergedData.easy_pace` guard in `handleConversation` blocked recalculation when user provided race time after Strava connected. Strava callback's insight message mentioned a pace (e.g. 9:30/mi from trail 30K), Haiku extraction stored that as `easy_pace`, then the guard prevented VDOT from recalculating when user later stated 17:50 5K. Correct easy pace for 17:50 5K is ~8:00/mi, not 9:30–10:00.
+2. Too many messages: Claude generating 3 text blocks despite "2 bubble" instruction (strength detail as separate bubble).
+3. Strava analysis: "2–3 sentences max" produced verbose output.
+4. Coach's note: included athlete name personalization and 2–3 sentences; user found it too long and slightly creepy.
+5. Dashboard: Claude was saying "I can't update the dashboard" — incorrect; plan changes DO update the dashboard automatically.
+6. Speed work delay: injury notes triggered all-easy first week even when athlete explicitly requested speed work.
+7. Leaked internal thinking: coaching_question path in `handleNonCadenceMessage` allowed model to output reasoning meta-commentary.
+8. Greeting formatting: Claude starting messages with just "Jake!" on its own line.
+**Fix / Change:**
+1. Removed `!mergedData.easy_pace` guard — VDOT now always recalculates when race time data is present.
+2. Changed initial_plan format from "2 short iMessage texts" to "EXACTLY 2 SMS bubbles — no more, no less."
+3. Strava insight prompt changed to "1–2 sentences max, one key insight only."
+4. Coach's note shortened to 2 sentences, removed name personalization.
+5. Added DASHBOARD UPDATES block to user_message system prompt — Dean is told he CAN update the plan/dashboard.
+6. Added SPEED GOAL OVERRIDE instruction — strides or tempo required in week 1 when athlete stated speed goal.
+7. Added "Answer directly, no meta-commentary" to coaching_question system prompt.
+8. Added formatting rule: never start a message with just the athlete's name alone on its own line.
+**Files changed:** `onboarding/handle/route.ts`, `auth/strava/callback/route.ts`, `coach/respond/route.ts`
+
+---
+
 ## 2026-04-08 — Post-race recovery context injected into system prompt
 
 **Type:** Feature

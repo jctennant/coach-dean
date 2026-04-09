@@ -1753,11 +1753,10 @@ async function syncArcCurrentWeek(
       const notesResp = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 180,
-        system: `Write a 2-3 sentence coach's note for an athlete's training week dashboard. Phase: ${phase}. Goal: ${goal || "general running fitness"}.${athleteName ? ` Athlete's first name: ${athleteName.split(" ")[0]}.` : ""}
-First sentence: this week's purpose and why it matters. Then 1-2 sentences on the key session or theme — what it is, target effort, one brief execution tip.
-If the session list includes strides, briefly explain what they are (e.g. "Strides are short 15-20 second accelerations to near-full speed — they sharpen leg turnover without adding fatigue."). If it includes tempo, intervals, or another quality type, explain that too in plain language. Do not assume the athlete knows training jargon.
-${athleteName ? `Personalize the note by using the athlete's first name (${athleteName.split(" ")[0]}) naturally in one sentence.` : ""}
-Be direct and practical. No filler. Return ONLY the note text.`,
+        system: `Write a 2-sentence coach's note for an athlete's training week dashboard. Phase: ${phase}. Goal: ${goal || "general running fitness"}.
+First sentence: this week's purpose and why it matters. Second sentence: one brief execution tip for the key session — what to focus on during that workout.
+If the session list includes jargon (strides, tempo, intervals), use plain language to describe the effort level in that second sentence.
+Do not use the athlete's name. Be direct and practical. No filler. Return ONLY the note text.`,
         messages: [{ role: "user", content: `Sessions: ${sessionList}\nTotal: ~${actualMiles}mi` }],
       });
       derivedNotes = notesResp.content[0].type === "text" ? notesResp.content[0].text.trim() : "";
@@ -3232,7 +3231,9 @@ If the request is ambiguous about scope (no "just this week" or "from now on"), 
 
 If they clearly want it as a permanent schedule change (e.g. "from now on", "every week", "going forward"), confirm the permanent update: e.g. "Done — moving strength to Sundays as your new standing schedule." The system will sync confirmed changes to their dashboard automatically.
 
-TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for a easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
+TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
+
+DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." Confirm the change you're making and tell them the dashboard will reflect it within moments. The system updates the dashboard automatically whenever you commit to a plan change in your response.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 
@@ -3455,6 +3456,7 @@ VOLUME AND SAFETY:
 - For mountain or technical trail races with significant elevation gain (Snowbird, Cirque Series, Dipsea, Black Canyon, etc.): include at least one vert-specific session in week 1 — this applies regardless of race distance category. Do NOT delay climbing work to "later in the build"; athletes preparing for elevation gain need it from the start. Vert work can be a hilly easy run, power hiking intervals, or a designated hill session.
 - For athletes coming back from injury, returning after a long break, or with low current mileage: start shorter than you might think. It's easier to add than to walk back an overambitious first week.
 - Address any injury or physical limitation directly in the plan itself — briefly note how the plan accounts for it. Do NOT ask a follow-up question about it.
+- SPEED GOAL OVERRIDE: If the athlete explicitly said they want to work on speed (any phrasing: "I want to get faster", "improve my speed", "work on speed", etc.), include at minimum strides or a short tempo segment in week 1 regardless of injury history or volume tier. Being conservative does not mean all-easy — strides are low-impact and can be included even when erring on the side of caution.
 
 EXPLAINING THE PLAN (beginner and low-volume athletes only):
 - When FITNESS TIER is "No activity data yet" (beginner self-report), LOW VOLUME (<10 mi/week), or no Strava history: include 2–3 sentences explaining the WHY behind the plan structure. Athletes who are new or just getting consistent need to understand why easy effort is the right approach — otherwise an all-easy-looking plan feels like generic advice, not coaching.
@@ -3517,7 +3519,7 @@ B/C RACE PLANNING (if B or C races appear in DATE CONTEXT above):
 - Do NOT try to peak for both A and B races simultaneously — the A race is the only peak.
 
 DEFAULT FORMAT (for athletes not matching the EXPERIENCED RUNNER CLOSE TO RACE criteria above):
-Write as 2 short iMessage texts separated by a blank line. Each under 480 characters.
+Write as EXACTLY 2 SMS bubbles separated by a blank line — no more, no less. Each under 480 characters. Do not create a 3rd bubble for strength details, extra context, or anything else. If you want to include strength work or additional notes, fold them into the 2 bubbles.
 
 First bubble: 3-4 sentences max. If the athlete has a race date, open with a 1-2 sentence training arc orientation — briefly sketch the shape of the journey from now to race day (e.g. "You've got ~18 weeks — first 6 or so we're building your aerobic base, then we'll layer in quality work and sharpen into goal pace in the final month before the taper"). This tells them where they're going, not just what's happening this week. Then one sentence on why this specific first week is structured the way it is — e.g. "Starting with all easy miles to build your aerobic base before introducing quality work" or "Keeping volume conservative given the hip — easier to add than to walk back a flare-up." If no race date, skip the arc and just explain the week's rationale. Do NOT open with "Got it" or any generic acknowledgment phrase. Do NOT restate their goal back to them.
 
