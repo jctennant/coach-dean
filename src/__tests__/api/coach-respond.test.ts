@@ -39,6 +39,7 @@ vi.mock("@/lib/weather", () => ({
 vi.mock("@/lib/training-plan", () => ({
   generateAndSaveFullPlan: vi.fn().mockResolvedValue("new-token-abc"),
   computePhaseForPlan: vi.fn().mockReturnValue("base"),
+  computeRacePreparedness: vi.fn().mockReturnValue({ flag: null }),
 }));
 
 vi.mock("next/server", () => ({
@@ -553,5 +554,104 @@ describe("coach/respond — web search block filtering", () => {
     const sentText = calls.map((c: unknown[]) => c[1] as string).join("\n");
     expect(sentText).toContain("Good run today");
     expect(sentText).toContain("Keep it up this week");
+  });
+});
+
+describe("coach/respond — initial_plan closing message", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    // Reset Claude mock — prior suites may have overridden it with web-search responses
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Easy run today!" }],
+    });
+  });
+
+  it("calls generateAndSaveFullPlan with skipLinkSms=true and sends no cadence question", async () => {
+    // The dashboard link is now included in our own closing message (not sent from
+    // generateAndSaveFullPlan), so skipLinkSms must be true to avoid a duplicate link SMS.
+    const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
+    const { sendSMS } = await import("@/lib/linq");
+
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 20 } }),
+      profile: baseProfile({ goal: "general_fitness" }),
+      state: baseState({ current_week: 1 }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    // generateAndSaveFullPlan must be called with skipLinkSms: true
+    const gpCalls = (generateAndSaveFullPlan as ReturnType<typeof vi.fn>).mock.calls;
+    expect(gpCalls.length).toBeGreaterThan(0);
+    const opts = gpCalls[0][4] as Record<string, unknown>;
+    expect(opts.skipLinkSms).toBe(true);
+
+    // No cadence question should be sent at plan time — it's deferred until the
+    // user responds to the plan (via inbound SMS or post-run)
+    const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[1] as string
+    );
+    const combined = allTexts.join("\n");
+    expect(combined).not.toMatch(/morning of|evening before|reminder.*workout|workout.*reminder/i);
+  });
+});
+
+describe("coach/respond — post_run cadence follow-up", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Great run!" }],
+    });
+  });
+
+  it("appends cadence question after post-run response when onboarding_step is awaiting_cadence", async () => {
+    setupSupabase({
+      user: baseUser({
+        onboarding_step: "awaiting_cadence",
+        strava_athlete_id: "strava-123",
+        onboarding_data: { timezone_confirmed: true },
+      }),
+      profile: baseProfile(),
+      state: baseState(),
+    });
+
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[1] as string
+    );
+
+    // Cadence question must appear as a follow-up SMS
+    expect(
+      allTexts.some((t) => /morning of|evening before/i.test(t))
+    ).toBe(true);
+  });
+
+  it("does NOT append cadence question for a fully onboarded post-run user", async () => {
+    setupSupabase({
+      user: baseUser({ onboarding_step: null }),
+      profile: baseProfile(),
+      state: baseState(),
+    });
+
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[1] as string
+    );
+
+    expect(
+      allTexts.some((t) => /morning of|evening before/i.test(t))
+    ).toBe(false);
   });
 });
