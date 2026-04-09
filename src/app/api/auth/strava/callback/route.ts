@@ -97,7 +97,7 @@ export async function GET(request: Request) {
   const stravaState = (athlete.state as string | null) || null;
 
   // Update user with Strava tokens, timezone, and stats
-  const updatedOnboardingData = {
+  const updatedOnboardingData: Record<string, unknown> = {
     ...onboardingData,
     strava_connected: true,
     strava_stats: {

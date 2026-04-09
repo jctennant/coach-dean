@@ -4,7 +4,6 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Resend } from "resend";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 /**
  * GET /api/cron/analyze-conversations
@@ -193,6 +192,7 @@ ${transcripts}`;
       : "<p>Analysis unavailable.</p>";
 
   // Send email
+  const resend = new Resend(process.env.RESEND_API_KEY);
   const { error: emailError } = await resend.emails.send({
     from: "Coach Dean <noreply@coachdean.ai>",
     to: toEmail,
