@@ -403,9 +403,17 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         }
         const checkoutUrl = dashboardToken ? `${appUrl}/checkout?token=${dashboardToken}` : appUrl;
         const portalUrl = dashboardToken ? `${appUrl}/cancel?token=${dashboardToken}` : appUrl;
+        // Detect subscribe/pay intent — reply warmly with direct link instead of the canned wall message.
+        const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
+        const hasSubscribeIntent = latestUserMsg &&
+          /\b(subscribe|subscription|pay|payment|sign.?up|get started|ready to start|want to join|want to subscribe|want to pay|want to sign up|ready to subscribe)\b/i.test(latestUserMsg.content as string);
         const msg = isPastDue
-          ? "Your last payment didn't go through — update your payment method here to continue coaching: " + portalUrl
-          : "Your Coach Dean subscription isn't active. Subscribe here to continue: " + checkoutUrl;
+          ? (hasSubscribeIntent
+              ? `Got it — here's your direct link to update your payment method, takes 2 minutes: ${portalUrl}`
+              : "Your last payment didn't go through — update your payment method here to continue coaching: " + portalUrl)
+          : (hasSubscribeIntent
+              ? `Got it — here's your direct link to get started, takes 2 minutes: ${checkoutUrl}`
+              : "Your Coach Dean subscription isn't active. Subscribe here to continue: " + checkoutUrl);
         if (!dry_run) {
           await sendSMS(user.phone_number as string, msg);
           await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: msg, message_type: "user_message" });
@@ -2669,9 +2677,25 @@ ${(() => {
   // references specific numbers rather than abstract "the easy pace shown above."
   const easyPaceRaw = profile?.current_easy_pace as string | null;
   const easyPaceGuardDisplay = easyPaceRaw ? formatPaceForPrompt(easyPaceRaw) : null;
+  // Server-side tempo pace sanity check: if stored tempo pace is slower than easy pace
+  // (e.g. a metric pace stored as min/mi, giving nonsensical values like 14:07/mi),
+  // fall back to the estimated tempo from easy pace rather than injecting corrupted data.
+  const paceStrToSec = (p: string | null | undefined): number | null => {
+    if (!p) return null;
+    const m = (p as string).match(/(\d+):(\d+)/);
+    return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null;
+  };
+  const easySec = paceStrToSec(easyPaceRaw);
+  const storedTempoPaceRaw = profile?.current_tempo_pace as string | null;
+  const storedTempoSec = paceStrToSec(storedTempoPaceRaw);
+  // Tempo must be strictly faster (fewer sec/mile) than easy.
+  const tempoValid = !easySec || !storedTempoSec || storedTempoSec < easySec;
+  if (!tempoValid) {
+    console.warn(`[buildSystemPrompt] corrupted tempo pace (${storedTempoPaceRaw}) is >= easy pace (${easyPaceRaw}) — ignoring stored value, falling back to estimate`);
+  }
+  const effectiveTempoPaceRaw = tempoValid ? storedTempoPaceRaw : null;
   const tempoPaceGuardDisplay = (() => {
-    const stored = profile?.current_tempo_pace as string | null;
-    if (stored) return formatPaceForPrompt(stored);
+    if (effectiveTempoPaceRaw) return formatPaceForPrompt(effectiveTempoPaceRaw);
     const est = estimatePacesFromEasyPace(easyPaceRaw);
     return est.tempo ? formatPaceForPrompt(est.tempo) : null;
   })();
@@ -2680,7 +2704,7 @@ ${deloadBlock}${progressionLine}- Weekly mileage target (athlete baseline): ${ta
 ⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${mileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
-- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${(() => { const stored = profile?.current_tempo_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.tempo ? `${formatPaceForPrompt(est.tempo)} (estimated from easy pace — no race data on file)` : "TBD"; })()}, Interval ${(() => { const stored = profile?.current_interval_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.interval ? `${formatPaceForPrompt(est.interval)} (estimated from easy pace — no race data on file)` : "TBD"; })()}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
+- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${(() => { if (effectiveTempoPaceRaw) return formatPaceForPrompt(effectiveTempoPaceRaw); const est = estimatePacesFromEasyPace(easyPaceRaw); return est.tempo ? `${formatPaceForPrompt(est.tempo)} (estimated from easy pace — no race data on file)` : "TBD"; })()}, Interval ${(() => { const stored = profile?.current_interval_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.interval ? `${formatPaceForPrompt(est.interval)} (estimated from easy pace — no race data on file)` : "TBD"; })()}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
 - RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
 ⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${easyPaceGuardDisplay ? ` This athlete's easy pace is ${easyPaceGuardDisplay}. Any tempo or interval pace you write that is ${easyPaceGuardDisplay} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tempoPaceGuardDisplay ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(easyPaceRaw, useMetricInner) || "see above"}); never prescribe WU/CD more than 30 sec${useMetricInner ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.
 ⚠️ LABEL/PACE CONSISTENCY — CRITICAL: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.
@@ -3369,9 +3393,14 @@ function buildUserMessage(
       if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead.");
       if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference specific HR values.");
       // Power/watt guard: only present when there's no actual power data in the DB record.
-      // If average_watts is populated (power meter, Zwift, etc.) Claude can reference it.
+      // If average_watts is populated (power meter, Zwift, etc.) Claude can reference the overall average.
       const hasWatts = !!(activityData?.average_watts != null);
       if (!hasWatts) dataGuards.push("No power data is available for this activity. Do NOT reference wattage, watts, or power output — not even as a range or estimate. Describe effort using HR, elapsed time, and pace-equivalent language only.");
+      // Cadence guard: only reference cadence when it's stored in the activity record.
+      const hasCadence = !!(activityData?.average_cadence != null);
+      if (!hasCadence) dataGuards.push("No cadence data is available for this activity. Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, or range.");
+      // Per-mile and per-lap elevation breakdown is not a Strava-provided field — only total elevation gain is.
+      dataGuards.push("Per-mile and per-lap elevation breakdowns (e.g. '500ft gain on lap 2', '721ft at miles 11-12') are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific footage to individual miles or laps.");
       // splits_standard gives one split per mile, so splitCount ≈ ceil(runDistanceMiles).
       // Guard: if splits look like km data (far more splits than miles), warn Claude.
       // This handles legacy activities stored before the switch to splits_standard.
@@ -3393,7 +3422,7 @@ function buildUserMessage(
 CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 8:12/mi avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
 
 DATA GLOSSARY for the details below:
-- summary.splits: auto-generated by Strava, one entry per kilometer (NOT per mile). Each entry includes a "cumulative_miles" field showing how far into the run that split ends. Use cumulative_miles to describe position — do NOT treat the array index or the "split" field as a mile number. For a 3.1mi run there will be ~5 km splits; calling the last one "mile 5" is wrong.${hasLaps ? "\n- summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown. IMPORTANT: Lap data provides per-lap AVERAGES only (avg pace, avg HR per lap). Do NOT cite specific elapsed-time markers within a lap (e.g. \"at 48:46 into the run, HR jumped to 140\") — Strava does not record event-level timestamps within a lap. Only reference per-lap averages." : ""}
+- summary.splits: auto-generated by Strava, one entry per kilometer (NOT per mile). Each entry includes a "cumulative_miles" field showing how far into the run that split ends. Use cumulative_miles to describe position — do NOT treat the array index or the "split" field as a mile number. For a 3.1mi run there will be ~5 km splits; calling the last one "mile 5" is wrong.${hasLaps ? "\n- summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown. IMPORTANT: Lap data provides per-lap AVERAGES for pace and HR only. Do NOT cite per-lap elevation gain, per-lap cadence, or per-lap power/watt ranges — Strava does not provide these per lap. Do NOT cite specific elapsed-time markers within a lap (e.g. \"at 48:46 into the run, HR jumped to 140\") — Strava does not record event-level timestamps within a lap. Only reference per-lap pace and HR averages." : ""}
 - All paces are min/mile. Elevation in feet. Distances in miles.${dataGuardBlock}
 
 Details:
