@@ -2,8 +2,6 @@ import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import { getAllActivities, getAthleteStats } from "@/lib/strava";
-import { formatRaceDistance, calculateVDOTPaces, easyPaceRange } from "@/lib/paces";
-import { anthropic } from "@/lib/anthropic";
 import type { Json } from "@/lib/database.types";
 
 /**
@@ -107,6 +105,9 @@ export async function GET(request: Request) {
       ytd_run_totals: stats.ytd_run_totals,
       recent_run_totals: stats.recent_run_totals,
     },
+    // Store computed weekly analytics so onboarding/handle's stravaContext can use them
+    // without re-querying activities. Computed below after the 8-week import.
+    // These will be overwritten after the analytics block runs.
     ...(stravaCity ? { strava_city: stravaCity } : {}),
     ...(stravaState ? { strava_state: stravaState } : {}),
   };
@@ -202,71 +203,13 @@ export async function GET(request: Request) {
   const totalElevFt = runs8w.reduce((s, a) => s + (a.elevation_gain ?? 0) * 3.28084, 0);
   const avgElevFtPerRun = runs8w.length > 0 ? Math.round(totalElevFt / runs8w.length) : 0;
 
-  // Best recent race for VDOT-derived easy pace
-  const recentRacesAll = runs8w.filter((a) => a.workout_type === 1);
-  let raceMentionLine = "";
-  let easyPaceStr: string | null = null;
-  if (recentRacesAll.length > 0) {
-    const raceLabels = recentRacesAll.slice(0, 2).map((r) =>
-      formatRaceDistance(r.distance_meters ?? 0, preferredUnits)
-    );
-    raceMentionLine = raceLabels.length === 1
-      ? `recent ${raceLabels[0]}`
-      : `recent races (${raceLabels.join(", ")})`;
-    // Compute VDOT-derived easy pace from the best race
-    const bestRace = recentRacesAll.reduce((best, r) =>
-      (r.distance_meters ?? 0) > (best.distance_meters ?? 0) ? r : best
-    );
-    if (bestRace.distance_meters && bestRace.moving_time_seconds) {
-      const paces = calculateVDOTPaces(bestRace.distance_meters / 1000, bestRace.moving_time_seconds / 60);
-      if (paces.easy) easyPaceStr = easyPaceRange(paces.easy);
-    }
-  }
 
-  // Experience signal from all-time Strava stats
-  const allTimeCount = ((stats.all_run_totals as Record<string, unknown>)?.count as number) ?? 0;
-  const allTimeMiles = Math.round(
-    (((stats.all_run_totals as Record<string, unknown>)?.distance as number) ?? 0) / 1609.34
-  );
-  const ytdMiles = Math.round(
-    (((stats.ytd_run_totals as Record<string, unknown>)?.distance as number) ?? 0) / 1609.34
-  );
-
-  // Goal context (from onboarding_data already collected before Strava connect)
-  const goalContext = (onboardingData.goal as string | null) ?? null;
-  const raceName = (onboardingData.race_name as string | null) ?? null;
-
-  // Build a data summary for Haiku to synthesize into 2-3 natural coaching sentences
-  const statsSummary = [
-    allTimeMiles > 0 ? `Strava-tracked history: ${allTimeCount} runs, ${allTimeMiles} miles (this is only what's recorded on Strava — their actual running history may be longer)` : null,
-    ytdMiles > 0 ? `YTD miles on Strava: ${ytdMiles}` : null,
-    avgWeeklyMiles != null ? `Recent avg weekly miles (8 weeks): ${avgWeeklyMiles} mi/week` : null,
-    longestRunMiles != null ? `Longest run (8 weeks): ${Math.round(longestRunMiles * 10) / 10} miles` : null,
-    avgRunsPerWeek != null ? `Avg runs/week: ${avgRunsPerWeek}` : null,
-    mileageTrend ? `Mileage trend: ${mileageTrend}` : null,
-    avgElevFtPerRun > 200 ? `Avg elevation gain/run: ${avgElevFtPerRun} ft` : null,
-    raceMentionLine ? `Race data found: ${raceMentionLine}${easyPaceStr ? ` — VDOT-derived easy pace: ${easyPaceStr}/mi` : ""}` : null,
-    goalContext ? `Athlete's training goal: ${raceName ? `${raceName} (${goalContext})` : goalContext}` : null,
-  ].filter(Boolean).join("\n");
-
-  const haiku = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 200,
-    system: `You are Coach Dean, an AI running coach. A new athlete just connected their Strava account.
-Write 1–2 sentences that surface the most relevant insight from their training history, connected to their goal. Be specific — reference a real number (weekly mileage, recent long run, vert/run, or a race).
-
-Rules:
-- One key insight max — the most relevant one given their goal. Do not list multiple observations.
-- If the goal is a trail or ultra race and elevation data is notable, lead with that.
-- If the Strava-tracked mileage is high (e.g. 2000+ miles), acknowledge their experience — but say "on Strava" not "all-time"
-- Skip any closing sentence about what you'll do with the data — just state the observation.
-- Plain text only. 1–2 sentences max.`,
-    messages: [{ role: "user", content: statsSummary || "No activity data available yet." }],
-  });
-
-  const stravaInsight = haiku.content[0].type === "text"
-    ? haiku.content[0].text.trim()
-    : "This gives me a clear picture of where your fitness is right now.";
+  // Persist weekly analytics into onboarding_data so onboarding/handle's stravaContext
+  // can surface them to Claude without re-querying activities.
+  if (avgWeeklyMiles != null) updatedOnboardingData.strava_avg_weekly_miles = avgWeeklyMiles;
+  if (mileageTrend) updatedOnboardingData.strava_mileage_trend = mileageTrend;
+  if (avgElevFtPerRun > 200) updatedOnboardingData.strava_avg_elev_ft_per_run = avgElevFtPerRun;
+  if (longestRunMiles != null) updatedOnboardingData.strava_longest_run_miles = Math.round(longestRunMiles * 10) / 10;
 
   // Background imports run in after() so Vercel keeps the process alive after
   // the redirect response is sent. Plain fire-and-forget gets killed on response.
@@ -291,11 +234,12 @@ Rules:
     Array.isArray(onboardingData.training_days) &&
     (onboardingData.training_days as string[]).length > 0;
 
+  // Brief acknowledgment only — no question, no insight here.
+  // For mid-onboarding users, onboarding/handle fires 2 seconds later and generates
+  // a single rich message with the Strava context + next question, avoiding a double text.
   const smsMsg = alreadyOnboarded
     ? `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`
-    : shouldAdvanceToSchedule && !trainingDaysAlreadyKnown
-      ? `Strava connected${firstName}! ${stravaInsight} Which days of the week work best for training? (e.g. Mon, Wed, Fri, Sun)`
-      : `Strava connected${firstName}! ${stravaInsight}`;
+    : `Strava connected${firstName}! Give me a moment to pull in your history.`;
 
   await Promise.all([
     sendSMS(user.phone_number, smsMsg),

@@ -165,24 +165,27 @@ async function handleConversation(
   let stravaContext = "";
   if (onboardingData.strava_connected) {
     const sbr = await lookupBestStravaRace(user.id);
+    // Build weekly stats line from stored analytics (computed at Strava connect time)
+    const avgWeeklyMiles = onboardingData.strava_avg_weekly_miles as number | null ?? null;
+    const mileageTrend = onboardingData.strava_mileage_trend as string | null ?? null;
+    const avgElevFtPerRun = onboardingData.strava_avg_elev_ft_per_run as number | null ?? null;
+    const weeklyLine = avgWeeklyMiles != null
+      ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.${avgElevFtPerRun ? ` Avg elevation/run: ${avgElevFtPerRun} ft.` : ""}`
+      : "";
+
     if (sbr) {
       const easyRange = easyPaceRange(sbr.easy_pace);
       const trailNote = sbr.is_trail
         ? " Note: this is a trail race — road training paces will be slightly faster."
         : "";
-      stravaContext = `\nSTRAVA: Connected. Best race on file: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${trailNote} Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${trailNote} Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
     } else {
-      const stats = onboardingData.strava_stats as Record<string, unknown> | null;
-      const recent = stats?.recent_run_totals as Record<string, unknown> | null;
-      const recentMiles = recent?.distance
-        ? Math.round((recent.distance as number) / 1609.34)
-        : null;
       const hasRaceData = !!(onboardingData.recent_race_distance_km && onboardingData.recent_race_time_minutes);
       const hasPaceData = !!onboardingData.easy_pace;
       const paceNote = hasRaceData || hasPaceData
         ? " No race activity found on Strava — using pace data already collected from conversation."
         : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
-      stravaContext = `\nSTRAVA: Connected.${recentMiles ? ` Recent 4-week mileage: ~${recentMiles} miles.` : ""}${paceNote}`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${paceNote}`;
     }
   } else if (onboardingData.strava_skipped) {
     stravaContext = "\nSTRAVA: User skipped Strava. Collect mileage + pace data manually.";
