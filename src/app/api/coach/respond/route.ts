@@ -988,6 +988,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
+    console.log("[initial_plan] weekMileageSoFar=", weekMileageSoFar, "recentActivities count=", recentActivities.length, "activityTypes=", recentActivities.slice(0, 10).map(a => `${a.activity_type}(${new Date(a.start_date).toISOString().slice(0,10)})`).join(", "));
 
     // Parse the prescribed week total from the plan text.
     // Match various formats Dean uses: "Total: ~18mi", "~18 miles this week", etc.
@@ -1020,6 +1021,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     const weekMileageTarget = isPartialWeek
       ? Math.round(((prescribedWeek1MilesRaw ?? periodization.suggestedWeeklyMiles ?? 0) + weekMileageSoFar) * 2) / 2
       : periodization.suggestedWeeklyMiles;
+    console.log("[initial_plan] prescribedWeek1MilesRaw=", prescribedWeek1MilesRaw, "isPartialWeek=", isPartialWeek, "weekMileageSoFar=", weekMileageSoFar, "weekMileageTarget=", weekMileageTarget);
 
     // Persist week counter, phase, and computed target. Clear taper_peak_miles so the
     // next taper window re-locks the peak from scratch.
