@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fix trail race misclassification when Strava activity_type is "Run"
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (internal)
+**User feedback:** "looks like Dean said my 30k was a road race now" — Strava 30K was auto-detected as `Run` rather than `TrailRun`, so `is_trail = false` and Dean presented it as a road race with a valid easy pace suggestion.
+**Root cause:** `selectBestRaceForPacing` set `isTrail` only when `activity_type === "TrailRun"`. Many trail races (especially auto-detected or manually logged) use `Run` as the activity type. A Marin 30K with significant vert was classified as road.
+**Fix / Change:** Added elevation-per-mile heuristic: if a race has >80ft/mile of elevation gain it is treated as trail regardless of `activity_type`. `elevation_gain` added to the DB query. Threshold chosen to be well above typical road race vert (<50ft/mile) and well below any real trail race.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-09 — Fix onboarding pace anchoring to wrong trail race easy pace
 
 **Type:** Bug Fix

@@ -891,10 +891,14 @@ function selectBestRaceForPacing(
     moving_time_seconds: number | null;
     start_date: string;
     activity_type?: string | null;
+    elevation_gain?: number | null;
   }>
 ): { distance_meters: number; moving_time_seconds: number; start_date: string; is_trail: boolean } | null {
   const now = Date.now();
   const STANDARD_KM = [5, 10, 15, 21.097, 42.195];
+  // Trail races often have >80ft/mile elevation gain. Road races are typically <50ft/mile.
+  // This catches trail races logged as "Run" rather than "TrailRun" in Strava.
+  const TRAIL_VERT_THRESHOLD_FT_PER_MILE = 80;
 
   const scored = races
     .filter(
@@ -912,7 +916,10 @@ function selectBestRaceForPacing(
       const distKm = r.distance_meters! / 1000;
       const isStandard = STANDARD_KM.some((d) => Math.abs(distKm - d) / d <= 0.03);
       const distScore = isStandard ? 2 : 1;
-      const isTrail = r.activity_type === "TrailRun";
+      const elevFtPerMile = r.elevation_gain != null && r.distance_meters != null
+        ? (r.elevation_gain * 3.28084) / (r.distance_meters / 1609.34)
+        : 0;
+      const isTrail = r.activity_type === "TrailRun" || elevFtPerMile >= TRAIL_VERT_THRESHOLD_FT_PER_MILE;
       const trailPenalty = isTrail ? 0.5 : 1;
       return {
         race: r,
@@ -947,7 +954,7 @@ async function lookupBestStravaRace(
   const [{ data: races }, { data: profile }] = await Promise.all([
     supabase
       .from("activities")
-      .select("distance_meters, moving_time_seconds, start_date, activity_type")
+      .select("distance_meters, moving_time_seconds, start_date, activity_type, elevation_gain")
       .eq("user_id", userId)
       .eq("workout_type", 1)
       .order("start_date", { ascending: false })
