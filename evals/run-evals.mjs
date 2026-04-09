@@ -273,6 +273,29 @@ function buildEvalSystemPrompt(fixture) {
     }
   }
 
+  // Pre-compute most recent run reference (mirrors production route logic)
+  let mostRecentRunRef = null;
+  if (fixture.trigger === "user_message" || !fixture.trigger) {
+    const RUN_TYPES_REF = new Set(["Run", "TrailRun", "VirtualRun"]);
+    const sortedRuns = [...(user.recent_activities || [])]
+      .filter(a => !a.type || RUN_TYPES_REF.has(a.type))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    if (sortedRuns.length > 0) {
+      const mostRecent = sortedRuns[0];
+      const [ty2, tm2, td2] = todayDateStr.split("-").map(Number);
+      const [ay, am, ad] = mostRecent.date.split("-").map(Number);
+      const daysAgo = Math.round((Date.UTC(ty2, tm2 - 1, td2) - Date.UTC(ay, am - 1, ad)) / 86400000);
+      if (daysAgo >= 2) {
+        const dayName = new Date(mostRecent.date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long" });
+        const yesterdayUTC = Date.UTC(ty2, tm2 - 1, td2 - 1);
+        const yesterdayDateStr2 = new Date(yesterdayUTC).toISOString().slice(0, 10);
+        const yesterdayDayName = new Date(yesterdayUTC).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+        const yesterdayHadRun = (user.recent_activities || []).some(a => a.date === yesterdayDateStr2 && (!a.type || RUN_TYPES_REF.has(a.type)));
+        mostRecentRunRef = `⚠️ MOST RECENT RUN: ${dayName} (${daysAgo} days ago). Always reference as "${dayName}'s run" — do NOT say "yesterday". Yesterday was ${yesterdayDayName}${yesterdayHadRun ? " (also a run day)" : " (a rest day — no runs)"}.`;
+      }
+    }
+  }
+
   // Activity details for post_run fixtures
   let activityBlock = "";
   if (fixture.activity_details) {
@@ -332,7 +355,7 @@ ATHLETE HISTORY:
 - Strava: ${user.strava_connected ? "connected" : "not connected"}
 - Goal: ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}${user.goal_race_distance ? ` — ${user.goal_race_distance}` : ""}
 - Experience: ${user.experience_level || "not specified"}
-- Training days: ${(user.training_days || []).join(", ")}
+- Training days: ${(user.training_days || []).join(", ")}${user.training_days && user.training_days.length > 0 ? `\n- ⚠️ TRAINING SESSION COUNT — HARD CONSTRAINT: This athlete trains EXACTLY ${user.training_days.length} day${user.training_days.length !== 1 ? "s" : ""} per week. Every week in the plan must have EXACTLY ${user.training_days.length} running sessions — never more. No optional, bonus, or supplementary running sessions beyond these days.` : ""}
 - Injury / constraints: ${user.injury_notes || "None reported"}
 - Preferred units: ${user.preferred_units || "imperial"} — use ${user.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 ${user.notes ? `- Athlete notes: ${user.notes}` : ""}
@@ -377,7 +400,7 @@ TONE:
 - No sign-offs, no "Let me know if you have questions", no "You've got this!" at end.
 - Sound like a knowledgeable friend, not a customer service bot.${(fixture.trigger === "user_message" || !fixture.trigger) ? `
 
-ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
+${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
 
 CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}` : ""}
 

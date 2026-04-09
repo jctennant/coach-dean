@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-08 — Fix Dean re-asking for race time after user already provided one
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (Gwyneth's onboarding)
+**User feedback:** "I just told you about the July 5k from last year. Also what is this trail 5k you're referencing?" — Dean asked for a road race time 3 times in the same conversation after Gwyneth already provided a 20:28 downhill 5K.
+**Root cause:**
+1. Haiku extraction didn't capture the user's stated 5K time because the user qualified it ("when I was in better shape", "net downhill") — the extraction rule said "only extract clearly stated data" with no note about caveated times. So `recent_race_distance_km` was never stored, causing the PACE CALIBRATION guard to fail on every subsequent turn.
+2. The PACE CALIBRATION instruction said "ask ONCE" but only checked extracted `onboarding_data` — it had no check against conversation history, so Dean repeated the question every turn when extraction was missing.
+3. The `stravaContext` fallback (when no Strava race found) hardcoded "ask for a recent race time or PR" regardless of whether the user had already stated one in conversation. This directly told Dean to ask even when it shouldn't.
+**Fix / Change:**
+1. Haiku extraction rule updated: explicitly says to extract race times even when caveated (downhill, old, "when I was in better shape"). Caveated times are still useful for calibration.
+2. PACE CALIBRATION instruction is now code-driven: before building the system prompt, `handleConversation` scans conversation history for whether Dean has already asked about road race times (regex on prior assistant messages). If yes, the PACE CALIBRATION block is replaced with an explicit "you already asked, do not ask again" instruction. This is more reliable than asking Claude to self-regulate by reading its own history.
+3. `stravaContext` fallback now checks if `onboarding_data` already has `recent_race_distance_km` or `easy_pace`. If yes, emits "using pace data already collected from conversation" instead of "ask for a recent race time."
+**Files changed:** `onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-08 — Two-phase plan rebuild + 2-bubble cap + speed work flag
 
 **Type:** Feature + Bug Fix

@@ -155,6 +155,12 @@ async function handleConversation(
   // True if Dean has never replied yet in this onboarding conversation
   const isFirstResponse = !history.some((m) => m.role === "assistant");
 
+  // True if Dean has already asked the pace calibration question in this conversation.
+  // Used to suppress re-asking rather than relying on a prompt instruction.
+  const alreadyAskedPaceCalibration = history.some(
+    (m) => m.role === "assistant" && /road\s+(5k|10k|half marathon)/i.test(m.content)
+  );
+
   // Build Strava context (best race for pace suggestion, if available)
   let stravaContext = "";
   if (onboardingData.strava_connected) {
@@ -171,7 +177,12 @@ async function handleConversation(
       const recentMiles = recent?.distance
         ? Math.round((recent.distance as number) / 1609.34)
         : null;
-      stravaContext = `\nSTRAVA: Connected.${recentMiles ? ` Recent 4-week mileage: ~${recentMiles} miles.` : ""} No races found for VDOT calculation — ask for a recent race time or PR to set training paces.`;
+      const hasRaceData = !!(onboardingData.recent_race_distance_km && onboardingData.recent_race_time_minutes);
+      const hasPaceData = !!onboardingData.easy_pace;
+      const paceNote = hasRaceData || hasPaceData
+        ? " No race activity found on Strava — using pace data already collected from conversation."
+        : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
+      stravaContext = `\nSTRAVA: Connected.${recentMiles ? ` Recent 4-week mileage: ~${recentMiles} miles.` : ""}${paceNote}`;
     }
   } else if (onboardingData.strava_skipped) {
     stravaContext = "\nSTRAVA: User skipped Strava. Collect mileage + pace data manually.";
@@ -271,9 +282,12 @@ ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
 For return_to_running or injury_recovery goals: you MUST ask about the injury/limitation and current status before [READY].
 
-PACE CALIBRATION — trail race on Strava:
+${alreadyAskedPaceCalibration
+  ? `PACE CALIBRATION — trail race on Strava:
+You already asked about road race times earlier in this conversation. Do NOT ask again. Accept whatever pace data the athlete has provided and proceed.`
+  : `PACE CALIBRATION — trail race on Strava:
 If Strava is connected and the STRAVA note says "this is a trail race", ask ONCE before signaling [READY]: "Your best Strava effort is a trail race, which tends to run slower than road races due to elevation. Do you have a recent road 5K, 10K, or half marathon time I can use for more accurate training paces? No worries if not — I can work with what's there."
-Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).`;
+Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).`}`;
 
   // Call Claude Sonnet — web_search handles race date lookups automatically
   const claudeResponse = await anthropic.messages.create({
@@ -518,7 +532,7 @@ Rules:
 - training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"]). When the athlete specifies a range with "through", "to", or "-" (e.g. "Tuesday through Thursday", "Tues-Thursday", "Mon-Wed"), expand it to ALL days in that range inclusive — "Tues-Thursday" → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
 - race_date: use the most specific date mentioned for the goal race. If a specific date (day + month) was stated by either participant, use that exact date. Only default to first of month if no specific date was ever given. Today is ${today}.
-- recent_race_distance_km: distance of their most-cited PR or recent race (not the goal race)
+- recent_race_distance_km: distance of their most-cited PR or recent race (not the goal race). IMPORTANT: extract this even when the athlete qualifies the race (e.g. "it was net downhill", "when I was in better shape", "a while ago", "it was hilly"). Caveated times are still useful for calibration — always extract if a distance and time are both stated.
 - recent_race_time_minutes: finishing time of that race in total float minutes. M:SS format means minutes:seconds — "18:45" → 18.75, "38:20" → 38.33. H:MM:SS or H:MM format — "1:05:30" → 65.5, "1:52" → 112.0. Never convert M:SS as if the first number were hours.
 - easy_pace: format "M:SS" (e.g. "8:30" means 8 minutes 30 seconds per mile)
 - timezone: IANA string when a location is mentioned (e.g. "Provo, UT" → "America/Denver", "San Francisco" → "America/Los_Angeles")

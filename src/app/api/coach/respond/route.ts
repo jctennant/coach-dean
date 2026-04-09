@@ -685,7 +685,38 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     : null;
 
   const wantsSpeedWork = !!((user.onboarding_data as Record<string, unknown> | null)?.wants_speed_work);
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork);
+
+  // Pre-compute the most recent run reference for user_message trigger.
+  // Instead of telling Claude "check the N-days-ago label before saying yesterday"
+  // (an advisory rule Claude can ignore), we inject the exact phrase to use and
+  // explicitly state what yesterday actually was. This prevents "yesterday" errors
+  // for runs that happened 2+ days ago.
+  const mostRecentRunRef = (() => {
+    if (trigger !== "user_message") return null;
+    const RUN_TYPES_REF = new Set(["Run", "TrailRun", "VirtualRun"]);
+    const sortedRuns = [...recentActivities]
+      .filter(a => RUN_TYPES_REF.has(a.activity_type as string))
+      .sort((a, b) => (b.start_date as string).localeCompare(a.start_date as string));
+    if (sortedRuns.length === 0) return null;
+    const mostRecent = sortedRuns[0];
+    const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
+    const actLocal = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date(mostRecent.start_date as string));
+    const [ty2, tm2, td2] = todayLocal.split("-").map(Number);
+    const [ay, am, ad] = actLocal.split("-").map(Number);
+    const daysAgo = Math.round((Date.UTC(ty2, tm2 - 1, td2) - Date.UTC(ay, am - 1, ad)) / 86400000);
+    if (daysAgo < 2) return null; // "today" or "yesterday" are correct — no override needed
+    const dayName = new Date(actLocal + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long" });
+    const yesterdayUTC = Date.UTC(ty2, tm2 - 1, td2 - 1);
+    const yesterdayLocal = new Date(yesterdayUTC).toISOString().slice(0, 10);
+    const yesterdayDayName = new Date(yesterdayUTC).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+    const yesterdayHadRun = recentActivities.some(a => {
+      const aLocal = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date(a.start_date as string));
+      return aLocal === yesterdayLocal && RUN_TYPES_REF.has(a.activity_type as string);
+    });
+    return `⚠️ MOST RECENT RUN: ${dayName} (${daysAgo} days ago). Always reference as "${dayName}'s run" — do NOT say "yesterday". Yesterday was ${yesterdayDayName}${yesterdayHadRun ? " (also a run day)" : " (a rest day — no runs)"}.`;
+  })();
+
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -2461,7 +2492,7 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 ATHLETE HISTORY:
 ${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}- Strava: ${user.strava_athlete_id ? "connected" : "not connected"}
 ${allTimeInfo}- Sport: ${sportType}
-- Training days: ${trainingDays}
+- Training days: ${trainingDays}${profile?.training_days && (profile.training_days as string[]).length > 0 ? `\n- ⚠️ TRAINING SESSION COUNT — HARD CONSTRAINT: This athlete trains EXACTLY ${(profile.training_days as string[]).length} day${(profile.training_days as string[]).length !== 1 ? "s" : ""} per week. Every week in the plan must have EXACTLY ${(profile.training_days as string[]).length} running sessions — never more. No optional, bonus, or supplementary running sessions beyond these days.` : ""}
 - Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}
 ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
@@ -3263,6 +3294,7 @@ function buildUserMessage(
   preferredUnits: string = "imperial",
   daysSinceLastCoachMessage: number | null = null,
   wantsSpeedWork = false,
+  mostRecentRunRef: string | null = null,
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -3440,7 +3472,7 @@ FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
 - If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.
 
-ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
+${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
 
 CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}${fullArcContext}`;
     }
