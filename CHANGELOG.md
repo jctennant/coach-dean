@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fix weekly target, A-race taper, and mileage display for partial-week onboards
+
+**Type:** Bug Fix (2 issues)
+**Reported by:** Jake Tennant (internal testing after fresh onboarding)
+**User feedback:** "the 'This week' weekly target should include any miles already done this week + any new miles prescribed by dean for this first week of the plan. Right now the target is just what Dean prescribes. (15 mi for me, but I've already run 17 this week, so target should be 32 mi this week). Also I'm not sure if there's any taper in the dipsea race week, week 10 of the arc. Feels like there should be."
+**Root cause (weekly target):** `syncArcCurrentWeek` runs after `generateAndSaveFullPlan` and overwrites `training_state.weekly_mileage_target` with just the prescribed session sum from Dean's message (e.g. 15mi). The earlier correct value computed in the `initial_plan` block (which adds `weekMileageSoFar` for partial-week onboards) gets lost.
+**Fix (weekly target):** After `syncArcCurrentWeek`, re-apply `weekMileageTarget` when `isPartialWeek` is true. This preserves the TRUE total (done this week + newly prescribed sessions) in `training_state`.
+**Root cause (A-race taper):** When a plan is extended past the A-race to cover a B-race (e.g. Dipsea June 14 + Snowbird July 11 → 14-week plan), `computePhaseForPlan` only tapers the *last* race. The A-race (week 10) falls in "build" phase at 48mi because `weeksFromEnd = 4 ≥ peakThreshold`. There's no logic to inject an A-race taper mid-plan.
+**Fix (A-race taper):** Compute `aRaceWeekNum` and `planExtendsPostA` flag in `generateAndSaveFullPlan`. When active, inject: 2-week taper around the A-race (pre-race at 70% of effective peak, race week at ~35%), + a recovery week after the A-race at 50% of peak. Uses `effectivePeak = max(peakMileage, buildMileage)` so the taper reference is correct even when peak phase hasn't formally started.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-09 — Fix 3 initial_plan bugs: wrong pace, missing daily sessions in dashboard, B race badge
 
 **Type:** Bug Fix (3 issues)

@@ -1068,6 +1068,17 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // the lambda exits before the async call completes.
     await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "", (user.name as string | null) ?? null);
 
+    // Re-apply the correct weekly target (done this week + prescribed) after syncArcCurrentWeek
+    // may have overwritten it with just the prescribed session total. For partial-week onboards
+    // (any day except Sunday/Monday), the dashboard should show the TRUE total = miles already
+    // logged Mon–today + new sessions Dean prescribed for the remaining days.
+    // Example: ran 17mi Mon–Thu, Dean prescribes 15mi for Sat+Sun → target = 32mi.
+    if (isPartialWeek && weekMileageTarget != null) {
+      await supabase.from("training_state")
+        .update({ weekly_mileage_target: weekMileageTarget })
+        .eq("user_id", userId);
+    }
+
     // Build the dashboard URL from the token generateAndSaveFullPlan just created/returned.
     const planToken = newDashboardToken ?? dashboardToken;
     const planUrl = planToken ? `${appUrl}/dashboard?token=${planToken}` : null;
