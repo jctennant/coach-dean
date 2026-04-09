@@ -608,7 +608,7 @@ async function handleCadence(
     anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 16,
-      system: `The athlete is responding to: "Would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday."
+      system: `The athlete is responding to: "Would you like a reminder about your upcoming workouts the morning of, or the evening before? If not, I'll just send you a weekly plan every Sunday."
 
 Classify their reply. Return only one word: "morning", "nightly", "weekly", or "unclear".
 - "morning", "day of", "morning of", "same day", "that morning", "morning works", any morning time like "8am" → morning
@@ -694,7 +694,7 @@ async function handleNonCadenceMessage(
   message: string
 ): Promise<NextResponse> {
   const cadenceQuestion =
-    "Last thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday.";
+    "Last thing — would you like a reminder about your upcoming workouts the morning of, or the evening before? If not, I'll just send you a weekly plan every Sunday.";
 
   const classifyResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",

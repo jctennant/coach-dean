@@ -997,38 +997,41 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       ? null               // Strava avg is authoritative — don't let partial-week total distort the arc
       : annualizedWeek1Miles; // no Strava: annualized prescribed total is the best estimate
 
-    // Generate and save the full multi-week training arc, then text the dashboard link.
-    // Pass B/C races so the arc enrichment Haiku can label those weeks appropriately.
+    // Generate and save the full multi-week training arc.
+    // skipLinkSms=true — we'll include the dashboard URL inline in the cadence question below
+    // so the user gets one closing message instead of two back-to-back.
     const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
     // New plan from scratch at the end of onboarding — always start at week 1.
-    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true });
+    const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true });
     // Overwrite the arc's week 1 key_workout and notes with what Dean actually prescribed
     // (the Haiku arc enrichment in generateAndSaveFullPlan uses estimates; this uses real sessions).
     // Must be awaited — this runs inside after(), and a void fire-and-forget gets killed when
     // the lambda exits before the async call completes.
     await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "", (user.name as string | null) ?? null);
 
-    // Send the feedback + reminders question AFTER the dashboard link so it lands last.
-    // The user will answer the reminders question and handleCadence picks it up.
-    const stravaLocation = stravaCity
-      ? (onboardingData.strava_state ? `${stravaCity}, ${onboardingData.strava_state as string}` : stravaCity)
+    // Build the dashboard URL from the token generateAndSaveFullPlan just created/returned.
+    const planToken = newDashboardToken ?? dashboardToken;
+    const planUrl = planToken ? `${appUrl}/dashboard?token=${planToken}` : null;
+
+    // Just send the dashboard link here — no cadence question yet.
+    // We ask about reminders after the user responds to the plan (next inbound SMS or post-run),
+    // so they get a chance to react to the plan before we add another question.
+    const closingMsg = planUrl
+      ? `Your full plan is here: ${planUrl}`
       : null;
-    const closingMsg = stravaLocation
-      ? `I can send a reminder the morning of each session or the evening before — I have you in ${stravaLocation} from Strava so I'll get the timing right. Which works better?`
-      : !timezoneConfirmed
-      ? `I can also send a reminder the morning of each session or the evening before — which works better? And what city are you in so I get the timing right?`
-      : `I can also send a reminder the morning of each session or the evening before — just let me know which works better.`;
-    if (!dry_run) {
-      if (chatId) await startTyping(chatId);
-      await new Promise((r) => setTimeout(r, 1500));
-      await sendSMS(user.phone_number, closingMsg);
+    if (closingMsg) {
+      if (!dry_run) {
+        if (chatId) await startTyping(chatId);
+        await new Promise((r) => setTimeout(r, 1500));
+        await sendSMS(user.phone_number, closingMsg);
+      }
+      await supabase.from("conversations").insert({
+        user_id: userId,
+        role: "assistant",
+        content: closingMsg,
+        message_type: "initial_plan",
+      });
     }
-    await supabase.from("conversations").insert({
-      user_id: userId,
-      role: "assistant",
-      content: closingMsg,
-      message_type: "initial_plan",
-    });
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
@@ -1123,6 +1126,34 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         updated_at: new Date().toISOString(),
       })
       .eq("user_id", userId);
+  }
+
+  // If the user is still awaiting_cadence (i.e. they haven't answered the reminders question
+  // yet — either they just got their initial plan or they replied about the plan without
+  // answering cadence), ask it now as a natural follow-up to the post-run response.
+  if (trigger === "post_run" && user.onboarding_step === "awaiting_cadence" && !dry_run) {
+    const onboardingDataForCadence = (user.onboarding_data as Record<string, unknown>) || {};
+    const stravaCity2 = onboardingDataForCadence.strava_city as string | null;
+    const stravaState2 = onboardingDataForCadence.strava_state as string | null;
+    const stravaLocation2 = stravaCity2
+      ? (stravaState2 ? `${stravaCity2}, ${stravaState2}` : stravaCity2)
+      : null;
+    const timezoneConfirmed2 = !!(onboardingDataForCadence.timezone_confirmed) || !!(user.strava_athlete_id);
+    const cadenceQ = stravaLocation2
+      ? `One quick thing — would you like reminders about your upcoming workouts the morning of, or the evening before? I have you in ${stravaLocation2} from Strava so I'll get the timing right.`
+      : !timezoneConfirmed2
+      ? `One quick thing — would you like reminders about your upcoming workouts the morning of, or the evening before? What city are you in so I get the timing right?`
+      : `One quick thing — would you like reminders about your upcoming workouts the morning of, or the evening before?`;
+    const cadenceChatId = requestChatId ?? learnedChatId ?? (user.linq_chat_id as string | null) ?? null;
+    if (cadenceChatId) await startTyping(cadenceChatId);
+    await new Promise((r) => setTimeout(r, 1500));
+    await sendSMS(user.phone_number, cadenceQ);
+    await supabase.from("conversations").insert({
+      user_id: userId,
+      role: "assistant",
+      content: cadenceQ,
+      message_type: "post_run",
+    });
   }
 
   return NextResponse.json({ ok: true, message: coachMessage });
@@ -3730,6 +3761,8 @@ TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the miles fro
         // Mid-week onboard: plan today through this Sunday only. Sunday recap generates next week.
         : `WEEK BOUNDARY — IMPORTANT: This athlete just onboarded. Plan sessions from TODAY through this ${sundayStr} only (${daysRemainingInclToday} day${daysRemainingInclToday === 1 ? "" : "s"} remaining in this Mon-Sun week). Do NOT schedule sessions into next week (starting Monday). The Sunday recap will generate a full next-week plan automatically. If very few days remain (1-2), keep this initial plan brief — just get them started.`;
       return `This athlete just finished onboarding. Send them an initial week plan — framed as a starting point, not a finished prescription. The goal is to get something in front of them quickly and invite them to shape it.
+
+LEAD WITH THE PLAN: Do not spend bubble 1 on preamble or coaching philosophy — get to the sessions. Any context about training approach, injury notes, or periodization belongs as 1–2 sentences woven into the plan message itself, not as a standalone opener. Never write "I'll get your plan put together now" — just send it. The athlete is waiting; give them the plan, then invite feedback.
 
 ${weekBoundaryNote}
 ${racePreparednessFlag}
