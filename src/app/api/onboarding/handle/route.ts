@@ -175,10 +175,14 @@ async function handleConversation(
 
     if (sbr) {
       const easyRange = easyPaceRange(sbr.easy_pace);
-      const trailNote = sbr.is_trail
-        ? " Note: this is a trail race — road training paces will be slightly faster."
-        : "";
-      stravaContext = `\nSTRAVA: Connected.${weeklyLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${trailNote} Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
+      // For trail races, withhold the easy pace suggestion entirely — trail paces run slower
+      // than road paces due to elevation, so the VDOT-derived easy pace is systematically
+      // low. Showing it causes Claude to anchor on the wrong number even after the user
+      // provides a road race time. Instead, prompt Claude to collect a road baseline.
+      const paceNote = sbr.is_trail
+        ? ` Note: this is a trail race — easy pace suggestion withheld. Collect a road 5K/10K/HM time to set accurate training zones.`
+        : ` Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
     } else {
       const hasRaceData = !!(onboardingData.recent_race_distance_km && onboardingData.recent_race_time_minutes);
       const hasPaceData = !!onboardingData.easy_pace;
