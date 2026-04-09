@@ -289,10 +289,17 @@ export default async function DashboardPage({
   }
   const raceDate = profileData?.race_date ?? planData.race_date;
 
-  // Which plan week does the race fall in (for "Race day" badge)?
+  // Which plan weeks have a race (A, B, or C) — for "Race day" badge.
   const raceWeekNum = (raceDate as string | null)
     ? Math.floor((new Date((raceDate as string) + "T12:00:00Z").getTime() - week1Monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1
     : null;
+  // Collect all race week numbers (A + B/C) so the badge shows on every race week.
+  const allRaceWeekNums = new Set<number>();
+  if (raceWeekNum != null) allRaceWeekNums.add(raceWeekNum);
+  for (const r of upcomingRaces) {
+    const wn = Math.floor((new Date((r.race_date as string) + "T12:00:00Z").getTime() - week1Monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    if (wn >= 1 && wn <= totalWeeks) allRaceWeekNums.add(wn);
+  }
 
   // Build a human-readable goal label: prefer specific race name over generic bucket
   const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
@@ -490,7 +497,7 @@ export default async function DashboardPage({
                   isPast={isPast}
                   actualMiles={actualMilesByWeek[week.week_number] ?? null}
                   weekStartDate={weekStart}
-                  isRaceWeek={raceWeekNum === week.week_number}
+                  isRaceWeek={allRaceWeekNums.has(week.week_number)}
                 />
               );
             })}

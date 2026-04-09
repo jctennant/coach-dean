@@ -1032,10 +1032,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
-    // Extract and store the specific planned sessions so all subsequent messages
-    // (post_run, reminders) use the exact same distances — not independently recalculated.
-    await extractAndStorePlanSessions(userId, coachMessage);
-
     // Arc base mileage calibration:
     // - If Strava history exists (avgWeeklyMileage != null): always use it — it's an 8-week
     //   real average and is accurate regardless of what day the user onboarded. The
@@ -1058,6 +1054,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
     // New plan from scratch at the end of onboarding — always start at week 1.
     const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true });
+
+    // Extract and store the specific planned sessions AFTER generateAndSaveFullPlan,
+    // because generateAndSaveFullPlan clears weekly_plan_sessions to null (stale sessions
+    // are invalid after a full arc rebuild). Running extractAndStorePlanSessions first
+    // would have those sessions wiped. By running it after, the sessions are preserved
+    // for the dashboard and syncArcCurrentWeek.
+    await extractAndStorePlanSessions(userId, coachMessage);
+
     // Overwrite the arc's week 1 key_workout and notes with what Dean actually prescribed
     // (the Haiku arc enrichment in generateAndSaveFullPlan uses estimates; this uses real sessions).
     // Must be awaited — this runs inside after(), and a void fire-and-forget gets killed when

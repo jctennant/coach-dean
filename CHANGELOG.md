@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fix 3 initial_plan bugs: wrong pace, missing daily sessions in dashboard, B race badge
+
+**Type:** Bug Fix (3 issues)
+**Reported by:** Jake Tennant (internal testing)
+**User feedback:** "looks like my pacing is still wrong?" / "there was an interval workout that was put on today (plan creation day)" / "the plan doesn't say my second race has a 'race day' tag"
+
+**Bug 1 — Wrong pace (9:25–9:55/mi instead of 7:50–8:20/mi for a 17:50 5K)**
+**Root cause:** Haiku extraction for `recent_race_distance_km`/`recent_race_time_minutes` was pulling the trail 30K from Dean's own message ("Your best Strava effort is a 30K trail race in 2:25:00") rather than the athlete's stated road 5K time. The instruction said "most-cited PR or recent race" without specifying user-only messages — so Haiku picked the coach-mentioned Strava data. Result: VDOT computed from trail 30K (~45.3 → easy 9:27/mi) instead of road 5K (~56.9 → easy 7:52/mi).
+**Fix:** Updated both `recent_race_distance_km` and `recent_race_time_minutes` extraction rules to say "extract ONLY from the athlete's own messages (user turns), NOT from coach messages about Strava data." If the coach mentions a Strava race but the athlete states a different road race time, use the athlete's stated time.
+
+**Bug 2 — Today's interval workout showing in dashboard / arc key_workout not synced from actual sessions**
+**Root cause:** `extractAndStorePlanSessions` was called BEFORE `generateAndSaveFullPlan`. But `generateAndSaveFullPlan` always clears `weekly_plan_sessions: null` (to flush stale sessions after a full arc rebuild). This wiped the just-stored sessions before `syncArcCurrentWeek` could read them — so `syncArcCurrentWeek` returned early (sessions.length === 0) and the arc's week 1 key_workout remained the Haiku-guessed "6×800m" from arc generation. The dashboard then fell back to `buildDailyPlan` (uses all training_days including today) instead of `buildDailyPlanFromSessions` (only stores actual remaining-week sessions).
+**Fix:** Moved `extractAndStorePlanSessions` to run AFTER `generateAndSaveFullPlan`, so sessions are stored after the null-clear and both the dashboard and `syncArcCurrentWeek` can use them.
+
+**Bug 3 — B race not tagged with "Race day" badge in arc**
+**Root cause:** Dashboard computed `raceWeekNum` only from `training_profiles.race_date` (the A race). B/C races in the `races` table were not checked.
+**Fix:** Computed week numbers for all races in `upcomingRaces` and collected them into `allRaceWeekNums` (Set). `WeekCard.isRaceWeek` now checks `allRaceWeekNums.has(week.week_number)` so every race week (A, B, C) gets the badge.
+
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-09 — Fixed plan rebuild corrupting A-race date + stale session display after rebuild
 
 **Type:** Bug Fix
