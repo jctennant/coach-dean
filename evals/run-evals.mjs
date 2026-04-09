@@ -322,9 +322,11 @@ ${a.hr ? `- Avg HR: ${a.hr} bpm\n` : ""}`;
   if (avgWeekly < 10) {
     fitnessTier = `FITNESS TIER: LOW VOLUME (~${avgWeekly} mi/week). Prioritize easy aerobic volume and consistency.`;
   } else if (avgWeekly < 30) {
-    fitnessTier = `FITNESS TIER: MODERATE VOLUME (~${avgWeekly} mi/week). 1-2 quality sessions per week appropriate alongside easy volume.`;
+    fitnessTier = `FITNESS TIER: MODERATE VOLUME (~${avgWeekly} mi/week). 1-2 quality sessions per week appropriate alongside easy volume.
+⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${avgWeekly} mi/week. Week 1 should not jump more than 15% above that — target ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.15)} mi. A first-week spike above ${Math.round(avgWeekly * 1.2)} mi risks overuse injury at the start of the plan.`;
   } else {
-    fitnessTier = `FITNESS TIER: HIGH VOLUME (~${avgWeekly} mi/week). Experienced runner. Skip base-building preamble.`;
+    fitnessTier = `FITNESS TIER: HIGH VOLUME (~${avgWeekly} mi/week). Experienced runner. Skip base-building preamble.
+⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${avgWeekly} mi/week → Week 1 target: ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.12)} mi. Don't jump to peak volume on Day 1.`;
   }
 
   // Goal discrepancy injection (for quality fixture)

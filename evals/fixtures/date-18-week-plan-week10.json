@@ -38,6 +38,6 @@
     "race_date": "2026-10-11",
     "days_until_race": 193,
     "weeks_until_race": 28,
-    "notes": "Race is 2026-10-11. Today is 2026-04-01. That's ~28 weeks away (193 days). Phase with 28 weeks out = base (>14). But stored current_phase is 'peak' because that's what the DB says. Response should say week 10 and reference the phase from state. Days until race should be ~193."
+    "notes": "Race is 2026-10-11. Today is 2026-04-01. That's ~28 weeks away (193 days). Phase with 28 weeks out = base (>14). But stored current_phase is 'peak' because that's what the DB says. Response should say week 10 and reference the phase from state. Days until race should be ~193.\n\nIMPORTANT — WEEK BOUNDARIES (Mon–Sun): Week of Mar 16–22 contains the 18mi long run (Mar 22 was a Sunday). Week of Mar 23–29 contains the 8mi run (Mar 25, a Wednesday). So 'last week' from Apr 1 = Mar 23–29 = 8mi total. The prior week = Mar 16–22 = 18mi. A response saying 'last week was 8 mi' or describing last week as light is FACTUALLY CORRECT — these runs are in different weeks. Do NOT penalize for this."
   }
 }

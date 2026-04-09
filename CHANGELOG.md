@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Week 1 volume cap for moderate/high volume athletes
+
+**Type:** Improvement
+**Reported by:** Internal eval (plan-strength-integrated-marathon 3/10)
+**User feedback:** N/A
+**Root cause:** The FITNESS TIER section in the system prompt only injected a `⚠️ WEEK 1 VOLUME CAP` for LOW VOLUME athletes (<10 mi/week). MODERATE (10–30 mi/week) and HIGH VOLUME (≥30 mi/week) athletes had no such constraint, so the model could generate an aggressively ramped Week 1 (e.g. 40mi from a 32mi base = 25% jump). The initial_plan prompt referenced this cap as if it existed for all tiers, creating a false expectation.
+**Fix / Change:** Added `⚠️ WEEK 1 VOLUME CAP — GUIDELINE` to the MODERATE and HIGH VOLUME fitness tier strings in both `route.ts` and `evals/run-evals.mjs`. MODERATE: target 105–115% of current base; HIGH: target 105–112%. Also clarified `date-18-week-plan-week10` fixture ground_truth notes with explicit Mon–Sun week boundaries to prevent the judge from misattributing the 18mi run (Mar 22, a Sunday = week of Mar 16) to the same week as the 8mi run (Mar 25 = week of Mar 23).
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`, `evals/fixtures/date-18-week-plan-week10.json`
+
+---
+
 ## 2026-04-09 — FACTS block: pre-computed numbers at top of system prompt
 
 **Type:** Improvement
