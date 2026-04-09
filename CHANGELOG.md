@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fix onboarding pace anchoring to wrong trail race easy pace
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (internal)
+**User feedback:** "Can you double check the math on that? It should be more like 8 min/mi for easy" — Dean stated 9:25–9:55/mi easy for a 17:50 5K (should be ~7:45–8:15/mi), anchored on the trail race Strava suggestion instead of computing from the road PR. After correction, Dean re-guessed 8:15–8:45/mi — still wrong.
+**Root cause:** Two compounding issues: (1) `stravaContext` injected a VDOT-derived easy pace range even when the best Strava race was a trail run — this systematically underestimates fitness. (2) Claude cannot compute VDOT-based paces reliably in-context and pattern-matches to whatever number it sees in the system prompt, so the wrong Strava number persisted even after the user provided a road race time. (3) The trail race calibration question was allowed to defer to any point before [READY], letting Claude acknowledge the road race time too late.
+**Fix / Change:**
+1. When `is_trail`, stravaContext no longer emits "Suggested easy pace" — instead says "easy pace suggestion withheld — collect a road 5K/10K/HM time." This removes the wrong anchor entirely.
+2. PACE CALIBRATION prompt instruction changed from "ask once before [READY]" to "ask in THIS message" — calibration question must fire in the same turn as the Strava acknowledgment, not deferred.
+3. New TRAINING PACES block in onboarding system prompt explicitly prohibits Claude from quoting specific min/mi paces during onboarding. Accurate zones are server-computed when the plan builds — Claude guessing in-conversation only produces wrong numbers.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-09 — Extend plan through post-A B races; fix partial-week mileage target
 
 **Type:** Bug Fix / Feature
