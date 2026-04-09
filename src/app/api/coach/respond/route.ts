@@ -2447,13 +2447,40 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     return `${min}:${String(sec).padStart(2, "0")}/km`;
   };
   const tsEasyPaceRaw = profile?.current_easy_pace as string | null;
+
+  // Parse easy pace to seconds for sanity-checking derived paces.
+  const tsEasySec = (() => {
+    if (!tsEasyPaceRaw) return null;
+    const m = tsEasyPaceRaw.match(/(\d+):(\d+)/);
+    return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null;
+  })();
+  // Sanity-check stored tempo/interval paces. A valid tempo must be:
+  //   - at least 30s/mi faster than easy pace, AND
+  //   - faster than 13:00/mi (absolute floor — anything slower is walking, not tempo)
+  // If either fails, the stored paces are corrupt (likely a km/mi confusion at intake)
+  // and we should NOT let Claude use them in prescriptions.
+  const TEMPO_FLOOR_SEC = 13 * 60; // 13:00/mi
+  const getRawPaceSec = (paceStr: string | null): number | null => {
+    if (!paceStr) return null;
+    const m = paceStr.match(/(\d+):(\d+)/);
+    return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null;
+  };
+  const storedTempoPaceRaw = profile?.current_tempo_pace as string | null;
+  const tempoSecRaw = getRawPaceSec(storedTempoPaceRaw) ?? getRawPaceSec(estimatePacesFromEasyPace(tsEasyPaceRaw).tempo);
+  const pacesAreSane = tempoSecRaw == null || (
+    tempoSecRaw < TEMPO_FLOOR_SEC &&
+    (tsEasySec == null || tempoSecRaw < tsEasySec - 30)
+  );
+
   const tsTempoPace = (() => {
+    if (!pacesAreSane) return "INVALID — paces appear corrupted (tempo ≥ easy or slower than 13:00/mi). Use effort-based language only (e.g. 'comfortably hard', 'easy effort'). Do not prescribe specific paces until the athlete provides a recent race time or easy pace to recalibrate.";
     const stored = profile?.current_tempo_pace as string | null;
     if (stored) return tsFormatPace(stored);
     const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
     return est.tempo ? `${tsFormatPace(est.tempo)} (estimated)` : "TBD";
   })();
   const tsIntervalPace = (() => {
+    if (!pacesAreSane) return "INVALID — see tempo note above";
     const stored = profile?.current_interval_pace as string | null;
     if (stored) return tsFormatPace(stored);
     const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
@@ -2469,6 +2496,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     : "";
   const tsEasyGuard = tsEasyPaceRaw ? tsFormatPace(tsEasyPaceRaw) : null;
   const tsTempoPaceGuard = (() => {
+    if (!pacesAreSane) return null; // guard: suppress invalid paces from plan generation
     const stored = profile?.current_tempo_pace as string | null;
     if (stored) return tsFormatPace(stored);
     const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
@@ -3090,10 +3118,22 @@ async function persistProfileUpdates(
     // Compute VDOT paces if race data provided, otherwise use easy pace estimate
     let computedPaces: { easy: string; tempo: string; interval: string; vdot?: number } | null = null;
     if (hasRaceData) {
-      computedPaces = calculateVDOTPaces(
-        extracted.recent_race_distance_km as number,
-        extracted.recent_race_time_minutes as number
-      );
+      const raceDistKm = extracted.recent_race_distance_km as number;
+      const raceTimeMins = extracted.recent_race_time_minutes as number;
+      // Sanity-check the extracted race time before computing VDOT.
+      // Implied pace must be between 4:00/mi (elite) and 20:00/mi (walking).
+      // Outside that range the extraction almost certainly mangled the input
+      // (e.g. passed pace-seconds as minutes, confused km with miles, etc.).
+      const impliedPaceMinPerMile = raceTimeMins / ((raceDistKm / 1.60934));
+      const RACE_PACE_MIN = 4.0;   // 4:00/mi — faster than any amateur runner
+      const RACE_PACE_MAX = 20.0;  // 20:00/mi — slower than brisk walking at race effort
+      if (impliedPaceMinPerMile >= RACE_PACE_MIN && impliedPaceMinPerMile <= RACE_PACE_MAX) {
+        computedPaces = calculateVDOTPaces(raceDistKm, raceTimeMins);
+      } else {
+        console.warn(
+          `[coach/respond] Skipping VDOT calc — implied pace ${impliedPaceMinPerMile.toFixed(1)} min/mi is outside [${RACE_PACE_MIN}, ${RACE_PACE_MAX}] for dist=${raceDistKm}km time=${raceTimeMins}min`
+        );
+      }
     } else if (hasEasyPace) {
       const p = estimatePacesFromEasyPace(extracted.easy_pace as string);
       if (p.easy) computedPaces = { easy: p.easy, tempo: p.tempo ?? "", interval: p.interval ?? "" };
@@ -3436,6 +3476,13 @@ DATA GLOSSARY for the details below:
 
 Details:
 ${JSON.stringify(activityForClaude, null, 2)}
+
+WORKOUT STRUCTURE — READ THIS BEFORE INTERPRETING SPLITS:
+If TODAY'S PLANNED SESSION is shown in CURRENT TRAINING STATE above, check whether it describes a structured workout (e.g. "1mi WU + 3mi @ 8:30/mi + 1mi CD", "intervals", "strides", "hill repeats"). If it does:
+- The opening slower segment = warmup. Do NOT flag it as a pacing anomaly or "going out too fast/slow."
+- The middle segment(s) = the main effort. Compare these against the prescribed pace.
+- The closing slower segment = cooldown. Do NOT describe it as "backing off" or "fading" — it is intentional.
+Read the planned structure first, then interpret the splits against it. If no plan is stored, describe the split pattern as observed (e.g. "your first mile was a touch slower, then you settled into a strong rhythm") without inferring intent.
 
 Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.
 

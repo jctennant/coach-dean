@@ -4,6 +4,35 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Add sanity check on extracted race times before VDOT calculation
+
+**Type:** Bug Fix
+**Reported by:** Internal investigation (Anthony, ae993f7b)
+**User feedback:** N/A — discovered by inspecting stored paces after the 14:07/mi tempo issue
+**Root cause:** `persistProfileUpdates` called `calculateVDOTPaces(distKm, timeMins)` directly from Haiku's extraction without validating the implied pace. If Haiku mangled the extraction (e.g. passing pace-seconds as minutes, or getting the distance wrong), the resulting VDOT could be wildly off. For Anthony, the implied pace from the stored extraction parameters corresponds to VDOT ~20 (17:19/mi easy) when his actual fitness is VDOT ~39 (10:34/mi easy) based on his Oakland Half at 8:35/mi.
+**Fix / Change:**
+1. Added bounds check before calling `calculateVDOTPaces`: implied pace must be between 4:00/mi and 20:00/mi. If outside that range, log a warning and skip — don't persist corrupt paces. This covers mis-extractions like pace-seconds passed as total minutes, or km/mi confusion.
+2. Manually corrected Anthony's stored profile paces to the correct values from his Oakland Half (VDOT 39.3 → Easy 10:34, Tempo 8:28, Interval 7:37).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-09 — Fix corrupted tempo pace used verbatim in session prescriptions
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (daily audit email)
+**User feedback:** "Wed 4/8 · Tempo 6.5mi (1mi WU + 4.5mi @ 14:07/mi + 1mi CD)" — 14:07/mi is a walking pace
+**Root cause:** When an athlete enters their easy pace in min/km during onboarding but the system stores it as min/mile (e.g. "15:37" meant 15:37/km = 9:41/mi, but stored as 15:37/mi), `estimatePacesFromEasyPace` correctly derives tempo = easy − 90s = 14:07/mi. The system prompt then presents this to Claude as an authoritative pre-computed pace with instructions to never recalculate it, so Claude uses it verbatim in session prescriptions.
+**Fix / Change:** Added a runtime sanity check: tempo pace must be (a) faster than 13:00/mi absolute floor AND (b) at least 30s/mi faster than easy pace. If either fails, the Tempo/Interval lines in the FACTS block read "INVALID — paces appear corrupted. Use effort-based language only. Do not prescribe specific paces until the athlete provides a recent race time or easy pace to recalibrate." Also suppresses the invalid tempo from plan generation guards.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-09 — Post-run feedback misreads WU/CD structure as pacing error
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (daily audit email)
+**User feedback:** Dean said "you held 8:15-8:28 for miles 1-4 right around target pace, then backed off the last mile." Athlete had to correct: "I thought I was meant to back off the last mile for cool down."
+**Root cause:** TODAY'S PLANNED SESSION is correctly injected into the system prompt (showing "1mi WU + 3mi @ 8:30/mi + 1mi CD"), but the post_run prompt only said "analyze their performance." Claude saw [slower mile 1, faster miles 2-4, slightly slower mile 5] in the splits and inferred "4-mile flat tempo + faded last mile" instead of reading the WU+tempo+CD structure from the plan.
+**Fix / Change:** Added a "WORKOUT STRUCTURE" block at the top of the post_run prompt that explicitly instructs Claude to check TODAY'S PLANNED SESSION first, map the opening/closing slower segments to WU/CD, and not flag them as anomalies or "backing off."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-09 — Fix daily audit email false positives (cadence, power, per-lap elevation)
 
 **Type:** Bug Fix
