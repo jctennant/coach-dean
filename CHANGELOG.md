@@ -4,6 +4,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — FACTS block: pre-computed numbers at top of system prompt
+
+**Type:** Improvement
+**Reported by:** Internal (eval architecture)
+**User feedback:** N/A
+**Root cause:** Volatile numbers (today's date, weekly mileage, paces, race countdown) were scattered across multiple sections deep in the system prompt. Claude was hallucinating or anchoring on conversation history when these facts conflicted, partly because they were buried in long prose sections.
+**Fix / Change:** Added a `FACTS` block as the very first thing in the system prompt — before "You are Coach Dean..." — containing all pre-computed volatile numbers in a compact, visually distinct table:
+- Today's date
+- Training week and phase (including recovery week flag)
+- Miles logged this week and projected total
+- Training paces (easy range, tempo, interval)
+- Race name, date, and days/weeks out
+- Miles remaining this week across sessions (when applicable)
+
+To make this possible, extracted the training state IIFE computation into pre-computed `ts*` variables before the `return` statement in `buildSystemPrompt`. The IIFE now uses these pre-computed values directly, eliminating redundant computation. Mirrored in `run-evals.mjs` for eval parity.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+
+---
+
 ## 2026-04-09 — Fix time-constrained training day distance caps
 
 **Type:** Bug Fix

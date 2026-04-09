@@ -347,7 +347,33 @@ ${a.hr ? `- Avg HR: ${a.hr} bpm\n` : ""}`;
     }
   }
 
-  return `${raceDate ? `ATHLETE: ${user.name || "this athlete"}
+  // ─── FACTS block (mirrors route.ts pre-computed facts) ───
+  const factsBlock = (() => {
+    const hasStrava = user.strava_connected;
+    const milogged = hasStrava || weekMileageSoFar > 0
+      ? `${weekMileageSoFar.toFixed(1)} mi logged (${user.runs_this_week || 0} run${(user.runs_this_week || 0) !== 1 ? "s" : ""})${weeklyTarget && (weekMileageSoFar + (user.plan_sessions_remaining ? 5 : 0)) > weekMileageSoFar ? "" : ""}`
+      : "not tracked (no Strava)";
+    const easyRange = easyPaceRange(paces.easy);
+    const raceLine = raceDate && daysUntilRace !== null && daysUntilRace > 0
+      ? `Race: ${user.goal_race || user.goal} on ${raceDate} · ${daysUntilRace} day${daysUntilRace !== 1 ? "s" : ""} / ~${weeksUntilRace} week${weeksUntilRace !== 1 ? "s" : ""} out`
+      : "";
+    const lines = [
+      `Today: ${todayStr}`,
+      `Training: Week ${user.current_week} · ${phase.charAt(0).toUpperCase() + phase.slice(1)} phase${isDeload ? " — recovery week" : ""}`,
+      `This week: ${milogged}${weeklyTarget ? ` (target: ${weeklyTarget} mi)` : ""}`,
+      `Paces: Easy ${easyRange} · Tempo ${paces.tempo} · Interval ${paces.interval}`,
+      ...(raceLine ? [raceLine] : []),
+    ];
+    return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FACTS — pre-computed by system. Never recalculate these.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${lines.join("\n")}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+  })();
+
+  return `${factsBlock}
+
+${raceDate ? `ATHLETE: ${user.name || "this athlete"}
 GOAL: ${user.goal_race || user.goal} on ${raceDate}
 ⚠️ This is the authoritative source for the athlete's goal race. If any prior message references a different race, disregard it.
 ${goalDiscrepancyBlock}

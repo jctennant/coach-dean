@@ -2428,7 +2428,183 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   // If the race has already passed, profile.race_date is stale — don't tell Claude the athlete
   // is still training for a race that occurred days ago.
   const raceIsUpcoming = profileRaceDaysUntil !== null && profileRaceDaysUntil > 0;
-  return `${raceIsUpcoming ? `ATHLETE: ${user.name || "this athlete"}
+
+  // ─── Pre-compute training state values (used in both FACTS block and training state section) ───
+  const tsUseMetric = profile?.preferred_units === "metric";
+  const tsMi = (miles: number) => tsUseMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
+  const tsTargetMiles = (state?.weekly_mileage_target as number) || 0;
+  const tsFormatPace = (paceStr: string | null | undefined): string => {
+    if (!paceStr) return "TBD";
+    if (!tsUseMetric) return paceStr;
+    const match = paceStr.match(/(\d+):(\d+)/);
+    if (!match) return paceStr;
+    const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+    const kmSec = Math.round(totalSec / 1.60934);
+    const min = Math.floor(kmSec / 60);
+    const sec = kmSec % 60;
+    return `${min}:${String(sec).padStart(2, "0")}/km`;
+  };
+  const tsEasyPaceRaw = profile?.current_easy_pace as string | null;
+  const tsTempoPace = (() => {
+    const stored = profile?.current_tempo_pace as string | null;
+    if (stored) return tsFormatPace(stored);
+    const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
+    return est.tempo ? `${tsFormatPace(est.tempo)} (estimated)` : "TBD";
+  })();
+  const tsIntervalPace = (() => {
+    const stored = profile?.current_interval_pace as string | null;
+    if (stored) return tsFormatPace(stored);
+    const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
+    return est.interval ? `${tsFormatPace(est.interval)} (estimated)` : "TBD";
+  })();
+  const tsEffectiveWeek = periodization?.effectiveWeek ?? (state?.current_week as number | null) ?? 1;
+  const tsPhaseDisplay = (periodization?.phase ?? (state?.current_phase as string | null) ?? "base");
+  const tsPhaseLabel = tsPhaseDisplay.charAt(0).toUpperCase() + tsPhaseDisplay.slice(1);
+  const tsDeloadBlock = periodization?.isDeloadWeek
+    ? `⚠️ RECOVERY WEEK — MANDATORY: Week ${tsEffectiveWeek} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${tsMi(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances. Recovery weeks are when adaptation happens — do not skip this.\n` : "";
+  const tsProgressionLine = !periodization?.isDeloadWeek && periodization?.suggestedWeeklyMiles != null && tsPhaseDisplay !== "taper"
+    ? `- Progression target this week: ~${tsMi(periodization.suggestedWeeklyMiles)} (~${tsPhaseDisplay === "peak" ? "5%" : "8%"} step up from recent avg)\n`
+    : "";
+  const tsEasyGuard = tsEasyPaceRaw ? tsFormatPace(tsEasyPaceRaw) : null;
+  const tsTempoPaceGuard = (() => {
+    const stored = profile?.current_tempo_pace as string | null;
+    if (stored) return tsFormatPace(stored);
+    const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
+    return est.tempo ? tsFormatPace(est.tempo) : null;
+  })();
+  const { sessionRows, projectedWeekMiles, remainingPlanLine } = (() => {
+    const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+    if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
+    const tz2 = timezone || "America/New_York";
+    const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz2 }).format(new Date());
+    const [ty, tm, td] = localTodayStr.split("-").map(Number);
+    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
+    const dayOfWeekToday = localTodayUTC.getUTCDay();
+    const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
+    const endOfWeekMs = Date.UTC(ty, tm - 1, td + daysToSunday);
+    const todaySessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      return new Date(Date.UTC(ty, m - 1, d)).getTime() === localTodayUTC.getTime();
+    });
+    const futureSessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return true;
+      return new Date(Date.UTC(ty, m - 1, d)) > localTodayUTC;
+    });
+    const activeSessions = [...todaySessions, ...futureSessions];
+    if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
+    const parseSessionMiles = (s: { label: string }) => {
+      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
+      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
+      const mMatch = explicitTotal || firstMi;
+      return mMatch ? parseFloat(mMatch[1]) : 0;
+    };
+    const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
+    const todaySessionMiles = trigger !== "post_run" ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0) : 0;
+    const totalRemainingPlanMiles = todaySessionMiles + remainingSessionMiles;
+    const targetAlreadyMet = tsTargetMiles > 0 && weekMileageSoFar >= tsTargetMiles;
+    let sessionRows = "";
+    if (todaySessions.length > 0) {
+      const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+      const todayLabel = trigger === "post_run"
+        ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
+        : `TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice)`;
+      sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
+    }
+    if (futureSessions.length > 0) {
+      if (targetAlreadyMet) {
+        const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+        sessionRows += `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n${futureList}\n`;
+      } else {
+        const thisWeekFuture = futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return true;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
+        });
+        const nextWeekFuture = futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return false;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() > endOfWeekMs;
+        });
+        if (thisWeekFuture.length > 0) {
+          sessionRows += `\n- UPCOMING SESSIONS THIS WEEK (week ends Sunday):\n${thisWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+        }
+        if (nextWeekFuture.length > 0) {
+          sessionRows += `\n- NEXT WEEK'S PLANNED SESSIONS (starts Monday — do NOT count these as part of this week's mileage or day count):\n${nextWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+        }
+      }
+    }
+    let remainingPlanLine = "";
+    if (totalRemainingPlanMiles > 0 && !targetAlreadyMet && trigger !== "post_run") {
+      const thisWeekRemaining = [
+        ...todaySessions,
+        ...futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return true;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
+        }),
+      ];
+      const breakdown = thisWeekRemaining.map(s => {
+        const [m, d] = s.date.split("/").map(Number);
+        const isToday = !isNaN(m) && !isNaN(d) && new Date(Date.UTC(ty, m - 1, d)).getTime() === localTodayUTC.getTime();
+        return `${isToday ? "today's" : `${s.day} ${s.date}`} ${s.label}`;
+      }).join(" + ");
+      const projTotal = weekMileageSoFar + totalRemainingPlanMiles;
+      remainingPlanLine = `\n- MILES REMAINING IN PLAN THIS WEEK: ${tsMi(totalRemainingPlanMiles)} across ${thisWeekRemaining.length} session${thisWeekRemaining.length !== 1 ? "s" : ""} (${breakdown}) → projected week total: ${tsMi(projTotal)}`;
+    }
+    return {
+      sessionRows,
+      projectedWeekMiles: trigger === "post_run"
+        ? weekMileageSoFar + remainingSessionMiles
+        : weekMileageSoFar + totalRemainingPlanMiles,
+      remainingPlanLine,
+    };
+  })();
+  const tsMileageLine = (() => {
+    const hasStrava = !!(user.strava_athlete_id as number | null);
+    if (!hasStrava && weekMileageSoFar === 0 && weekRunCount === 0) {
+      return `not tracked (athlete not on Strava) — refer to RECENT CONVERSATION for what was reported`;
+    }
+    const done = `${tsMi(weekMileageSoFar)} done so far this week (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`;
+    if (trigger === "post_run") return `${done} (includes today's synced run — do NOT add it again)`;
+    if (projectedWeekMiles !== null && projectedWeekMiles > weekMileageSoFar) {
+      return `${done} | Projected week total (done + upcoming sessions): ${tsMi(projectedWeekMiles)}`;
+    }
+    return done;
+  })();
+
+  // ─── FACTS block — pre-computed numbers injected at top of system prompt ───
+  const factsBlock = (() => {
+    const hasStrava = !!(user.strava_athlete_id as number | null);
+    const milogged = hasStrava || weekMileageSoFar > 0
+      ? `${tsMi(weekMileageSoFar)} logged (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})${projectedWeekMiles > weekMileageSoFar ? ` | Projected: ${tsMi(projectedWeekMiles)}` : ""}`
+      : "not tracked (no Strava)";
+    const easyRange = easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD";
+    const raceLine = raceIsUpcoming && profileRaceDaysUntil !== null
+      ? `Race: ${goalDisplay} on ${profile!.race_date as string} · ${profileRaceDaysUntil} day${profileRaceDaysUntil !== 1 ? "s" : ""} / ~${Math.round(profileRaceDaysUntil / 7)} week${Math.round(profileRaceDaysUntil / 7) !== 1 ? "s" : ""} out`
+      : "";
+    const remainingLine = remainingPlanLine
+      ? `Miles remaining this week:${remainingPlanLine.replace(/^- MILES REMAINING IN PLAN THIS WEEK:/, "").split("→")[0].trim()} → ${remainingPlanLine.split("→")[1]?.trim() ?? ""}`
+      : "";
+    const lines = [
+      `Today: ${todayStr}`,
+      `Training: Week ${tsEffectiveWeek} · ${tsPhaseLabel} phase${periodization?.isDeloadWeek ? " — recovery week" : ""}`,
+      `This week: ${milogged}`,
+      `Paces: Easy ${easyRange} · Tempo ${tsTempoPace} · Interval ${tsIntervalPace}`,
+      ...(raceLine ? [raceLine] : []),
+      ...(remainingLine ? [remainingLine] : []),
+    ];
+    return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FACTS — pre-computed by system. Never recalculate these.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${lines.join("\n")}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+  })();
+
+  return `${factsBlock}
+
+${raceIsUpcoming ? `ATHLETE: ${user.name || "this athlete"}
 GOAL: ${goalDisplay} on ${profile!.race_date}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : ""}
 ⚠️ This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.
 ⚠️ GOAL DISCREPANCY — RAISE ONCE ONLY: If there is a discrepancy between the stored goal above and something the athlete said, flag it at most once per conversation. Check RECENT CONVERSATION — if you (Coach Dean) have already asked "which race is it?" or flagged a goal mismatch in a prior message, do NOT raise it again. If the athlete has answered, treat their answer as ground truth and proceed. Repeating the same goal-conflict flag three times in a row when the athlete already answered is a serious trust failure.
@@ -2524,186 +2700,28 @@ ${raceHistory.map((r) => {
 }).join("\n")}
 ` : ""}
 CURRENT TRAINING STATE:
+(See FACTS block at top for today's date, weekly mileage, paces, and race countdown — those are the authoritative numbers.)
 ${(() => {
-  const useMetric = profile?.preferred_units === "metric";
-  const mi = (miles: number) => useMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
-  const targetMiles = (state?.weekly_mileage_target as number) || 0;
-  // Parse remaining session miles from the label text so we can compute the projected total.
-  // Positive matching: only sessions with an explicit "mi" marker contribute to the projection.
-  // Non-running sessions are instructed in the prompt to never include distance in miles.
-  const { sessionRows, projectedWeekMiles, remainingPlanLine } = (() => {
-    const sessions = state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
-    if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: null, remainingPlanLine: "" };
-    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
-    // Compute week boundary once — used for both session labeling and remaining-plan summary
-    const dayOfWeekToday = localTodayUTC.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
-    const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
-    const endOfWeekMs = Date.UTC(ty, tm - 1, td + daysToSunday);
-    const todaySessions = sessions.filter(s => {
-      const [m, d] = s.date.split("/").map(Number);
-      if (isNaN(m) || isNaN(d)) return false;
-      const sessionDate = new Date(Date.UTC(ty, m - 1, d));
-      return sessionDate.getTime() === localTodayUTC.getTime();
-    });
-    const futureSessions = sessions.filter(s => {
-      const [m, d] = s.date.split("/").map(Number);
-      if (isNaN(m) || isNaN(d)) return true;
-      const sessionDate = new Date(Date.UTC(ty, m - 1, d));
-      return sessionDate > localTodayUTC;
-    });
-    const activeSessions = [...todaySessions, ...futureSessions];
-    if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
-    // Helper: parse miles from a session label (same regex as extractAndStorePlanSessions)
-    const parseSessionMiles = (s: { label: string }) => {
-      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
-      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
-      const mMatch = explicitTotal || firstMi;
-      return mMatch ? parseFloat(mMatch[1]) : 0;
-    };
-    // Sum future session miles for projected total (future only — today may already be done)
-    const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
-    // For non-post_run: today's session may not be completed yet — include it in remaining plan miles
-    const todaySessionMiles = trigger !== "post_run"
-      ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0)
-      : 0;
-    const totalRemainingPlanMiles = todaySessionMiles + remainingSessionMiles;
-    const targetAlreadyMet = targetMiles > 0 && weekMileageSoFar >= targetMiles;
-    let sessionRows = "";
-    if (todaySessions.length > 0) {
-      const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-      // For post_run: the run just synced, so today's session IS completed and already
-      // counted in the week-to-date figure. Label it explicitly to prevent Claude from
-      // adding the session miles on top of a week-to-date that already includes them.
-      const todayLabel = trigger === "post_run"
-        ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
-        : `TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice)`;
-      sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
-    }
-    if (futureSessions.length > 0) {
-      if (targetAlreadyMet) {
-        const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-        sessionRows += `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n${futureList}\n`;
-      } else {
-        // Split sessions by calendar week boundary (Mon–Sun). Sessions in the current
-        // Mon–Sun week vs next week should be clearly labeled so Dean doesn't say
-        // "5 training days left this week" when only 1 calendar day remains.
-        const thisWeekFuture = futureSessions.filter(s => {
-          const [mm, dd] = s.date.split("/").map(Number);
-          if (isNaN(mm) || isNaN(dd)) return true;
-          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
-        });
-        const nextWeekFuture = futureSessions.filter(s => {
-          const [mm, dd] = s.date.split("/").map(Number);
-          if (isNaN(mm) || isNaN(dd)) return false;
-          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() > endOfWeekMs;
-        });
-
-        if (thisWeekFuture.length > 0) {
-          sessionRows += `\n- UPCOMING SESSIONS THIS WEEK (week ends Sunday):\n${thisWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
-        }
-        if (nextWeekFuture.length > 0) {
-          sessionRows += `\n- NEXT WEEK'S PLANNED SESSIONS (starts Monday — do NOT count these as part of this week's mileage or day count):\n${nextWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
-        }
-      }
-    }
-    // Pre-compute the "miles remaining" answer so Claude never needs to do arithmetic.
-    // When an athlete asks "how many miles do I have left?", Claude reads this line directly
-    // rather than computing target-delta (wrong) or adding session distances itself (error-prone).
-    let remainingPlanLine = "";
-    if (totalRemainingPlanMiles > 0 && !targetAlreadyMet && trigger !== "post_run") {
-      const thisWeekRemaining = [
-        ...todaySessions,
-        ...futureSessions.filter(s => {
-          const [mm, dd] = s.date.split("/").map(Number);
-          if (isNaN(mm) || isNaN(dd)) return true;
-          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
-        }),
-      ];
-      const breakdown = thisWeekRemaining.map(s => {
-        const [mm, dd] = s.date.split("/").map(Number);
-        const isToday = !isNaN(mm) && !isNaN(dd) && new Date(Date.UTC(ty, mm - 1, dd)).getTime() === localTodayUTC.getTime();
-        return `${isToday ? "today's" : `${s.day} ${s.date}`} ${s.label}`;
-      }).join(" + ");
-      const projTotal = weekMileageSoFar + totalRemainingPlanMiles;
-      remainingPlanLine = `\n- MILES REMAINING IN PLAN THIS WEEK: ${mi(totalRemainingPlanMiles)} across ${thisWeekRemaining.length} session${thisWeekRemaining.length !== 1 ? "s" : ""} (${breakdown}) → projected week total: ${mi(projTotal)}`;
-    }
-    return {
-      sessionRows,
-      // For non-post_run: projected total includes today's unfinished session so the
-      // mileageLine and MILES REMAINING line are consistent with each other.
-      projectedWeekMiles: trigger === "post_run"
-        ? weekMileageSoFar + remainingSessionMiles
-        : weekMileageSoFar + totalRemainingPlanMiles,
-      remainingPlanLine,
-    };
-  })();
-  const mileageLine = (() => {
-    // For non-Strava users with no tracked activities, avoid showing "0 mi" which
-    // causes Dean to treat the week as quiet and reset to a conservative plan.
-    const hasStravaInner = !!(user.strava_athlete_id as number | null);
-    if (!hasStravaInner && weekMileageSoFar === 0 && weekRunCount === 0) {
-      return `not tracked (athlete not on Strava) — refer to RECENT CONVERSATION for what was reported`;
-    }
-    const done = `${mi(weekMileageSoFar)} done so far this week (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`;
-    // For post_run: suppress the projected total — the user message already has the
-    // authoritative ⚠️ WEEK-TO-DATE figure. Showing a projected total here too is what
-    // caused Dean to say "you're at 9.2 miles this week" when only 3.2 had been run:
-    // Claude uses the visible projected number instead of the authoritative done-so-far.
-    // Also add a parenthetical to make it unambiguous that today's synced run is already counted.
-    if (trigger === "post_run") return `${done} (includes today's synced run — do NOT add it again)`;
-    if (projectedWeekMiles !== null && projectedWeekMiles > weekMileageSoFar) {
-      return `${done} | Projected week total (done + upcoming sessions): ${mi(projectedWeekMiles)}`;
-    }
-    return done;
-  })();
-  const useMetricInner = profile?.preferred_units === "metric";
-  const miInner = (miles: number) => useMetricInner ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
-  // Convert a stored min/mile pace to min/km for metric users.
-  // Paces are always stored as "M:SS/mi". For metric athletes the system prompt must
-  // show them in min/km so Claude never needs to convert them itself (a documented
-  // source of unit errors, e.g. 8:46/mi displayed as 14:07 without units).
-  const formatPaceForPrompt = (paceStr: string | null | undefined): string => {
-    if (!paceStr) return "TBD";
-    if (!useMetricInner) return paceStr; // already min/mile
-    const match = paceStr.match(/(\d+):(\d+)/);
-    if (!match) return paceStr;
-    const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
-    const kmSec = Math.round(totalSec / 1.60934);
-    const min = Math.floor(kmSec / 60);
-    const sec = kmSec % 60;
-    return `${min}:${String(sec).padStart(2, "0")}/km`;
-  };
-  const effectiveWeekDisplay = periodization?.effectiveWeek ?? (state?.current_week as number | null) ?? 1;
-  const phaseDisplay = (periodization?.phase ?? (state?.current_phase as string | null) ?? "base");
-  const phaseLabel = phaseDisplay.charAt(0).toUpperCase() + phaseDisplay.slice(1);
-  const deloadBlock = periodization?.isDeloadWeek
-    ? `⚠️ RECOVERY WEEK — MANDATORY: Week ${effectiveWeekDisplay} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${miInner(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances. Recovery weeks are when adaptation happens — do not skip this.\n` : "";
-  const progressionLine = !periodization?.isDeloadWeek && periodization?.suggestedWeeklyMiles != null && phaseDisplay !== "taper"
-    ? `- Progression target this week: ~${miInner(periodization.suggestedWeeklyMiles)} (~${phaseDisplay === "peak" ? "5%" : "8%"} step up from recent avg)\n`
-    : "";
-  // Concrete pace values injected into the PACE SANITY CHECK below, so the guard
-  // references specific numbers rather than abstract "the easy pace shown above."
-  const easyPaceRaw = profile?.current_easy_pace as string | null;
-  const easyPaceGuardDisplay = easyPaceRaw ? formatPaceForPrompt(easyPaceRaw) : null;
-  const tempoPaceGuardDisplay = (() => {
-    const stored = profile?.current_tempo_pace as string | null;
-    if (stored) return formatPaceForPrompt(stored);
-    const est = estimatePacesFromEasyPace(easyPaceRaw);
-    return est.tempo ? formatPaceForPrompt(est.tempo) : null;
-  })();
-  return `- Week ${effectiveWeekDisplay} of training, phase: ${phaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""}
-${deloadBlock}${progressionLine}- Weekly mileage target (athlete baseline): ${targetMiles ? mi(targetMiles) : "TBD"}
-⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${mileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}
+  const useMetric = tsUseMetric;
+  const mi = tsMi;
+  const targetMiles = tsTargetMiles;
+  // Session rows, projectedWeekMiles, remainingPlanLine, and tsMileageLine are all
+  // pre-computed before the return statement — use them directly here.
+  // (Legacy IIFE removed; values computed once in the ts* pre-computation block above.)
+  return `- Week ${tsEffectiveWeek} of training, phase: ${tsPhaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""}
+${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): ${tsTargetMiles ? tsMi(tsTargetMiles) : "TBD"}
+⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${tsMileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
-- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(profile?.current_easy_pace as string ?? null, useMetric) || "TBD"}, Tempo ${(() => { const stored = profile?.current_tempo_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.tempo ? `${formatPaceForPrompt(est.tempo)} (estimated from easy pace — no race data on file)` : "TBD"; })()}, Interval ${(() => { const stored = profile?.current_interval_pace as string | null; if (stored) return formatPaceForPrompt(stored); const est = estimatePacesFromEasyPace(profile?.current_easy_pace as string ?? null); return est.interval ? `${formatPaceForPrompt(est.interval)} (estimated from easy pace — no race data on file)` : "TBD"; })()}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
+- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD"}, Tempo ${tsTempoPace}, Interval ${tsIntervalPace}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
 - RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
-⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${easyPaceGuardDisplay ? ` This athlete's easy pace is ${easyPaceGuardDisplay}. Any tempo or interval pace you write that is ${easyPaceGuardDisplay} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tempoPaceGuardDisplay ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(easyPaceRaw, useMetricInner) || "see above"}); never prescribe WU/CD more than 30 sec${useMetricInner ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.
+⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace you write that is ${tsEasyGuard} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.
 ⚠️ LABEL/PACE CONSISTENCY — CRITICAL: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.
 - RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any of: "⚠️ GOAL DISCREPANCY", "Now I need to provide", "Let me craft the response", "Now let me search", or any internal analysis paragraph. The FIRST thing you output must be the coaching message itself — nothing before it.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}${remainingPlanLine}`;
 })()}
+
 
 COMMUNICATION STYLE:
 You are texting over iMessage. Write exactly like a real human coach would text — not an email, not a report, not a bullet-point summary.
