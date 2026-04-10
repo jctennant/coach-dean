@@ -308,7 +308,7 @@ export default function Home() {
               }, 
               {
                 q: "What type of races can Coach Dean help me prepare for?",
-                a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. If you're training for a triathlon, he can factor in your swimming and cycling alongside your run training. Not sure what distance is right for you? Tell Coach Dean where you're at and he'll help you figure it out.",
+                a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. If you're training for a triathlon, he focuses on the run leg — your running program will be dialed in, but for swim and bike you'd want dedicated coaching alongside. Not sure what distance is right for you? Tell Coach Dean where you're at and he'll help you figure it out.",
               },
               {
                 q: "How does Coach Dean know what paces to assign my workouts?",
