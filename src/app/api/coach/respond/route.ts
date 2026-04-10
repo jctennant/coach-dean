@@ -1101,7 +1101,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // (any day except Sunday/Monday), the dashboard should show the TRUE total = miles already
     // logged Mon–today + new sessions Dean prescribed for the remaining days.
     // Example: ran 17mi Mon–Thu, Dean prescribes 15mi for Sat+Sun → target = 32mi.
-    if (isPartialWeek && weekMileageTarget != null) {
+    // Only re-apply if we have a meaningful value (> 0). If prescribedWeek1MilesRaw and
+    // suggestedWeeklyMiles were both null (e.g. no-Strava beginner), weekMileageTarget
+    // resolves to 0 — don't clobber syncArcCurrentWeek's session-derived result in that case.
+    if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
       await supabase.from("training_state")
         .update({ weekly_mileage_target: weekMileageTarget })
         .eq("user_id", userId);

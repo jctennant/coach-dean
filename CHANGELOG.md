@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fixed partial-week onboard clobbering syncArcCurrentWeek's session-derived mileage
+
+**Type:** Bug Fix
+**Reported by:** User follow-up during same session
+**User feedback:** "in this case though the user hadn't run this week at all, and will have two runs (or maybe even one) before the end of the week since it is thursday. So the 8 mi target should be lower for the first week since it's a partial week"
+**Root cause:** The partial-week re-apply block (`if (isPartialWeek && weekMileageTarget != null)`) ran unconditionally even when `weekMileageTarget` computed to 0 (no Strava history + no prescribedWeek1MilesRaw → `null ?? null ?? 0 = 0`). This overwrote `syncArcCurrentWeek`'s session-derived result (e.g. 3.5mi from 2 run/walk sessions) back to 0, causing the dashboard to show "0 mi" for the week.
+**Fix / Change:** Added `&& weekMileageTarget > 0` guard so the re-apply block only fires when there's a meaningful value. When both `prescribedWeek1MilesRaw` and `suggestedWeeklyMiles` are null, `syncArcCurrentWeek`'s sum (the actual prescribed session distances) is preserved as the weekly target.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-09 — Fixed wildly wrong mileage targets for beginner run/walk plans; fixed repeated cadence question
 
 **Type:** Bug Fix

@@ -65,7 +65,7 @@ export async function POST(request: Request) {
 
   const { data: user, error: userError } = await supabase
     .from("users")
-    .select("id, phone_number, name, onboarding_step, onboarding_data")
+    .select("id, phone_number, name, onboarding_step, onboarding_data, timezone, strava_athlete_id")
     .eq("id", userId)
     .single();
 
@@ -99,7 +99,10 @@ export async function POST(request: Request) {
       result = await handleStrava(user, message, onboardingData, chatId);
       break;
     case "awaiting_cadence":
-      result = await handleCadence({ ...user, onboarding_data: onboardingData }, message);
+      result = await handleCadence({ ...user, onboarding_data: onboardingData, timezone: user.timezone as string | null }, message);
+      break;
+    case "awaiting_timezone":
+      result = await handleTimezone({ ...user, onboarding_data: onboardingData }, message);
       break;
     case "awaiting_payment":
       result = await handleAwaitingPayment(user);
@@ -611,11 +614,14 @@ async function handleStrava(
 // Cadence handler (post-plan reminder preference)
 // ---------------------------------------------------------------------------
 
+const TIMEZONE_QUESTION = "One last thing — what city are you in? I want to make sure your reminders go out at the right time.";
+
 async function handleCadence(
-  user: { id: string; phone_number: string; name: string | null; onboarding_data: Record<string, unknown> },
+  user: { id: string; phone_number: string; name: string | null; onboarding_data: Record<string, unknown>; timezone: string | null },
   message: string
 ): Promise<NextResponse> {
-  const timezoneAlreadyConfirmed = !!(user.onboarding_data.timezone_confirmed);
+  const timezoneAlreadyConfirmed = !!(user.onboarding_data.timezone_confirmed) || !!(user.timezone);
+  const needsTimezone = !timezoneAlreadyConfirmed;
 
   const [cadenceResponse, parsedTimezone] = await Promise.all([
     anthropic.messages.create({
@@ -657,8 +663,8 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
     .limit(1);
   const planAlreadySent = (planMessages?.length ?? 0) > 0;
 
-  const userUpdate: Record<string, unknown> = { onboarding_step: null };
-  if (!timezoneAlreadyConfirmed && parsedTimezone) {
+  const userUpdate: Record<string, unknown> = { onboarding_step: needsTimezone ? "awaiting_timezone" : null };
+  if (!needsTimezone && parsedTimezone) {
     userUpdate.timezone = parsedTimezone;
     userUpdate.onboarding_data = { ...user.onboarding_data, timezone_confirmed: true };
   }
@@ -674,7 +680,9 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
     await sendAndStore(
       user.id,
       user.phone_number,
-      "Got it — and sorry for the delay! Let me get your plan together now.",
+      needsTimezone
+        ? `Got it — and sorry for the delay! Let me get your plan together now.\n\n${TIMEZONE_QUESTION}`
+        : "Got it — and sorry for the delay! Let me get your plan together now.",
       "awaiting_cadence"
     );
     after(async () => {
@@ -691,14 +699,56 @@ Classify their reply. Return only one word: "morning", "nightly", "weekly", or "
     return NextResponse.json({ ok: true });
   }
 
-  const confirmation =
+  const cadenceConfirmation =
     cadence === "morning_reminders"
-      ? "Perfect — I'll remind you the morning of each session. How does the plan look? Let me know if anything needs tweaking."
+      ? "Perfect — I'll remind you the morning of each session."
       : cadence === "nightly_reminders"
-      ? "Perfect — I'll send you a heads-up the evening before each session. How does the plan look? Let me know if anything needs tweaking."
-      : "Got it — I'll send you a weekly plan every Sunday. How does the plan look? Happy to adjust anything.";
+      ? "Perfect — I'll send you a heads-up the evening before each session."
+      : "Got it — I'll send you a weekly plan every Sunday.";
+
+  const confirmation = needsTimezone
+    ? `${cadenceConfirmation}\n\n${TIMEZONE_QUESTION}`
+    : `${cadenceConfirmation} How does the plan look? Let me know if anything needs tweaking.`;
 
   await sendAndStore(user.id, user.phone_number, confirmation, "awaiting_cadence");
+  return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Timezone handler (post-cadence location collection for non-Strava users)
+// ---------------------------------------------------------------------------
+
+async function handleTimezone(
+  user: { id: string; phone_number: string; onboarding_data: Record<string, unknown> },
+  message: string
+): Promise<NextResponse> {
+  const parsedTimezone = await parseTimezoneFromMessage(message);
+
+  if (!parsedTimezone) {
+    await sendAndStore(
+      user.id,
+      user.phone_number,
+      "Sorry, I didn't catch that — what city or state are you in? (e.g. \"Denver, CO\" or \"Austin, TX\")",
+      "awaiting_timezone"
+    );
+    return NextResponse.json({ ok: true });
+  }
+
+  await supabase
+    .from("users")
+    .update({
+      timezone: parsedTimezone,
+      onboarding_step: null,
+      onboarding_data: { ...user.onboarding_data, timezone_confirmed: true } as unknown as import("@/lib/database.types").Json,
+    })
+    .eq("id", user.id);
+
+  await sendAndStore(
+    user.id,
+    user.phone_number,
+    "Got it — your reminders will go out at the right time for you. How does the plan look? Let me know if anything needs tweaking.",
+    "awaiting_timezone"
+  );
   return NextResponse.json({ ok: true });
 }
 
