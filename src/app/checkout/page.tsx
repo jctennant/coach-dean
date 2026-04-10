@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
@@ -32,18 +32,22 @@ function CheckoutContent() {
     }
   }
 
-  const trialEndDate = new Date();
-  trialEndDate.setDate(trialEndDate.getDate() + 7);
-  const trialEndFormatted = trialEndDate.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-  });
+  // Compute client-side only to avoid SSR/UTC timezone mismatch giving wrong date
+  const [trialEndFormatted, setTrialEndFormatted] = useState<string>("7 days from today");
+  useEffect(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    setTrialEndFormatted(d.toLocaleDateString("en-US", { month: "long", day: "numeric" }));
+  }, []);
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center justify-center px-4 py-16">
       <div className="max-w-md w-full space-y-8">
         {/* Header */}
         <div className="text-center">
+          <div className="inline-flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-3 py-1 rounded-full mb-4">
+            🎉 Launch discount — 50% off
+          </div>
           <h1 className="text-3xl font-bold text-gray-900">Your plan is ready</h1>
           <p className="mt-3 text-gray-500">
             Start your free 7-day trial — no charge until {trialEndFormatted}. Cancel anytime.
@@ -66,10 +70,13 @@ function CheckoutContent() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-semibold text-gray-900">Annual</p>
-                <p className="text-sm text-gray-500 mt-0.5">$120/year — billed once a year</p>
+                <p className="text-sm text-gray-500 mt-0.5">$60/year — billed once a year</p>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-gray-900">$10</p>
+                <div className="flex items-baseline gap-1.5 justify-end">
+                  <p className="text-2xl font-bold text-gray-900">$5</p>
+                  <p className="text-sm text-gray-400 line-through">$10</p>
+                </div>
                 <p className="text-xs text-gray-500">per month</p>
               </div>
             </div>
@@ -90,7 +97,10 @@ function CheckoutContent() {
                 <p className="text-sm text-gray-500 mt-0.5">Billed monthly — cancel anytime</p>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-gray-900">$20</p>
+                <div className="flex items-baseline gap-1.5 justify-end">
+                  <p className="text-2xl font-bold text-gray-900">$10</p>
+                  <p className="text-sm text-gray-400 line-through">$20</p>
+                </div>
                 <p className="text-xs text-gray-500">per month</p>
               </div>
             </div>
