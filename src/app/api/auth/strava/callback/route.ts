@@ -181,16 +181,19 @@ export async function GET(request: Request) {
     weeklyMilesArr[weekIdx] += (a.distance_meters ?? 0) / 1609.34;
   }
 
-  const recentWeeksMiles = weeklyMilesArr[0] + weeklyMilesArr[1]; // last 2 weeks
-  const priorWeeksMiles = weeklyMilesArr[2] + weeklyMilesArr[3];  // prior 2 weeks
+  // Skip weekIdx 0 (current partial rolling window) — it may only contain a few days
+  // of runs depending on when the user connects, which would drag the average down.
+  // Use weeks 1–4 (four fully completed 7-day windows) for a stable baseline.
+  const recentWeeksMiles = weeklyMilesArr[1] + weeklyMilesArr[2]; // weeks 1–2 (completed)
+  const priorWeeksMiles = weeklyMilesArr[3] + weeklyMilesArr[4];  // weeks 3–4 (completed)
 
-  // Use 4-week average (more representative of current fitness than 8-week)
-  const last4WeeksMiles = weeklyMilesArr.slice(0, 4).reduce((s, m) => s + m, 0);
+  // Use 4-week average over completed windows (weeks 1–4)
+  const last4WeeksMiles = weeklyMilesArr.slice(1, 5).reduce((s, m) => s + m, 0);
   const avgWeeklyMiles = runs8w.length > 0
     ? Math.round(last4WeeksMiles / 4)
     : null;
 
-  // Trend: last 2 weeks vs prior 2 weeks (only meaningful if we have enough data)
+  // Trend: completed weeks 1–2 vs completed weeks 3–4
   let mileageTrend: "building" | "steady" | "declining" | null = null;
   if (priorWeeksMiles > 5) {
     const ratio = recentWeeksMiles / priorWeeksMiles;

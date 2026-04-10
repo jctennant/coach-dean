@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fixed partial week skewing Strava avg weekly mileage baseline low
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** The weekly bucketing used rolling 7-day windows from `now`. Week index 0 (0–7 days ago) captured an incomplete week if the user connected mid-week (e.g. Wednesday), so the 4-week average was divided by 4 full slots but one slot had only a few days of runs, pulling the baseline down.
+**Fix / Change:** Skip `weekIdx 0` (current partial window) for both the average and trend calculation. Average now uses weeks 1–4 (four fully completed 7-day windows); trend uses weeks 1–2 vs weeks 3–4. Week 0 is still populated in case it's useful later.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`
+
+---
+
 ## 2026-04-09 — Fixed partial-week onboard clobbering syncArcCurrentWeek's session-derived mileage
 
 **Type:** Bug Fix
