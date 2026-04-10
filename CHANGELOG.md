@@ -17,6 +17,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Conversation analysis auto-fixes: subscription wall UX, hallucination guards, tempo pace sanity check
+
+**Type:** Bug Fix
+**Reported by:** Automated conversation analysis (2026-04-08 batch, 16 users, 69 messages)
+**User feedback:** User a9b4016c sent three messages explicitly trying to subscribe and received the same canned subscription-wall message each time. First two responses used generic URL.
+**Root cause:**
+1. (P0) Subscription wall gave identical canned responses regardless of user intent. Users saying "I want to subscribe" got the same message as users who incidentally hit the wall, with no warm acknowledgment or urgency. First-call token generation was working, but subscribe-intent cases needed a distinct, warmer response.
+2. (P1) Post-run prompt had no cadence guard — `average_cadence` was fetched but never checked before injection. Claude fabricated per-lap cadence ranges (e.g. "90-92 spm") on activities where cadence was not in the Strava data. Additionally, the laps glossary said "per-lap AVERAGES for pace and HR" but did not explicitly exclude per-lap elevation, cadence, or power — Claude hallucinated per-lap elevation (e.g. "721ft gain on lap 2") and per-lap watt ranges on Zwift activities that had only average watts. Per-mile elevation breakdown (e.g. "500ft gain at miles 11-12") also had no guard.
+3. (P1) Stored `current_tempo_pace` could be corrupted (e.g. a metric pace mistakenly stored as min/mi, producing values like 14:07/mi). The prompt sanity check instruction told Claude to use the stored pace, so a corrupted stored value would be passed through and used verbatim.
+**Fix / Change:**
+1. Subscription wall now detects subscribe/pay intent keywords in the latest user message ("subscribe", "subscription", "pay", "payment", "sign up", "get started", "ready to subscribe", etc.). When intent is detected, replies warmly with "Got it — here's your direct link to get started, takes 2 minutes: [personalized URL]" instead of the canned wall message.
+2. Added cadence guard (parallel to existing watts guard): if `average_cadence` is null in the activity record, injects "No cadence data is available — do NOT reference cadence." Strengthened lap data glossary to explicitly say "per-lap AVERAGES for pace and HR only — no per-lap elevation, cadence, or power ranges." Added universal per-mile/per-lap elevation breakdown guard (always injected): "Per-mile and per-lap elevation breakdowns are NOT available from Strava — reference total elevation gain only."
+3. Added server-side tempo pace validation before system prompt injection: parses stored `current_tempo_pace` and `current_easy_pace` to seconds/mile; if tempo >= easy (impossible physically), logs a warning and falls back to the estimated tempo derived from easy pace. Prevents a corrupted DB value from being injected into the prompt as ground truth.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-09 — Fixed partial week skewing Strava avg weekly mileage baseline low
 
 **Type:** Bug Fix
