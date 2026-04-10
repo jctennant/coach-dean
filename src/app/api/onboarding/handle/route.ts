@@ -708,23 +708,11 @@ async function handleNonCadenceMessage(
   const cadenceQuestion =
     "Last thing — would you like a reminder about your upcoming workouts the morning of, or the evening before? If not, I'll just send you a weekly plan every Sunday.";
 
-  const classifyResponse = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 16,
-    system: `The athlete received their training plan and instead of answering a reminder preference question, sent a different message. Classify it as one word:
-- "cancel" — athlete wants to cancel, stop, or end their subscription (even with typos like "strip" instead of "Stripe", or wanting to "keep the free trial")
-- "plan_feedback" — wants to CHANGE or MODIFY the plan (add/remove runs, different schedule, more/less volume, add speed work). NOT just asking what's in it.
-- "coaching_question" — asking what the plan says, asking about a specific week, or asking a training/race prep question. Examples: "what's week 2?", "what's my plan for week 3?", "what does my plan look like?", "how far is my long run this week?"
-- "other" — everything else`,
-    messages: [{ role: "user", content: message }],
-  });
-
-  const msgType =
-    classifyResponse.content[0].type === "text"
-      ? classifyResponse.content[0].text.trim().toLowerCase()
-      : "other";
-
-  if (msgType.startsWith("cancel")) {
+  // Deterministic cancel check — same pattern as coach/respond. Run before any LLM call
+  // so typos ("strip" instead of "Stripe"), extra context ("keep my 7 days free"), and
+  // unusual phrasing don't cause misclassification.
+  const isCancelByRegex = /\b(cancel|unsubscribe|stop\s+subscription|end\s+my\s+subscription|cancel\s+my\s+subscription)\b/i.test(message);
+  if (isCancelByRegex) {
     const { data: userData } = await supabase
       .from("users")
       .select("dashboard_token")
@@ -738,6 +726,32 @@ async function handleNonCadenceMessage(
       : "To cancel, just text Jake directly at this number and he'll take care of it right away. Sorry to see you go!";
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_cadence");
     return NextResponse.json({ ok: true });
+  }
+
+  // Classify remaining messages. Default to coaching_question — only route to plan_feedback
+  // when the message contains explicit modification language. This prevents "what's week 2?"
+  // from being misclassified as a plan change request just because it mentions "plan".
+  const PLAN_MODIFY_KEYWORDS = /\b(add|remove|drop|change|swap|switch|update|rebuild|redo|modify|adjust|fewer|more|less|different|restructure|redo|rewrite)\b/i;
+  const isPlanModify = PLAN_MODIFY_KEYWORDS.test(message);
+
+  // If it's clearly a modification request, confirm and skip the LLM classification.
+  // Otherwise, let Haiku distinguish coaching_question from other.
+  let msgType: string;
+  if (isPlanModify) {
+    msgType = "plan_feedback";
+  } else {
+    const classifyResponse = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 16,
+      system: `The athlete received their training plan and sent a message that is NOT a plan modification request. Classify it as one word:
+- "coaching_question" — asking what the plan says, asking about a specific week, asking about their mileage, or any training/race prep question. This is the DEFAULT — use it when in doubt.
+- "other" — genuinely off-topic (personal chat, emoji-only, test messages, etc.)`,
+      messages: [{ role: "user", content: message }],
+    });
+    msgType =
+      classifyResponse.content[0].type === "text"
+        ? classifyResponse.content[0].text.trim().toLowerCase()
+        : "coaching_question";
   }
 
   if (msgType.startsWith("plan_feedback")) {
