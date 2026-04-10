@@ -19,14 +19,6 @@ interface OnboardingRequest {
   dry_run?: boolean;
 }
 
-/** Extract JSON from Claude's response, handling markdown code blocks */
-function extractJSON(text: string): string {
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) return codeBlockMatch[1].trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (jsonMatch) return jsonMatch[0];
-  return text;
-}
 
 /** Send SMS and store in conversations. */
 async function sendAndStore(
@@ -124,7 +116,7 @@ const ULTRA_GOALS = ["30k", "50k", "50mi", "100k", "100mi"];
 
 const VALID_GOAL_BUCKETS = new Set([
   "mile", "5k", "10k", "half_marathon", "marathon", "trail_race", "30k", "50k", "50mi", "100k", "100mi",
-  "sprint_tri", "olympic_tri", "70.3", "ironman", "cycling",
+  "cycling",
   "general_fitness", "return_to_running", "injury_recovery",
 ]);
 
@@ -500,7 +492,7 @@ function summarizeCollected(data: Record<string, unknown>): string {
   return lines.join("\n");
 }
 
-/** Extract structured training fields from a conversation using Claude Haiku. */
+/** Extract structured training fields from a conversation using Claude Haiku (tool use). */
 async function extractFields(
   messages: Array<{ role: "user" | "assistant"; content: string }>
 ): Promise<Record<string, unknown>> {
@@ -513,58 +505,64 @@ async function extractFields(
 
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 600,
-    system: `Extract training data from this conversation. Return ONLY valid JSON. Today is ${today}.
-
-Output format (include only fields that are clearly stated — use null for anything not mentioned):
-{
-  "name": string | null,
-  "goal": "mile"|"5k"|"10k"|"half_marathon"|"marathon"|"trail_race"|"30k"|"50k"|"50mi"|"100k"|"100mi"|"sprint_tri"|"olympic_tri"|"70.3"|"ironman"|"cycling"|"general_fitness"|"return_to_running"|"injury_recovery" | null,
-  "race_name": string | null,
-  "race_date": "YYYY-MM-DD" | null,
-  "goal_distance_miles": number | null,
-  "goal_time_minutes": number | null,
-  "training_days": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"] (any subset) | null,
-  "days_per_week": number | null,
-  "easy_pace": "M:SS" | null,
-  "tempo_pace": "M:SS" | null,
-  "interval_pace": "M:SS" | null,
-  "weekly_miles": number | null,
-  "recent_race_distance_km": number | null,
-  "recent_race_time_minutes": number | null,
-  "injury_notes": string | null,
-  "ultra_race_history": string | null,
-  "experience_years": number | null,
-  "other_races": [{"name": string|null, "date": "YYYY-MM-DD"|null, "priority": "B"|"C", "goal": string|null, "goal_distance_miles": number|null}] | null,
-  "timezone": string | null,
-  "strava_skipped": true | null,
-  "wants_speed_work": true | null
-}
+    max_tokens: 700,
+    system: `Extract training data clearly stated in this conversation and call save_training_fields. Today is ${today}.
 
 Rules:
-- Only extract data clearly stated in the conversation. Do not infer or guess.
-- goal: use "trail_race" for trail/mountain races that aren't standard road distances (e.g. a 5mi, 8.9mi, 15mi trail race). Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. IMPORTANT: if the athlete says they have no committed race — only aspirational/eventual talk ("maybe a marathon someday", "thinking about eventually") — use "return_to_running" or "general_fitness", NOT the race distance. The goal must reflect what they are actually training for right now, not what they might do later.
-- training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"]). When the athlete specifies a range with "through", "to", or "-" (e.g. "Tuesday through Thursday", "Tues-Thursday", "Mon-Wed"), expand it to ALL days in that range inclusive — "Tues-Thursday" → ["tuesday","wednesday","thursday"].
+- Only extract data clearly stated in the conversation. Do not infer or guess. Use null for anything not mentioned.
+- goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
+- training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
-- race_date: PREFER the athlete's (user-turn) stated date when they provide a specific day number. Only use a date from Dean's messages if the athlete never stated a specific day. If both mention a specific date and they differ by 1–2 days, always use the athlete's date. Only default to first of month if no specific date was ever given. Today is ${today}.
-- recent_race_distance_km: distance of the athlete's most-cited PR or recent road race (not the goal race). CRITICAL: extract ONLY from the athlete's own messages (user turns), NOT from coach messages about Strava data. If the coach mentions a Strava race (e.g. "Your best Strava effort is a 30K in 2:25") but the athlete states a different road race time, use the athlete's stated time. IMPORTANT: extract this even when the athlete qualifies the race (e.g. "it was net downhill", "when I was in better shape", "a while ago", "it was hilly"). Caveated times are still useful for calibration — always extract if a distance and time are both stated by the athlete.
-- recent_race_time_minutes: finishing time of the athlete's stated race in total float minutes. Extract from ATHLETE (user) messages only — ignore race times mentioned by the coach about Strava data. M:SS format means minutes:seconds — "18:45" → 18.75, "38:20" → 38.33. H:MM:SS or H:MM format — "1:05:30" → 65.5, "1:52" → 112.0. Never convert M:SS as if the first number were hours.
-- easy_pace: format "M:SS" (e.g. "8:30" means 8 minutes 30 seconds per mile)
-- timezone: IANA string when a location is mentioned (e.g. "Provo, UT" → "America/Denver", "San Francisco" → "America/Los_Angeles")
-- other_races: only B/C secondary races, not the main A race (goal/race_name/race_date). Use the same date precision rule as race_date — prefer the athlete's stated date, first-of-month only as last resort.
-- ultra_race_history: summarize any ultra or trail race background mentioned (e.g. "3 marathons PR 3:45, 2 trail halves, no prior ultras"). Populate whenever the athlete describes their racing/ultra history, even if they say they have none.
-- strava_skipped: set to true if the athlete explicitly says they don't have Strava, won't use it, or skip it. Leave null if the topic hasn't come up.
-- wants_speed_work: set to true if the athlete explicitly says they want to work on speed, get faster, improve their speed, or add speed work. Leave null if not mentioned.`,
+- race_date: prefer the athlete's stated specific date over Dean's. If both differ by 1–2 days, use athlete's. Only use first-of-month if no specific date was given. Today is ${today}.
+- recent_race_distance_km: from athlete's messages only (not coach Strava summaries). Extract even if caveated ("net downhill", "a while ago").
+- recent_race_time_minutes: from athlete's messages only. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5.
+- easy_pace: "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile).
+- timezone: IANA string from location ("Provo, UT" → "America/Denver").
+- other_races: B/C secondary races only, not the main A race.
+- ultra_race_history: summarize any ultra/trail background mentioned, even if none.
+- strava_skipped: true if athlete says they don't have or won't use Strava. Null otherwise.
+- wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.`,
     messages: [{ role: "user", content: transcript }],
+    tools: [{
+      name: "save_training_fields",
+      description: "Save the extracted training fields from the conversation.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          name: { type: ["string", "null"] },
+          goal: { type: ["string", "null"], enum: ["mile", "5k", "10k", "half_marathon", "marathon", "trail_race", "30k", "50k", "50mi", "100k", "100mi", "cycling", "general_fitness", "return_to_running", "injury_recovery", null] },
+          race_name: { type: ["string", "null"] },
+          race_date: { type: ["string", "null"], description: "YYYY-MM-DD" },
+          goal_distance_miles: { type: ["number", "null"] },
+          goal_time_minutes: { type: ["number", "null"] },
+          training_days: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "null" }] },
+          days_per_week: { type: ["number", "null"] },
+          easy_pace: { type: ["string", "null"] },
+          tempo_pace: { type: ["string", "null"] },
+          interval_pace: { type: ["string", "null"] },
+          weekly_miles: { type: ["number", "null"] },
+          recent_race_distance_km: { type: ["number", "null"] },
+          recent_race_time_minutes: { type: ["number", "null"] },
+          injury_notes: { type: ["string", "null"] },
+          ultra_race_history: { type: ["string", "null"] },
+          experience_years: { type: ["number", "null"] },
+          other_races: { oneOf: [{ type: "array", items: { type: "object" } }, { type: "null" }] },
+          timezone: { type: ["string", "null"] },
+          strava_skipped: { type: ["boolean", "null"] },
+          wants_speed_work: { type: ["boolean", "null"] },
+        },
+        required: [],
+      },
+    }],
+    tool_choice: { type: "tool" as const, name: "save_training_fields" },
   });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "{}";
-  try {
-    return JSON.parse(extractJSON(text)) as Record<string, unknown>;
-  } catch {
-    console.error("[onboarding] field extraction failed:", text);
-    return {};
+  const toolBlock = response.content.find(b => b.type === "tool_use" && b.name === "save_training_fields");
+  if (toolBlock && toolBlock.type === "tool_use") {
+    return (toolBlock.input as Record<string, unknown>) ?? {};
   }
+  console.error("[onboarding] extractFields: no tool_use block returned");
+  return {};
 }
 
 // ---------------------------------------------------------------------------

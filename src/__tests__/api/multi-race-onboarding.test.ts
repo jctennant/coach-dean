@@ -98,6 +98,12 @@ function mockLLMResponse(text: string) {
   });
 }
 
+function mockToolResponse(toolName: string, input: Record<string, unknown>) {
+  (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    content: [{ type: "tool_use", id: "tool-1", name: toolName, input }],
+  });
+}
+
 function onboardingUser(overrides: Record<string, unknown> = {}) {
   return {
     id: "user-001",
@@ -122,8 +128,8 @@ describe("Multi-race onboarding — extraction and data merging", () => {
 
     // Sonnet: continues conversation naturally
     mockLLMResponse("Got it — Snowbird in June is your A race, with Dipsea in July as a tune-up. Which days work best for training?");
-    // Haiku extraction: pulls out both races
-    mockLLMResponse(JSON.stringify({
+    // Haiku extraction (tool use): pulls out both races
+    mockToolResponse("save_training_fields", {
       name: "Jake",
       goal: "50k",
       race_name: "Cirque Series Snowbird",
@@ -133,7 +139,7 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       ],
       training_days: null,
       timezone: null,
-    }));
+    });
 
     await POST(makeRequest({ userId: "user-001", message: "I'm training for Snowbird 50k in June and Dipsea in July" }));
 
@@ -172,12 +178,12 @@ describe("Multi-race onboarding — extraction and data merging", () => {
 
     // Sonnet sees goal in system prompt "what you already know" and asks for schedule
     mockLLMResponse("Great! Which days of the week work best for training?");
-    mockLLMResponse(JSON.stringify({
+    mockToolResponse("save_training_fields", {
       goal: "marathon",
       race_name: "Boston Marathon",
       race_date: "2026-04-20",
       training_days: null,
-    }));
+    });
 
     await POST(makeRequest({ userId: "user-001", message: "Monday, Wednesday, Friday, Sunday" }));
 
@@ -195,14 +201,14 @@ describe("Multi-race onboarding — extraction and data merging", () => {
     });
 
     mockLLMResponse("Nice — a 22:30 5K is solid fitness! Which days do you prefer to train?");
-    // Haiku extracts race time → triggers VDOT calculation
-    mockLLMResponse(JSON.stringify({
+    // Haiku extracts race time → triggers VDOT calculation (tool use)
+    mockToolResponse("save_training_fields", {
       name: null,
       goal: "half_marathon",
       recent_race_distance_km: 5,
       recent_race_time_minutes: 22.5,
       training_days: null,
-    }));
+    });
 
     await POST(makeRequest({ userId: "user-001", message: "I ran a 22:30 5K last month" }));
 
@@ -239,8 +245,8 @@ describe("Multi-race onboarding — extraction and data merging", () => {
 
     // Sonnet: sends [READY]
     mockLLMResponse("Perfect, I have everything I need to build your plan!\n[READY]");
-    // Haiku: extraction with all data
-    mockLLMResponse(JSON.stringify({
+    // Haiku: extraction with all data (tool use)
+    mockToolResponse("save_training_fields", {
       goal: "50k",
       race_name: "Snowbird 50K",
       race_date: "2026-06-20",
@@ -249,7 +255,7 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       other_races: [
         { name: "Dipsea Race", date: "2026-07-12", priority: "B", goal: null }
       ],
-    }));
+    });
 
     await POST(makeRequest({ userId: "user-001", message: "Denver, CO" }));
 
@@ -270,11 +276,11 @@ describe("Multi-race onboarding — extraction and data merging", () => {
     });
 
     mockLLMResponse("What distance are you targeting?");
-    // Haiku returns an invalid goal bucket
-    mockLLMResponse(JSON.stringify({
-      goal: "triathlon",  // not in VALID_GOAL_BUCKETS
+    // Haiku returns an invalid goal bucket (tool use) — "sprint_tri" is no longer valid
+    mockToolResponse("save_training_fields", {
+      goal: "sprint_tri",  // not in VALID_GOAL_BUCKETS
       race_name: null,
-    }));
+    });
 
     await POST(makeRequest({ userId: "user-001", message: "I want to do a triathlon" }));
 
@@ -311,7 +317,7 @@ describe("Strava-connected onboarding", () => {
     });
 
     mockLLMResponse("Great pace for a half marathon build! Which days work best?");
-    mockLLMResponse(JSON.stringify({ goal: "half_marathon", training_days: null }));
+    mockToolResponse("save_training_fields", { goal: "half_marathon", training_days: null });
 
     await POST(makeRequest({ userId: "user-001", message: "I want to run a sub-2 half" }));
 

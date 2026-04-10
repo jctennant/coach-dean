@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Pre-launch reliability and architecture improvements
+
+**Type:** Improvement
+**Reported by:** Internal observation / architecture review
+**User feedback:** N/A
+**Root cause:** Several features carried inaccuracy risk or were architecturally fragile going into launch: (1) shoe mileage proxy counted miles since Strava connection, not per-shoe, making it systematically wrong; (2) triathlon goal types (sprint_tri, olympic_tri, 70.3, ironman) were accepted during onboarding but the plan generation code is running-only, producing confidently wrong coaching; (3) Haiku extraction calls used text parsing with regex fallbacks, causing silent `{}` returns on parse failure; (4) `after()` catch blocks had no alerting — errors were console-logged but invisible in production.
+**Fix / Change:**
+- **Removed shoe mileage proxy**: Dropped `totalTrackedMiles` and `dominantGear` from `CoachingSignals` and `buildCoachingSignalsBlock`. Shoe check advice was unreliable since it counted all Strava history, not actual shoe mileage.
+- **Removed triathlon goal types**: Dropped `sprint_tri`, `olympic_tri`, `70.3`, `ironman` from `VALID_GOAL_BUCKETS` and the Haiku extraction schema. The existing Dean prompt already handles triathletes gracefully by clarifying run-only focus.
+- **Tool use for Haiku extraction**: Replaced text-parsing JSON extraction in `extractAndStorePlanSessions` (plan session sync) and `extractFields` (onboarding field extraction) with forced tool calls (`tool_choice: {type: "tool"}`). Guarantees structured output — eliminates regex fallback and silent empty-object failures.
+- **Alerting on `after()` failures**: Added `trackEvent("after_error", ...)` in all `after()` catch blocks so production failures are visible in PostHog rather than only console logs.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`, `src/__tests__/api/multi-race-onboarding.test.ts`
+
+---
+
 ## 2026-04-10 — Week-1 rebuild support and post-rebuild SMS context
 
 **Type:** Improvement

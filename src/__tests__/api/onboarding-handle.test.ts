@@ -105,6 +105,13 @@ function mockLLMResponse(text: string) {
   });
 }
 
+/** Mock a Haiku tool-use response (for extractFields) */
+function mockToolResponse(toolName: string, input: Record<string, unknown>) {
+  (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    content: [{ type: "tool_use", id: "tool-1", name: toolName, input }],
+  });
+}
+
 // ---------- Tests ----------
 
 describe("POST /api/onboarding/handle — unknown/null step", () => {
@@ -148,8 +155,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
     // Sonnet call: normal response (no signals)
     mockLLMResponse("Great! What days of the week work best for training?");
-    // Haiku call: field extraction
-    mockLLMResponse('{"name": "Jake", "goal": null, "training_days": null}');
+    // Haiku call: field extraction (tool use)
+    mockToolResponse("save_training_fields", { name: "Jake", goal: null, training_days: null });
 
     await POST(makeRequest({ userId: "user-001", message: "I want to run a 5K" }));
 
@@ -173,8 +180,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
     // Sonnet: includes [READY] signal
     mockLLMResponse("Awesome, I have everything I need! Let's build your plan.\n[READY]");
-    // Haiku extraction
-    mockLLMResponse('{"name": "Jake", "goal": "5k", "training_days": ["tuesday","thursday","saturday"], "timezone": "America/New_York"}');
+    // Haiku extraction (tool use)
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: ["tuesday","thursday","saturday"], timezone: "America/New_York" });
 
     await POST(makeRequest({ userId: "user-001", message: "NYC, Monday Wednesday Friday" }));
 
@@ -195,8 +202,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
     // Sonnet: includes [STRAVA_LINK] placeholder
     mockLLMResponse("Do you use Strava? Tap here to connect: [STRAVA_LINK]");
-    // Haiku extraction
-    mockLLMResponse('{"name": "Jake", "goal": "marathon"}');
+    // Haiku extraction (tool use)
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "marathon" });
 
     await POST(makeRequest({ userId: "user-001", message: "I run marathons" }));
 
@@ -219,7 +226,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     });
 
     mockLLMResponse("Which days work for you?");
-    mockLLMResponse("{}");
+    mockToolResponse("save_training_fields", {});
 
     await POST(makeRequest({ userId: "user-001", message: "5K goal", dry_run: true }));
 
@@ -240,8 +247,8 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
 
     // Sonnet: conversation response after skip
     mockLLMResponse("No worries! Which days of the week work best for training?");
-    // Haiku: field extraction
-    mockLLMResponse("{}");
+    // Haiku: field extraction (tool use)
+    mockToolResponse("save_training_fields", {});
 
     await POST(makeRequest({ userId: "user-001", message: "skip" }));
 

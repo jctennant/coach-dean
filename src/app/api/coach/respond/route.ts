@@ -45,9 +45,7 @@ interface ActivityRow {
 interface CoachingSignals {
   avgCadenceSpm: number | null;          // avg spm across recent runs; flag if < 170
   weekOverWeekRampPct: number | null;    // % change between last two complete weeks
-  totalTrackedMiles: number;             // proxy for shoe mileage
   hasRecentLongEffort: boolean;          // run ≥ 10 mi or ≥ 75 min in last 14 days
-  dominantGear: string | null;           // most-used shoe name if available
   daysUntilRace: number | null;          // null if no race date or race has passed
 }
 
@@ -70,6 +68,7 @@ export async function POST(request: Request) {
         await processCoachRequest(body);
       } catch (err) {
         console.error("[coach/respond] unhandled error in after():", err);
+        void trackEvent(body.userId, "after_error", { trigger: body.trigger, error: String(err) });
       }
     });
     return NextResponse.json({ ok: true });
@@ -276,6 +275,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
         void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
       } catch (err) {
         console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
+        void trackEvent(userId, "after_error", { trigger: "rebuild_plan", error: String(err) });
         // Send fallback SMS so the user isn't left waiting for a link that never arrives
         try {
           await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"my plan\" to see your current version.");
@@ -1240,6 +1240,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         });
       } catch (err) {
         console.error("[coach/respond] sync_sessions trigger failed (initial_plan):", err);
+        void trackEvent(userId, "after_error", { trigger: "sync_sessions_initial_plan", error: String(err) });
       }
     });
 
@@ -1287,6 +1288,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         });
       } catch (err) {
         console.error("[coach/respond] sync_sessions trigger failed (weekly_recap):", err);
+        void trackEvent(userId, "after_error", { trigger: "sync_sessions_weekly_recap", error: String(err) });
       }
     });
   }
@@ -1321,6 +1323,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
             });
           } catch (err) {
             console.error("[coach/respond] rebuild_plan trigger failed:", err);
+            void trackEvent(userId, "after_error", { trigger: "rebuild_plan_trigger", error: String(err) });
           }
         });
       } else {
@@ -1862,9 +1865,6 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
     weekOverWeekRampPct = ((currentWeekMiles - lastCompletedWeekMiles) / lastCompletedWeekMiles) * 100;
   }
 
-  // Total tracked miles — rough shoe mileage proxy
-  const totalTrackedMiles = activities.reduce((s, a) => s + (a.distance_meters || 0) / 1609.34, 0);
-
   // Recent long effort: any run ≥ 10 miles or ≥ 75 min in the last 14 days
   const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const hasRecentLongEffort = activities.some(a => {
@@ -1875,13 +1875,6 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
     return miles >= 10 || minutes >= 75;
   });
 
-  // Most-used shoe from recent activities
-  const gearCounts: Record<string, number> = {};
-  for (const a of activities) {
-    if (a.gear_name) gearCounts[a.gear_name] = (gearCounts[a.gear_name] || 0) + 1;
-  }
-  const dominantGear = Object.entries(gearCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-
   // Days until race
   let daysUntilRace: number | null = null;
   if (raceDate) {
@@ -1890,7 +1883,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
     if (days >= 0) daysUntilRace = days;
   }
 
-  return { avgCadenceSpm, weekOverWeekRampPct, totalTrackedMiles, hasRecentLongEffort, dominantGear, daysUntilRace };
+  return { avgCadenceSpm, weekOverWeekRampPct, hasRecentLongEffort, daysUntilRace };
 }
 
 /**
@@ -2060,11 +2053,6 @@ function buildCoachingSignalsBlock(signals: CoachingSignals): string {
     }
   }
 
-  if (signals.totalTrackedMiles > 400) {
-    const gear = signals.dominantGear ? ` in their ${signals.dominantGear}` : "";
-    lines.push(`- Shoe mileage proxy: ~${Math.round(signals.totalTrackedMiles)} miles tracked since connecting${gear}. Most running shoes last 300–500 miles. Work a shoe check question into a natural moment (post-long-run, weekly recap) — e.g. "How are your shoes holding up? Most have about 400-500 miles in them before the cushioning breaks down."`);
-  }
-
   if (signals.hasRecentLongEffort) {
     lines.push(`- Long effort in the last 14 days (≥10 miles or ≥75 min). For these sessions, check in on fueling and hydration in your post-run feedback if the athlete hasn't mentioned it — e.g. "Did you fuel on that one? Anything over an hour starts to matter for recovery." One casual question only.`);
   }
@@ -2099,21 +2087,41 @@ async function extractAndStorePlanSessions(userId: string, planText: string): Pr
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 500,
-    system: `Extract the list of planned training sessions from this coaching message.
-Return ONLY valid JSON array, nothing else.
-Each session object: {"day": "Mon"|"Tue"|"Wed"|"Thu"|"Fri"|"Sat"|"Sun", "date": "M/D" (e.g. "3/10"), "label": "session description", "optional": false}
+    system: `Extract the list of planned training sessions from this coaching message and call save_plan_sessions.
 If a session starts with "(Optional)" or "Optional:", set "optional": true and strip that prefix from the label.
-Example: [{"day":"Tue","date":"3/10","label":"Easy 6.5mi","optional":false},{"day":"Fri","date":"3/12","label":"Strength + climbing drills 30 min","optional":true}]
-If no session list is found, return [].`,
+If no session list is found, call save_plan_sessions with an empty sessions array.`,
     messages: [{ role: "user", content: planText }],
+    tools: [{
+      name: "save_plan_sessions",
+      description: "Save the extracted training sessions from the plan message.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          sessions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                day: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+                date: { type: "string", description: "M/D format, e.g. 3/10" },
+                label: { type: "string", description: "Session description, e.g. Easy 6.5mi" },
+                optional: { type: "boolean" },
+              },
+              required: ["day", "date", "label", "optional"],
+            },
+          },
+        },
+        required: ["sessions"],
+      },
+    }],
+    tool_choice: { type: "tool" as const, name: "save_plan_sessions" },
   });
-  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "[]";
+
+  const toolBlock = response.content.find(b => b.type === "tool_use" && b.name === "save_plan_sessions");
   let sessions: Array<{ day: string; date: string; label: string; optional?: boolean }> = [];
-  try {
-    const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] || "[]");
-    if (Array.isArray(parsed)) sessions = parsed;
-  } catch {
-    // leave empty — no sessions to store
+  if (toolBlock && toolBlock.type === "tool_use") {
+    const input = toolBlock.input as { sessions?: unknown };
+    if (Array.isArray(input.sessions)) sessions = input.sessions as typeof sessions;
   }
 
   // Sanitize cross-training labels with incorrect units or suspiciously short durations.
