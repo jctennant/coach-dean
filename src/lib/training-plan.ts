@@ -475,12 +475,16 @@ No other text.`,
   const week1MileageTarget = prescribedWeek1Miles ?? week1ArcMileage;
   await supabase.from("training_state")
     .update({
-      ...(resetToWeek1 ? { current_week: 1 } : {}),
-      ...(resetToWeek1 && week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
-      ...(resetToWeek1 ? { weekly_plan_sessions: null } : {}),
-      // Week-1 mid-plan rebuild: update mileage target + clear future sessions (preserve past).
-      ...(!resetToWeek1 && week1Reset && week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
-      ...(!resetToWeek1 && week1Reset ? { weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json } : {}),
+      ...(resetToWeek1 ? {
+        current_week: 1,
+        ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
+        weekly_plan_sessions: null,
+      } : {}),
+      ...(!resetToWeek1 && week1Reset ? {
+        // Week-1 mid-plan rebuild: update mileage target + clear future sessions (preserve past).
+        ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
+        weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json,
+      } : {}),
     })
     .eq("user_id", userId);
 

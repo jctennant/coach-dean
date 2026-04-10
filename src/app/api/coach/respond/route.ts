@@ -164,34 +164,35 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
 
   const allRecentText = (conversationsData ?? []).map((m: { content: string }) => m.content).join(" ").toLowerCase();
 
-  // Use Haiku to classify whether the athlete requested a mileage/volume change.
-  // Regex was too fragile — "mileage looks good, add more tempo" matched "mileage" + "more"
-  // and incorrectly triggered mileage recalculation. Haiku understands that "more" modifies
-  // "tempo" here, not mileage. On failure, default to no mileage change (conservative —
-  // preserves existing target rather than risk silently shifting all week targets).
-  let wantsMileageChange = false;
-  let wantsDecrease = false;
-  try {
-    const mileageCheck = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 10,
-      system: `Classify the athlete's intent. Reply with exactly one word:
+  // Haiku classifies whether the athlete requested a mileage/volume change.
+  // Defaults to NO (conservative — preserves existing target if the call fails).
+  // Skipped for silent (admin) rebuilds — result is unused and NO is the right default.
+  type MileageIntent = "INCREASE" | "DECREASE" | "NO";
+  let mileageIntent: MileageIntent = "NO";
+  if (!silent) {
+    try {
+      const mileageCheck = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 10,
+        system: `Classify the athlete's intent. Reply with exactly one word:
 DECREASE — they explicitly asked to reduce weekly mileage or volume
 INCREASE — they explicitly asked to increase weekly mileage or volume
 NO — no mileage/volume change requested (e.g. adding workout types, fixing sessions, changing schedule)
 
 Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycling, HIIT). Only classify explicit mileage/volume requests.`,
-      messages: [{ role: "user", content: allRecentText.slice(-2000) }],
-    });
-    const classification = mileageCheck.content[0].type === "text"
-      ? mileageCheck.content[0].text.trim().toUpperCase()
-      : "NO";
-    wantsMileageChange = classification === "INCREASE" || classification === "DECREASE";
-    wantsDecrease = classification === "DECREASE";
-    console.log(`[handleRebuildPlan] mileage classification: ${classification}`);
-  } catch (err) {
-    console.error("[handleRebuildPlan] mileage classification failed (non-fatal):", err);
+        messages: [{ role: "user", content: allRecentText.slice(-2000) }],
+      });
+      const raw = mileageCheck.content[0].type === "text"
+        ? mileageCheck.content[0].text.trim().toUpperCase()
+        : "NO";
+      if (raw === "INCREASE" || raw === "DECREASE") mileageIntent = raw;
+      console.log(`[handleRebuildPlan] mileage classification: ${mileageIntent}`);
+    } catch (err) {
+      console.error("[handleRebuildPlan] mileage classification failed (non-fatal):", err);
+    }
   }
+  const wantsMileageChange = mileageIntent !== "NO";
+  const wantsDecrease = mileageIntent === "DECREASE";
 
   // Extract athlete-stated mileage from recent conversation.
   // When Strava data is incomplete (e.g. watch not syncing), the athlete often corrects us
@@ -263,7 +264,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
           {
             resetToWeek1: false,
             week1Reset: isWeek1Rebuild,
-            preservedSessions: isWeek1Rebuild ? preservedSessions : undefined,
+            preservedSessions,
             planReadyNote,
             bRaces: bCRaces.length > 0 ? bCRaces : undefined,
             wantsSpeedWork,
