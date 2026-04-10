@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fixed race date off-by-one; added explicit rest-day constraint to system prompt
+
+**Type:** Bug Fix (2 issues)
+**Reported by:** Conversation analysis email (2026-04-09 batch)
+**User feedback:** "Athlete said July 26th. Dean logged and confirmed July 27th. Taper timing, race-week scheduling, and countdown messaging will all be off by one day. (July 26, 2026 is indeed a Sunday — athlete is correct.)" / "Same user, same pattern. Athlete said September 26th. Dean stored September 27th. Likely a systemic off-by-one in date parsing."
+**Root cause (date off-by-one):** The Dean conversation prompt had an instruction: "After searching: always use the date from your search result, not the date the athlete stated." When web search returned a date 1 day off from what the athlete said (e.g. July 27 vs the correct July 26), Dean would use the search result. The Haiku extraction rule ("use the most specific date mentioned by either participant") then locked in Dean's (wrong) date even when the athlete had stated a different one.
+**Fix (date off-by-one):** (1) Changed the Dean instruction: when athlete stated a specific date and the search result is within 2 days of it, use the athlete's date — small calendar discrepancies in web results are common and athletes are usually right about their own races. Only override when the search shows a clearly different week/month. (2) Changed the Haiku extraction rule to explicitly prefer the athlete's (user-turn) stated date over any date Dean mentioned; only fall back to Dean's date if the athlete never gave a specific day.
+**Root cause (rest-day constraint):** The system prompt listed training days (e.g. "Monday–Saturday") but never explicitly enumerated the rest days. Claude could infer that unlisted days = rest, but it was an implicit constraint — confirmed by Weston's onboarding where Dean scheduled a Sunday run despite "I take Sunday off" being stated. The `initialPlanDaysConstraint` correctly constrained the partial current week but did not cover future-week previews included in the initial plan message.
+**Fix (rest-day constraint):** Added a pre-computed `restDays` array (all 7 days minus training_days) and injected it into the system prompt as an explicit `⚠️ REST DAYS — NEVER schedule a run on: [days]` constraint, flagged as a hard constraint that applies to all weeks including the initial plan and future-week previews.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-09 — Fixed partial week skewing Strava avg weekly mileage baseline low
 
 **Type:** Bug Fix
