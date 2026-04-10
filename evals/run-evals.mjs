@@ -47,11 +47,22 @@ function paceAtVDOTPct(vdot, pct) {
   return `${min}:${String(sec).padStart(2, "0")}/mi`;
 }
 
-function easyPaceRange(paceStr) {
+function easyPaceRange(paceStr, useMetric = false) {
   if (!paceStr) return "TBD";
   const match = paceStr.match(/(\d+):(\d+)/);
   if (!match) return paceStr;
   const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+  if (useMetric) {
+    const kmSec = Math.round(totalSec / 1.60934);
+    const rounded = Math.round(kmSec / 5) * 5;
+    const upper = rounded + 20;
+    const fmt = (s) => {
+      const min = Math.floor(s / 60);
+      const sec = s % 60;
+      return `${min}:${String(sec).padStart(2, "0")}`;
+    };
+    return `${fmt(rounded)}–${fmt(upper)}/km`;
+  }
   const rounded = Math.round(totalSec / 5) * 5;
   const upper = rounded + 30;
   const fmt = (s) => {
@@ -62,13 +73,28 @@ function easyPaceRange(paceStr) {
   return `${fmt(rounded)}–${fmt(upper)}/mi`;
 }
 
+function miPaceToKm(paceStr) {
+  if (!paceStr) return "TBD";
+  const match = paceStr.match(/(\d+):(\d+)/);
+  if (!match) return paceStr;
+  const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
+  const kmSec = Math.round(totalSec / 1.60934);
+  const min = Math.floor(kmSec / 60);
+  const sec = kmSec % 60;
+  return `${min}:${String(sec).padStart(2, "0")}/km`;
+}
+
 function getVDOTPaces(fixture) {
   const { user } = fixture;
+  const useMetric = user.preferred_units === "metric";
   // Use stored paces if available in fixture; compute from VDOT as fallback
-  const easy = user.easy_pace || paceAtVDOTPct(user.vdot, 0.65);
-  const tempo = user.tempo_pace || paceAtVDOTPct(user.vdot, 0.86);
-  const interval = user.interval_pace || paceAtVDOTPct(user.vdot, 0.98);
-  const easyRange = easyPaceRange(easy);
+  const easyMi = user.easy_pace || paceAtVDOTPct(user.vdot, 0.65);
+  const tempoMi = user.tempo_pace || paceAtVDOTPct(user.vdot, 0.86);
+  const intervalMi = user.interval_pace || paceAtVDOTPct(user.vdot, 0.98);
+  const easy = useMetric ? miPaceToKm(easyMi) : easyMi;
+  const tempo = useMetric ? miPaceToKm(tempoMi) : tempoMi;
+  const interval = useMetric ? miPaceToKm(intervalMi) : intervalMi;
+  const easyRange = easyPaceRange(easyMi, useMetric);
   return { easy, tempo, interval, easyRange };
 }
 
@@ -409,8 +435,8 @@ ${activityBlock}
 CURRENT TRAINING STATE:
 - Week ${user.current_week} of training, phase: ${phase.charAt(0).toUpperCase() + phase.slice(1)}${isDeload ? " — RECOVERY WEEK" : ""}
 ${isDeload ? `⚠️ RECOVERY WEEK: This week's target is ${weeklyTarget} mi — already reflects the recovery volume reduction. Use the stored target, do NOT compute a further reduction from recent average. No new quality sessions. Same number of runs, shorter distances.\n` : ""}
-- Weekly mileage target: ${weeklyTarget ? weeklyTarget + " mi" : "TBD"}${trigger === "weekly_recap" ? `\n- Progression target for NEXT week (week ${user.current_week + 1}): ~${Math.round(avgWeekly * 1.08)} mi (8% step up from recent average — use this as the plan total, not the stored weekly target)` : ""}
-⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${weekMileageSoFar.toFixed(1)} mi done so far this week (${user.runs_this_week || 0} run${(user.runs_this_week || 0) !== 1 ? "s" : ""}). This is the ONLY authoritative source for current week mileage — computed directly from Strava. NEVER compute week mileage yourself by summing individual run mentions. Each week resets on Monday. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to this figure immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.
+- Weekly mileage target: ${weeklyTarget ? (user.preferred_units === "metric" ? `${(weeklyTarget * 1.60934).toFixed(0)} km` : weeklyTarget + " mi") : "TBD"}${trigger === "weekly_recap" ? `\n- Progression target for NEXT week (week ${user.current_week + 1}): ~${user.preferred_units === "metric" ? `${(Math.round(avgWeekly * 1.08) * 1.60934).toFixed(0)} km` : Math.round(avgWeekly * 1.08) + " mi"} (8% step up from recent average — use this as the plan total, not the stored weekly target)` : ""}
+⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${user.preferred_units === "metric" ? (weekMileageSoFar * 1.60934).toFixed(1) + " km" : weekMileageSoFar.toFixed(1) + " mi"} done so far this week (${user.runs_this_week || 0} run${(user.runs_this_week || 0) !== 1 ? "s" : ""}). This is the ONLY authoritative source for current week mileage — computed directly from Strava. NEVER compute week mileage yourself by summing individual run mentions. Each week resets on Monday. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to this figure immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.
 - Athlete preferred units: ${user.preferred_units || "imperial"}
 - Athlete VDOT: ${user.vdot}
 - Current paces (Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth):

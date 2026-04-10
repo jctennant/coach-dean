@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Training plan volume cap and 5 new eval fixtures
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Internal eval (plan-half-marathon-first-timer failing 5/10)
+**User feedback:** N/A
+**Root cause:** `getTargetPeakMileage()` used a 1.8x growth multiplier from base mileage, causing first-time half marathoners at 25 mpw to generate 45mi peak weeks — too aggressive. Target sweet spot for a first HM at 25mpw is 35–42mi.
+**Fix / Change:** Changed multiplier from `1.8` to `1.5` in `training-plan.ts`. At 25mpw base, peak now targets ~37.5mi (within the 35–42mi sweet spot). Also added 5 new eval fixtures covering previously untested scenarios: post_run feedback quality, weekly_recap trigger, taper phase messaging, general fitness users with no race, and metric-units pace display. Fixed eval harness to convert paces and distances to km for metric users.
+**Files changed:** src/lib/training-plan.ts, evals/run-evals.mjs, evals/fixtures/quality-post-run-feedback.json, evals/fixtures/quality-weekly-recap.json, evals/fixtures/date-taper-messaging.json, evals/fixtures/quality-general-fitness-no-race.json, evals/fixtures/pace-metric-user.json
+
+## 2026-04-10 — Fixed timezone extraction hallucinating invalid IANA zones for midwest cities
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** `parseTimezoneFromMessage()` in onboarding used Haiku with only coastal city examples (Denver, SF, NY), causing it to hallucinate `America/Columbus` (invalid IANA) for Columbus, OH.
+**Fix / Change:** Added 15+ city examples to the extraction prompt covering midwest (Chicago, Columbus, Indianapolis, Nashville, Dallas, Detroit), mountain (Phoenix), pacific (Seattle, Honolulu), and alaska.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-04-09 — Fixed Strava mileage including non-run activities and using 8-week average
 
 **Type:** Bug Fix
