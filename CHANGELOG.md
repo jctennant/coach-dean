@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — coach/respond fails silently when required fields are missing
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (manual rebuild_plan curl using user_id instead of userId)
+**User feedback:** N/A
+**Root cause:** `after()` swallows all errors inside the async callback, so a request with wrong/missing field names (e.g. `user_id` vs `userId`) returns `{ ok: true }` while silently doing nothing.
+**Fix / Change:** Added upfront validation of `userId` and `trigger` before entering `after()`. Missing fields now return a 400 immediately.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-10 — Dashboard km support and quality workout display fixes
 
 **Type:** Bug Fix

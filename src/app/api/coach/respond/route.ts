@@ -56,6 +56,10 @@ interface CoachingSignals {
 export async function POST(request: Request) {
   const body = await request.json();
 
+  if (!body.userId || !body.trigger) {
+    return NextResponse.json({ error: "Missing required fields: userId, trigger" }, { status: 400 });
+  }
+
   // For non-dry_run requests, return 200 immediately and do all the work in
   // after() so the caller (webhook) isn't left waiting on Claude + SMS time.
   if (!body.dry_run) {
