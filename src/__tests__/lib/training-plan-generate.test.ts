@@ -300,6 +300,47 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     expect(capturedUpdate).not.toHaveProperty("weekly_plan_sessions");
   });
 
+  it("updates weekly_mileage_target and clears future sessions (keeps preserved) when week1Reset is true", async () => {
+    // Week-1 mid-plan rebuild: athlete is in week 1 and wants changes. We should update
+    // the mileage target and replace sessions (clearing future ones, preserving past ones)
+    // so the dashboard reflects the new plan immediately.
+    let capturedUpdate: Record<string, unknown> | null = null;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_state") {
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+          capturedUpdate = payload;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    const pastSession = { day: "Mon", date: "3/16", label: "Easy 5mi" };
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ race_date: RACE_18W }),
+      30,
+      {
+        skipLinkSms: true,
+        prescribedWeek1Miles: 35,
+        resetToWeek1: false,
+        week1Reset: true,
+        preservedSessions: [pastSession],
+      },
+    );
+
+    // current_week must NOT be reset — athlete stays on week 1
+    expect(capturedUpdate).not.toHaveProperty("current_week");
+    // Mileage target updated to the new plan's week 1 value
+    expect(capturedUpdate).toMatchObject({ weekly_mileage_target: 35 });
+    // Past sessions preserved; future sessions cleared
+    expect(capturedUpdate).toMatchObject({ weekly_plan_sessions: [pastSession] });
+  });
+
   it("scopes the training_state update to the correct user_id", async () => {
     let capturedEqUserId: unknown;
 

@@ -4,6 +4,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Week-1 rebuild support and post-rebuild SMS context
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Mid-plan rebuilds always skipped updating `weekly_mileage_target` and `weekly_plan_sessions` (by design, to protect in-progress weeks). But for week-1 rebuilds, the athlete has just started and wants the updated plan reflected immediately — including mileage target on the dashboard. Post-rebuild SMSs also gave no indication of what changed, leaving athletes unsure whether their current week was affected.
+**Fix / Change:**
+- `handleRebuildPlan` now fetches `current_week` from `training_state`. When `current_week === 1`, it sets `week1Reset: true` and passes `preservedSessions` (sessions whose date is before today, so already-completed sessions aren't lost).
+- `generateAndSaveFullPlan` with `week1Reset: true` now updates `weekly_mileage_target` and replaces `weekly_plan_sessions` with the preserved past sessions (clearing future sessions so the new plan takes effect).
+- Post-rebuild dashboard SMS now appends a context line explaining what changed: content-only rebuild → "Your upcoming weeks have been updated. Your current week is unchanged." / mileage rebuild → "Your plan has been updated with the adjusted mileage — your current week is unchanged." / week-1 rebuild → "Your plan has been fully regenerated starting this week."
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`, `src/__tests__/lib/training-plan-generate.test.ts`
+
+## 2026-04-10 — Plan rebuild preserves current week and honours workout preferences
+
+**Type:** Bug Fix + Improvement
+**Reported by:** User feedback (hill repeats / cycling not appearing; mileage target changing unexpectedly on rebuild)
+**User feedback:** "I asked for bike and hill repeats to be added but I can't actually see any of these" / "my target mileage changed across the board I think but I didn't request for that to be changed (including this week changed)"
+**Root cause:** Three separate issues: (1) Haiku enrichment never received the athlete's workout preferences (`other_notes` from onboarding_data), so hill repeats, HIIT, cycling etc. were never incorporated into `key_workout`/`notes`. (2) Every rebuild re-derived the mileage arc from the current Strava avg, which drifts over time — a content-only request ("add hill repeats") would silently change all mileage targets. (3) `weekly_plan_sessions` and `weekly_mileage_target` were cleared/overwritten on every rebuild, wiping the current week's in-progress sessions and mid-week target.
+**Fix / Change:** (1) Pass `other_notes` and `injury_notes` from the athlete's profile into the Haiku enrichment prompt so workout preferences are incorporated into future weeks. (2) Added `wantsMileageChange` detection (both increase and decrease keywords) — when no mileage change is requested, the arc anchors to the existing `weekly_mileage_target` instead of recalculating from Strava avg. (3) When `resetToWeek1: false` (all mid-plan rebuilds), skip updating `weekly_mileage_target` and `weekly_plan_sessions` — the current week is already in progress and those values are authoritative. Note: current week sessions are only updated by weekly recap, morning plan, or explicit in-conversation session swaps.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-plan-generate.test.ts`
+
+---
+
 ## 2026-04-10 — Fix dashboard showing phantom post-race week
 
 **Type:** Bug Fix

@@ -143,7 +143,7 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, wantsSpeedWork = false, otherNotes = null }: {
+  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, week1Reset = false, preservedSessions, planReadyNote, wantsSpeedWork = false, otherNotes = null }: {
     skipLinkSms?: boolean;
     prescribedWeek1Miles?: number;
     bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }>;
@@ -155,6 +155,19 @@ export async function generateAndSaveFullPlan(
      * mileage targets) so the user stays on their current week.
      */
     resetToWeek1?: boolean;
+    /**
+     * When true (and resetToWeek1 is false), this is a week-1 mid-plan rebuild.
+     * Unlike normal mid-plan rebuilds, week 1 rebuilds DO update weekly_mileage_target
+     * and weekly_plan_sessions (clearing future sessions, keeping past ones).
+     */
+    week1Reset?: boolean;
+    /**
+     * Past sessions to preserve when week1Reset is true. Sessions with dates before today
+     * are kept so context about completed/missed sessions isn't lost.
+     */
+    preservedSessions?: Array<{ day: string; date: string; label: string }> | null;
+    /** Custom context line appended to the post-rebuild dashboard SMS. */
+    planReadyNote?: string;
     /** When true, inject speed-work-first guidance into Haiku enrichment */
     wantsSpeedWork?: boolean;
     /** Athlete preferences from onboarding_data.other_notes (hill repeats, cycling, etc.) */
@@ -450,11 +463,14 @@ No other text.`,
   // Sync training_state: reset week counter if this is a new plan; sync mileage target.
   // When resetToWeek1 is true (new plan, new race, onboarding): reset everything —
   // week counter, mileage target, and session list.
-  // When resetToWeek1 is false (mid-plan rebuild — tweaking workouts, paces, etc.):
+  // When resetToWeek1 is false, week1Reset is false (normal mid-plan rebuild — tweaking workouts):
   // leave weekly_mileage_target and weekly_plan_sessions alone. The current week is
   // already in progress; overwriting these would change this week's target mid-week
   // and wipe Dean's carefully scheduled sessions. The arc mileage is already anchored
   // by the caller passing prescribedWeek1Miles = existingTarget.
+  // When resetToWeek1 is false, week1Reset is true (week-1 rebuild — first week plan changed):
+  // update the mileage target and replace sessions, but keep any past sessions (already
+  // completed/missed before today) so historical context isn't lost.
   const week1ArcMileage = planWeeks[0]?.mileage_target ?? null;
   const week1MileageTarget = prescribedWeek1Miles ?? week1ArcMileage;
   await supabase.from("training_state")
@@ -462,6 +478,9 @@ No other text.`,
       ...(resetToWeek1 ? { current_week: 1 } : {}),
       ...(resetToWeek1 && week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
       ...(resetToWeek1 ? { weekly_plan_sessions: null } : {}),
+      // Week-1 mid-plan rebuild: update mileage target + clear future sessions (preserve past).
+      ...(!resetToWeek1 && week1Reset && week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
+      ...(!resetToWeek1 && week1Reset ? { weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json } : {}),
     })
     .eq("user_id", userId);
 
@@ -482,8 +501,13 @@ No other text.`,
   if (!skipLinkSms) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const planUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
+    // For rebuilds, use the caller-supplied context note so the athlete knows exactly
+    // what changed. For new plans (onboarding), use the standard welcome message.
+    const smsBody = planReadyNote
+      ? `Your updated plan is ready: ${planUrl}\n\n${planReadyNote}`
+      : `Your full ${totalWeeks}-week training plan is ready: ${planUrl}\n\nI'll send you the specifics each week and keep this updated as your training progresses.`;
     try {
-      await sendSMS(phoneNumber, `Your full ${totalWeeks}-week training plan is ready: ${planUrl}\n\nI'll send you the specifics each week and keep this updated as your training progresses.`);
+      await sendSMS(phoneNumber, smsBody);
     } catch (err) {
       console.error("[generateAndSaveFullPlan] dashboard link SMS failed (non-fatal):", err);
     }

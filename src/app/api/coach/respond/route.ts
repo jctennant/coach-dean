@@ -130,7 +130,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
       ? supabase.from("activities").select("distance_meters, start_date").eq("user_id", userId).gte("start_date", eightWeeksAgo).in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
       : Promise.resolve({ data: null }),
     supabase.from("races").select("race_date, race_name, priority").eq("user_id", userId).gt("race_date", now.toISOString().slice(0, 10)).in("priority", ["B", "C"]),
-    supabase.from("training_state").select("weekly_mileage_target").eq("user_id", userId).single(),
+    supabase.from("training_state").select("weekly_mileage_target, current_week, weekly_plan_sessions").eq("user_id", userId).single(),
     supabase.from("conversations").select("role, content").eq("user_id", userId).order("created_at", { ascending: false }).limit(20),
   ]);
 
@@ -142,18 +142,56 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   }
 
   const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
-  const existingTarget = (stateData as { weekly_mileage_target: number | null } | null)?.weekly_mileage_target ?? null;
+  const typedStateData = stateData as { weekly_mileage_target: number | null; current_week: number | null; weekly_plan_sessions: unknown } | null;
+  const existingTarget = typedStateData?.weekly_mileage_target ?? null;
+  const currentWeek = typedStateData?.current_week ?? 1;
+
+  // When rebuilding in week 1, we allow a full week 1 regeneration (update mileage target +
+  // sessions) but preserve any sessions whose date has already passed — the athlete may have
+  // already completed or missed those sessions and wiping them loses context.
+  const isWeek1Rebuild = currentWeek === 1;
+  const rawSessions = typedStateData?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
+  let preservedSessions: Array<{ day: string; date: string; label: string }> | null = null;
+  if (isWeek1Rebuild && rawSessions) {
+    const todayMonth = now.getMonth() + 1;
+    const todayDay = now.getDate();
+    const past = rawSessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      return !isNaN(m) && !isNaN(d) && (m < todayMonth || (m === todayMonth && d < todayDay));
+    });
+    preservedSessions = past.length > 0 ? past : null;
+  }
 
   const allRecentText = (conversationsData ?? []).map((m: { content: string }) => m.content).join(" ").toLowerCase();
 
-  // Detect explicit mileage change requests.
-  // wantsDecrease: user wants to run less.
-  // wantsIncrease: user wants to run more.
-  // When neither is true, the rebuild is content-only (add workouts, fix sessions, etc.)
-  // and we should hold mileage constant rather than re-deriving from Strava avg.
-  const wantsDecrease = /\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b/.test(allRecentText);
-  const wantsIncrease = /\b(more|higher|increase|ramp.?up|bump|add)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(more|higher|increase|ramp.?up|bump|add)\b/.test(allRecentText);
-  const wantsMileageChange = wantsDecrease || wantsIncrease;
+  // Use Haiku to classify whether the athlete requested a mileage/volume change.
+  // Regex was too fragile — "mileage looks good, add more tempo" matched "mileage" + "more"
+  // and incorrectly triggered mileage recalculation. Haiku understands that "more" modifies
+  // "tempo" here, not mileage. On failure, default to no mileage change (conservative —
+  // preserves existing target rather than risk silently shifting all week targets).
+  let wantsMileageChange = false;
+  let wantsDecrease = false;
+  try {
+    const mileageCheck = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 10,
+      system: `Classify the athlete's intent. Reply with exactly one word:
+DECREASE — they explicitly asked to reduce weekly mileage or volume
+INCREASE — they explicitly asked to increase weekly mileage or volume
+NO — no mileage/volume change requested (e.g. adding workout types, fixing sessions, changing schedule)
+
+Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycling, HIIT). Only classify explicit mileage/volume requests.`,
+      messages: [{ role: "user", content: allRecentText.slice(-2000) }],
+    });
+    const classification = mileageCheck.content[0].type === "text"
+      ? mileageCheck.content[0].text.trim().toUpperCase()
+      : "NO";
+    wantsMileageChange = classification === "INCREASE" || classification === "DECREASE";
+    wantsDecrease = classification === "DECREASE";
+    console.log(`[handleRebuildPlan] mileage classification: ${classification}`);
+  } catch (err) {
+    console.error("[handleRebuildPlan] mileage classification failed (non-fatal):", err);
+  }
 
   // Extract athlete-stated mileage from recent conversation.
   // When Strava data is incomplete (e.g. watch not syncing), the athlete often corrects us
@@ -200,6 +238,16 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   const wantsSpeedWork = !!onboardingData.wants_speed_work;
   const otherNotes = (onboardingData.other_notes as string | null) ?? null;
 
+  // Craft a context line for the post-rebuild SMS so the athlete knows what changed.
+  // This is appended to the dashboard link so they're not left wondering if their
+  // current week was affected or just the upcoming weeks.
+  const planReadyNote = silent ? undefined
+    : isWeek1Rebuild
+    ? "Your plan has been fully regenerated starting this week. Check your dashboard for the updated schedule."
+    : wantsMileageChange
+    ? "Your plan has been updated with the adjusted mileage — your current week is unchanged."
+    : "Your upcoming weeks have been updated with your changes. Your current week is unchanged.";
+
   if (!dryRun) {
     // Run generateAndSaveFullPlan in after() so this function returns immediately.
     // The caller (linq webhook's after() or the wantsRebuild after()) only needs to
@@ -212,7 +260,17 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
           phoneNumber,
           profile as Record<string, unknown> | null,
           avgWeeklyMileage,
-          { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase, skipLinkSms: silent, otherNotes }
+          {
+            resetToWeek1: false,
+            week1Reset: isWeek1Rebuild,
+            preservedSessions: isWeek1Rebuild ? preservedSessions : undefined,
+            planReadyNote,
+            bRaces: bCRaces.length > 0 ? bCRaces : undefined,
+            wantsSpeedWork,
+            prescribedWeek1Miles: rebuildBase,
+            skipLinkSms: silent,
+            otherNotes,
+          }
         );
         void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
       } catch (err) {
