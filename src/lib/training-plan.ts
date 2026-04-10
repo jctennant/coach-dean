@@ -91,8 +91,8 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   } else {
     hardCap = 60; floor = 20;
   }
-  // Allow up to 80% growth from base, but never outside [floor, hardCap]
-  return Math.max(Math.min(baseMileage * 1.8, hardCap), floor);
+  // Allow up to 50% growth from base, but never outside [floor, hardCap]
+  return Math.max(Math.min(baseMileage * 1.5, hardCap), floor);
 }
 
 /**

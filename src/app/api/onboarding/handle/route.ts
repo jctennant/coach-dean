@@ -250,6 +250,7 @@ ${isFirstResponse
 STRAVA:
 Ask about Strava as your NEXT question once you have the athlete's name and goal — before asking for race times, pace, or weekly mileage. Strava can provide all of that automatically, so don't collect fitness data manually if Strava might have it. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 When you ask, briefly explain the value in one sentence: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention it helps inform the training plan.
+CRITICAL: Even if the athlete volunteers race history, fitness data, or pace information before you've asked about Strava — do NOT follow up on that data yet. Ask about Strava first. You can come back to those details after the Strava question is answered. The Strava question takes priority over any follow-up on volunteered fitness data.
 IMPORTANT: When you ask about Strava, make it a standalone turn — do not combine it with other questions (training days, pace, etc.) in the same message. Ask only the Strava question in that message. Ask other questions in your next turn after the user responds. This prevents you from re-asking questions the user already answered when they were bundled with the Strava link.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message — never embedded inline in a sentence (e.g. never "connect here: [STRAVA_LINK]."). End your question, then put [STRAVA_LINK] on a new line after.
 
@@ -800,7 +801,25 @@ async function parseTimezoneFromMessage(message: string): Promise<string | null>
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 50,
-    system: `Convert the location in this message to an IANA timezone string. Return ONLY the IANA string (e.g. "America/Denver", "America/Los_Angeles", "America/New_York"). If no location is mentioned, return "none".`,
+    system: `Convert the location in this message to an IANA timezone string. Return ONLY the IANA string. If no location is mentioned, return "none".
+
+Examples:
+- "San Francisco" → "America/Los_Angeles"
+- "Provo, UT" → "America/Denver"
+- "Denver" → "America/Denver"
+- "Chicago" → "America/Chicago"
+- "Columbus, OH" → "America/New_York"
+- "Detroit" → "America/Detroit"
+- "Indianapolis" → "America/Indiana/Indianapolis"
+- "Nashville" → "America/Chicago"
+- "Dallas" → "America/Chicago"
+- "New York" → "America/New_York"
+- "Boston" → "America/New_York"
+- "Miami" → "America/New_York"
+- "Seattle" → "America/Los_Angeles"
+- "Phoenix" → "America/Phoenix"
+- "Honolulu" → "Pacific/Honolulu"
+- "Anchorage" → "America/Anchorage"`,
     messages: [{ role: "user", content: message }],
   });
   const raw =

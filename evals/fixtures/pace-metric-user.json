@@ -1,0 +1,48 @@
+{
+  "id": "pace-metric-user",
+  "description": "Metric-units user asks about their easy pace. All pace guidance must be in min/km, not min/mi. Distance must be in km.",
+  "category": "pace_accuracy",
+  "trigger": "user_message",
+  "today": "2026-04-09",
+  "user": {
+    "name": "Lena",
+    "timezone": "Europe/London",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "London Half Marathon",
+    "goal_race_date": "2026-06-14",
+    "goal_time_minutes": 105,
+    "current_week": 6,
+    "current_phase": "build",
+    "vdot": 50,
+    "easy_pace": "8:45/mi",
+    "tempo_pace": "6:59/mi",
+    "interval_pace": "6:17/mi",
+    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "preferred_units": "metric",
+    "weekly_mileage_target": 50,
+    "miles_logged_this_week": 16,
+    "runs_this_week": 2,
+    "injury_notes": "None",
+    "notes": "British runner, training in km. Goal is sub-1:45 half marathon.",
+    "recent_activities": [
+      { "date": "2026-04-09", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:50/mi" },
+      { "date": "2026-04-07", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:45/mi" },
+      { "date": "2026-04-05", "type": "Tempo Run", "distance_miles": 6.0, "pace": "7:05/mi" },
+      { "date": "2026-04-02", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:48/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "What pace should I be running my easy runs at?",
+  "ground_truth": {
+    "vdot": 50,
+    "easy_pace_per_mile": "8:45/mi",
+    "easy_pace_per_km": "5:26/km",
+    "easy_pace_range_per_km_low": "5:17/km",
+    "easy_pace_range_per_km_high": "5:35/km",
+    "preferred_units": "metric",
+    "must_use_metric": true,
+    "forbidden_phrases": ["/mi", "per mile", "min/mile", "miles per hour"],
+    "notes": "Lena has preferred_units: metric. She asked about easy pace. VDOT 50 easy pace is 8:45/mi = 5:26/km. Response MUST give pace in min/km (around 5:20-5:35/km range), NOT min/mi. Must NOT say '8:45 per mile' or '/mi' anywhere. Distance references should use km (e.g. '13km long run' not '8-mile long run'). The conversion: 8:45/mi ÷ 1.609 = ~5:26/km. Easy range is roughly 5:17–5:35/km."
+  }
+}

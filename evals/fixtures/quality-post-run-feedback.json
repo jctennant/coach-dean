@@ -1,0 +1,53 @@
+{
+  "id": "quality-post-run-feedback",
+  "description": "Dean receives a Strava post-run webhook for a 10-mile easy long run. Should acknowledge the run, give feedback on pace, and tie it to training progress.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-04-05",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-10-11",
+    "goal_time_minutes": 240,
+    "current_week": 8,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 42,
+    "miles_logged_this_week": 10,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "notes": "First marathon. Wants to break 4 hours.",
+    "recent_activities": [
+      { "date": "2026-04-05", "type": "Long Run", "distance_miles": 10.0, "pace": "9:10/mi" },
+      { "date": "2026-04-03", "type": "Tempo Run", "distance_miles": 6.0, "pace": "7:20/mi" },
+      { "date": "2026-04-02", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:05/mi" },
+      { "date": "2026-03-31", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:00/mi" },
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 9.0, "pace": "9:15/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-04-05",
+    "type": "Long Run",
+    "distance_miles": 10.0,
+    "pace": "9:10/mi",
+    "duration_minutes": 91
+  },
+  "ground_truth": {
+    "activity_distance": 10.0,
+    "activity_pace": "9:10/mi",
+    "easy_pace_range": "8:52–9:22/mi",
+    "must_acknowledge_run": true,
+    "must_mention_distance_or_pace": true,
+    "forbidden_phrases": ["rest day", "you didn't run", "no activity"],
+    "notes": "Dean received a post_run webhook for a 10-mile long run at 9:10/mi. That pace is squarely in the easy zone (9:02 easy pace ± 20s). Response should: (1) acknowledge the 10-mile run, (2) affirm the pace was appropriate for an easy long run, (3) reference training context (week 8, building toward Chicago Marathon). Must NOT treat this as a non-run day, must NOT give incorrect mileage, must NOT confuse pace as too fast or too slow."
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "id": "quality-general-fitness-no-race",
+  "description": "General fitness user with no race in DB asks for a workout recommendation. Should NOT mention races, race prep, or race-specific advice. Should give appropriate general fitness guidance.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-04-08",
+  "user": {
+    "name": "Kira",
+    "timezone": "America/Denver",
+    "strava_connected": false,
+    "goal": "general_fitness",
+    "goal_race": null,
+    "goal_race_date": null,
+    "goal_time_minutes": null,
+    "current_week": 5,
+    "current_phase": "base",
+    "vdot": 40,
+    "easy_pace": "10:14/mi",
+    "tempo_pace": "8:09/mi",
+    "interval_pace": "7:20/mi",
+    "training_days": ["tuesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 18,
+    "miles_logged_this_week": 6,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "notes": "Just wants to stay healthy and run consistently. No race planned.",
+    "recent_activities": [
+      { "date": "2026-04-07", "type": "Easy Run", "distance_miles": 6.0, "pace": "10:10/mi" },
+      { "date": "2026-04-04", "type": "Easy Run", "distance_miles": 5.0, "pace": "10:20/mi" },
+      { "date": "2026-04-02", "type": "Easy Run", "distance_miles": 4.0, "pace": "10:15/mi" },
+      { "date": "2026-03-31", "type": "Easy Run", "distance_miles": 6.0, "pace": "10:12/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "What should I do for my Thursday run this week?",
+  "ground_truth": {
+    "goal": "general_fitness",
+    "no_race_in_db": true,
+    "today": "Wednesday April 8",
+    "thursday_is_tomorrow": true,
+    "miles_logged_this_week": 6,
+    "weekly_mileage_target": 18,
+    "thursday_is_training_day": true,
+    "forbidden_phrases": ["race day", "race prep", "taper", "goal race", "marathon", "half marathon", "5k", "10k", "race week", "pre-race"],
+    "required_elements": ["Thursday workout recommendation", "distance or workout type", "pace guidance"],
+    "notes": "Today is Wednesday April 8. Kira has no race — she's running for general fitness. She asked what to do for her Thursday run (tomorrow). Response MUST: (1) give a concrete Thursday workout recommendation (distance + pace), (2) NOT mention races, race prep, or race-specific concepts like taper, (3) frame guidance around her general fitness goal. She's logged 6mi so far this week (Tuesday run), target is 18mi, so ~12mi remaining across Thursday and Saturday. A reasonable Thursday recommendation is 5-6mi easy at around 10:00-10:20/mi."
+  }
+}

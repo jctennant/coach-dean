@@ -1,0 +1,50 @@
+{
+  "id": "date-taper-messaging",
+  "description": "Runner is 2 weeks out from their marathon — deep in taper phase. Should get taper-appropriate messaging: reduced volume, trust your training, race prep focus. Must NOT suggest hard workouts or volume increases.",
+  "category": "date_week_correctness",
+  "trigger": "user_message",
+  "today": "2026-04-09",
+  "user": {
+    "name": "Derek",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Big Sur International Marathon",
+    "goal_race_date": "2026-04-26",
+    "goal_time_minutes": 210,
+    "current_week": 16,
+    "current_phase": "taper",
+    "vdot": 50,
+    "easy_pace": "8:45/mi",
+    "tempo_pace": "6:59/mi",
+    "interval_pace": "6:17/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 28,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "Goal is sub-3:30 marathon. This is week 16 of 18.",
+    "taper_peak_miles": 55,
+    "recent_activities": [
+      { "date": "2026-04-06", "type": "Easy Run", "distance_miles": 6.0, "pace": "8:50/mi" },
+      { "date": "2026-04-05", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:55/mi" },
+      { "date": "2026-04-03", "type": "Tempo Run", "distance_miles": 5.0, "pace": "7:05/mi" },
+      { "date": "2026-04-02", "type": "Easy Run", "distance_miles": 5.0, "pace": "8:48/mi" },
+      { "date": "2026-03-29", "type": "Long Run", "distance_miles": 14.0, "pace": "9:00/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "I feel like I'm losing fitness during taper. Should I add more miles this week?",
+  "ground_truth": {
+    "race_date": "2026-04-26",
+    "days_until_race": 17,
+    "current_phase": "taper",
+    "weekly_mileage_target": 28,
+    "peak_miles": 55,
+    "must_reassure_taper_is_correct": true,
+    "must_not_increase_volume": true,
+    "forbidden_phrases": ["add more miles", "increase your mileage", "extra run", "hard workout", "interval", "long run this week"],
+    "notes": "Derek is in taper, 17 days from race day (April 26). He's asking if he should add miles — a classic taper anxiety question. Response MUST: (1) reassure him that taper fatigue/feeling flat is normal and expected, (2) NOT recommend adding miles or intensity, (3) affirm that 28mi this week is the right target coming off a 55mi peak, (4) mention the physiological rationale (glycogen supercompensation, muscle repair). Must NOT suggest increasing volume or adding workouts. The 'taper madness' feeling is real and Dean should name it."
+  }
+}

@@ -165,22 +165,29 @@ export async function GET(request: Request) {
     .gte("start_date", eightWeeksAgo)
     .order("start_date", { ascending: true });
 
-  const runs8w = (activities8w ?? []).filter((a) => (a.distance_meters ?? 0) > 400);
+  // Only count running activity types — exclude cycling, swimming, etc.
+  const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+  const runs8w = (activities8w ?? []).filter(
+    (a) => (a.distance_meters ?? 0) > 400 && RUN_TYPES.has(a.activity_type ?? "")
+  );
 
   // --- Weekly breakdown ---
   const now = Date.now();
-  // Bucket each run into one of 4 rolling 2-week windows (most recent = week pair 0)
-  const weeklyMilesArr: number[] = [0, 0, 0, 0]; // index 0 = most recent week, 3 = oldest
+  // Bucket each run into one of 8 individual week slots (index 0 = most recent week)
+  const weeklyMilesArr: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
   for (const a of runs8w) {
     const daysAgo = (now - new Date(a.start_date!).getTime()) / (1000 * 60 * 60 * 24);
-    const weekIdx = Math.min(3, Math.floor(daysAgo / 7));
+    const weekIdx = Math.min(7, Math.floor(daysAgo / 7));
     weeklyMilesArr[weekIdx] += (a.distance_meters ?? 0) / 1609.34;
   }
 
   const recentWeeksMiles = weeklyMilesArr[0] + weeklyMilesArr[1]; // last 2 weeks
   const priorWeeksMiles = weeklyMilesArr[2] + weeklyMilesArr[3];  // prior 2 weeks
+
+  // Use 4-week average (more representative of current fitness than 8-week)
+  const last4WeeksMiles = weeklyMilesArr.slice(0, 4).reduce((s, m) => s + m, 0);
   const avgWeeklyMiles = runs8w.length > 0
-    ? Math.round((runs8w.reduce((s, a) => s + (a.distance_meters ?? 0), 0) / 1609.34) / 8)
+    ? Math.round(last4WeeksMiles / 4)
     : null;
 
   // Trend: last 2 weeks vs prior 2 weeks (only meaningful if we have enough data)

@@ -1,0 +1,47 @@
+{
+  "id": "quality-weekly-recap",
+  "description": "Sunday weekly recap trigger. Runner completed 4 of 5 planned runs (38 of 42 target miles). Recap should accurately state miles logged, note the missed run, and build a plan for next week.",
+  "category": "response_quality",
+  "trigger": "weekly_recap",
+  "today": "2026-04-12",
+  "user": {
+    "name": "Priya",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Brooklyn Half Marathon",
+    "goal_race_date": "2026-05-16",
+    "goal_time_minutes": 115,
+    "current_week": 10,
+    "current_phase": "build",
+    "vdot": 46,
+    "easy_pace": "9:20/mi",
+    "tempo_pace": "7:28/mi",
+    "interval_pace": "6:43/mi",
+    "training_days": ["tuesday", "wednesday", "friday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 38,
+    "miles_logged_this_week": 33,
+    "runs_this_week": 4,
+    "injury_notes": "None",
+    "notes": "Goal is sub-1:55 half marathon.",
+    "recent_activities": [
+      { "date": "2026-04-12", "type": "Long Run", "distance_miles": 11.0, "pace": "9:25/mi" },
+      { "date": "2026-04-11", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:18/mi" },
+      { "date": "2026-04-09", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:35/mi" },
+      { "date": "2026-04-08", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:22/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "ground_truth": {
+    "miles_this_week": 33,
+    "target_miles": 38,
+    "runs_completed": 4,
+    "runs_planned": 5,
+    "missed_run": "tuesday",
+    "weeks_until_race": 5,
+    "must_state_miles_correctly": true,
+    "forbidden_phrases": ["38 miles this week", "hit your target", "perfect week"],
+    "notes": "Priya logged 33 miles (not 38) across 4 runs this week. Tuesday was a planned training day but no activity was logged. The recap MUST: (1) state 33 miles accurately (not 38 or any other number), (2) acknowledge she missed one run (Tuesday), (3) frame it positively without being preachy, (4) preview next week's plan. Race is 5 weeks out (May 16 from April 12). Should NOT say she hit her 38-mile target. Should NOT fabricate a Tuesday run."
+  }
+}

@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fixed Strava mileage including non-run activities and using 8-week average
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth (onboarding observation)
+**User feedback:** "What's your frame of reference for the 20mile/week?" / "Yeah I think my current average is closer to 15"
+**Root cause:** Two compounding issues: (1) `runs8w` filter in strava callback was `distance_meters > 400` only — no activity type filter — so cycling, walking, and other Strava activities were included in the "average weekly miles" figure passed to Dean. (2) The average was computed over 8 weeks, which smooths over older (potentially higher) weeks and misrepresents current fitness. Gwyneth's last 4 weeks were 14, 16, 10, 17 (~14 avg) but the 8-week avg read as ~20.
+**Fix / Change:** (1) Added `RUN_TYPES` filter to `runs8w` — only Run, TrailRun, VirtualRun, Treadmill count toward mileage. (2) Changed `avgWeeklyMiles` to use a 4-week average (`last4WeeksMiles / 4`) instead of 8-week. This better represents current fitness and matches the user's mental model of "recent average". (3) Strengthened the STRAVA onboarding prompt with a CRITICAL rule: even if the athlete volunteers race history or fitness data before Strava is asked, ask about Strava first — do not follow up on volunteered data until after the Strava question is answered.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
 ## 2026-04-09 — Fixed onboarding asking "are you currently running?" after Strava connected
 
 **Type:** Bug Fix
