@@ -4,6 +4,40 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fixed wildly wrong mileage targets for beginner run/walk plans; fixed repeated cadence question
+
+**Type:** Bug Fix
+**Reported by:** User feedback (observed in production conversation)
+**User feedback:** "Why does it say I'm running 16 miles this week" / "But if I'm running 2 min walk 2 min 6 times, that's only 24 minutes. I can do 5.5 miles in 24 minutes?"
+**Root cause (mileage):** Two compounding issues. (1) `noHistoryDefault` for beginners with no Strava was 15mi, so the arc was built from a 15mi base even for a true zero-to-runner. (2) Time-based run/walk sessions ("Run 2 min, walk 2 min × 6 (~24 min total)") have no mileage in the label, so `parseMilesFromLabel` returned 0. Since `actualMiles = 0`, `syncArcCurrentWeek` didn't update `mileage_target` or `weekly_mileage_target` — both stayed at the 15mi arc default. (3) The system prompt didn't require a distance estimate for run/walk sessions, so they were purely time-based with no miles for the parser to find.
+**Root cause (cadence):** In `handleNonCadenceMessage`, the cadence question was unconditionally appended to EVERY coaching answer, even when the user was clearly confused or asking a follow-up question. Dean would add "Last thing — would you like a reminder..." to responses 3+ times in a row.
+**Fix / Change:** (1) Lowered `noHistoryDefault` for beginner from 15 → 8 miles in `training-plan.ts`. (2) Added fallback to `parseMilesFromLabel` to estimate miles from total minutes at ~13 min/mile for run/walk sessions. (3) Added prompt instructions in both SESSION DISTANCE FORMAT sections requiring run/walk interval sessions to include an approximate distance estimate: "Run 2 min, walk 2 min × 6 (~24 min, ~1.8mi)". (4) In `handleNonCadenceMessage`, check if the most recent assistant message already contained the cadence question — if so, skip re-appending it.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
+## 2026-04-09 — Dean incorrectly said he can't update the dashboard; rebuild also perpetuated wrong mileage target
+
+**Type:** Bug Fix
+**Reported by:** User feedback (observed in production conversation)
+**User feedback:** Dean said "I can't update the dashboard directly myself — the plan you're seeing is built by the system based on your profile." (twice) after user asked to fix a mismatch between prescribed sessions (~3-4mi) and the dashboard showing 16mi for week 1.
+**Root cause:** Two bugs: (1) The DASHBOARD UPDATES prompt instruction already said "Do not say I can't update the dashboard" but didn't explicitly cover the case where the dashboard shows *wrong/mismatched* data — Dean interpreted that as a system bug outside its control rather than a plan correction request. (2) `handleRebuildPlan` uses `existingTarget` as a floor for `rebuildBase`, so even if `[REBUILD_PLAN]` had been triggered, the rebuilt plan would have also started at 16mi (the wrong existing target), because the conversation didn't contain explicit decrease-vocabulary like "lower/reduce mileage".
+**Fix / Change:** (1) Strengthened the DASHBOARD UPDATES prompt instruction to explicitly cover correction/mismatch scenarios and explicitly forbid "I can't edit the system / it's auto-generated" responses. (2) Added `wantsCorrection` detection in `handleRebuildPlan` — when the conversation contains correction language (e.g. "way off", "doesn't match", "not updated", "showing wrong"), the `existingTarget` floor is skipped entirely, so the rebuild derives fresh from Strava avg or profile baseline rather than perpetuating a bad stored target.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-09 — Strava skip regex missed "I don't use Strava"
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake)
+**User feedback:** "feels like this should result in us skipping the strava question, no?" — user replied "I don't use strava" and got the Strava link re-sent instead of moving on.
+**Root cause:** `isSkip` regex in `handleStrava()` only matched `don't have`, not `don't use`. "I don't use strava" fell through to the catch-all that re-sends the connect link.
+**Fix / Change:** Added `don.?t use`, `i don.?t`, and `not on strava` to the skip regex.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-09 — Rebuild plan respects existing mileage target (floor/ceiling)
 
 **Type:** Bug Fix

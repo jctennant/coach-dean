@@ -222,7 +222,9 @@ export async function generateAndSaveFullPlan(
   // When there's no Strava history, use fitness_level to pick a sensible default rather
   // than a flat 15mi — intermediate/advanced users shouldn't get a beginner-tier arc.
   const fitnessLevel = (profile?.fitness_level as string | null) ?? "beginner";
-  const noHistoryDefault = fitnessLevel === "advanced" ? 30 : fitnessLevel === "intermediate" ? 20 : 15;
+  // Beginner lowered from 15 → 8: a true zero-to-runner does 3-6mi/week on run/walk
+  // plans; 15mi caused the arc to start at 15mi even when sessions were 24-min intervals.
+  const noHistoryDefault = fitnessLevel === "advanced" ? 30 : fitnessLevel === "intermediate" ? 20 : 8;
   const baseMileage = prescribedWeek1Miles
     ? Math.max(5, prescribedWeek1Miles)
     : Math.max(5, Math.round((avgWeeklyMileage ?? noHistoryDefault) * 2) / 2);

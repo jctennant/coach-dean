@@ -187,29 +187,23 @@ async function handleRebuildPlan(userId: string, dryRun: boolean): Promise<NextR
   const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
   const existingTarget = (stateData as { weekly_mileage_target: number | null } | null)?.weekly_mileage_target ?? null;
 
-  // Detect whether the conversation is asking to reduce volume. If so, the existing
-  // target acts as a ceiling (plan can decrease); otherwise it acts as a floor
-  // (rebuild never silently drops below what was already prescribed).
+  // Detect whether the conversation is asking to reduce volume. When true, cap the rebuild
+  // base at existingTarget so the new arc doesn't start higher than the current plan.
   const allRecentText = (conversationsResult.data ?? []).map(m => m.content).join(" ").toLowerCase();
   const wantsDecrease = /\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b/.test(allRecentText);
 
-  // Compute the effective base for the rebuild arc:
-  // - Default (increase or neutral): floor at existingTarget so Strava avg drift never silently lowers the plan.
-  // - Decrease request: allow going below existingTarget, capped at existingTarget as a ceiling.
+  // Compute the effective base for the rebuild arc.
+  // Use Strava avg when available (authoritative current fitness).
+  // Apply a ceiling at existingTarget only when the user wants to decrease — prevents the arc
+  // from accidentally starting above the current plan when Strava avg has drifted higher.
+  // No floor: the stored target may be wrong and flooring at it perpetuates bad data.
   let rebuildBase: number | undefined;
-  if (existingTarget !== null) {
-    if (wantsDecrease) {
-      // User wants less — use Strava avg (could be lower), ceiling at existing target
-      rebuildBase = avgWeeklyMileage !== null
-        ? Math.min(avgWeeklyMileage, existingTarget)
-        : existingTarget;
-    } else {
-      // Default — floor at existing target so rebuild never decreases accidentally
-      rebuildBase = avgWeeklyMileage !== null
-        ? Math.max(avgWeeklyMileage, existingTarget)
-        : existingTarget;
-    }
+  if (avgWeeklyMileage !== null) {
+    rebuildBase = wantsDecrease
+      ? Math.min(avgWeeklyMileage, existingTarget ?? avgWeeklyMileage)
+      : avgWeeklyMileage;
   }
+  // No Strava: leave rebuildBase undefined → generateAndSaveFullPlan derives from profile.
 
   const wantsSpeedWork = !!((user.onboarding_data as Record<string, unknown> | null)?.wants_speed_work);
 
@@ -2036,10 +2030,18 @@ async function syncArcCurrentWeek(
     const sessions = (stateRow?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
     if (sessions.length === 0) return;
 
-    // Compute actual mileage from session labels
+    // Compute actual mileage from session labels.
+    // For run/walk interval sessions (time-based, e.g. "Run 2 min, walk 2 min × 6 (~24 min total)")
+    // that don't include explicit miles, estimate from total minutes at ~13 min/mile as a fallback.
     function parseMilesFromLabel(label: string): number {
       const m = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
-      return m ? parseFloat(m[1]!) : 0;
+      if (m) return parseFloat(m[1]!);
+      // Fallback: time-based run/walk session → estimate at ~13 min/mile
+      if (/\b(run|walk)\b/i.test(label)) {
+        const totalMinMatch = label.match(/~?(\d+)\s*min(?:\s+total)?[)]/i);
+        if (totalMinMatch) return Math.round(parseInt(totalMinMatch[1]) / 13 * 10) / 10;
+      }
+      return 0;
     }
     const actualMiles = Math.round(sessions.reduce((sum, s) => sum + parseMilesFromLabel(s.label), 0) * 2) / 2;
 
@@ -2922,7 +2924,7 @@ FORMATTING:
   Wed 3/11 · Tempo 4mi (2mi @ 8:45)
   Sat 3/14 · Long run 8mi easy
   Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun), M/D dates, and · as the separator. Never use full day names ("Monday, March 9"), colons, or dashes as separators for session lists. Blank lines split into separate SMS bubbles — keep the session list as one unbroken block. Always sort sessions in chronological order by date — never group by workout type (e.g. runs first, then strength). A strength session on Tuesday belongs before a run on Thursday.
-- SESSION DISTANCE FORMAT — CRITICAL: Running sessions must always include distance in miles (e.g. "Easy 5mi", "Tempo 4mi", "Long run 8mi"). Non-running sessions — strength, cross-training, swimming, cycling, yoga, spin, Zwift, rowing, aqua jogging, or any other non-running activity — must NEVER include a distance in miles, even if you know the distance. Use duration or just the activity name instead (e.g. "Strength + mobility 30 min", "Master's swim", "Zwift ride 60 min", "Spin class"). This format is how the system counts weekly running mileage — putting miles on a non-running session will cause it to be incorrectly counted as running volume.
+- SESSION DISTANCE FORMAT — CRITICAL: Running sessions must always include distance in miles (e.g. "Easy 5mi", "Tempo 4mi", "Long run 8mi"). Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate in parentheses after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~1.8mi)". Estimate at ~13 min/mile for a beginner run/walk pace. This allows the system to track weekly volume accurately. Non-running sessions — strength, cross-training, swimming, cycling, yoga, spin, Zwift, rowing, aqua jogging, or any other non-running activity — must NEVER include a distance in miles, even if you know the distance. Use duration or just the activity name instead (e.g. "Strength + mobility 30 min", "Master's swim", "Zwift ride 60 min", "Spin class"). This format is how the system counts weekly running mileage — putting miles on a non-running session will cause it to be incorrectly counted as running volume.
 
 ${isRunReview ? `TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
 - Lead with genuine excitement — celebrate the effort and the fitness it reflects
@@ -3672,9 +3674,9 @@ If they clearly want it as a permanent schedule change (e.g. "from now on", "eve
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
 
-DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." Confirm the change you're making and tell them the dashboard will reflect it within moments. The system updates the dashboard automatically whenever you commit to a plan change in your response.
+DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." This includes situations where the dashboard is showing wrong or mismatched data (e.g. "the dashboard shows 16 miles but you only gave me two short sessions" — that is a plan correction request, not a system bug outside your control). In all cases: confirm the change you're making and tell them the dashboard will reflect it. Do NOT say you can't edit the system, can't touch the database, or that the plan is auto-generated. Use [REBUILD_PLAN] and confirm.
 
-FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "update the whole plan", "rebuild my plan with more tempo", "add speed work throughout" — send a short 1-2 sentence confirmation of what's changing, then add [REBUILD_PLAN] on its own line at the very end. The tag is stripped before sending. Do NOT include a session list or week-by-week schedule in this message — just the confirmation and the tag. The updated dashboard link will arrive in a separate message automatically. Example: "On it — rebuilding your plan with tempo sessions added from week 2 onward. Dashboard link coming shortly.\n\n[REBUILD_PLAN]"${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
+FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "update the whole plan", "rebuild my plan with more tempo", "add speed work throughout", "the dashboard shows the wrong mileage, can you fix it" — send a short 1-2 sentence confirmation of what's changing, then add [REBUILD_PLAN] on its own line at the very end. The tag is stripped before sending. Do NOT include a session list or week-by-week schedule in this message — just the confirmation and the tag. The updated dashboard link will arrive in a separate message automatically. Example: "On it — rebuilding your plan with tempo sessions added from week 2 onward. Dashboard link coming shortly.\n\n[REBUILD_PLAN]"${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 
@@ -3976,7 +3978,7 @@ Mon 3/2 · Easy 3mi @ easy effort
 Tue 3/3 · Strength + mobility 20 min
 Wed 3/4 · Tempo 4mi (2mi @ 8:45) — builds lactate threshold, the engine for your goal pace
 Sat 3/7 · Easy 4mi
-SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 3mi"). Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 20 min", "Zwift ride 60 min"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
+SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 3mi"). Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~1.8mi)". Estimate at ~13 min/mile for beginner run/walk pace. Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 20 min", "Zwift ride 60 min"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
 QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified. Format the label to show the breakdown in parentheses. Examples:
 - "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
 - "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"

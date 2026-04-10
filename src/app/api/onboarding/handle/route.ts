@@ -575,7 +575,7 @@ async function handleStrava(
   chatId?: string | null
 ): Promise<NextResponse> {
   const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-  const isSkip = /\b(skip|no strava|don.?t have|no thanks|nope|later|next|without it)\b/i.test(message);
+  const isSkip = /\b(skip|no strava|don.?t have|don.?t use|no thanks|nope|later|next|without it|i don.?t|not on strava)\b/i.test(message);
 
   // If asking about Strava (with or without a question mark)
   const isAskingAboutStrava = !isSkip && /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
@@ -709,6 +709,20 @@ async function handleNonCadenceMessage(
   const cadenceQuestion =
     "Last thing — would you like a reminder about your upcoming workouts the morning of, or the evening before? If not, I'll just send you a weekly plan every Sunday.";
 
+  // Don't re-ask the cadence question if it was already in the most recent assistant message.
+  // Repeating it when the user is asking a follow-up question (especially a confused one) is
+  // annoying and erodes trust — the reengagement cron will handle stalls after 3 days.
+  const { data: recentMsgs } = await supabase
+    .from("conversations")
+    .select("role, content")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(3);
+  const lastAssistantMsg = (recentMsgs ?? []).find(m => m.role === "assistant");
+  const cadenceAlreadyAsked = lastAssistantMsg
+    ? lastAssistantMsg.content.includes("morning of") || lastAssistantMsg.content.includes("evening before")
+    : false;
+
   // Deterministic cancel check — same pattern as coach/respond. Run before any LLM call
   // so typos ("strip" instead of "Stripe"), extra context ("keep my 7 days free"), and
   // unusual phrasing don't cause misclassification.
@@ -807,7 +821,7 @@ async function handleNonCadenceMessage(
     const answerResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 300,
-      system: `You are Coach Dean. This is an ongoing coaching relationship — do NOT use greeting phrases like "Thanks for reaching out!" or "Hi!" — jump straight into the answer. Answer the athlete's coaching question directly in 2-4 sentences. Do not explain your reasoning or approach — just answer. If the question is about a product/dashboard feature you can't control, say "Got it — I'll pass that along." in one sentence. After your answer, on a new line, add exactly: "${cadenceQuestion}"${planContext}`,
+      system: `You are Coach Dean. This is an ongoing coaching relationship — do NOT use greeting phrases like "Thanks for reaching out!" or "Hi!" — jump straight into the answer. Answer the athlete's coaching question directly in 2-4 sentences. Do not explain your reasoning or approach — just answer. If the question is about a product/dashboard feature you can't control, say "Got it — I'll pass that along." in one sentence.${!cadenceAlreadyAsked ? ` After your answer, on a new line, add exactly: "${cadenceQuestion}"` : ""}${planContext}`,
       messages: [{ role: "user", content: message }],
     });
     const answer =
