@@ -212,7 +212,7 @@ Required before signaling [READY]:
 - Training schedule (which days of the week work best)
 - Race date (if they have a named race — MANDATORY: always web_search the exact date, never state one from memory)
 - Fitness baseline: a recent race PR, current easy pace, OR Strava is connected
-- Current weekly mileage — REQUIRED if Strava is not connected. Ask directly: "How many miles are you running per week right now?" or "Are you currently running, and if so, about how many miles per week?" If they say they're not running yet or just starting out, that is also useful — record as 0. Do not skip this even if you have their pace — mileage and pace are independent.
+- Current weekly mileage — REQUIRED if Strava is not connected AND not already shown in the STRAVA context above. If Strava is connected and shows "Recent avg: ~X mi/week", that IS the mileage baseline — do NOT ask "are you currently running" or "how many miles per week." That data is already known. Only ask if Strava is not connected or shows no weekly mileage. Ask directly: "How many miles are you running per week right now?" or "Are you currently running, and if so, about how many miles per week?" If they say they're not running yet or just starting out, that is also useful — record as 0. Do not skip this even if you have their pace — mileage and pace are independent.
 
 Required ONLY for ultra goals (30k, 50k, 50mi, 100k, 100mi) — must collect before [READY]:
 - Ultra and trail race background: how many ultras have they done? Any trail races? This is essential for planning.

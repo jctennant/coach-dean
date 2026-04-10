@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Fixed onboarding asking "are you currently running?" after Strava connected
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal observation during onboarding)
+**User feedback:** "Dean asked if I'm currently running after he already pulled my Strava which has tons of details on it"
+**Root cause:** System prompt said weekly mileage is "REQUIRED if Strava is not connected" but gave no explicit instruction to skip the question when Strava IS connected and shows avg weekly miles. Claude was asking anyway because the negative case wasn't spelled out.
+**Fix / Change:** Made the rule explicit in both directions: if Strava is connected AND shows "Recent avg: ~X mi/week", treat that as known and do NOT ask about current running or mileage.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
 ## 2026-04-09 — Optional cross-training sessions visible on dashboard
 
 **Type:** Feature
