@@ -278,24 +278,20 @@ export default async function DashboardPage({
       ? buildDailyPlan(currentWeek, effectiveTrainingDays)
       : null);
 
-  // Partial-week logic — must run before week1Monday is used so date anchors are correct.
-  // If the user onboarded mid-week with no remaining workouts (e.g. Saturday, no Sunday run),
-  // shift week 1 forward to start on Monday. Everything downstream (date labels, activity
-  // bucketing, race week badge) uses the adjusted anchor automatically.
   const todayDayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
   const todayDayIdx = DAY_ORDER.indexOf(todayDayName);
-  const remainingWorkoutsThisWeek = dailyPlan
-    ? dailyPlan.filter(d => DAY_ORDER.indexOf(d.day) >= todayDayIdx && d.type !== "rest")
-    : null;
-  const noRemainingWorkouts = remainingWorkoutsThisWeek !== null && remainingWorkoutsThisWeek.length === 0;
 
-  // Week 1 anchor: Monday of the plan-creation week, shifted forward 7 days when no workouts remain.
+  // Week 1 anchor: Monday of the plan-creation week.
+  // We no longer shift forward when a week has no remaining workouts — that shift caused
+  // the last plan week to appear one week after the race date (e.g. race May 2 showing in
+  // week 3 while week 4 displayed as May 4-10 post-race). A week that's almost over
+  // correctly shows its past days dimmed; the next week is the naturally upcoming one.
   const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
   const planCreatedAt = new Date(planData.created_at as string);
   const dayOfWeek = planCreatedAt.getUTCDay(); // 0=Sun, 1=Mon...
   const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
   const week1Monday = new Date(planCreatedAt);
-  week1Monday.setUTCDate(week1Monday.getUTCDate() + daysToMonday + (noRemainingWorkouts ? 7 : 0));
+  week1Monday.setUTCDate(week1Monday.getUTCDate() + daysToMonday);
   week1Monday.setUTCHours(0, 0, 0, 0);
 
   const actualMilesByWeek: Record<number, number> = {};
@@ -466,9 +462,7 @@ export default async function DashboardPage({
               <div className="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden">
                 {dailyPlan.map(d => {
                   const dayIdx = DAY_ORDER.indexOf(d.day);
-                  // When noRemainingWorkouts shifted the week anchor to next Monday,
-                  // every day in the displayed week is in the future — nothing is "past".
-                  const isPastDay = !noRemainingWorkouts && dayIdx < todayDayIdx;
+                  const isPastDay = dayIdx < todayDayIdx;
                   const isOptional = d.type === "optional";
                   const isDimmed = d.type === "rest" || isPastDay;
                   // Optional sessions: visible but clearly secondary — lighter gray, bg same as rest

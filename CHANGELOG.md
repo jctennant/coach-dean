@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fix dashboard showing phantom post-race week
+
+**Type:** Bug Fix
+**Reported by:** Madie (internal observation)
+**User feedback:** "the plan was actually wrong because the race day is may 2 but it has taper the week after that!!"
+**Root cause:** The dashboard had a "no remaining workouts" shift — when it was late in the week with all sessions past, it pushed `week1Monday` forward 7 days to make week 1 appear to start next Monday. This was a cosmetic UX optimization for newly-onboarded mid-week users. But for existing users with rebuilt plans, it caused the displayed week dates to be 7 days ahead of where the plan generator anchored them (the generator always uses the current week's Monday). Result: the race fell in the *displayed* week 3 instead of week 4, and a phantom "Taper" week 4 appeared after the race with May 4–10 dates.
+**Fix / Change:** Removed the 7-day anchor shift entirely. Week 1 now always displays starting from the Monday of the plan-creation week — past days in that week are correctly dimmed. Reverted a compensating `isPastDay` band-aid added earlier in the same session.
+**Files changed:** `src/app/dashboard/page.tsx`
+
 ## 2026-04-10 — Fix rebuild_plan anchoring to wrong base when Strava data is incomplete
 
 **Type:** Bug Fix

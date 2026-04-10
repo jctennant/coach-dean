@@ -192,25 +192,30 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   const wantsSpeedWork = !!((user.onboarding_data as Record<string, unknown> | null)?.wants_speed_work);
 
   if (!dryRun) {
-    try {
-      await generateAndSaveFullPlan(
-        userId,
-        phoneNumber,
-        profile as Record<string, unknown> | null,
-        avgWeeklyMileage,
-        { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase, skipLinkSms: silent }
-      );
-      void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
-    } catch (err) {
-      console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
-      // Send fallback SMS so the user isn't left waiting for a link that never arrives
+    // Run generateAndSaveFullPlan in after() so this function returns immediately.
+    // The caller (linq webhook's after() or the wantsRebuild after()) only needs to
+    // wait for the fast DB reads above, not the 30-60s Haiku enrichment. This keeps
+    // both callers within the Hobby plan's 60s function budget.
+    after(async () => {
       try {
-        await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"my plan\" to see your current version.");
-      } catch (smsErr) {
-        console.error("[handleRebuildPlan] fallback SMS also failed:", smsErr);
+        await generateAndSaveFullPlan(
+          userId,
+          phoneNumber,
+          profile as Record<string, unknown> | null,
+          avgWeeklyMileage,
+          { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase, skipLinkSms: silent }
+        );
+        void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
+      } catch (err) {
+        console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
+        // Send fallback SMS so the user isn't left waiting for a link that never arrives
+        try {
+          await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"my plan\" to see your current version.");
+        } catch (smsErr) {
+          console.error("[handleRebuildPlan] fallback SMS also failed:", smsErr);
+        }
       }
-      return NextResponse.json({ error: "Plan generation failed" }, { status: 500 });
-    }
+    });
   }
 
   return NextResponse.json({ ok: true });

@@ -8,8 +8,8 @@ import type { Json } from "@/lib/database.types";
 import crypto from "crypto";
 import { Resend } from "resend";
 
-// Allow up to 60s for image fetch + Claude vision + coach response
-export const maxDuration = 60;
+// 120s: UPDATE PLAN rebuild takes 30-60s (Haiku enrichment); image path takes up to 60s
+export const maxDuration = 120;
 
 /**
  * POST /api/webhooks/linq
@@ -433,9 +433,9 @@ async function handleInboundMessage(
   const isUpdatePlan = /^UPDATE PLAN$/i.test(body.trim());
   if (isUpdatePlan) {
     void trackEvent(user.id, "plan_rebuild_confirmed");
-    // Fire rebuild in background — generateAndSaveFullPlan sends the dashboard link SMS when done.
-    // void: the rebuild runs for 30-60s; we don't block on it here.
-    void fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+    // Await the fetch so after() stays alive during the 30-60s rebuild.
+    // void fetch() would exit after() immediately, abandoning the request before it fires.
+    await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId: user.id, trigger: "rebuild_plan", chatId: resolvedChatId }),
