@@ -55,7 +55,8 @@ export async function POST(request: Request) {
       .from("activities")
       .select("distance_meters")
       .eq("user_id", userId)
-      .gte("start_date", eightWeeksAgo.toISOString());
+      .gte("start_date", eightWeeksAgo.toISOString())
+      .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"]);
     if (acts && acts.length > 0) {
       const totalMeters = acts.reduce((sum, a) => sum + ((a.distance_meters as number) ?? 0), 0);
       avgWeeklyMileage = Math.round((totalMeters / 1609.34 / 8) * 10) / 10;
