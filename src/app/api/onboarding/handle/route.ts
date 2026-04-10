@@ -712,9 +712,9 @@ async function handleNonCadenceMessage(
     model: "claude-haiku-4-5-20251001",
     max_tokens: 16,
     system: `The athlete received their training plan and instead of answering a reminder preference question, sent a different message. Classify it as one word:
-- "cancel" — athlete wants to cancel their subscription
-- "plan_feedback" — wants to change the plan (fewer/more runs, different schedule, volume)
-- "coaching_question" — asking a training or race prep question
+- "cancel" — athlete wants to cancel, stop, or end their subscription (even with typos like "strip" instead of "Stripe", or wanting to "keep the free trial")
+- "plan_feedback" — wants to CHANGE or MODIFY the plan (add/remove runs, different schedule, more/less volume, add speed work). NOT just asking what's in it.
+- "coaching_question" — asking what the plan says, asking about a specific week, or asking a training/race prep question. Examples: "what's week 2?", "what's my plan for week 3?", "what does my plan look like?", "how far is my long run this week?"
 - "other" — everything else`,
     messages: [{ role: "user", content: message }],
   });
@@ -744,7 +744,7 @@ async function handleNonCadenceMessage(
     const ackResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 120,
-      system: `You are Coach Dean. The athlete asked to change their training plan. Write 1-2 short sentences acknowledging what they asked for and confirming you're rebuilding the plan. Tell them the updated dashboard link will arrive in a moment. Do NOT ask any questions. Do NOT include a session list.`,
+      system: `You are Coach Dean. The athlete asked to change their training plan. This is an ongoing coaching relationship — do NOT use greeting phrases like "Thanks for reaching out!" or "Hi!" — jump straight into the response. Write 1-2 short sentences acknowledging what they asked for and confirming you're rebuilding the plan. Tell them the updated dashboard link will arrive in a moment. Do NOT ask any questions. Do NOT include a session list.`,
       messages: [{ role: "user", content: message }],
     });
     const ackRaw =
@@ -773,10 +773,26 @@ async function handleNonCadenceMessage(
   }
 
   if (msgType.startsWith("coaching_question")) {
+    // Fetch the stored training plan arc so Dean can answer "what's week 2?" accurately.
+    const { data: planRow } = await supabase
+      .from("training_plans")
+      .select("weeks, total_weeks")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    const planArc = planRow?.weeks && Array.isArray(planRow.weeks)
+      ? (planRow.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>)
+          .map(w => `Week ${w.week_number} (${w.phase}): ${w.mileage_target}mi, long run ~${w.long_run_target}mi${w.key_workout ? ` — ${w.key_workout}` : ""}`)
+          .join("\n")
+      : null;
+    const planContext = planArc
+      ? `\n\nTRAINING PLAN ARC (use this to answer questions about specific weeks — answer directly from the data, do NOT say you don't have access):\n${planArc}`
+      : "";
     const answerResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 300,
-      system: `You are Coach Dean. Answer the athlete's coaching question directly in 2-4 sentences. Do not explain your reasoning or approach — just answer. If the question is about a product/dashboard feature you can't control, say "Got it — I'll pass that along." in one sentence. After your answer, on a new line, add exactly: "${cadenceQuestion}"`,
+      system: `You are Coach Dean. This is an ongoing coaching relationship — do NOT use greeting phrases like "Thanks for reaching out!" or "Hi!" — jump straight into the answer. Answer the athlete's coaching question directly in 2-4 sentences. Do not explain your reasoning or approach — just answer. If the question is about a product/dashboard feature you can't control, say "Got it — I'll pass that along." in one sentence. After your answer, on a new line, add exactly: "${cadenceQuestion}"${planContext}`,
       messages: [{ role: "user", content: message }],
     });
     const answer =
@@ -791,7 +807,7 @@ async function handleNonCadenceMessage(
   await sendAndStore(
     user.id,
     user.phone_number,
-    `Just one last thing — ${cadenceQuestion}`,
+    cadenceQuestion,
     "awaiting_cadence"
   );
   return NextResponse.json({ ok: true });

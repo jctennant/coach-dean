@@ -4,6 +4,57 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Rebuild plan respects existing mileage target (floor/ceiling)
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth (onboarding test)
+**User feedback:** "The mileage build seems a little low, maybe we increase it a tiny bit?" → Dean acknowledged and rebuilt → plan came out lower than before
+**Root cause:** `handleRebuildPlan` recalculated `avgWeeklyMileage` fresh from Strava's 8-week window each time. If recent runs averaged lower (data drift, fewer runs that week), the rebuild would silently produce a lower plan even when the user asked for more. Dean's promise to "increase" wasn't translated into any parameter.
+**Fix / Change:** Fetch `training_state.weekly_mileage_target` (what Dean last prescribed) and use it to anchor the rebuild:
+- Default (neutral or increase): `max(strava_avg, existing_target)` as `prescribedWeek1Miles` — the plan can't silently drop below what was already prescribed
+- Volume decrease explicitly requested: detect "lower/less/reduce/decrease/dial back/too high" language near "mileage/volume/week" in recent conversation, then use `min(strava_avg, existing_target)` — plan can actually decrease but won't exceed current target
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-09 — Fix mid-onboarding week-2 plan rebuild, "thanks for reaching out", and doubled cadence question
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth (post-plan onboarding flow)
+**User feedback:** "he said thanks for reaching out in the middle of a conversation, and then probably shouldn't be rebuilding a plan just because Gwyneth wants to see week 2...the proper behavior here is to highlight the planned mileage and quality workout and saying he'll generate the full plan on Sunday night. Also the cancel subscription doesn't seem to work"
+**Root cause:**
+1. Haiku classifier in `handleNonCadenceMessage` classified "I would like you to tell me what my week 2 plan is" as `plan_feedback` (because it contains "plan") instead of `coaching_question`. This triggered a full plan rebuild.
+2. The `plan_feedback` Sonnet system prompt had no instruction to skip greeting language — Claude said "Thanks for reaching out!" mid-conversation.
+3. The `other` fallback response prefixed `cadenceQuestion` with "Just one last thing —", but `cadenceQuestion` itself already starts with "Last thing —", producing "Just one last thing — Last thing — would you like a reminder...".
+4. Cancel classification may have failed on "cancel my strip subscription" (misspelled Stripe) and fallen to the `other` fallback.
+**Fix / Change:**
+- Improved classifier prompt to clearly distinguish "asking to SEE what's in the plan" (coaching_question) vs "wanting to CHANGE the plan" (plan_feedback), with explicit examples
+- Added "no greeting phrases" instruction to `plan_feedback` Sonnet prompt
+- `coaching_question` path now fetches and injects the training plan arc so Dean can answer "what's week 2?" directly from data; also added no-greeting instruction
+- `cancel` classifier description now handles typos and free-trial phrasing
+- Fixed fallback to use `cadenceQuestion` directly instead of prefixing it with "Just one last thing —"
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+## 2026-04-09 — Speed work earlier in plans, fix "no access" hallucination, dashboard key workout display
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Gwyneth (onboarding test)
+**User feedback:** "The mileage build seems a little low, maybe we increase it a tiny bit? Also I enjoy doing speed workouts but I'm not seeing any until week 7, why?" / "Also in the dashboard it looks like I can only see what the long run is for each week, not the tempo workout" / "What's my speed workout for week 2?" → Dean: "I don't have access to your specific training plan right now."
+**Root cause (4 issues):**
+1. Dean hallucinated "I don't have access to training plan" despite having it in context — `fullArcContext` instruction said "do NOT reproduce this list" which Claude over-applied to specific week questions
+2. Haiku arc enrichment was setting `key_workout` to the long run even on weeks with a tempo session — the rule "defining session" was ambiguous, leading to long runs appearing for every week on the dashboard
+3. `hasEstablishedBase` threshold was 15mi/week — runners at 10-14mi/week were getting conservative "build from scratch" instructions and no speed work until late in the plan
+4. Peak mileage multiplier was capped at 1.5x base — produced conservative peaks (e.g. 25mi for a 15mi/week half marathon runner; 30mi would be more appropriate)
+**Fix / Change:**
+1. Updated `fullArcContext` instruction to explicitly say "NEVER say you don't have access to the training plan" and clarify that specific week questions should be answered from arc data
+2. Updated Haiku enrichment system prompt: when a week has both a long run AND a quality session, `key_workout` must be the quality session (tempo/intervals/strides), not the long run — the long run is shown separately
+3. Lowered `hasEstablishedBase` threshold from 15 to 10 mi/week so more runners get quality sessions from week 1
+4. Added `wantsSpeedWork` parameter to `generateAndSaveFullPlan` — now passed from `handleRebuildPlan` and `initial_plan` trigger, injected into Haiku enrichment prompt so athletes who said they want speed work get it from week 1 in the arc
+5. Increased peak mileage multiplier from 1.5x to 2.0x base (e.g. 15mi/week → 30mi peak for HM vs old 25mi)
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-10 — Training plan volume cap and 5 new eval fixtures
 
 **Type:** Bug Fix + Improvement

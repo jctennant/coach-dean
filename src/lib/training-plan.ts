@@ -91,8 +91,10 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   } else {
     hardCap = 60; floor = 20;
   }
-  // Allow up to 50% growth from base, but never outside [floor, hardCap]
-  return Math.max(Math.min(baseMileage * 1.5, hardCap), floor);
+  // Allow up to 100% growth from base (doubles over a full training cycle),
+  // but never outside [floor, hardCap]. Previous 1.5x cap was too conservative —
+  // athletes routinely build from 15 to 30+ mi/week over a 14-week HM plan.
+  return Math.max(Math.min(baseMileage * 2.0, hardCap), floor);
 }
 
 /**
@@ -141,7 +143,7 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true }: {
+  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, wantsSpeedWork = false }: {
     skipLinkSms?: boolean;
     prescribedWeek1Miles?: number;
     bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }>;
@@ -153,6 +155,8 @@ export async function generateAndSaveFullPlan(
      * mileage targets) so the user stays on their current week.
      */
     resetToWeek1?: boolean;
+    /** When true, inject speed-work-first guidance into Haiku enrichment */
+    wantsSpeedWork?: boolean;
   } = {},
 ): Promise<string> {
   const raceDate = (profile?.race_date as string | null) ?? null;
@@ -369,11 +373,11 @@ export async function generateAndSaveFullPlan(
     `Week ${w.week_number} (${w.phase}, ${w.mileage_target}mi, long run ~${w.long_run_target}mi)`
   ).join("\n");
 
-  // A runner with an established base (≥15 mi/week) doesn't need weeks of pure easy
+  // A runner with an established base (≥10 mi/week) doesn't need weeks of pure easy
   // aerobic miles at the start — they already have the base. Quality sessions (strides,
   // short tempos, fartleks) are appropriate from week 1. Only truly new runners building
   // from scratch should have pure easy base weeks.
-  const hasEstablishedBase = baseMileage >= 15;
+  const hasEstablishedBase = baseMileage >= 10;
   const basePhaseGuidance = hasEstablishedBase
     ? `This runner already has an established aerobic base at ~${baseMileage}mi/week. Do NOT assign pure easy/base-building weeks — include quality sessions (strides, fartlek, short tempo, easy intervals) from week 1 onward. Reserve "easy aerobic miles" labels only for deload weeks.`
     : `This runner is building their base from scratch. Early base-phase weeks should be easy aerobic miles to develop the aerobic foundation before adding quality.`;
@@ -396,7 +400,7 @@ ULTRA-SPECIFIC REQUIREMENTS (mandatory):
       max_tokens: 2500,
       system: `You are a running coach generating a structured training plan arc.
 For each week provide:
-- key_workout: the defining session for that week (1 line). Examples: "6×800m @ 5K pace", "4mi tempo @ threshold", "12mi long run with 2mi @ goal pace", "6×strides + easy 5mi", "20min fartlek", "Race simulation 5mi @ goal pace". Deload weeks get a low-key description.
+- key_workout: the quality/speed session for that week (1 line). CRITICAL RULE: When a week includes BOTH a long run AND a quality session (tempo, intervals, strides, fartlek, hill repeats), set key_workout to the QUALITY session — NOT the long run. The long run is displayed separately in the dashboard. Only use the long run as key_workout for pure long-run-only weeks (recovery, low-volume deload). Examples: "6×800m @ 5K pace", "4mi tempo @ threshold", "6×strides + easy 5mi", "20min fartlek", "Race simulation 5mi @ goal pace", "Hill repeats 6×90sec". Deload weeks: "Easy 30min + 4×strides" or similar.
 - notes: 2-3 sentences for the athlete to read on their dashboard. First sentence: the week's purpose and why it matters at this stage of training (e.g. "Week 6 is about building your aerobic base — consistent easy mileage here pays dividends in the peak phase."). Then 1-2 sentences on the key workout: what it is, the target effort or pace, and one brief execution tip (e.g. "The tempo run on Wednesday should feel comfortably hard — you should be able to speak in short phrases but not hold a conversation. Start controlled and aim to hold pace in the second half."). Deload weeks should acknowledge the pullback and why recovery is productive. Keep it direct and practical, not generic.
 
 Return ONLY a valid JSON array:
@@ -404,7 +408,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 

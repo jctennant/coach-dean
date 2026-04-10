@@ -169,15 +169,49 @@ async function handleRebuildPlan(userId: string, dryRun: boolean): Promise<NextR
     }
   }
 
-  // Fetch B/C races so the arc enrichment labels those weeks correctly
+  // Fetch B/C races and current training_state in parallel
   const now = new Date();
-  const { data: upcomingRaces } = await supabase
-    .from("races")
-    .select("race_date, race_name, priority")
-    .eq("user_id", userId)
-    .gt("race_date", now.toISOString().slice(0, 10))
-    .in("priority", ["B", "C"]);
+  const [{ data: upcomingRaces }, { data: stateData }] = await Promise.all([
+    supabase
+      .from("races")
+      .select("race_date, race_name, priority")
+      .eq("user_id", userId)
+      .gt("race_date", now.toISOString().slice(0, 10))
+      .in("priority", ["B", "C"]),
+    supabase
+      .from("training_state")
+      .select("weekly_mileage_target")
+      .eq("user_id", userId)
+      .single(),
+  ]);
   const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
+  const existingTarget = (stateData as { weekly_mileage_target: number | null } | null)?.weekly_mileage_target ?? null;
+
+  // Detect whether the conversation is asking to reduce volume. If so, the existing
+  // target acts as a ceiling (plan can decrease); otherwise it acts as a floor
+  // (rebuild never silently drops below what was already prescribed).
+  const allRecentText = (conversationsResult.data ?? []).map(m => m.content).join(" ").toLowerCase();
+  const wantsDecrease = /\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b/.test(allRecentText);
+
+  // Compute the effective base for the rebuild arc:
+  // - Default (increase or neutral): floor at existingTarget so Strava avg drift never silently lowers the plan.
+  // - Decrease request: allow going below existingTarget, capped at existingTarget as a ceiling.
+  let rebuildBase: number | undefined;
+  if (existingTarget !== null) {
+    if (wantsDecrease) {
+      // User wants less — use Strava avg (could be lower), ceiling at existing target
+      rebuildBase = avgWeeklyMileage !== null
+        ? Math.min(avgWeeklyMileage, existingTarget)
+        : existingTarget;
+    } else {
+      // Default — floor at existing target so rebuild never decreases accidentally
+      rebuildBase = avgWeeklyMileage !== null
+        ? Math.max(avgWeeklyMileage, existingTarget)
+        : existingTarget;
+    }
+  }
+
+  const wantsSpeedWork = !!((user.onboarding_data as Record<string, unknown> | null)?.wants_speed_work);
 
   if (!dryRun) {
     try {
@@ -186,7 +220,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean): Promise<NextR
         phoneNumber,
         freshProfile as Record<string, unknown> | null,
         avgWeeklyMileage,
-        { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined }
+        { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase }
       );
       void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
     } catch (err) {
@@ -1053,7 +1087,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // so the user gets one closing message instead of two back-to-back.
     const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
     // New plan from scratch at the end of onboarding — always start at week 1.
-    const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true });
+    const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true, wantsSpeedWork });
 
     // Extract and store the specific planned sessions AFTER generateAndSaveFullPlan,
     // because generateAndSaveFullPlan clears weekly_plan_sessions to null (stale sessions
@@ -3611,7 +3645,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
       const fullArcContext = storedPlanAllWeeks && storedPlanAllWeeks.length > 0
-        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (reference when asked about upcoming weeks, peak volume, or overall plan; do NOT reproduce this list in your response):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${w.mileage_target} mi, long run ~${w.long_run_target} mi${w.key_workout ? ` — ${w.key_workout}` : ''}`).join('\n')}`
+        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${w.mileage_target} mi, long run ~${w.long_run_target} mi${w.key_workout ? ` — ${w.key_workout}` : ''}`).join('\n')}`
         : '';
       return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
 
