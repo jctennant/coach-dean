@@ -66,10 +66,21 @@ Crons → POST /api/coach/respond (various triggers)
 
 - **All proactive triggers** use `after()` to return 200 immediately, then process async — Vercel keeps the process alive after response
 - **`dry_run` mode** available on both coach/respond and onboarding/handle — skips SMS, still writes conversations, returns the message in the response body
+- **`rebuild_plan` trigger** — silent plan regeneration: `{"userId":"<id>","trigger":"rebuild_plan","silent":true}` rebuilds the arc without sending the "plan ready" SMS. Note: `userId` is camelCase in the request body.
 - **Activity dedup**: by `strava_activity_id` (upsert), plus near-dupe detection (±2 min start time, ±15% distance) and manual-dupe cleanup
 - **Typing indicators**: `startTyping()` called before each Claude call; a background loop refreshes every 4.5s for long generations
 - **Message splitting**: `splitIntoMessages()` breaks long coach responses into multiple SMS bubbles, each sent with a compose delay
 - **Tests**: vitest, all in `src/__tests__/`. Supabase and Anthropic are always mocked. Run with `npm test`.
+
+## Admin curl commands
+
+Always write curl commands as a single line — multi-line commands cause copy/paste issues. Example:
+
+```bash
+curl -X POST https://coachdean.ai/api/coach/respond -H "Content-Type: application/json" -d '{"userId":"<id>","trigger":"rebuild_plan","silent":true}'
+```
+
+**Request body field names** use camelCase (`userId`, not `user_id`).
 
 ---
 

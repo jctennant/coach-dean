@@ -115,8 +115,11 @@ function buildDailyPlanFromSessions(sessions: PlanSession[]): DayWorkout[] {
   }
 
   function parseMiles(label: string): number | null {
-    const m = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
-    return m ? parseFloat(m[1]!) : null;
+    const miMatch = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
+    if (miMatch) return parseFloat(miMatch[1]!);
+    const kmMatch = label.match(/(\d+(?:\.\d+)?)\s*km(?!\w)/i);
+    if (kmMatch) return parseFloat(kmMatch[1]!) / 1.60934;
+    return null;
   }
 
   return DAY_ORDER.map(day => {
@@ -182,6 +185,11 @@ function daysUntilRace(raceDateStr: string | null): number | null {
   return days > 0 ? days : null;
 }
 
+function fmtDist(miles: number, useMetric: boolean): string {
+  if (useMetric) return `${Math.round(miles * 1.60934 * 10) / 10} km`;
+  return `${miles} mi`;
+}
+
 
 export default async function DashboardPage({
   searchParams,
@@ -221,7 +229,7 @@ export default async function DashboardPage({
       .single(),
     supabase
       .from("training_profiles")
-      .select("goal, race_date, goal_distance_miles, training_days, this_week_override_days, this_week_override_expires")
+      .select("goal, race_date, goal_distance_miles, training_days, this_week_override_days, this_week_override_expires, preferred_units")
       .eq("user_id", user.id)
       .single(),
     supabase
@@ -260,6 +268,8 @@ export default async function DashboardPage({
   const todayStr = new Date().toISOString().split("T")[0]!;
   const isOverrideActive = overrideDays !== null && overrideExpires !== null && overrideExpires >= todayStr;
   const effectiveTrainingDays = isOverrideActive ? overrideDays : trainingDays;
+  const useMetric = (profileData?.preferred_units as string | null) === "metric";
+  const distUnit = useMetric ? "km" : "mi";
   const upcomingRaces = (racesData ?? []) as Race[];
   const weeklyPlanSessions = (stateData?.weekly_plan_sessions as PlanSession[] | null) ?? null;
   const dailyPlan = weeklyPlanSessions && weeklyPlanSessions.length > 0
@@ -407,7 +417,7 @@ export default async function DashboardPage({
             A single race is already represented by the header countdown, so the section
             would just be redundant. */}
         {upcomingRaces.length > 1 && (
-          <UpcomingRaces races={upcomingRaces} />
+          <UpcomingRaces races={upcomingRaces} useMetric={useMetric} />
         )}
 
         {/* Current week card */}
@@ -423,13 +433,16 @@ export default async function DashboardPage({
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Weekly target</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {displayMileageTarget}
-                  {" "}<span className="text-sm font-normal text-gray-500">mi</span>
+                  {useMetric ? Math.round(displayMileageTarget * 1.60934 * 10) / 10 : displayMileageTarget}
+                  {" "}<span className="text-sm font-normal text-gray-500">{distUnit}</span>
                 </p>
               </div>
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Long run</p>
-                <p className="text-2xl font-bold text-gray-900">{currentWeek.long_run_target} <span className="text-sm font-normal text-gray-500">mi</span></p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {useMetric ? Math.round(currentWeek.long_run_target * 1.60934 * 10) / 10 : currentWeek.long_run_target}
+                  {" "}<span className="text-sm font-normal text-gray-500">{distUnit}</span>
+                </p>
               </div>
             </div>
             {/* Progress bar for miles logged this week */}
@@ -438,7 +451,7 @@ export default async function DashboardPage({
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-gray-400">Done this week</span>
                   <span className="text-xs font-semibold text-gray-700">
-                    {Math.round(currentWeekActualMiles * 10) / 10} / {displayMileageTarget} mi
+                    {fmtDist(Math.round(currentWeekActualMiles * 10) / 10, useMetric)} / {fmtDist(displayMileageTarget, useMetric)}
                   </span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -471,7 +484,7 @@ export default async function DashboardPage({
                       </div>
                       {d.miles !== null && (
                         <span className={`text-sm shrink-0 ml-2 ${valueColor}`}>
-                          {d.miles} mi
+                          {fmtDist(d.miles, useMetric)}
                         </span>
                       )}
                     </div>
@@ -514,6 +527,7 @@ export default async function DashboardPage({
                   actualMiles={actualMilesByWeek[week.week_number] ?? null}
                   weekStartDate={weekStart}
                   isRaceWeek={allRaceWeekNums.has(week.week_number)}
+                  useMetric={useMetric}
                 />
               );
             })}
@@ -538,7 +552,7 @@ const GOAL_DISTANCE_LABELS: Record<string, string> = {
   injury_recovery: "Injury Recovery",
 };
 
-function UpcomingRaces({ races }: { races: Race[] }) {
+function UpcomingRaces({ races, useMetric }: { races: Race[]; useMetric?: boolean }) {
   const showPriority = races.length > 1;
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
@@ -556,7 +570,7 @@ function UpcomingRaces({ races }: { races: Race[] }) {
           const isNonStandardDistance = race.goal_distance_miles != null
             && Math.abs(race.goal_distance_miles - (STANDARD_BUCKET_MILES[race.goal] ?? -1)) > 0.5;
           const distanceLabel = isNonStandardDistance
-            ? `${race.goal_distance_miles} mi`
+            ? fmtDist(race.goal_distance_miles!, !!useMetric)
             : GOAL_DISTANCE_LABELS[race.goal]
               ?? race.goal.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
           return (
@@ -586,13 +600,14 @@ function UpcomingRaces({ races }: { races: Race[] }) {
   );
 }
 
-function WeekCard({ week, isCurrent, isPast, actualMiles, weekStartDate, isRaceWeek }: {
+function WeekCard({ week, isCurrent, isPast, actualMiles, weekStartDate, isRaceWeek, useMetric }: {
   week: PlanWeek;
   isCurrent: boolean;
   isPast: boolean;
   actualMiles: number | null;
   weekStartDate?: Date;
   isRaceWeek?: boolean;
+  useMetric?: boolean;
 }) {
   const completed = isPast && actualMiles !== null && actualMiles >= week.mileage_target * 0.8;
   const attempted = isPast && actualMiles !== null && actualMiles > 0 && !completed;
@@ -639,11 +654,11 @@ function WeekCard({ week, isCurrent, isPast, actualMiles, weekStartDate, isRaceW
         <div className="text-right shrink-0">
           {isPast && actualMiles !== null && actualMiles > 0 ? (
             <div className="flex items-baseline gap-1">
-              <span className={`text-sm font-semibold ${completed ? "text-green-700" : "text-yellow-700"}`}>{Math.round(actualMiles * 10) / 10}</span>
-              <span className="text-xs text-gray-400">/ {week.mileage_target} mi</span>
+              <span className={`text-sm font-semibold ${completed ? "text-green-700" : "text-yellow-700"}`}>{fmtDist(Math.round(actualMiles * 10) / 10, !!useMetric)}</span>
+              <span className="text-xs text-gray-400">/ {fmtDist(week.mileage_target, !!useMetric)}</span>
             </div>
           ) : (
-            <span className={`text-sm font-semibold ${isPast ? "text-gray-400" : "text-gray-900"}`}>{week.mileage_target} mi</span>
+            <span className={`text-sm font-semibold ${isPast ? "text-gray-400" : "text-gray-900"}`}>{fmtDist(week.mileage_target, !!useMetric)}</span>
           )}
         </div>
       </div>

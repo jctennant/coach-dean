@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Dashboard km support and quality workout display fixes
+
+**Type:** Bug Fix
+**Reported by:** Pierre-Etienne (Pec)
+**User feedback:** "can we use kilometers instead of miles" / "Use kilometers please" / "it also doesn't show any of the quality workouts"
+**Root cause:** (1) Dashboard never fetched `preferred_units` from `training_profiles` — all mileage was hardcoded "mi" regardless of user preference. (2) The Haiku enrichment call for plan arcs had `max_tokens: 2500`, which is insufficient for a 27-week plan (~4000+ tokens needed), causing truncation and empty `key_workout` fields. (3) `parseMiles` in `buildDailyPlanFromSessions` only matched "mi" labels — metric users' km-labelled sessions returned `null` distance.
+**Fix / Change:** (1) Added `preferred_units` to profile select, added `fmtDist(miles, useMetric)` helper, updated all mileage displays in dashboard (weekly target, long run, progress bar, daily plan rows, WeekCard arc, UpcomingRaces) to convert and show "km" for metric users. (2) Increased Haiku enrichment `max_tokens` from 2500 to 5000. (3) Updated `parseMiles` to also match "km" labels and convert to miles internally.
+**Files changed:** `src/app/dashboard/page.tsx`, `src/lib/training-plan.ts`
+
 ## 2026-04-10 — Training plan arc notes used wrong paces (Haiku not given tempo/interval paces)
 
 **Type:** Bug Fix
