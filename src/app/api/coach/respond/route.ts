@@ -21,6 +21,7 @@ interface CoachRequest {
   activityId?: number;
   imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
+  silent?: boolean; // For rebuild_plan: regenerates the arc without sending the "plan ready" SMS
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
   missedRunCheckin?: boolean; // True when Strava user had a scheduled workout but no run came through — check if they got it in
@@ -94,7 +95,7 @@ const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
  * Does NOT reset current_week — the athlete stays on their current week in the arc.
  * generateAndSaveFullPlan sends the dashboard link SMS automatically.
  */
-async function handleRebuildPlan(userId: string, dryRun: boolean): Promise<NextResponse> {
+async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false): Promise<NextResponse> {
   // Load user, profile, and recent conversation
   const [userResult, profileResult, conversationsResult] = await Promise.all([
     supabase.from("users").select("*").eq("id", userId).single(),
@@ -214,7 +215,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean): Promise<NextR
         phoneNumber,
         freshProfile as Record<string, unknown> | null,
         avgWeeklyMileage,
-        { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase }
+        { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase, skipLinkSms: silent }
       );
       void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
     } catch (err) {
@@ -321,7 +322,7 @@ async function handlePostRunOnboarding(
 }
 
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
-  const { userId, trigger, activityId, imageActivity, dry_run, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
+  const { userId, trigger, activityId, imageActivity, dry_run, silent, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
 
   // Lightweight early-exit: brief run reaction + onboarding nudge for mid-onboarding users.
   // Avoids the heavy data fetching the full post_run path requires.
@@ -333,7 +334,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // regenerates the full plan arc without resetting the week counter. No Claude call needed.
   // Fired after Dean sends a [REBUILD_PLAN] confirmation to the athlete.
   if (trigger === "rebuild_plan") {
-    return await handleRebuildPlan(userId, dry_run ?? false);
+    return await handleRebuildPlan(userId, dry_run ?? false, silent ?? false);
   }
 
   // Fetch user context in parallel
