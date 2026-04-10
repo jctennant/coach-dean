@@ -414,11 +414,12 @@ async function handlePostRunOnboarding(
     ],
   });
 
-  const coachMessage = claudeResponse.content
+  const rawOnboardingMsg = claudeResponse.content
     .filter((b) => b.type === "text")
     .map((b) => (b as { type: "text"; text: string }).text.trim())
     .join(" ")
     .trim();
+  const coachMessage = stripReasoningPreamble(rawOnboardingMsg);
 
   if (dryRun) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -828,7 +829,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       const rpMi = (miles: number) => rpIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const shortfall = Math.round((prep.minAdequateLongRun - prep.achievableLongRun) * 10) / 10;
       const goalLabel = ((profile?.goal as string | null) ?? "this race").replace(/_/g, " ");
-      racePreparednessFlag = `\n⚠️ RACE PREPAREDNESS GAP — READ THIS BEFORE WRITING THE PLAN:
+      racePreparednessFlag = `\n<rule>RACE PREPAREDNESS GAP — READ THIS BEFORE WRITING THE PLAN:
 This athlete is at ${rpMi(avgWeeklyMileage ?? 0)}. At the maximum safe build rate (10%/week), they can reach an estimated peak long run of ~${rpMi(prep.achievableLongRun)} before race day. The standard guideline for a ${goalLabel} is a ${rpMi(prep.minAdequateLongRun)}+ peak long run. Gap: ~${rpMi(shortfall)}.
 
 The right response is NOT to prescribe a race-day run/walk strategy — that's presumptuous and demoralizing for an experienced runner. Instead:
@@ -836,7 +837,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 1. Acknowledge the timeline is tight (one honest sentence). Frame it as a challenge to approach smartly, not a reason to doubt the goal.
 2. Recommend run/walk intervals specifically for TRAINING LONG RUNS as a tool to safely extend distance beyond what continuous running allows right now. Example framing: "For the longer efforts, we'll use short walk breaks — run 10 min, walk 1 min — to keep the effort honest and let you go further without breaking down." This is the Galloway approach and it's legitimate training methodology, not a concession.
 3. Ask the athlete one question about their preference: whether they've used run/walk training before and are open to it, OR if they'd rather keep runs continuous and shorter (focusing on building pure running base over time). Their answer will shape how Dean structures the long runs.
-4. Do NOT tell the athlete how they should run the race — that's their call on race day based on how training goes.`;
+4. Do NOT tell the athlete how they should run the race — that's their call on race day based on how training goes.
+</rule>`;
     }
   }
 
@@ -876,7 +878,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       const aLocal = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date(a.start_date as string));
       return aLocal === yesterdayLocal && RUN_TYPES_REF.has(a.activity_type as string);
     });
-    return `⚠️ MOST RECENT RUN: ${dayName} (${daysAgo} days ago). Always reference as "${dayName}'s run" — do NOT say "yesterday". Yesterday was ${yesterdayDayName}${yesterdayHadRun ? " (also a run day)" : " (a rest day — no runs)"}.`;
+    return `<rule>MOST RECENT RUN: ${dayName} (${daysAgo} days ago). Always reference as "${dayName}'s run" — do NOT say "yesterday". Yesterday was ${yesterdayDayName}${yesterdayHadRun ? " (also a run day)" : " (a rest day — no runs)"}.</rule>`;
   })();
 
   // For initial_plan: pre-compute the remaining training days in the current week so we can
@@ -1606,13 +1608,29 @@ const MAX_MSG_CHARS = 480;
  * Both patterns are detected and stripped here so no reasoning reaches the SMS layer.
  */
 function stripReasoningPreamble(text: string): string {
-  // Pattern 1: preamble + "---" separator + actual response.
+  // Safety net: strip any <rule>...</rule> blocks that leaked into the output.
+  // The system prompt uses <rule> XML tags for all coaching directives — Claude should
+  // never echo these, but if it does, remove them entirely.
+  let cleaned = text.replace(/<rule>[\s\S]*?<\/rule>/gi, "").trim();
+  if (!cleaned) return text; // if we stripped everything, return original (something went wrong)
+  text = cleaned;
+
+  // Pattern 1: "RESPONSE:" separator — Claude sometimes outputs analysis then "RESPONSE:\n".
+  // Only take what follows the last "RESPONSE:" label.
+  const responseLabelMatch = text.match(/^RESPONSE:\s*/im);
+  if (responseLabelMatch && responseLabelMatch.index !== undefined) {
+    const afterLabel = text.slice(responseLabelMatch.index + responseLabelMatch[0].length).trim();
+    if (afterLabel) return afterLabel;
+  }
+
+  // Pattern 2: preamble + "---" separator + actual response.
   // Strip the preamble if it reads like internal reasoning (not a coaching message).
   const sepIdx = text.indexOf("\n---\n");
   if (sepIdx !== -1) {
     const preamble = text.slice(0, sepIdx);
     const reasoningMarkers = [
-      /^⚠️\s*(ANALYSIS|REASONING|PLANNING|THINKING)/i,
+      /^⚠️/,  // Claude might still use ⚠️ from training data despite instructions
+      /^<rule>/i,  // echoed rule tag
       /^The athlete is (asking|looking|trying|requesting|wondering)/im,
       /^I should (keep|answer|respond|address|be|make)/im,
       /^Key considerations:/im,
@@ -1625,10 +1643,11 @@ function stripReasoningPreamble(text: string): string {
     }
   }
 
-  // Pattern 2: leading paragraph(s) that look like reasoning scratchpad.
-  // Strip them until we reach the first paragraph that looks like coaching content.
+  // Pattern 3: leading paragraph(s) that look like reasoning scratchpad.
+  // Strip ⚠️ blocks (Claude may still use from training data) and common reasoning openers.
   const reasoningStartPatterns = [
-    /^⚠️\s*(ANALYSIS|REASONING|PLANNING|THINKING)/i,
+    /^⚠️/,
+    /^<rule>/i,
     /^The athlete is (asking|looking|trying|requesting|wondering)/i,
     /^I should (keep|answer|respond|address|be|make)/i,
     /^Key considerations:/i,
@@ -2047,7 +2066,7 @@ function buildCoachingSignalsBlock(signals: CoachingSignals): string {
   if (signals.weekOverWeekRampPct !== null && signals.weekOverWeekRampPct > 10) {
     const pctStr = `+${Math.round(signals.weekOverWeekRampPct)}%`;
     if (signals.weekOverWeekRampPct > 100) {
-      lines.push(`⚠️ EXTREME MILEAGE JUMP: Current week is ${pctStr} above last completed week. This is a very large spike — well above safe training build rates. Do NOT describe it as "right on track," "solid," or normalize it without comment. Before discussing workouts, explicitly check in with the athlete: "That's a big jump from last week — how's your body feeling with the increased load?" Flag the jump matter-of-factly and gauge their response before recommending more volume. Bones and tendons adapt much slower than the cardiovascular system.`);
+      lines.push(`<rule>EXTREME MILEAGE JUMP: Current week is ${pctStr} above last completed week. This is a very large spike — well above safe training build rates. Do NOT describe it as "right on track," "solid," or normalize it without comment. Before discussing workouts, explicitly check in with the athlete: "That's a big jump from last week — how's your body feeling with the increased load?" Flag the jump matter-of-factly and gauge their response before recommending more volume. Bones and tendons adapt much slower than the cardiovascular system.</rule>`);
     } else {
       lines.push(`- Mileage ramp: current week is ${pctStr} above last completed week (above the 10% guideline). This compares the current week's mileage so far vs the prior full week — not the week before that. Mention this naturally in post-run feedback or the weekly recap — bones and tendons adapt slower than cardiovascular fitness, so big jumps are where overuse injuries originate. Keep the tone matter-of-fact, not alarming.`);
     }
@@ -2685,7 +2704,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       // Sanity check: pace > 15 min/mi is not a running pace — the goal time was likely
       // set for a different race distance (e.g. marathon time stored against a half).
       if (paceMinsPerMile > 15) {
-        goalPaceStr = ` ⚠️ GOAL TIME MISMATCH: stored goal time ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")} implies ${fmtPace(paceMinsPerMile, "mi")} pace for this race, which is not a running pace. The stored time was likely set for a different distance. Ask the athlete to clarify their goal time for this specific race before building the plan.`;
+        goalPaceStr = ` — <rule>GOAL TIME MISMATCH: stored goal time ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")} implies ${fmtPace(paceMinsPerMile, "mi")} pace for this race, which is not a running pace. The stored time was likely set for a different distance. Ask the athlete to clarify their goal time for this specific race before building the plan.</rule>`;
       } else {
         goalPaceStr = ` — goal pace: ${fmtPace(paceMinsPerMile, "mi")} (${fmtPace(pacePerKm, "km")})`;
       }
@@ -2708,7 +2727,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       if (paceMatch) {
         const paceSeconds = parseInt(paceMatch[1]) * 60 + parseInt(paceMatch[2]);
         const maxMiles = (parseInt(timeMins) * 60 / paceSeconds).toFixed(1);
-        timeConstraintBlock = `\n⚠️ TIME CONSTRAINT — HARD CAP: ${day1} and ${day2} sessions are strictly limited to ${timeMins} minutes. At this athlete's easy pace (${easyPaceRaw}), that is a maximum of ~${maxMiles} miles. NEVER prescribe more than ${maxMiles} miles on ${day1} or ${day2} — in any week, including peak week.`;
+        timeConstraintBlock = `\n<rule>TIME CONSTRAINT — HARD CAP: ${day1} and ${day2} sessions are strictly limited to ${timeMins} minutes. At this athlete's easy pace (${easyPaceRaw}), that is a maximum of ~${maxMiles} miles. NEVER prescribe more than ${maxMiles} miles on ${day1} or ${day2} — in any week, including peak week.</rule>`;
       }
     }
   }
@@ -2790,7 +2809,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   const tsPhaseDisplay = (periodization?.phase ?? (state?.current_phase as string | null) ?? "base");
   const tsPhaseLabel = tsPhaseDisplay.charAt(0).toUpperCase() + tsPhaseDisplay.slice(1);
   const tsDeloadBlock = periodization?.isDeloadWeek
-    ? `⚠️ RECOVERY WEEK — MANDATORY: Week ${tsEffectiveWeek} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${tsMi(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances. Recovery weeks are when adaptation happens — do not skip this.\n` : "";
+    ? `<rule>RECOVERY WEEK — MANDATORY: Week ${tsEffectiveWeek} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${tsMi(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances. Recovery weeks are when adaptation happens — do not skip this.</rule>\n` : "";
   const tsProgressionLine = !periodization?.isDeloadWeek && periodization?.suggestedWeeklyMiles != null && tsPhaseDisplay !== "taper"
     ? `- Progression target this week: ~${tsMi(periodization.suggestedWeeklyMiles)} (~${tsPhaseDisplay === "peak" ? "5%" : "8%"} step up from recent avg)\n`
     : "";
@@ -2936,8 +2955,8 @@ ${lines.join("\n")}
 
 ${raceIsUpcoming ? `ATHLETE: ${user.name || "this athlete"}
 GOAL: ${goalDisplay} on ${profile!.race_date}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : ""}
-⚠️ This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.
-⚠️ GOAL DISCREPANCY — RAISE ONCE ONLY: If there is a discrepancy between the stored goal above and something the athlete said, flag it at most once per conversation. Check RECENT CONVERSATION — if you (Coach Dean) have already asked "which race is it?" or flagged a goal mismatch in a prior message, do NOT raise it again. If the athlete has answered, treat their answer as ground truth and proceed. Repeating the same goal-conflict flag three times in a row when the athlete already answered is a serious trust failure.
+<rule>This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.</rule>
+<rule>GOAL DISCREPANCY — RAISE ONCE ONLY: If there is a discrepancy between the stored goal above and something the athlete said, flag it at most once per conversation. Check RECENT CONVERSATION — if you (Coach Dean) have already asked "which race is it?" or flagged a goal mismatch in a prior message, do NOT raise it again. If the athlete has answered, treat their answer as ground truth and proceed. Repeating the same goal-conflict flag three times in a row when the athlete already answered is a serious trust failure.</rule>
 
 ` : ""}You are Coach Dean, an expert running coach communicating via text message. You specialize in running — from 5Ks to ultramarathons. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${raceIsUpcoming ? ` on ${profile!.race_date}` : ""}.
 
@@ -2947,7 +2966,7 @@ Your response is sent directly to the athlete as an SMS text message. Never incl
 - Draft versions or abandoned attempts ("I was going to say X but actually Y")
 - Meta-commentary about the plan ("I need to be smart here", "Given his history...")
 - Any commentary about discrepancies between what the system prompt says and what you know ("The system says X but I know X is actually Y...") — if you notice a data issue, proceed with what's in the system prompt and say nothing about it
-- Internal system-prompt instruction labels or warning headers — these are directives to you, not content the athlete should see. Examples: "⚠️ GOAL DISCREPANCY DETECTED", "⚠️ RECOVERY WEEK", "⚠️ MILEAGE TRACKING UNAVAILABLE". Never echo these labels or any ⚠️-prefixed directive header in your response.
+- Internal system-prompt instruction labels or <rule> tags — these are directives to you, not content the athlete should see. The system prompt uses <rule>...</rule> XML tags and ⚠️ prefixes to mark coaching rules and data guards. Never echo any <rule> content, XML tags, or ⚠️-prefixed text in your response.
 Do all reasoning silently before writing your final response. Output only the message the athlete should receive.
 
 CRITICAL — TRAINING PACES:
@@ -2964,24 +2983,24 @@ ${
         const isAdvanced = fl === "advanced";
         if (isAdvanced) {
           return `FITNESS TIER: No Strava history yet, but athlete self-reports as ADVANCED. Treat this like a moderate-to-high volume athlete returning to training — do not apply beginner volume defaults.
-⚠️ WEEK 1 VOLUME CAP (no history, advanced): Start at ${spMi(25)}–${spMi(35)} for the week. Spread across ${profile?.days_per_week ?? 5}+ days. Include 1 quality session. Do not prescribe fewer than ${spMi(20)} — that is inconsistent with advanced fitness.`;
+<rule>WEEK 1 VOLUME CAP (no history, advanced): Start at ${spMi(25)}–${spMi(35)} for the week. Spread across ${profile?.days_per_week ?? 5}+ days. Include 1 quality session. Do not prescribe fewer than ${spMi(20)} — that is inconsistent with advanced fitness.</rule>`;
         } else if (isIntermediate) {
           return `FITNESS TIER: No Strava history yet, but athlete self-reports as INTERMEDIATE. Treat as an athlete with an established aerobic base — do not apply beginner volume defaults.
-⚠️ WEEK 1 VOLUME CAP (no history, intermediate): Start at ${spMi(15)}–${spMi(25)} for the week. Spread across ${profile?.days_per_week ?? 4}+ days. Include at least 1 easy quality session (strides or short tempo). Do not prescribe fewer than ${spMi(12)} — that is inconsistent with intermediate fitness.`;
+<rule>WEEK 1 VOLUME CAP (no history, intermediate): Start at ${spMi(15)}–${spMi(25)} for the week. Spread across ${profile?.days_per_week ?? 4}+ days. Include at least 1 easy quality session (strides or short tempo). Do not prescribe fewer than ${spMi(12)} — that is inconsistent with intermediate fitness.</rule>`;
         } else {
           return `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
-⚠️ WEEK 1 VOLUME CAP (no history, beginner): Since no mileage data exists and this is a beginner, Week 1 must not exceed ${spMi(10)} total. Start extremely conservatively — 3 short sessions of ${spMi(2)}–${spMi(3)} each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.`;
+<rule>WEEK 1 VOLUME CAP (no history, beginner): Since no mileage data exists and this is a beginner, Week 1 must not exceed ${spMi(10)} total. Start extremely conservatively — 3 short sessions of ${spMi(2)}–${spMi(3)} each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.</rule>`;
         }
       })()
     : avgWeeklyMileage < 10
     ? `FITNESS TIER: LOW VOLUME (avg ${spMi(avgWeeklyMileage)}). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
-⚠️ WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${spMi(avgWeeklyMileage)}. Week 1 MUST NOT exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6))} total (current volume × 1.30, floor ${spMi(6)}). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. Do not exceed this cap under any circumstances, regardless of race goals or timelines.
-⚠️ LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3))} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.`
+<rule>WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${spMi(avgWeeklyMileage)}. Week 1 MUST NOT exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6))} total (current volume × 1.30, floor ${spMi(6)}). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. Do not exceed this cap under any circumstances, regardless of race goals or timelines.</rule>
+<rule>LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3))} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`
     : avgWeeklyMileage < 30
     ? `FITNESS TIER: MODERATE VOLUME (avg ${spMi(avgWeeklyMileage)}). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
-⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${spMi(avgWeeklyMileage)}. Week 1 should not jump more than 15% above that — target ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.15))}. A first-week spike above ${spMi(Math.round(avgWeeklyMileage * 1.2))} risks overuse injury at the start of the plan.`
+<rule>WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${spMi(avgWeeklyMileage)}. Week 1 should not jump more than 15% above that — target ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.15))}. A first-week spike above ${spMi(Math.round(avgWeeklyMileage * 1.2))} risks overuse injury at the start of the plan.</rule>`
     : `FITNESS TIER: HIGH VOLUME (avg ${spMi(avgWeeklyMileage)}). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
-⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${spMi(avgWeeklyMileage)} → Week 1 target: ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.12))}. Don't jump to peak volume on Day 1.`
+<rule>WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${spMi(avgWeeklyMileage)} → Week 1 target: ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.12))}. Don't jump to peak volume on Day 1.</rule>`
 }
 
 ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:
@@ -3016,8 +3035,8 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 ATHLETE HISTORY:
 ${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}- Strava: ${user.strava_athlete_id ? "connected" : "not connected"}
 ${allTimeInfo}- Sport: ${sportType}
-- Training days: ${trainingDays}${profile?.training_days && (profile.training_days as string[]).length > 0 ? `\n- ⚠️ TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${(profile.training_days as string[]).length} running session${(profile.training_days as string[]).length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${(profile.training_days as string[]).length <= 3 ? ` With only ${(profile.training_days as string[]).length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${(profile.training_days as string[]).length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}` : ""}
-${restDays.length > 0 ? `- ⚠️ REST DAYS — NEVER schedule a run on: ${restDays.join(", ")}. This is a hard constraint — it applies to all weeks including the initial plan and any future-week previews.\n` : ""}- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}
+- Training days: ${trainingDays}${profile?.training_days && (profile.training_days as string[]).length > 0 ? `\n- <rule>TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${(profile.training_days as string[]).length} running session${(profile.training_days as string[]).length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${(profile.training_days as string[]).length <= 3 ? ` With only ${(profile.training_days as string[]).length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${(profile.training_days as string[]).length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}</rule>` : ""}
+${restDays.length > 0 ? `- <rule>REST DAYS — NEVER schedule a run on: ${restDays.join(", ")}. This is a hard constraint — it applies to all weeks including the initial plan and any future-week previews.</rule>\n` : ""}- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}
 ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${timeConstraintBlock ? `${timeConstraintBlock}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
@@ -3042,14 +3061,14 @@ ${(() => {
   // (Legacy IIFE removed; values computed once in the ts* pre-computation block above.)
   return `- Week ${tsEffectiveWeek} of training, phase: ${tsPhaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""}
 ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): ${tsTargetMiles ? tsMi(tsTargetMiles) : "TBD"}
-⚠️ THIS WEEK'S MILEAGE — READ CAREFULLY: ${tsMileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}
+<rule>THIS WEEK'S MILEAGE: ${tsMileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}</rule>
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD"}, Tempo ${tsTempoPace}, Interval ${tsIntervalPace}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
 - RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
-⚠️ PACE SANITY CHECK — CRITICAL: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace you write that is ${tsEasyGuard} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.
-⚠️ LABEL/PACE CONSISTENCY — CRITICAL: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.
-- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any of: "⚠️ ANALYSIS", "⚠️ REASONING", "⚠️ GOAL DISCREPANCY", "Now I need to provide", "Let me craft the response", "Now let me search", or any internal analysis paragraph. Do NOT create your own ⚠️-prefixed analysis blocks — those are system-prompt-only directives. The FIRST thing you output must be the coaching message itself — nothing before it.
+<rule>PACE SANITY CHECK: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace you write that is ${tsEasyGuard} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.</rule>
+<rule>LABEL/PACE CONSISTENCY: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.</rule>
+- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any <rule> tag contents, XML tags, or ⚠️-prefixed text — these are directives to you, not athlete-facing content. Do NOT use "RESPONSE:" as a label before your message. Do NOT output "Now I need to provide", "Let me craft the response", "Now let me search", or any internal commentary. The FIRST thing you output must be the coaching message itself — nothing before it.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}${remainingPlanLine}`;
 })()}
@@ -3132,8 +3151,8 @@ MEMORY AND DATA LIMITATIONS:
 - You have their Coach Dean start date (shown in ATHLETE HISTORY above) — use it when asked how long they've been training with Dean or when they started. For everything else (what was said in earlier conversations, mileage from before your activity window), you don't have that information.
 - If asked about something outside your data window, be honest: "I don't have that far back in our conversation history" is fine. Fabricating a confident answer is not — it destroys trust when the athlete knows you're wrong.
 - When in doubt about a historical fact, omit it or flag uncertainty. Never invent specifics.
-- ⚠️ HISTORICAL MILEAGE RULE: When citing a specific prior week's mileage, use ONLY the values shown in "WEEKLY MILEAGE (completed weeks)" above. If a particular week is not in that table, say "I don't have exact data for that week" — never estimate or fabricate a specific number. Inventing a mileage figure (e.g. saying "last week you ran 6.8 miles" when the actual number was 12.8) erodes trust immediately when the athlete knows their own training.
-- ⚠️ ATHLETE-CONFIRMED IN-CONVERSATION DATA: If an athlete corrects or confirms a specific pace, distance, or training zone during the conversation — that value is ground truth for the rest of this session. Do NOT re-derive or re-interpret it from stored profile values. When generating any plan output (session list, week plan, updated targets), use the most recently athlete-confirmed pace zones (easy, tempo, long run pace), overriding stored defaults. Once a value is confirmed by the athlete, lock it and acknowledge it before moving on — never flip-flop on a data point the athlete has already corrected.
+- <rule>HISTORICAL MILEAGE RULE: When citing a specific prior week's mileage, use ONLY the values shown in "WEEKLY MILEAGE (completed weeks)" above. If a particular week is not in that table, say "I don't have exact data for that week" — never estimate or fabricate a specific number. Inventing a mileage figure (e.g. saying "last week you ran 6.8 miles" when the actual number was 12.8) erodes trust immediately when the athlete knows their own training.</rule>
+- <rule>ATHLETE-CONFIRMED IN-CONVERSATION DATA: If an athlete corrects or confirms a specific pace, distance, or training zone during the conversation — that value is ground truth for the rest of this session. Do NOT re-derive or re-interpret it from stored profile values. When generating any plan output (session list, week plan, updated targets), use the most recently athlete-confirmed pace zones (easy, tempo, long run pace), overriding stored defaults. Once a value is confirmed by the athlete, lock it and acknowledge it before moving on — never flip-flop on a data point the athlete has already corrected.</rule>
 
 ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports:
 - Activity tracking: Strava only. If an athlete has connected Strava, their activities sync automatically. No Garmin, Apple Watch, Wahoo, or other platform sync.
@@ -3145,7 +3164,7 @@ ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports
 - Evening reminders go out at approximately 6pm PT / 7pm MT / 8pm CT / 9pm ET (the evening before the session).
 - Specific times beyond these (e.g. "8:30am", "noon", "3pm", "after work") are NOT supported — just morning or evening.
 - NEVER promise a reminder at a precise time — say "around 6am" or "evening before", not "at 8am exactly".
-- ⚠️ REMINDER TIME CONSTRAINT: If an athlete requests a specific time that isn't morning or evening (e.g. "3pm", "noon", "lunchtime"), immediately disclose the constraint — do NOT confirm the unsupported time first. Say something like: "I can send reminders around 6am [their timezone] or the evening before — which works better?" Surface the limitation upfront so the athlete can choose. Never confirm a time you cannot support and correct it later.
+- <rule>REMINDER TIME CONSTRAINT: If an athlete requests a specific time that isn't morning or evening (e.g. "3pm", "noon", "lunchtime"), immediately disclose the constraint — do NOT confirm the unsupported time first. Say something like: "I can send reminders around 6am [their timezone] or the evening before — which works better?" Surface the limitation upfront so the athlete can choose. Never confirm a time you cannot support and correct it later.</rule>
 - If asked about a feature that doesn't exist (a web dashboard, export, calendar sync, etc.), say you don't have that yet rather than fabricating instructions.
 ` : ""}
 
@@ -3769,8 +3788,8 @@ function buildUserMessage(
       const weekMilesStr = weekMileageSoFar.toFixed(1);
       const isRunActivity = ["Run", "TrailRun", "VirtualRun"].includes((activityData?.type as string) ?? "");
       const weekMileageContext = isRunActivity
-        ? `\n⚠️ WEEK-TO-DATE (this run included): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.\n`
-        : `\n⚠️ WEEK-TO-DATE RUNNING MILES: ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.\n`;
+        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
+        : `\n<rule>WEEK-TO-DATE RUNNING MILES: ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
 
       return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
 
@@ -3800,10 +3819,10 @@ You are a proactive coach, not a performance logger. Don't just describe what th
 - If something needs to change in the plan: say it now, don't defer it to the next weekly recap.
 Keep it concise — one coaching-forward observation is enough. Don't lecture.
 
-MILEAGE ACCURACY — CRITICAL: The ⚠️ AUTHORITATIVE WEEK-TO-DATE MILEAGE in CURRENT TRAINING STATE is what the athlete has ALREADY RUN this week — it already includes the activity shown above. Use it as the current/completed figure. If you mention a projected end-of-week total, always add the word "on track for" or "projected" to make clear it's not yet achieved. Never say "you're at X miles this week" when X includes future sessions.
+MILEAGE ACCURACY — CRITICAL: The WEEK-TO-DATE figure in CURRENT TRAINING STATE is what the athlete has ALREADY RUN this week — it already includes the activity shown above. Use it as the current/completed figure. If you mention a projected end-of-week total, always add the word "on track for" or "projected" to make clear it's not yet achieved. Never say "you're at X miles this week" when X includes future sessions.
 
 PLAN CONSISTENCY RULES — follow these exactly:
-- Week-to-date mileage: use the ⚠️ AUTHORITATIVE WEEK-TO-DATE MILEAGE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
+- Week-to-date mileage: use the WEEK-TO-DATE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
 - Upcoming sessions: if THIS WEEK'S PLANNED SESSIONS is present in CURRENT TRAINING STATE, use those exact sessions and distances. Do not recalculate, substitute, or invent different numbers. Only omit sessions that have already been completed (i.e. activity date falls on or before today's date).
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
@@ -3811,7 +3830,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
       const umIsMetric = preferredUnits === "metric";
       const umMi = (miles: number) => umIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const nextWeekContext = storedNextPlanWeek
-        ? `Week ${storedNextPlanWeek.week_number} (next week): ${umMi(storedNextPlanWeek.mileage_target)} target, long run ${umMi(storedNextPlanWeek.long_run_target)}, key workout: ${storedNextPlanWeek.key_workout}${weekMileageSoFar > storedNextPlanWeek.mileage_target ? ` ⚠️ NOTE: This target (${umMi(storedNextPlanWeek.mileage_target)}) is LOWER than this week's current mileage (${umMi(weekMileageSoFar)}). Do NOT say "steps up" or "stepping up the volume" — describe it as a planned lighter week and explain why (pre-race management, recovery, arc design).` : ''}`
+        ? `Week ${storedNextPlanWeek.week_number} (next week): ${umMi(storedNextPlanWeek.mileage_target)} target, long run ${umMi(storedNextPlanWeek.long_run_target)}, key workout: ${storedNextPlanWeek.key_workout}${weekMileageSoFar > storedNextPlanWeek.mileage_target ? ` <rule>NOTE: This target (${umMi(storedNextPlanWeek.mileage_target)}) is LOWER than this week's current mileage (${umMi(weekMileageSoFar)}). Do NOT say "steps up" or "stepping up the volume" — describe it as a planned lighter week and explain why (pre-race management, recovery, arc design).</rule>` : ''}`
         : null;
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
@@ -3958,10 +3977,10 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       // Instead, tell Claude the data is missing and to use the conversation.
       const noStravaMileageData = !hasStrava && weekMileageSoFar === 0;
       const weekMileageContext = noStravaMileageData
-        ? `⚠️ MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
-        : `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
+        ? `<rule>MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.</rule>\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
+        : `<rule>THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.</rule>\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
       const deloadInstruction = periodization?.isDeloadWeek
-        ? `\n⚠️ RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.\n`
+        ? `\n<rule>RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.</rule>\n`
         : periodization?.suggestedWeeklyMiles != null
         ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${recapMi(periodization.suggestedWeeklyMiles)} (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
         : "";
@@ -3990,7 +4009,7 @@ MONDAY: Make sure Monday's session is clearly included in the sessions list. Clo
 YTD MILESTONES: Check "Year-to-date" in ATHLETE HISTORY. If the athlete has crossed a round-number milestone this week (100, 200, 250, 300, 500, 1000 miles) or is within striking distance of one in the coming week, call it out naturally — one short sentence woven into the recap, not a separate announcement. e.g. "You also just crossed 500 miles on the year — that's a real number." Keep it earned, not forced. Skip it if the number isn't notable.
 
 SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
-⚠️ CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.
+<rule>CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.</rule>
 
 TRAINING DAY COUNT VALIDATION — CRITICAL: The number of running sessions in your plan must exactly match the athlete's stated days/week preference ("Training days" in ATHLETE HISTORY). If the athlete wants 5 days of running, the plan must have exactly 5 running sessions — not 4, not 6. If the count is wrong, fix the plan. This is one of the most common plan errors.
 
@@ -4014,7 +4033,7 @@ Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown 
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
 TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the miles from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: 32.5 mi". Wrong: adding past-week miles to next week’s total (e.g. if the plan is 32.5 mi but the recap week had 30.8 mi, the Total is 32.5 mi, not 63.3 mi).
-⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.`;
+<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.</rule>`;
     }
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
@@ -4064,10 +4083,10 @@ RACE TIMELINE — never compute this yourself:
 GENERAL FITNESS GOAL — SET EXPECTATIONS:
 - When the athlete has a general fitness goal (no race target), include 1-2 sentences in your first text bubble about what they can expect to achieve by the end of this training cycle. Be specific and concrete — not "you'll feel better" but something like: "By week 12 you'll be running comfortably through both days each week, and we'll look to steadily add a third day and more miles as you find your rhythm." Ground it in their current mileage and days/week.
 
-${wantsSpeedWork ? `⚠️ SPEED WORK REQUIRED: This athlete explicitly requested speed work as a training goal. Week 1 MUST include at minimum strides or a short tempo segment — do not send an all-easy plan. This requirement overrides conservative defaults. Strides are low-impact and appropriate even when being cautious about injury history.
+${wantsSpeedWork ? `<rule>SPEED WORK REQUIRED: This athlete explicitly requested speed work as a training goal. Week 1 MUST include at minimum strides or a short tempo segment — do not send an all-easy plan. This requirement overrides conservative defaults. Strides are low-impact and appropriate even when being cautious about injury history.</rule>
 
 ` : ""}VOLUME AND SAFETY:
-- ⚠️ CRITICAL: The FITNESS TIER section in your system prompt contains a "⚠️ WEEK 1 VOLUME CAP" and a "⚠️ LONG RUN CAP" — both are hard limits calculated from the athlete's actual current mileage. You MUST respect both caps. Prescribing 2–3× current volume is a documented injury risk. If the cap says Week 1 max is 7 mi, do not write a plan with 15 mi. If the long run cap is 2 mi, do not prescribe a 9 mi long run.
+- The FITNESS TIER section above contains a WEEK 1 VOLUME CAP and a LONG RUN CAP — both are hard limits calculated from the athlete's actual current mileage. You MUST respect both caps. Prescribing 2–3× current volume is a documented injury risk. If the cap says Week 1 max is 7 mi, do not write a plan with 15 mi. If the long run cap is 2 mi, do not prescribe a 9 mi long run.
 - SELF-CONSISTENCY CHECK: Before sending any plan, verify that (1) the sum of running session distances matches your stated weekly total, and (2) no single session exceeds the long run cap from FITNESS TIER. If you state a safety cap in one sentence and prescribe a plan that violates it in the next sentence, that is a direct contradiction and must be corrected before sending.
 - HIGH VOLUME athletes: week 1 MUST include at least one quality session (tempo, intervals, strides, or hill repeats). An athlete running 30+ mi/week should NOT get an all-easy first week — prescribing all easy miles for an established runner is sandbagging them.
 - MODERATE VOLUME athletes: week 1 must include at least strides (4–6 × 20-second pickups at the end of an easy run). "Strides" counts as a quality session. Do not send a completely flat, all-easy plan to someone running 10–30 mi/week — they are past the phase where that makes sense.
@@ -4098,7 +4117,7 @@ FOCUSED WORKOUT FORMAT — use this instead of a day-by-day schedule when the at
 
 MILE TIME TRIAL GOAL:
 - Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
-- ⚠️ STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description, e.g., "Easy 5mi + 6×20sec strides".
+- <rule>STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description, e.g., "Easy 5mi + 6×20sec strides".</rule>
 - Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides (see above), and one tempo run (3-5mi) for aerobic support.
 - Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes. More is not better here.
 - Intensity distribution flips compared to longer events: 60-70% of sessions are genuinely easy, but the quality sessions are sharper and shorter than anything needed for a 5K or 10K.
@@ -4121,10 +4140,10 @@ SPORT-SPECIFIC GUIDANCE:
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
 TOTAL LINE FORMAT: The Total line must show ONLY the sum of the planned future sessions. Never write "Total: X mi + your Y mi already this week" — that is confusing and misleading. If the athlete has already run some miles this week and you want to acknowledge it, do so in a separate sentence outside the session list. Never combine planned and already-completed miles in the same Total line.
-⚠️ CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.
+<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.</rule>
 
 SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days if the athlete has requested them.
-⚠️ CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.
+<rule>CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.</rule>
 
 OPTIONAL CROSS-TRAINING SESSIONS: If the athlete has requested optional workouts (e.g. "optional bike", "optional strength", "optional cross-training"), include them in the sessions list on upcoming rest days — even if those days are not in the athlete's confirmed training day list. Mark them with "(Optional)" at the start of the label. Example: "Fri 4/11 · (Optional) Easy bike 45 min" or "Mon 4/14 · (Optional) Strength + climbing drills 30 min". Optional sessions are a suggestion — the athlete can skip them freely. Do NOT include their duration in the Total mileage count. Note: the CONFIRMED TRAINING DAYS list above is for running sessions only — optional cross-training can appear on any upcoming rest day.
 

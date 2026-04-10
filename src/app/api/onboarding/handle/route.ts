@@ -357,6 +357,21 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
     .replace(/\[STRAVA_LINK\]/gi, "")
     .trim();
 
+  // Strip any ⚠️-prefixed reasoning preamble Claude may have output (e.g. "⚠️ CRITICAL …\n\n")
+  // and "RESPONSE:" label separators — these are internal directives that must never reach the athlete.
+  if (/^RESPONSE:\s*/im.test(responseText)) {
+    const m = responseText.match(/^RESPONSE:\s*/im);
+    if (m && m.index !== undefined) {
+      const after = responseText.slice(m.index + m[0].length).trim();
+      if (after) responseText = after;
+    }
+  } else {
+    const paras = responseText.split(/\n{2,}/);
+    let firstOk = 0;
+    while (firstOk < paras.length - 1 && /^⚠️/.test(paras[firstOk].trim())) firstOk++;
+    if (firstOk > 0) responseText = paras.slice(firstOk).join("\n\n").trim();
+  }
+
   // Inject actual Strava URL where placeholder was
   if (wantsStravaLink && !onboardingData.strava_connected && !onboardingData.strava_skipped) {
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;

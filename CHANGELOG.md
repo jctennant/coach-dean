@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Replace ⚠️ directive format with XML <rule> tags to prevent reasoning leaks
+
+**Type:** Improvement
+**Reported by:** Internal (follow-up to Madie's leaked reasoning incident)
+**User feedback:** N/A
+**Root cause:** The system prompt used `⚠️ ALL_CAPS` format extensively for internal coaching directives. This trained Claude to associate that format with "important internal observation," causing it to mirror the pattern when generating its own analysis blocks (e.g. "⚠️ CRITICAL MILEAGE DISCREPANCY"). The format-reinforcement ran deeper than the output rule telling Claude not to use it.
+**Fix / Change:** Replaced all `⚠️ HEADER` coaching directives in the system prompt with `<rule>...</rule>` XML tags. Claude strongly associates XML tags with structured metadata rather than conversational output, making it far less likely to echo them. The stripping pipeline now also removes any leaked `<rule>` blocks as a safety net, and still catches `⚠️` from Claude's training data. Updated `run-evals.mjs` to maintain parity with the new format. Output rule updated to forbid `<rule>` tag output and ⚠️.
+**Files changed:** src/app/api/coach/respond/route.ts, evals/run-evals.mjs
+
+## 2026-04-10 — Prevent internal reasoning from leaking into SMS messages
+
+**Type:** Bug Fix
+**Reported by:** Madie (user)
+**User feedback:** Received multiple raw SMS bubbles containing internal analysis (e.g. "⚠️ CRITICAL MILEAGE DISCREPANCY — READ CAREFULLY: The athlete states they ran 21.5 miles...") followed by a "RESPONSE:" label, then the actual coaching message.
+**Root cause:** Four compounding issues: (1) `stripReasoningPreamble` only matched specific ⚠️ keywords (ANALYSIS, REASONING, PLANNING, THINKING) — any novel ⚠️-prefixed header Claude invented (like "⚠️ CRITICAL MILEAGE DISCREPANCY") slipped through. (2) The function only recognized `\n---\n` as a separator, not `RESPONSE:` (which Claude used). (3) The `post_run_onboarding` trigger applied zero stripping — raw Claude output went straight to SMS. (4) The system prompt blocklist named specific patterns rather than banning all ⚠️ output.
+**Fix / Change:** (1) `stripReasoningPreamble` now strips any paragraph starting with `⚠️` (not just specific keywords), and recognizes `RESPONSE:` as a separator. (2) Applied `stripReasoningPreamble` to the `post_run_onboarding` path. (3) Added the same `⚠️`/`RESPONSE:` guard to the onboarding handler. (4) Strengthened the system prompt rule to ban all `⚠️`-prefixed output and explicitly forbid the `RESPONSE:` label.
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts
+
 ## 2026-04-10 — Pre-launch reliability and architecture improvements
 
 **Type:** Improvement

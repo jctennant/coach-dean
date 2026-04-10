@@ -495,6 +495,58 @@ describe("coach/respond — prompt content guards", () => {
   });
 });
 
+describe("coach/respond — reasoning preamble stripping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("strips <rule> tags that leak into Claude's output", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "<rule>CRITICAL MILEAGE DISCREPANCY: athlete says 21mi but Strava shows 9mi.</rule>\n\nI'm seeing a mismatch — Strava shows 9 miles last week." }],
+    });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sentText).not.toContain("<rule>");
+    expect(sentText).not.toContain("CRITICAL MILEAGE DISCREPANCY");
+    expect(sentText).toContain("I'm seeing a mismatch");
+  });
+
+  it("strips ⚠️-prefixed preamble paragraphs that Claude invents", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "⚠️ CRITICAL MILEAGE DISCREPANCY — athlete says 21mi but Strava shows 9mi.\n\nI'm seeing a mismatch — Strava shows 9 miles last week." }],
+    });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sentText).not.toContain("⚠️");
+    expect(sentText).not.toContain("CRITICAL MILEAGE DISCREPANCY");
+    expect(sentText).toContain("I'm seeing a mismatch");
+  });
+
+  it("strips content before RESPONSE: label separator", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "⚠️ CRITICAL MILEAGE DISCREPANCY — athlete says 21mi but Strava shows 9mi.\nThis is a 2.4× discrepancy. I cannot build a plan until this is resolved.\nRESPONSE:\nI'm seeing a mismatch — Strava shows 9 miles last week." }],
+    });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sentText).not.toContain("CRITICAL MILEAGE DISCREPANCY");
+    expect(sentText).not.toContain("RESPONSE:");
+    expect(sentText).toContain("I'm seeing a mismatch");
+  });
+});
+
 describe("coach/respond — web search block filtering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
