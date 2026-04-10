@@ -915,7 +915,7 @@ function buildPaymentMessage(
     goalDesc = `${weeksDetail}${goal.replace(/_/g, " ")} plan`;
   }
 
-  return `${firstName}, your ${goalDesc} is built and ready. Start your free 7-day trial to unlock it:\n${checkoutUrl}`;
+  return `${firstName}, your ${goalDesc} is built and ready. To access it, sign up for your free 7-day trial:\n${checkoutUrl}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1270,7 +1270,7 @@ async function completeOnboarding(
         day: "numeric",
       });
       const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-      const sms = `${firstName}, your plan is ready! Start your free 7-day trial — no charge until ${trialEndFormatted}. Cancel any time: ${checkoutUrl}`;
+      const sms = `${firstName}, your plan is ready! To access it, sign up for your free 7-day trial — no charge until ${trialEndFormatted}. Cancel any time: ${checkoutUrl}`;
       const phoneNumber = billingUser?.phone_number as string;
       await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
     }

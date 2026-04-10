@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 
     const name = (user.name as string | null) ?? "hey";
     const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-    const message = `${name.split(" ")[0]}, your training plan is ready and waiting — just needs one more step to unlock it. Start your free 7-day trial here: ${checkoutUrl}`;
+    const message = `${name.split(" ")[0]}, your training plan is ready and waiting. To access it, sign up for your free 7-day trial: ${checkoutUrl}`;
 
     try {
       await sendSMS(user.phone_number as string, message);
