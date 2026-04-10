@@ -1926,16 +1926,17 @@ ${lines.join("\n")}
 async function extractAndStorePlanSessions(userId: string, planText: string): Promise<void> {
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 400,
+    max_tokens: 500,
     system: `Extract the list of planned training sessions from this coaching message.
 Return ONLY valid JSON array, nothing else.
-Each session object: {"day": "Mon"|"Tue"|"Wed"|"Thu"|"Fri"|"Sat"|"Sun", "date": "M/D" (e.g. "3/10"), "label": "the full session description as written"}
-Example: [{"day":"Tue","date":"3/10","label":"Easy 6.5 km"},{"day":"Thu","date":"3/12","label":"Easy 6.5 km"},{"day":"Sat","date":"3/14","label":"Easy 8 km"}]
+Each session object: {"day": "Mon"|"Tue"|"Wed"|"Thu"|"Fri"|"Sat"|"Sun", "date": "M/D" (e.g. "3/10"), "label": "session description", "optional": false}
+If a session starts with "(Optional)" or "Optional:", set "optional": true and strip that prefix from the label.
+Example: [{"day":"Tue","date":"3/10","label":"Easy 6.5mi","optional":false},{"day":"Fri","date":"3/12","label":"Strength + climbing drills 30 min","optional":true}]
 If no session list is found, return [].`,
     messages: [{ role: "user", content: planText }],
   });
   const text = response.content[0].type === "text" ? response.content[0].text.trim() : "[]";
-  let sessions: Array<{ day: string; date: string; label: string }> = [];
+  let sessions: Array<{ day: string; date: string; label: string; optional?: boolean }> = [];
   try {
     const parsed = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] || "[]");
     if (Array.isArray(parsed)) sessions = parsed;
@@ -3796,6 +3797,7 @@ NO DUPLICATE ENTRIES: Each date must appear at most once per session type. Befor
 SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 5mi"). Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 30 min", "Zwift ride 60 min", "Master's swim"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate. When you prescribe a strength session, always follow the session list with a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
+OPTIONAL CROSS-TRAINING SESSIONS: If the athlete has requested optional workouts (e.g. "optional bike", "optional strength", "optional cross-training"), include them in the sessions list on rest days. Mark them with "(Optional)" at the start of the label. Example: "Mon 3/2 · (Optional) Easy bike 45 min" or "Fri 3/6 · (Optional) Strength + climbing drills 30 min". Optional sessions are a suggestion — the athlete can skip them freely. Do NOT include their duration in the Total mileage count.
 
 QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified. Format the label to show the breakdown in parentheses. Examples:
 - "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
@@ -3916,6 +3918,8 @@ TOTAL LINE FORMAT: The Total line must show ONLY the sum of the planned future s
 
 SCHEDULE CONSTRAINT: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days if the athlete has requested them.
 ⚠️ CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.
+
+OPTIONAL CROSS-TRAINING SESSIONS: If the athlete has requested optional workouts (e.g. "optional bike", "optional strength", "optional cross-training"), include them in the sessions list on upcoming rest days — even if those days are not in the athlete's confirmed training day list. Mark them with "(Optional)" at the start of the label. Example: "Fri 4/11 · (Optional) Easy bike 45 min" or "Mon 4/14 · (Optional) Strength + climbing drills 30 min". Optional sessions are a suggestion — the athlete can skip them freely. Do NOT include their duration in the Total mileage count. Note: the CONFIRMED TRAINING DAYS list above is for running sessions only — optional cross-training can appear on any upcoming rest day.
 
 DATES AND DAY LABELS:
 - CRITICAL: Use the day names from DATE CONTEXT above — do not compute weekdays yourself. DATE CONTEXT lists tomorrow and the next 7 days with correct day names. Copy them directly. "Wed, Mar 11" → use "Wed 3/11". Getting these wrong destroys trust.

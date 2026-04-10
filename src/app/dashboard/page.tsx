@@ -36,7 +36,7 @@ type Race = {
 type DayWorkout = {
   day: string;
   shortDay: string;
-  type: "long" | "key" | "easy" | "rest";
+  type: "long" | "key" | "easy" | "rest" | "optional";
   label: string;
   miles: number | null;
 };
@@ -45,6 +45,7 @@ type PlanSession = {
   day: string; // "Mon", "Tue", etc.
   date: string;
   label: string;
+  optional?: boolean;
 };
 
 const DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -123,6 +124,15 @@ function buildDailyPlanFromSessions(sessions: PlanSession[]): DayWorkout[] {
     const dayShort = Object.entries(DAY_SHORT_TO_FULL).find(([, v]) => v === day)?.[0];
     const session = dayShort ? sessionByDay.get(dayShort) : undefined;
     if (!session) return { day, shortDay, type: "rest", label: "Rest", miles: null };
+    if (session.optional) {
+      return {
+        day,
+        shortDay,
+        type: "optional" as const,
+        label: session.label,
+        miles: parseMiles(session.label),
+      };
+    }
     return {
       day,
       shortDay,
@@ -444,17 +454,23 @@ export default async function DashboardPage({
                 {dailyPlan.map(d => {
                   const dayIdx = DAY_ORDER.indexOf(d.day);
                   const isPastDay = dayIdx < todayDayIdx;
+                  const isOptional = d.type === "optional";
                   const isDimmed = d.type === "rest" || isPastDay;
+                  // Optional sessions: visible but clearly secondary — lighter gray, bg same as rest
+                  const rowBg = isDimmed || isOptional ? "bg-gray-50" : "bg-white";
+                  const dayColor = isDimmed ? "text-gray-300" : isOptional ? "text-gray-400" : "text-gray-500";
+                  const labelColor = isDimmed ? "text-gray-300" : isOptional ? "text-gray-400 italic" : "text-gray-600";
+                  const valueColor = isDimmed ? "text-gray-300" : isOptional ? "text-gray-400" : d.type === "key" ? "font-semibold text-gray-900" : "text-gray-500";
                   return (
-                    <div key={d.day} className={`flex items-center justify-between px-3 py-2 ${isDimmed ? "bg-gray-50" : "bg-white"}`}>
+                    <div key={d.day} className={`flex items-center justify-between px-3 py-2 ${rowBg}`}>
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={`text-xs font-semibold w-7 shrink-0 ${isDimmed ? "text-gray-300" : "text-gray-500"}`}>{d.shortDay}</span>
-                        <span className={`text-sm leading-snug ${isDimmed ? "text-gray-300" : "text-gray-600"}`}>
+                        <span className={`text-xs font-semibold w-7 shrink-0 ${dayColor}`}>{d.shortDay}</span>
+                        <span className={`text-sm leading-snug ${labelColor}`}>
                           {d.label}
                         </span>
                       </div>
                       {d.miles !== null && (
-                        <span className={`text-sm shrink-0 ml-2 ${isDimmed ? "text-gray-300" : d.type === "key" ? "font-semibold text-gray-900" : "text-gray-500"}`}>
+                        <span className={`text-sm shrink-0 ml-2 ${valueColor}`}>
                           {d.miles} mi
                         </span>
                       )}

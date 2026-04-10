@@ -4,6 +4,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-09 — Optional cross-training sessions visible on dashboard
+
+**Type:** Feature
+**Reported by:** Jake Tennant (internal feedback after onboarding)
+**User feedback:** "He also said he'd add optional strength and/or biking workouts but not seeing one for tomorrow (Friday). Also I think this will be generally helpful for cross training"
+**Root cause:** Dean included optional sessions conversationally but not in the structured `Day M/D · Session` format that `extractAndStorePlanSessions` parses. There was no concept of "optional" in the session type or dashboard rendering, so even if Dean had listed them, they'd show as required sessions.
+**Fix:** End-to-end support for optional sessions:
+1. Prompt (initial_plan + weekly_recap): Explicit instruction to include optional cross-training on rest days with `(Optional)` prefix, even in partial-week plans. Clarified that the CONFIRMED TRAINING DAYS constraint is for running sessions only.
+2. Extractor (`extractAndStorePlanSessions`): Updated Haiku prompt to detect `(Optional)` prefix, strip it from the label, and set `optional: true` on the session object.
+3. Dashboard (`PlanSession` + `DayWorkout`): Added `optional?: boolean` fields. `buildDailyPlanFromSessions` maps optional sessions to type `"optional"`. Rendered with lighter gray styling and italic text — visible but clearly secondary.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`
+
 ## 2026-04-09 — Fix weekly target, A-race taper, and mileage display for partial-week onboards
 
 **Type:** Bug Fix (2 issues)
