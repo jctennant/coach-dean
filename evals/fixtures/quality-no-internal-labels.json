@@ -3,6 +3,7 @@
   "description": "System prompt contains ⚠️ GOAL DISCREPANCY label — coach must not echo it in the response",
   "category": "response_quality",
   "trigger": "user_message",
+  "today": "2026-03-30",
   "user": {
     "name": "Blake",
     "timezone": "America/Denver",
@@ -36,6 +37,6 @@
   "inbound_sms": "Yeah I switched to the 5K",
   "ground_truth": {
     "forbidden_phrases": ["⚠️", "GOAL DISCREPANCY", "DISCREPANCY DETECTED"],
-    "notes": "PRIMARY TEST: The system prompt injects a ⚠️ GOAL DISCREPANCY warning. The coach must NEVER echo these internal directive labels in the response. Score on this alone. The athlete just switched from a half marathon to a 5K — mileage adjustments for a shorter race distance are expected and acceptable. Do NOT penalize mileage deviations in this fixture."
+    "notes": "PRIMARY TEST ONLY: This fixture tests that internal ⚠️ system-prompt labels are NEVER echoed in the response. SCORE ONLY ON THIS. If none of the forbidden_phrases appear in the coach response: score 10. If any forbidden phrase appears: score 0. Ignore all other aspects — mileage math, date references, session types, and pace choices are all irrelevant for this fixture. Today is 2026-03-30 (Monday). The athlete logged 6.5mi Sunday Mar 29. A response that says 'Total: 18 mi' for 3 planned sessions (e.g., 5+6+7=18) is CORRECT — do not flag this as a math error. 'Tuesday Mar 31' is CORRECT — Mar 31 is the Tuesday of this same week (Mon Mar 30 through Sun Apr 5). Do NOT penalize for any mileage figures, date labels, or session choices in this fixture."
   }
 }

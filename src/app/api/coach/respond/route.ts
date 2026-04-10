@@ -3880,6 +3880,8 @@ CONTEXT RETENTION — DO NOT RE-ASK FOR KNOWN DATA: If ATHLETE HISTORY already c
 
 INTERVAL SESSION MATH: When converting interval sessions to time or total distance, always calculate explicitly — never estimate or guess. Formula: (number of reps × rep distance) + warmup + recovery jogs + cooldown = session total. Example: 6×400m = 6 × 0.25 mi = 1.5 mi of fast work. Add warmup (~1 mi), recovery jogs between reps (~0.75 mi for 5 jogs × ~150m each), and cooldown (~0.5 mi) → ~3.75 mi total. Do NOT output a range that spans 4+ miles (e.g. "3.5–7 mi") — that is internally contradictory and wrong. Output a single coherent total. If you are unsure of warmup/cooldown lengths, use reasonable defaults (1 mi warmup, 0.5 mi cooldown, ~150m jog between reps) and state them explicitly.
 
+GENERAL FITNESS ATHLETES — WORKOUT PRESCRIPTIONS: If the athlete's goal is general_fitness (no race target) and they are in the base or early build phase (weeks 1–8), prescribe easy runs at conversational effort — NOT tempo runs, interval sessions, or threshold work. General fitness athletes building a base benefit from aerobic volume at easy effort; quality sessions are not appropriate until they have established consistent mileage. A tempo run prescribed to a base-phase general fitness athlete at 15–25 mi/week is aggressive and counterproductive. The exception: if the athlete explicitly requests speed work or says they want to add quality, then include it — otherwise default to easy miles.
+
 FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK:", they are submitting feedback. Decide which of two paths applies:
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
 - If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.
@@ -4085,7 +4087,12 @@ GENERAL FITNESS GOAL — SET EXPECTATIONS:
 
 ${wantsSpeedWork ? `<rule>SPEED WORK REQUIRED: This athlete explicitly requested speed work as a training goal. Week 1 MUST include at minimum strides or a short tempo segment — do not send an all-easy plan. This requirement overrides conservative defaults. Strides are low-impact and appropriate even when being cautious about injury history.</rule>
 
-` : ""}VOLUME AND SAFETY:
+` : ""}DELOAD WEEKS — REQUIRED IN EVERY PLAN:
+- <rule>Every full training plan arc MUST include deload weeks. The standard pattern is: build 3 weeks, recover 1 week (approximately 70% of the prior build week's volume). A plan that shows continuous mileage increases for 10+ weeks without any deload is a safety failure and will cause overtraining. When presenting the full-arc summary, explicitly mark deload weeks — e.g., "Weeks 1–3 (build): 34, 36, 38 mi; Week 4 (recovery): 26 mi; Weeks 5–7 (build): 42, 44, 46 mi; Week 8 (recovery): 32 mi..."</rule>
+- Exception: 8-week or shorter plans may omit deload weeks if the athlete has very low volume risk (e.g. mile TT plan with modest total mileage), but should still include at least one step-back week near the midpoint.
+- MARATHON-SPECIFIC: For marathon plans (18+ weeks), the arc must have 4-5 deload weeks across the base and build phases. Additionally, long runs in the build/peak phase should include marathon-pace (MP) segments — e.g., the last 2-3 miles of a 16mi long run at goal marathon pace. This is non-negotiable for marathon prep as it teaches the legs to run at race pace when already fatigued.
+
+VOLUME AND SAFETY:
 - The FITNESS TIER section above contains a WEEK 1 VOLUME CAP and a LONG RUN CAP — both are hard limits calculated from the athlete's actual current mileage. You MUST respect both caps. Prescribing 2–3× current volume is a documented injury risk. If the cap says Week 1 max is 7 mi, do not write a plan with 15 mi. If the long run cap is 2 mi, do not prescribe a 9 mi long run.
 - SELF-CONSISTENCY CHECK: Before sending any plan, verify that (1) the sum of running session distances matches your stated weekly total, and (2) no single session exceeds the long run cap from FITNESS TIER. If you state a safety cap in one sentence and prescribe a plan that violates it in the next sentence, that is a direct contradiction and must be corrected before sending.
 - HIGH VOLUME athletes: week 1 MUST include at least one quality session (tempo, intervals, strides, or hill repeats). An athlete running 30+ mi/week should NOT get an all-easy first week — prescribing all easy miles for an established runner is sandbagging them.
@@ -4118,11 +4125,12 @@ FOCUSED WORKOUT FORMAT — use this instead of a day-by-day schedule when the at
 MILE TIME TRIAL GOAL:
 - Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
 - <rule>STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description, e.g., "Easy 5mi + 6×20sec strides".</rule>
-- Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides (see above), and one tempo run (3-5mi) for aerobic support.
+- <rule>SHORT FAST INTERVALS: The mile is a ~4 minute anaerobic/lactate effort — the primary quality sessions MUST be short and fast: 200m–400m repeats at goal pace or faster (NOT 800m repeats, which target a different energy system). 800m repeats are too long for mile prep and train the wrong physiological pathway. Use 6-12x200m or 6-10x400m at goal-mile pace or 3-5 sec/lap faster.</rule>
+- Key quality sessions: 400m repeats (6-10x) at goal-mile pace, 200m repeats (8-12x) at faster than goal pace for neuromuscular development, and strides (see above). One short tempo run (2-3mi) per week maximum for aerobic support — this is secondary, not the focus.
+- If they have a goal time, compute goal pace (e.g., 5:45 mile = 1:26 per 400m) and calibrate: 400m reps at or 3-5 sec faster per rep, 200m reps at 5-8 sec faster per rep than goal-pace equivalent.
 - Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes. More is not better here.
 - Intensity distribution flips compared to longer events: 60-70% of sessions are genuinely easy, but the quality sessions are sharper and shorter than anything needed for a 5K or 10K.
-- No traditional taper — the final 7 days before the time trial, reduce total volume ~30% and do one short sharpening session (4-6x400m).
-- If they have a goal time, compute goal pace (e.g., 5:30 mile = 5:30/mi) and use it to calibrate intervals: 400m repeats ~5-10 sec/quarter faster than goal pace.
+- No traditional taper — the final 7 days before the time trial, reduce total volume ~30% and do one short sharpening session (4-6x400m at goal pace).
 
 ULTRA AND LONG TRAIL DISTANCE GOALS (30K, 50K, 100K, 50mi, 100mi, and beyond):
 - Do NOT apply beginner conservatism. Anyone training for these distances is already running meaningful volume — calibrate to their stated mileage, not a cautious floor.

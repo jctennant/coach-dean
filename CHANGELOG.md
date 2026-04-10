@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fix 4 eval failures: deload weeks, mile TT intervals, general fitness tempo, judge fixture
+
+**Type:** Improvement
+**Reported by:** Internal eval run (4 fixtures failing at 6/10)
+**User feedback:** N/A
+**Root cause:** Four distinct prompt/fixture issues: (1) initial_plan arc had no rule requiring deload weeks, so marathon plans came out as continuous 13-week ramps; (2) MILE TIME TRIAL GOAL section listed 800m repeats as a key session, which targets the wrong energy system for a 4-minute race; (3) no rule preventing tempo runs for base-phase general_fitness users when they ask for a workout via SMS; (4) quality-no-internal-labels fixture had no `today` set (defaulted to a date with ambiguous calendar context) and the judge prompt notes weren't strong enough to prevent false positive math/date flags.
+**Fix / Change:** (1) Added DELOAD WEEKS block to initial_plan requiring deload every 4th week + marathon-pace segments in long runs. (2) Replaced 800m repeats with 200m–400m short intervals at goal-mile pace in the MILE TIME TRIAL GOAL section; tempo capped at one 2-3mi session for aerobic support only. (3) Added GENERAL FITNESS ATHLETES paragraph to user_message prompt: no tempo/intervals in base phase unless explicitly requested. (4) Updated quality-no-internal-labels fixture: added explicit `today: "2026-03-30"`, rewrote ground_truth notes to explicitly block judge from penalizing unrelated math/dates.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/fixtures/quality-no-internal-labels.json`
+
 ## 2026-04-10 — Replace ⚠️ directive format with XML <rule> tags to prevent reasoning leaks
 
 **Type:** Improvement
