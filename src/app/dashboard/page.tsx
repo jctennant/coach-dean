@@ -466,7 +466,9 @@ export default async function DashboardPage({
               <div className="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden">
                 {dailyPlan.map(d => {
                   const dayIdx = DAY_ORDER.indexOf(d.day);
-                  const isPastDay = dayIdx < todayDayIdx;
+                  // When noRemainingWorkouts shifted the week anchor to next Monday,
+                  // every day in the displayed week is in the future — nothing is "past".
+                  const isPastDay = !noRemainingWorkouts && dayIdx < todayDayIdx;
                   const isOptional = d.type === "optional";
                   const isDimmed = d.type === "rest" || isPastDay;
                   // Optional sessions: visible but clearly secondary — lighter gray, bg same as rest
