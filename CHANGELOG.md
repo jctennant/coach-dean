@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Training plan arc notes used wrong paces (Haiku not given tempo/interval paces)
+
+**Type:** Bug Fix
+**Reported by:** Internal (Anthony's plan review)
+**User feedback:** N/A
+**Root cause:** `generateAndSaveFullPlan` only passed `easy_pace` to the Haiku enrichment prompt. Haiku had to infer tempo and interval paces from easy pace alone, and consistently under-estimated them (e.g. calling 9:50/mi "threshold" for an athlete whose actual stored tempo is 8:28/mi). The plan notes baked in wrong pace references that showed on the dashboard and in the coaching arc context.
+**Fix / Change:** Extract `current_tempo_pace` and `current_interval_pace` from the profile and inject them into the Haiku prompt alongside easy pace. Haiku now receives all three paces and uses the correct values in week notes.
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
 ## 2026-04-10 — Fixed race date off-by-one; added explicit rest-day constraint to system prompt
 
 **Type:** Bug Fix (2 issues)

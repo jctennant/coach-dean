@@ -162,6 +162,8 @@ export async function generateAndSaveFullPlan(
   const raceDate = (profile?.race_date as string | null) ?? null;
   const goal = (profile?.goal as string | null) ?? null;
   const easyPace = (profile?.current_easy_pace as string | null) ?? null;
+  const tempoPace = (profile?.current_tempo_pace as string | null) ?? null;
+  const intervalPace = (profile?.current_interval_pace as string | null) ?? null;
   const daysPerWeek = (profile?.days_per_week as number | null) ?? 4;
   const hasRace = !!raceDate;
 
@@ -410,7 +412,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 
