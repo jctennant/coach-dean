@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fix quality workout descriptions using miles for km-preference users
+
+**Type:** Bug Fix
+**Reported by:** Pec (user)
+**User feedback:** "4×strides + easy 3.5mi" and "3mi tempo @ threshold" showing in dashboard even though preference is km
+**Root cause:** The Haiku enrichment call that generates `key_workout` and `notes` for each plan week was always passing mileage values with "mi" labels and never told Haiku the user's unit preference. Haiku generated workout descriptions in miles regardless of `preferred_units`.
+**Fix / Change:** Read `preferred_units` from the training profile; if "km", convert all mileage values passed to Haiku (arc summary, base mileage display, ultra guidance examples) to km. Added explicit unit instruction in the Haiku system prompt ("All distances must use km — never mix units") and passed `Preferred units: km` in the user message.
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
+## 2026-04-10 — Two-step "UPDATE PLAN" confirmation for full plan rebuilds
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** The previous `[REBUILD_PLAN]` mechanism relied on Dean autonomously deciding when to emit a hidden token, which was non-deterministic — Dean sometimes triggered rebuilds when the user didn't intend one, and sometimes missed triggering when the user clearly wanted it. Errors in the rebuild also failed silently inside `after()`, leaving users waiting for a dashboard link that never arrived.
+**Fix / Change:** Replaced the `[REBUILD_PLAN]` LLM token with a two-step user-confirmed keyword flow. Dean now responds to plan rebuild requests with a description of what will change and asks the user to "Reply UPDATE PLAN to confirm." The Linq webhook detects the exact phrase `UPDATE PLAN` (case-insensitive) and fires the `rebuild_plan` trigger directly — no LLM discretion involved. Added a fallback SMS in `handleRebuildPlan` if `generateAndSaveFullPlan` throws, so users aren't left waiting silently.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/linq-webhook.test.ts`
+
+---
+
 ## 2026-04-10 — Fix initial_plan and weekly_recap timing out on Vercel Hobby (10s cap)
 
 **Type:** Bug Fix

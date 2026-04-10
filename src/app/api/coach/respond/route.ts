@@ -175,6 +175,12 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
       void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
     } catch (err) {
       console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
+      // Send fallback SMS so the user isn't left waiting for a link that never arrives
+      try {
+        await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"my plan\" to see your current version.");
+      } catch (smsErr) {
+        console.error("[handleRebuildPlan] fallback SMS also failed:", smsErr);
+      }
       return NextResponse.json({ error: "Plan generation failed" }, { status: 500 });
     }
   }
@@ -3721,9 +3727,9 @@ If they clearly want it as a permanent schedule change (e.g. "from now on", "eve
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
 
-DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." This includes situations where the dashboard is showing wrong or mismatched data (e.g. "the dashboard shows 16 miles but you only gave me two short sessions" — that is a plan correction request, not a system bug outside your control). In all cases: confirm the change you're making and tell them the dashboard will reflect it. Do NOT say you can't edit the system, can't touch the database, or that the plan is auto-generated. Use [REBUILD_PLAN] and confirm.
+DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." This includes situations where the dashboard is showing wrong or mismatched data (e.g. "the dashboard shows 16 miles but you only gave me two short sessions" — that is a plan correction request, not a system bug outside your control). In all cases: describe what you're changing in 1-2 sentences and ask them to confirm. Do NOT say you can't edit the system, can't touch the database, or that the plan is auto-generated.
 
-FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "update the whole plan", "rebuild my plan with more tempo", "add speed work throughout", "the dashboard shows the wrong mileage, can you fix it" — send a short 1-2 sentence confirmation of what's changing, then add [REBUILD_PLAN] on its own line at the very end. The tag is stripped before sending. Do NOT include a session list or week-by-week schedule in this message — just the confirmation and the tag. The updated dashboard link will arrive in a separate message automatically. Example: "On it — rebuilding your plan with tempo sessions added from week 2 onward. Dashboard link coming shortly.\n\n[REBUILD_PLAN]"${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
+FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "update the whole plan", "rebuild my plan with more tempo", "add speed work throughout", "the dashboard shows the wrong mileage, can you fix it" — describe what will change in 1-2 sentences, then end with: "Reply UPDATE PLAN to confirm and I'll send you the updated dashboard link." Do NOT include a session list or week-by-week schedule. Do NOT say the plan has already been updated — nothing changes until they confirm. Do NOT use [REBUILD_PLAN].${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 

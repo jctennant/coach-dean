@@ -427,6 +427,22 @@ async function handleInboundMessage(
     // regenerate the token and send the link.
   }
 
+  // Detect "UPDATE PLAN" — user confirming a full plan rebuild that Dean proposed.
+  // Fires rebuild_plan directly, bypassing the conversational coach/respond pipeline.
+  // Dean asks "Reply UPDATE PLAN to confirm" and the athlete sends this exact phrase.
+  const isUpdatePlan = /^UPDATE PLAN$/i.test(body.trim());
+  if (isUpdatePlan) {
+    void trackEvent(user.id, "plan_rebuild_confirmed");
+    // Fire rebuild in background — generateAndSaveFullPlan sends the dashboard link SMS when done.
+    // void: the rebuild runs for 30-60s; we don't block on it here.
+    void fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id, trigger: "rebuild_plan", chatId: resolvedChatId }),
+    });
+    return;
+  }
+
   // Coaching flow: debounce 15 seconds so rapid multi-part messages are batched.
   // 10s was too short — users often send a second message 12-15 seconds after the first,
   // causing two independent responses that contradict each other (e.g. different mileage totals).

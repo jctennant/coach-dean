@@ -373,8 +373,13 @@ export async function generateAndSaveFullPlan(
     ? `\n\nB/C RACES (tune-up races during the plan):\n${bRaceWeekLabels.join("\n")}\nFor B race weeks: keep key_workout brief or race-focused ("B race — tune-up effort" or similar). For C race weeks: treat as a quality workout day.`
     : "";
 
+  const preferredUnits = (profile?.preferred_units as string | null) ?? "miles";
+  const useKm = preferredUnits === "km";
+  const unitLabel = useKm ? "km" : "mi";
+  const miToDisplay = (mi: number) => useKm ? Math.round(mi * 1.60934 * 10) / 10 : mi;
+
   const arcSummary = planWeeks.map(w =>
-    `Week ${w.week_number} (${w.phase}, ${w.mileage_target}mi, long run ~${w.long_run_target}mi)`
+    `Week ${w.week_number} (${w.phase}, ${miToDisplay(w.mileage_target)}${unitLabel}, long run ~${miToDisplay(w.long_run_target)}${unitLabel})`
   ).join("\n");
 
   // A runner with an established base (≥10 mi/week) doesn't need weeks of pure easy
@@ -382,8 +387,9 @@ export async function generateAndSaveFullPlan(
   // short tempos, fartleks) are appropriate from week 1. Only truly new runners building
   // from scratch should have pure easy base weeks.
   const hasEstablishedBase = baseMileage >= 10;
+  const baseMileageDisplay = `${miToDisplay(baseMileage)}${unitLabel}`;
   const basePhaseGuidance = hasEstablishedBase
-    ? `This runner already has an established aerobic base at ~${baseMileage}mi/week. Do NOT assign pure easy/base-building weeks — include quality sessions (strides, fartlek, short tempo, easy intervals) from week 1 onward. Reserve "easy aerobic miles" labels only for deload weeks.`
+    ? `This runner already has an established aerobic base at ~${baseMileageDisplay}/week. Do NOT assign pure easy/base-building weeks — include quality sessions (strides, fartlek, short tempo, easy intervals) from week 1 onward. Reserve "easy aerobic miles" labels only for deload weeks.`
     : `This runner is building their base from scratch. Early base-phase weeks should be easy aerobic miles to develop the aerobic foundation before adding quality.`;
 
   // Ultra-specific enrichment guidance: back-to-back long runs are the central stimulus
@@ -393,9 +399,9 @@ export async function generateAndSaveFullPlan(
   const ultraGuidance = isUltraEnrich ? `
 
 ULTRA-SPECIFIC REQUIREMENTS (mandatory):
-- Introduce back-to-back long run weekends (e.g. "Sat 18mi + Sun 12mi easy") no later than week ${Math.max(3, Math.round(totalWeeks * 0.25))} of ${totalWeeks}. This is the key ultra stimulus — do NOT delay it to the second half of the plan.
+- Introduce back-to-back long run weekends (e.g. "Sat ${miToDisplay(18)}${unitLabel} + Sun ${miToDisplay(12)}${unitLabel} easy") no later than week ${Math.max(3, Math.round(totalWeeks * 0.25))} of ${totalWeeks}. This is the key ultra stimulus — do NOT delay it to the second half of the plan.
 - Include trail-specific context from week 1: hiking steep uphills (power-hiking is faster than running them in a 50k/100k), running by time-on-feet rather than strict pace, and managing elevation.
-- key_workout for back-to-back weekends should specify both Saturday and Sunday, e.g. "Sat 20mi trail + Sun 14mi easy (back-to-back)".
+- key_workout for back-to-back weekends should specify both Saturday and Sunday, e.g. "Sat ${miToDisplay(20)}${unitLabel} trail + Sun ${miToDisplay(14)}${unitLabel} easy (back-to-back)".
 - Notes should reference the back-to-back adaptation, hiking uphills, and time-on-feet philosophy when applicable.` : "";
 
   try {
@@ -404,7 +410,7 @@ ULTRA-SPECIFIC REQUIREMENTS (mandatory):
       max_tokens: Math.min(8000, Math.max(2500, totalWeeks * 200)),
       system: `You are a running coach generating a structured training plan arc.
 For each week provide:
-- key_workout: the quality/speed session for that week (1 line). CRITICAL RULE: When a week includes BOTH a long run AND a quality session (tempo, intervals, strides, fartlek, hill repeats), set key_workout to the QUALITY session — NOT the long run. The long run is displayed separately in the dashboard. Only use the long run as key_workout for pure long-run-only weeks (recovery, low-volume deload). Examples: "6×800m @ 5K pace", "4mi tempo @ threshold", "6×strides + easy 5mi", "20min fartlek", "Race simulation 5mi @ goal pace", "Hill repeats 6×90sec". Deload weeks: "Easy 30min + 4×strides" or similar.
+- key_workout: the quality/speed session for that week (1 line). CRITICAL RULE: When a week includes BOTH a long run AND a quality session (tempo, intervals, strides, fartlek, hill repeats), set key_workout to the QUALITY session — NOT the long run. The long run is displayed separately in the dashboard. Only use the long run as key_workout for pure long-run-only weeks (recovery, low-volume deload). Examples: "6×800m @ 5K pace", "4${unitLabel} tempo @ threshold", "6×strides + easy 5${unitLabel}", "20min fartlek", "Race simulation 5${unitLabel} @ goal pace", "Hill repeats 6×90sec". Deload weeks: "Easy 30min + 4×strides" or similar. IMPORTANT: All distances in key_workout and notes must use ${unitLabel} (${useKm ? "kilometers" : "miles"}) — never mix units.
 - notes: 2-3 sentences for the athlete to read on their dashboard. First sentence: the week's purpose and why it matters at this stage of training (e.g. "Week 6 is about building your aerobic base — consistent easy mileage here pays dividends in the peak phase."). Then 1-2 sentences on the key workout: what it is, the target effort or pace, and one brief execution tip (e.g. "The tempo run on Wednesday should feel comfortably hard — you should be able to speak in short phrases but not hold a conversation. Start controlled and aim to hold pace in the second half."). Deload weeks should acknowledge the pullback and why recovery is productive. Keep it direct and practical, not generic.
 
 Return ONLY a valid JSON array:
@@ -412,7 +418,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileage}mi/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileageDisplay}/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\nPreferred units: ${unitLabel}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 

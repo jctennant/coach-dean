@@ -510,6 +510,77 @@ describe("POST /api/webhooks/linq — message routing", () => {
     }
   });
 
+  it("'UPDATE PLAN' keyword: fires rebuild_plan trigger directly, skips debounce", async () => {
+    mockTables({
+      conversations: [
+        { data: null, error: null },               // dedup check
+        { data: { id: "conv-001" }, error: null }, // insert storedMsg
+      ],
+      users: {
+        data: {
+          id: "user-001", onboarding_step: null, timezone: "America/New_York",
+          linq_chat_id: "chat-abc", messaging_opted_out: false,
+          reengagement_sent_at: null, strava_athlete_id: "12345",
+          dashboard_token: "tok-abc123",
+        },
+        error: null,
+      },
+    });
+
+    const req = makeRequest("+12025551234", "UPDATE PLAN");
+    await POST(req);
+    await flush();
+
+    // Must fire rebuild_plan directly — no debounce, no user_message trigger
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("coach/respond"),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"trigger":"rebuild_plan"'),
+      })
+    );
+    // Must NOT route to user_message (which goes through debounce and Dean)
+    expect(global.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("coach/respond"),
+      expect.objectContaining({
+        body: expect.stringContaining('"trigger":"user_message"'),
+      })
+    );
+  });
+
+  it("'UPDATE PLAN' is case-insensitive", async () => {
+    for (const variant of ["update plan", "Update Plan", "UPDATE PLAN"]) {
+      vi.clearAllMocks();
+      afterQueue.splice(0);
+      mockTables({
+        conversations: [
+          { data: null, error: null },
+          { data: { id: "conv-001" }, error: null },
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null,
+            dashboard_token: "tok-xyz",
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", variant);
+      await POST(req);
+      await flush();
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.objectContaining({
+          body: expect.stringContaining('"trigger":"rebuild_plan"'),
+        })
+      );
+    }
+  });
+
   it.each(["UNSUBSCRIBE", "CANCEL"])("%s: does NOT opt out, routes to coach/respond for Stripe portal link", async (keyword) => {
     vi.useFakeTimers();
     try {
