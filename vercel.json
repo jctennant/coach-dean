@@ -1,1 +1,7 @@
-{}
+{
+  "functions": {
+    "src/app/api/coach/respond/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}
