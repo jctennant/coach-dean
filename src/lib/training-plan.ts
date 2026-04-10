@@ -143,7 +143,7 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, wantsSpeedWork = false }: {
+  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, wantsSpeedWork = false, otherNotes = null }: {
     skipLinkSms?: boolean;
     prescribedWeek1Miles?: number;
     bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }>;
@@ -157,6 +157,8 @@ export async function generateAndSaveFullPlan(
     resetToWeek1?: boolean;
     /** When true, inject speed-work-first guidance into Haiku enrichment */
     wantsSpeedWork?: boolean;
+    /** Athlete preferences from onboarding_data.other_notes (hill repeats, cycling, etc.) */
+    otherNotes?: string | null;
   } = {},
 ): Promise<string> {
   const raceDate = (profile?.race_date as string | null) ?? null;
@@ -165,6 +167,7 @@ export async function generateAndSaveFullPlan(
   const tempoPace = (profile?.current_tempo_pace as string | null) ?? null;
   const intervalPace = (profile?.current_interval_pace as string | null) ?? null;
   const daysPerWeek = (profile?.days_per_week as number | null) ?? 4;
+  const injuryNotes = (profile?.injury_notes as string | null) ?? null;
   const hasRace = !!raceDate;
 
   // Determine total weeks: anchor to the start of the current week (Monday) so the race
@@ -418,7 +421,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileageDisplay}/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\nPreferred units: ${unitLabel}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileageDisplay}/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\nPreferred units: ${unitLabel}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${injuryNotes ? `\n\nINJURY/PHYSICAL LIMITATIONS: ${injuryNotes}. Avoid exercises that could aggravate this; suggest lower-impact alternatives where relevant.` : ""}${otherNotes ? `\n\nATHLETE PREFERENCES: ${otherNotes}. Incorporate these into key_workout and notes where appropriate — spread across multiple weeks (e.g. if hill repeats requested, designate 2-3 build/peak weeks with hill repeats as key_workout; if cycling requested, mention optional bike sessions in notes for rest/recovery days, not as the key_workout).` : ""}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 
@@ -445,20 +448,20 @@ No other text.`,
   });
 
   // Sync training_state: reset week counter if this is a new plan; sync mileage target.
-  // Always sync weekly_mileage_target: use prescribedWeek1Miles (what Dean told the athlete) if
-  // provided, otherwise fall back to the computed arc week 1 so the dashboard stays consistent
-  // with the plan (fixes the "dashboard shows 15mi but plan says 13mi" mismatch after race date
-  // changes that trigger a full regen without a fresh prescribed value).
+  // When resetToWeek1 is true (new plan, new race, onboarding): reset everything —
+  // week counter, mileage target, and session list.
+  // When resetToWeek1 is false (mid-plan rebuild — tweaking workouts, paces, etc.):
+  // leave weekly_mileage_target and weekly_plan_sessions alone. The current week is
+  // already in progress; overwriting these would change this week's target mid-week
+  // and wipe Dean's carefully scheduled sessions. The arc mileage is already anchored
+  // by the caller passing prescribedWeek1Miles = existingTarget.
   const week1ArcMileage = planWeeks[0]?.mileage_target ?? null;
   const week1MileageTarget = prescribedWeek1Miles ?? week1ArcMileage;
   await supabase.from("training_state")
     .update({
       ...(resetToWeek1 ? { current_week: 1 } : {}),
-      ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
-      // Clear the cached session list so the dashboard falls back to training_days-based
-      // display. After a full plan rebuild the old sessions are stale (wrong days, wrong
-      // distances). They'll be re-derived from Dean's next plan message.
-      weekly_plan_sessions: null,
+      ...(resetToWeek1 && week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
+      ...(resetToWeek1 ? { weekly_plan_sessions: null } : {}),
     })
     .eq("user_id", userId);
 

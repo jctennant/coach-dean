@@ -270,7 +270,10 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     expect(capturedUpdate).toMatchObject({ weekly_mileage_target: 30 });
   });
 
-  it("does NOT include current_week in the update when resetToWeek1 is false", async () => {
+  it("does NOT touch current_week, weekly_mileage_target, or weekly_plan_sessions when resetToWeek1 is false", async () => {
+    // Mid-plan rebuilds (add hill repeats, change workout types, update paces) must not
+    // overwrite the current week's target or session list — the athlete is already in
+    // progress for the week and those values are authoritative.
     let capturedUpdate: Record<string, unknown> | null = null;
 
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
@@ -293,7 +296,8 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     );
 
     expect(capturedUpdate).not.toHaveProperty("current_week");
-    expect(capturedUpdate).toMatchObject({ weekly_mileage_target: 20 });
+    expect(capturedUpdate).not.toHaveProperty("weekly_mileage_target");
+    expect(capturedUpdate).not.toHaveProperty("weekly_plan_sessions");
   });
 
   it("scopes the training_state update to the correct user_id", async () => {

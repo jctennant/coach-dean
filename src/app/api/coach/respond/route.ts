@@ -144,36 +144,43 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
   const existingTarget = (stateData as { weekly_mileage_target: number | null } | null)?.weekly_mileage_target ?? null;
 
-  // Detect whether the conversation is asking to reduce volume. When true, cap the rebuild
-  // base at existingTarget so the new arc doesn't start higher than the current plan.
   const allRecentText = (conversationsData ?? []).map((m: { content: string }) => m.content).join(" ").toLowerCase();
+
+  // Detect explicit mileage change requests.
+  // wantsDecrease: user wants to run less.
+  // wantsIncrease: user wants to run more.
+  // When neither is true, the rebuild is content-only (add workouts, fix sessions, etc.)
+  // and we should hold mileage constant rather than re-deriving from Strava avg.
   const wantsDecrease = /\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b/.test(allRecentText);
+  const wantsIncrease = /\b(more|higher|increase|ramp.?up|bump|add)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(more|higher|increase|ramp.?up|bump|add)\b/.test(allRecentText);
+  const wantsMileageChange = wantsDecrease || wantsIncrease;
 
   // Extract athlete-stated mileage from recent conversation.
   // When Strava data is incomplete (e.g. watch not syncing), the athlete often corrects us
   // by stating their actual weekly volume. Parse the highest plausible figure mentioned in
   // the last 20 messages and use it as a floor when it significantly exceeds Strava avg.
-  // Matches patterns like "21.5 miles last week", "running 20 miles a week", "hit 20 this week".
   let statedMileage: number | null = null;
   const mileageMatches = allRecentText.matchAll(/\b(\d{1,3}(?:\.\d)?)\s*(?:miles?|mi)\b/g);
   for (const m of mileageMatches) {
     const val = parseFloat(m[1]);
-    // Only consider plausible weekly totals (5–150 mi/week); ignore single-run distances
-    // mentioned in isolation by filtering to values that appear near weekly-volume language.
     if (val >= 5 && val <= 150) {
       statedMileage = statedMileage === null ? val : Math.max(statedMileage, val);
     }
   }
 
   // Compute the effective base for the rebuild arc.
-  // Priority: admin override > Strava avg (with stated-mileage floor) > profile default.
-  // The stated-mileage floor handles Strava-sync gaps: if the athlete says they ran 21mi
-  // but Strava only shows 9mi, we trust the higher stated figure so the arc isn't anchored
-  // to bad data. We only apply this floor when there's a clear discrepancy (stated > 1.5× Strava).
+  // Priority: admin override > content-only anchor > Strava avg > profile default.
+  //
+  // Content-only anchor: when no mileage change was requested and we have an existing
+  // target, lock the arc to that value. This prevents Strava avg drift from silently
+  // shifting all mileage targets when the user only asked to add hill repeats or cycling.
   let rebuildBase: number | undefined;
   if (adminOverrideMiles != null && adminOverrideMiles > 0) {
     rebuildBase = adminOverrideMiles;
     console.log(`[handleRebuildPlan] using admin override: ${rebuildBase} mi/week`);
+  } else if (!wantsMileageChange && existingTarget != null) {
+    rebuildBase = existingTarget;
+    console.log(`[handleRebuildPlan] content-only rebuild — anchoring to existing target: ${rebuildBase} mi/week`);
   } else if (avgWeeklyMileage !== null) {
     const stravaBase = wantsDecrease
       ? Math.min(avgWeeklyMileage, existingTarget ?? avgWeeklyMileage)
@@ -187,9 +194,11 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
       console.log(`[handleRebuildPlan] Strava avg (${avgWeeklyMileage} mi) significantly below stated mileage (${statedMileage} mi) — using stated as base`);
     }
   }
-  // No Strava: leave rebuildBase undefined → generateAndSaveFullPlan derives from profile.
+  // No Strava and no existing target: leave rebuildBase undefined → derives from profile.
 
-  const wantsSpeedWork = !!((user.onboarding_data as Record<string, unknown> | null)?.wants_speed_work);
+  const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+  const wantsSpeedWork = !!onboardingData.wants_speed_work;
+  const otherNotes = (onboardingData.other_notes as string | null) ?? null;
 
   if (!dryRun) {
     // Run generateAndSaveFullPlan in after() so this function returns immediately.
@@ -203,7 +212,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
           phoneNumber,
           profile as Record<string, unknown> | null,
           avgWeeklyMileage,
-          { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase, skipLinkSms: silent }
+          { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase, skipLinkSms: silent, otherNotes }
         );
         void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
       } catch (err) {
