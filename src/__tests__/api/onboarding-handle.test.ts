@@ -272,7 +272,7 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
     expect(textSent).toContain("skip");
   });
 
-  it("Strava question: explains value and re-sends link", async () => {
+  it("Strava question: explains what Strava is and re-sends link", async () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
 
     mockTables({
@@ -280,11 +280,11 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
       conversations: { data: null, error: null },
     });
 
-    await POST(makeRequest({ userId: "user-001", message: "Is Strava worth it?" }));
+    await POST(makeRequest({ userId: "user-001", message: "What is Strava?" }));
 
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
     const textSent = smsCalls[0]?.[1] as string;
-    expect(textSent).toContain("worth it");
+    expect(textSent).toContain("Strava is a free app");
     expect(textSent).toContain("https://coachdean.ai/api/auth/strava");
   });
 });

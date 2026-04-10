@@ -577,9 +577,10 @@ async function handleStrava(
   const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
   const isSkip = /\b(skip|no strava|don.?t have|no thanks|nope|later|next|without it)\b/i.test(message);
 
-  // If asking about Strava specifically, explain value and re-send link
-  if (!isSkip && /strava/i.test(message) && message.includes("?")) {
-    const reply = `Yes, worth it — it's free and once connected I can automatically analyze every run without you reporting anything. Here's the link:\n\n${stravaUrl}\n\nAlready have it? Tap the link to connect. No Strava? Just reply "skip".`;
+  // If asking about Strava (with or without a question mark)
+  const isAskingAboutStrava = !isSkip && /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
+  if (isAskingAboutStrava || (!isSkip && /strava/i.test(message) && message.includes("?"))) {
+    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run you do and adjust your training plan based on real data. No need to report anything manually.\n\nDon't have it? No problem — you can skip and I'll ask you a few quick questions to set your paces instead.\n\n${stravaUrl}\n\nNo Strava? Just reply "skip".`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
