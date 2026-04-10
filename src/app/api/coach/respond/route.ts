@@ -100,15 +100,14 @@ const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
  * generateAndSaveFullPlan sends the dashboard link SMS automatically.
  */
 async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false): Promise<NextResponse> {
-  // Load user, profile, and recent conversation
-  const [userResult, profileResult, conversationsResult] = await Promise.all([
+  // Load user and profile.
+  // Profile extraction is intentionally NOT done here — by the time rebuild_plan fires,
+  // persistProfileUpdates has already run in the user_message handler (line ~1173).
+  // Doing it again adds a redundant LLM call (~5s) and would push us over the 10s
+  // Hobby plan function limit.
+  const [userResult, profileResult] = await Promise.all([
     supabase.from("users").select("*").eq("id", userId).single(),
     supabase.from("training_profiles").select("*").eq("user_id", userId).single(),
-    supabase.from("conversations")
-      .select("role, content")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(20),
   ]);
 
   const user = userResult.data as Record<string, unknown> | null;
@@ -118,83 +117,34 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   }
 
   const phoneNumber = user.phone_number as string;
-  const timezone = (user.timezone as string | null) ?? "America/New_York";
   const hasStrava = !!(user.strava_athlete_id as number | null);
 
-  // Extract profile updates from the recent conversation — this is what makes the
-  // rebuild reflect pace corrections and preferences stated during the conversation.
-  const recentMessages = (conversationsResult.data ?? [])
-    .reverse()
-    .filter(m => m.role === "user");
-  if (recentMessages.length > 0) {
-    const recentUserText = recentMessages
-      .slice(-8) // last 8 user messages — enough context without blowing the extraction
-      .map(m => m.content)
-      .join("\n");
-    try {
-      const extracted = await extractProfileData(recentUserText, timezone);
-      await persistProfileUpdates(
-        userId,
-        phoneNumber,
-        extracted,
-        profile,
-        (user.onboarding_data as Record<string, unknown>) || {},
-        timezone,
-        hasStrava
-      );
-    } catch (err) {
-      // Non-fatal — rebuild continues with whatever profile state exists
-      console.error("[handleRebuildPlan] profile extraction failed (non-fatal):", err);
-    }
-  }
-
-  // Brief pause so the profile writes above are visible to the subsequent fetch
-  await new Promise(r => setTimeout(r, 300));
-
-  // Re-fetch the now-updated profile
-  const { data: freshProfile } = await supabase
-    .from("training_profiles")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
-
-  // Fetch 8-week avg mileage from Strava activities (same window as initial_plan)
-  let avgWeeklyMileage: number | null = null;
-  if (hasStrava) {
-    const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentActs } = await supabase
-      .from("activities")
-      .select("distance_meters, start_date")
-      .eq("user_id", userId)
-      .gte("start_date", eightWeeksAgo)
-      .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"]);
-    if (recentActs && recentActs.length > 0) {
-      const totalMiles = recentActs.reduce((sum, a) => sum + ((a.distance_meters as number) / 1609.34), 0);
-      avgWeeklyMileage = Math.round((totalMiles / 8) * 10) / 10;
-    }
-  }
-
-  // Fetch B/C races and current training_state in parallel
+  // Fetch Strava activities, B/C races, training_state, and recent conversations in parallel.
+  // No profile re-fetch needed — profile was already persisted by user_message before this fires.
   const now = new Date();
-  const [{ data: upcomingRaces }, { data: stateData }] = await Promise.all([
-    supabase
-      .from("races")
-      .select("race_date, race_name, priority")
-      .eq("user_id", userId)
-      .gt("race_date", now.toISOString().slice(0, 10))
-      .in("priority", ["B", "C"]),
-    supabase
-      .from("training_state")
-      .select("weekly_mileage_target")
-      .eq("user_id", userId)
-      .single(),
+  const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
+  const [recentActsResult, { data: upcomingRaces }, { data: stateData }, { data: conversationsData }] = await Promise.all([
+    hasStrava
+      ? supabase.from("activities").select("distance_meters, start_date").eq("user_id", userId).gte("start_date", eightWeeksAgo).in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
+      : Promise.resolve({ data: null }),
+    supabase.from("races").select("race_date, race_name, priority").eq("user_id", userId).gt("race_date", now.toISOString().slice(0, 10)).in("priority", ["B", "C"]),
+    supabase.from("training_state").select("weekly_mileage_target").eq("user_id", userId).single(),
+    supabase.from("conversations").select("role, content").eq("user_id", userId).order("created_at", { ascending: false }).limit(20),
   ]);
+
+  let avgWeeklyMileage: number | null = null;
+  const recentActs = recentActsResult.data;
+  if (recentActs && recentActs.length > 0) {
+    const totalMiles = recentActs.reduce((sum, a) => sum + ((a.distance_meters as number) / 1609.34), 0);
+    avgWeeklyMileage = Math.round((totalMiles / 8) * 10) / 10;
+  }
+
   const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
   const existingTarget = (stateData as { weekly_mileage_target: number | null } | null)?.weekly_mileage_target ?? null;
 
   // Detect whether the conversation is asking to reduce volume. When true, cap the rebuild
   // base at existingTarget so the new arc doesn't start higher than the current plan.
-  const allRecentText = (conversationsResult.data ?? []).map(m => m.content).join(" ").toLowerCase();
+  const allRecentText = (conversationsData ?? []).map((m: { content: string }) => m.content).join(" ").toLowerCase();
   const wantsDecrease = /\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b/.test(allRecentText);
 
   // Compute the effective base for the rebuild arc.
@@ -217,7 +167,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
       await generateAndSaveFullPlan(
         userId,
         phoneNumber,
-        freshProfile as Record<string, unknown> | null,
+        profile as Record<string, unknown> | null,
         avgWeeklyMileage,
         { resetToWeek1: false, bRaces: bCRaces.length > 0 ? bCRaces : undefined, wantsSpeedWork, prescribedWeek1Miles: rebuildBase, skipLinkSms: silent }
       );
