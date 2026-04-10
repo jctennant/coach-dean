@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fix initial_plan and weekly_recap timing out on Vercel Hobby (10s cap)
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (maxDuration = 120 is ignored on Hobby; after() capped at 10s)
+**User feedback:** N/A
+**Root cause:** `initial_plan` made 4 sequential LLM calls (Sonnet + 3× Haiku) and `weekly_recap` made 3 (Sonnet + 2× Haiku), both well over the 10s Hobby limit, causing silent timeouts after the SMS was sent — meaning users got their plan message but the dashboard had no plan data, no weekly sessions, and no quality workouts.
+**Fix / Change:** Added `sync_sessions` trigger + `handleSyncSessions` handler. Both `initial_plan` and `weekly_recap` now fire `sync_sessions` as a separate HTTP request (fresh 10s budget) after the main SMS is sent. `handleSyncSessions` reads the plan text from the `conversations` DB table and runs `extractAndStorePlanSessions` + `syncArcCurrentWeek` sequentially (~3-4s, fits in budget). The partial-week mileage correction is passed as `partialWeekTarget` in the request body. Closing link message changed from `message_type: "initial_plan"` to `"initial_plan_link"` so it doesn't interfere with the sync_sessions plan-text query. Budget after fix: `initial_plan` ~7-9s (Sonnet + generateAndSaveFullPlan), `weekly_recap` ~5-7s (Sonnet only).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-10 — coach/respond fails silently when required fields are missing
 
 **Type:** Bug Fix

@@ -13,7 +13,7 @@ import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions";
 
 interface CoachRequest {
   userId: string;
@@ -22,6 +22,7 @@ interface CoachRequest {
   imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
   silent?: boolean; // For rebuild_plan: regenerates the arc without sending the "plan ready" SMS
+  partialWeekTarget?: number; // For sync_sessions: re-apply partial-week mileage target after syncArcCurrentWeek
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
   missedRunCheckin?: boolean; // True when Strava user had a scheduled workout but no run came through — check if they got it in
@@ -182,6 +183,64 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
 }
 
 /**
+ * Runs extractAndStorePlanSessions + syncArcCurrentWeek in a fresh invocation
+ * so initial_plan and weekly_recap stay within the 10s Hobby budget.
+ *
+ * Reads the plan text from the most recent initial_plan/weekly_recap conversation row —
+ * that message is already saved to DB before this trigger fires.
+ *
+ * @param partialWeekTarget - When set (> 0), re-applies this value as weekly_mileage_target
+ *   after syncArcCurrentWeek runs, preserving the partial-week onboard total
+ *   (miles already logged + miles Dean prescribed for remaining days).
+ */
+async function handleSyncSessions(userId: string, partialWeekTarget: number | null): Promise<NextResponse> {
+  const [userResult, profileResult, stateResult, convResult] = await Promise.all([
+    supabase.from("users").select("id, name").eq("id", userId).single(),
+    supabase.from("training_profiles").select("goal").eq("user_id", userId).single(),
+    supabase.from("training_state").select("current_week, current_phase").eq("user_id", userId).single(),
+    supabase.from("conversations")
+      .select("content")
+      .eq("user_id", userId)
+      .eq("role", "assistant")
+      .in("message_type", ["initial_plan", "weekly_recap"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single(),
+  ]);
+
+  const user = userResult.data as { id: string; name: string | null } | null;
+  const profile = profileResult.data as { goal: string | null } | null;
+  const state = stateResult.data as { current_week: number | null; current_phase: string | null } | null;
+  const planMessage = convResult.data as { content: string } | null;
+
+  if (!user || !profile || !state) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  if (planMessage) {
+    await extractAndStorePlanSessions(userId, planMessage.content);
+  }
+
+  await syncArcCurrentWeek(
+    userId,
+    state.current_week ?? 1,
+    state.current_phase ?? "base",
+    profile.goal ?? "",
+    user.name ?? null,
+  );
+
+  // Re-apply the partial-week onboard total if provided — syncArcCurrentWeek overwrites
+  // weekly_mileage_target with just the prescribed session sum, losing the miles already logged.
+  if (partialWeekTarget != null && partialWeekTarget > 0) {
+    await supabase.from("training_state")
+      .update({ weekly_mileage_target: partialWeekTarget })
+      .eq("user_id", userId);
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+/**
  * Handles a Strava activity event for a user who hasn't finished onboarding yet.
  * Sends a brief, warm reaction to the run, then re-asks the current onboarding question
  * so the user knows to reply and finish setup.
@@ -289,6 +348,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Fired after Dean sends a [REBUILD_PLAN] confirmation to the athlete.
   if (trigger === "rebuild_plan") {
     return await handleRebuildPlan(userId, dry_run ?? false, silent ?? false);
+  }
+
+  if (trigger === "sync_sessions") {
+    return await handleSyncSessions(userId, body.partialWeekTarget ?? null);
   }
 
   // Fetch user context in parallel
@@ -979,6 +1042,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
+    const _ipStart = Date.now();
     console.log("[initial_plan] weekMileageSoFar=", weekMileageSoFar, "recentActivities count=", recentActivities.length, "activityTypes=", recentActivities.slice(0, 10).map(a => `${a.activity_type}(${new Date(a.start_date).toISOString().slice(0,10)})`).join(", "));
 
     // Parse the prescribed week total from the plan text.
@@ -1044,34 +1108,31 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // so the user gets one closing message instead of two back-to-back.
     const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
     // New plan from scratch at the end of onboarding — always start at week 1.
+    const _preGenMs = Date.now() - _ipStart;
+    console.log(`[initial_plan] ${_preGenMs}ms elapsed before generateAndSaveFullPlan — budget remaining: ~${10000 - _preGenMs}ms`);
+    if (_preGenMs > 6000) console.warn(`[initial_plan] ⚠️ already ${_preGenMs}ms in — generateAndSaveFullPlan may exceed 10s Hobby cap`);
     const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true, wantsSpeedWork });
+    console.log(`[initial_plan] generateAndSaveFullPlan done — total elapsed: ${Date.now() - _ipStart}ms`);
 
-    // Extract and store the specific planned sessions AFTER generateAndSaveFullPlan,
-    // because generateAndSaveFullPlan clears weekly_plan_sessions to null (stale sessions
-    // are invalid after a full arc rebuild). Running extractAndStorePlanSessions first
-    // would have those sessions wiped. By running it after, the sessions are preserved
-    // for the dashboard and syncArcCurrentWeek.
-    await extractAndStorePlanSessions(userId, coachMessage);
-
-    // Overwrite the arc's week 1 key_workout and notes with what Dean actually prescribed
-    // (the Haiku arc enrichment in generateAndSaveFullPlan uses estimates; this uses real sessions).
-    // Must be awaited — this runs inside after(), and a void fire-and-forget gets killed when
-    // the lambda exits before the async call completes.
-    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "", (user.name as string | null) ?? null);
-
-    // Re-apply the correct weekly target (done this week + prescribed) after syncArcCurrentWeek
-    // may have overwritten it with just the prescribed session total. For partial-week onboards
-    // (any day except Sunday/Monday), the dashboard should show the TRUE total = miles already
-    // logged Mon–today + new sessions Dean prescribed for the remaining days.
-    // Example: ran 17mi Mon–Thu, Dean prescribes 15mi for Sat+Sun → target = 32mi.
-    // Only re-apply if we have a meaningful value (> 0). If prescribedWeek1MilesRaw and
-    // suggestedWeeklyMiles were both null (e.g. no-Strava beginner), weekMileageTarget
-    // resolves to 0 — don't clobber syncArcCurrentWeek's session-derived result in that case.
-    if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
-      await supabase.from("training_state")
-        .update({ weekly_mileage_target: weekMileageTarget })
-        .eq("user_id", userId);
-    }
+    // Fire sync_sessions in a fresh invocation so it doesn't eat into the 10s Hobby budget.
+    // It must run AFTER generateAndSaveFullPlan (which clears weekly_plan_sessions) but
+    // the plan message is now in the DB, so sync_sessions can read it from conversations.
+    after(async () => {
+      try {
+        const syncBody: Record<string, unknown> = { userId, trigger: "sync_sessions" };
+        // Pass partial-week target so syncArcCurrentWeek's session-sum doesn't clobber it.
+        if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
+          syncBody.partialWeekTarget = weekMileageTarget;
+        }
+        await fetch(`${appUrl}/api/coach/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(syncBody),
+        });
+      } catch (err) {
+        console.error("[coach/respond] sync_sessions trigger failed (initial_plan):", err);
+      }
+    });
 
     // Build the dashboard URL from the token generateAndSaveFullPlan just created/returned.
     const planToken = newDashboardToken ?? dashboardToken;
@@ -1093,7 +1154,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         user_id: userId,
         role: "assistant",
         content: closingMsg,
-        message_type: "initial_plan",
+        message_type: "initial_plan_link",
       });
     }
   } else if (trigger === "weekly_recap") {
@@ -1107,10 +1168,18 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       ...(periodization.suggestedWeeklyMiles != null ? { weekly_mileage_target: periodization.suggestedWeeklyMiles } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
-    await extractAndStorePlanSessions(userId, coachMessage);
-    // Sync the arc's current week with what Dean actually prescribed this week.
-    // Must be awaited — void fire-and-forget gets killed when the lambda exits inside after().
-    await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string | null) ?? "", (user.name as string | null) ?? null);
+    // Fire sync_sessions in a fresh invocation — saves ~3s vs inline Haiku calls.
+    after(async () => {
+      try {
+        await fetch(`${appUrl}/api/coach/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, trigger: "sync_sessions" }),
+        });
+      } catch (err) {
+        console.error("[coach/respond] sync_sessions trigger failed (weekly_recap):", err);
+      }
+    });
   }
 
   // For user_message, persist any profile updates extracted above (injuries, cross-training,
