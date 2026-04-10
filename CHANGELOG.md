@@ -4,6 +4,37 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fix rebuild_plan anchoring to wrong base when Strava data is incomplete
+
+**Type:** Bug Fix
+**Reported by:** Madie (internal observation)
+**User feedback:** "Max at 5 miles a week??" / "Yes exactly the volume is wrong" / "Weekly mileage targets should be updated"
+**Root cause:** `handleRebuildPlan` derived the plan arc base exclusively from Strava avg weekly mileage. When a user's watch isn't syncing to Strava, Strava shows much lower volume than the athlete is actually running (Madie: Strava showed ~9mi/week, actual was 20+mi/week). Every rebuild fired with the wrong 9mi base, producing a 7.5mi/week taper plan even after repeated attempts.
+**Fix / Change:** Two changes: (1) Added `prescribedWeek1Miles` to the `rebuild_plan` API request body as an admin override — allows correct base to be passed when Strava data is known to be wrong. (2) `handleRebuildPlan` now extracts the highest athlete-stated mileage from recent conversation text. When the stated figure is materially higher than Strava avg (>1.5×), it uses the stated figure as the arc base instead, on the principle that the athlete knows their actual volume better than a partially-synced Strava account.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-10 — Add metric plan quality eval (plan-half-marathon-metric)
+
+**Type:** Infra
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** No eval coverage for whether Dean produces plans in km for metric users. The existing plan_quality judge had no unit-correctness dimension.
+**Fix / Change:** Added `plan-half-marathon-metric` fixture (Pec, 27-week HM, Spanish runner, preferred_units: metric). Updated `plan-quality.mjs` judge to detect `must_use_metric` ground truth flag and inject a `uses_correct_units` dimension that fails if any distance or pace appears in miles. Ground truth bounds now show km equivalents for metric fixtures.
+**Files changed:** `evals/fixtures/plan-half-marathon-metric.json`, `evals/judges/plan-quality.mjs`, `CLAUDE.md`
+
+---
+
+## 2026-04-10 — Convert all hardcoded miles in coach prompts to respect preferred_units
+
+**Type:** Bug Fix
+**Reported by:** Internal (follow-up to Pec's km unit bug)
+**User feedback:** N/A
+**Root cause:** Multiple places in `buildSystemPrompt` and `buildUserMessage` injected mileage values with hardcoded "mi" labels regardless of the user's `preferred_units` setting. This included the taper protocol, fitness tier volume caps, race preparedness flag, next-week plan context, full training arc summary, weekly recap stored plan, and recovery/progression target blocks.
+**Fix / Change:** Added `spUseMetric`/`spMi()` unit helper at the top of `buildSystemPrompt` (so it's available to the taper block, which precedes the existing `ts*` helpers) and aliased `tsUseMetric`/`tsMi` to it. Added inline `rpMi()`, `umMi()`, and `recapMi()` helpers in the three `buildUserMessage` cases that needed them. All hardcoded `mi` values now convert to km for metric users.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts` (also fixed wrong `=== "km"` check to `=== "metric"`)
+
+---
+
 ## 2026-04-10 — Fix quality workout descriptions using miles for km-preference users
 
 **Type:** Bug Fix

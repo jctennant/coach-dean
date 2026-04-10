@@ -373,8 +373,8 @@ export async function generateAndSaveFullPlan(
     ? `\n\nB/C RACES (tune-up races during the plan):\n${bRaceWeekLabels.join("\n")}\nFor B race weeks: keep key_workout brief or race-focused ("B race — tune-up effort" or similar). For C race weeks: treat as a quality workout day.`
     : "";
 
-  const preferredUnits = (profile?.preferred_units as string | null) ?? "miles";
-  const useKm = preferredUnits === "km";
+  const preferredUnits = (profile?.preferred_units as string | null) ?? "imperial";
+  const useKm = preferredUnits === "metric";
   const unitLabel = useKm ? "km" : "mi";
   const miToDisplay = (mi: number) => useKm ? Math.round(mi * 1.60934 * 10) / 10 : mi;
 

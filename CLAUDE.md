@@ -131,7 +131,7 @@ The GH Actions workflow runs `npm test` on every push. A commit that breaks test
 
 Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound SMS. The runner (`evals/run-evals.mjs`) builds a realistic coaching system prompt from the fixture data, calls Claude Sonnet for the response, then calls Claude Opus as the judge. Results go to `evals/results/` (gitignored).
 
-**18 fixtures across 6 categories:**
+**19 fixtures across 7 categories:**
 
 | Category | What it catches | Fixture count |
 |---|---|---|
@@ -141,8 +141,9 @@ Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound
 | `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 3 |
 | `mileage_format` | Additive total format ("Total: 25mi + your 15mi already") | 2 |
 | `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed, morning plan attributes activity to wrong day | 3 |
+| `plan_quality` | Plan structure: volume ramp, long run, quality sessions, safe progression — and for metric users, correct km units throughout | 1 |
 
-**Current baseline (2026-04-02):** 22/22 passing, avg 9.5/10. No known failures.
+**Current baseline (2026-04-02):** 22/22 passing, avg 9.5/10. No known failures. (Baseline pre-dates `plan-half-marathon-metric` fixture — run evals to establish new baseline.)
 
 ### When to update evals
 

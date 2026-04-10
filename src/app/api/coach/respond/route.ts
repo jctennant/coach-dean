@@ -22,6 +22,7 @@ interface CoachRequest {
   imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
   silent?: boolean; // For rebuild_plan: regenerates the arc without sending the "plan ready" SMS
+  prescribedWeek1Miles?: number; // For rebuild_plan: admin override for base mileage when Strava data is wrong/incomplete
   partialWeekTarget?: number; // For sync_sessions: re-apply partial-week mileage target after syncArcCurrentWeek
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
@@ -100,7 +101,7 @@ const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
  * Does NOT reset current_week — the athlete stays on their current week in the arc.
  * generateAndSaveFullPlan sends the dashboard link SMS automatically.
  */
-async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false): Promise<NextResponse> {
+async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false, adminOverrideMiles?: number): Promise<NextResponse> {
   // Load user and profile.
   // Profile extraction is intentionally NOT done here — by the time rebuild_plan fires,
   // persistProfileUpdates has already run in the user_message handler (line ~1173).
@@ -148,16 +149,43 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   const allRecentText = (conversationsData ?? []).map((m: { content: string }) => m.content).join(" ").toLowerCase();
   const wantsDecrease = /\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b.*\b(mile|mileage|volume|week)\b|\b(mile|mileage|volume|week)\b.*\b(lower|less|reduce|decrease|dial.?back|scale.?back|cut.?back|too.?high|too.?much|too.?many)\b/.test(allRecentText);
 
+  // Extract athlete-stated mileage from recent conversation.
+  // When Strava data is incomplete (e.g. watch not syncing), the athlete often corrects us
+  // by stating their actual weekly volume. Parse the highest plausible figure mentioned in
+  // the last 20 messages and use it as a floor when it significantly exceeds Strava avg.
+  // Matches patterns like "21.5 miles last week", "running 20 miles a week", "hit 20 this week".
+  let statedMileage: number | null = null;
+  const mileageMatches = allRecentText.matchAll(/\b(\d{1,3}(?:\.\d)?)\s*(?:miles?|mi)\b/g);
+  for (const m of mileageMatches) {
+    const val = parseFloat(m[1]);
+    // Only consider plausible weekly totals (5–150 mi/week); ignore single-run distances
+    // mentioned in isolation by filtering to values that appear near weekly-volume language.
+    if (val >= 5 && val <= 150) {
+      statedMileage = statedMileage === null ? val : Math.max(statedMileage, val);
+    }
+  }
+
   // Compute the effective base for the rebuild arc.
-  // Use Strava avg when available (authoritative current fitness).
-  // Apply a ceiling at existingTarget only when the user wants to decrease — prevents the arc
-  // from accidentally starting above the current plan when Strava avg has drifted higher.
-  // No floor: the stored target may be wrong and flooring at it perpetuates bad data.
+  // Priority: admin override > Strava avg (with stated-mileage floor) > profile default.
+  // The stated-mileage floor handles Strava-sync gaps: if the athlete says they ran 21mi
+  // but Strava only shows 9mi, we trust the higher stated figure so the arc isn't anchored
+  // to bad data. We only apply this floor when there's a clear discrepancy (stated > 1.5× Strava).
   let rebuildBase: number | undefined;
-  if (avgWeeklyMileage !== null) {
-    rebuildBase = wantsDecrease
+  if (adminOverrideMiles != null && adminOverrideMiles > 0) {
+    rebuildBase = adminOverrideMiles;
+    console.log(`[handleRebuildPlan] using admin override: ${rebuildBase} mi/week`);
+  } else if (avgWeeklyMileage !== null) {
+    const stravaBase = wantsDecrease
       ? Math.min(avgWeeklyMileage, existingTarget ?? avgWeeklyMileage)
       : avgWeeklyMileage;
+    // Use stated mileage as floor when it's materially higher than Strava (likely a sync gap).
+    const statedFloor = statedMileage !== null && statedMileage > stravaBase * 1.5
+      ? statedMileage
+      : null;
+    rebuildBase = statedFloor ?? stravaBase;
+    if (statedFloor) {
+      console.log(`[handleRebuildPlan] Strava avg (${avgWeeklyMileage} mi) significantly below stated mileage (${statedMileage} mi) — using stated as base`);
+    }
   }
   // No Strava: leave rebuildBase undefined → generateAndSaveFullPlan derives from profile.
 
@@ -353,7 +381,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // regenerates the full plan arc without resetting the week counter. No Claude call needed.
   // Fired after Dean sends a [REBUILD_PLAN] confirmation to the athlete.
   if (trigger === "rebuild_plan") {
-    return await handleRebuildPlan(userId, dry_run ?? false, silent ?? false);
+    return await handleRebuildPlan(userId, dry_run ?? false, silent ?? false, body.prescribedWeek1Miles);
   }
 
   if (trigger === "sync_sessions") {
@@ -723,10 +751,12 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       (profile?.race_date as string | null) ?? null,
     );
     if (prep && prep.achievableLongRun < prep.minAdequateLongRun * 0.85) {
+      const rpIsMetric = (profile?.preferred_units as string | null) === "metric";
+      const rpMi = (miles: number) => rpIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const shortfall = Math.round((prep.minAdequateLongRun - prep.achievableLongRun) * 10) / 10;
       const goalLabel = ((profile?.goal as string | null) ?? "this race").replace(/_/g, " ");
       racePreparednessFlag = `\n⚠️ RACE PREPAREDNESS GAP — READ THIS BEFORE WRITING THE PLAN:
-This athlete is at ${(avgWeeklyMileage ?? 0).toFixed(1)} mi/week. At the maximum safe build rate (10%/week), they can reach an estimated peak long run of ~${prep.achievableLongRun.toFixed(1)} mi before race day. The standard guideline for a ${goalLabel} is a ${prep.minAdequateLongRun}+ mi peak long run. Gap: ~${shortfall} mi.
+This athlete is at ${rpMi(avgWeeklyMileage ?? 0)}. At the maximum safe build rate (10%/week), they can reach an estimated peak long run of ~${rpMi(prep.achievableLongRun)} before race day. The standard guideline for a ${goalLabel} is a ${rpMi(prep.minAdequateLongRun)}+ peak long run. Gap: ~${rpMi(shortfall)}.
 
 The right response is NOT to prescribe a race-day run/walk strategy — that's presumptuous and demoralizing for an experienced runner. Instead:
 
@@ -2339,6 +2369,9 @@ function buildSystemPrompt(
   const isConversational = trigger === "user_message";
   // Sections useful when reviewing a completed run
   const isRunReview = isPostRun || isConversational;
+  // Unit helpers — available throughout buildSystemPrompt
+  const spUseMetric = profile?.preferred_units === "metric";
+  const spMi = (miles: number) => spUseMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
   const tz2 = timezone || "America/New_York";
   const msgFormatter = new Intl.DateTimeFormat("en-US", {
     timeZone: tz2,
@@ -2485,11 +2518,11 @@ function buildSystemPrompt(
       const w1 = Math.round(peak * w1Pct);
 
       if (daysUntil > 14) {
-        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. This week (3 weeks out): ${w3}mi total. Next week (2 weeks out): ${w2}mi total. Race week: ${w1}mi total. No quality sessions in race week — easy miles only. One short race-pace tune-up (2-3mi @ goal pace) allowed 10-12 days out.\n`;
+        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${spMi(peak)}. This week (3 weeks out): ${spMi(w3)} total. Next week (2 weeks out): ${spMi(w2)} total. Race week: ${spMi(w1)} total. No quality sessions in race week — easy miles only. One short race-pace tune-up (${spMi(2.5)} @ goal pace) allowed 10-12 days out.\n`;
       } else if (daysUntil > 7) {
-        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. This week (2 weeks out): ${w2}mi total. Race week: ${w1}mi total. No quality sessions in race week — easy miles only. One short race-pace tune-up (2-3mi @ goal pace) is acceptable this week.\n`;
+        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${spMi(peak)}. This week (2 weeks out): ${spMi(w2)} total. Race week: ${spMi(w1)} total. No quality sessions in race week — easy miles only. One short race-pace tune-up (${spMi(2.5)} @ goal pace) is acceptable this week.\n`;
       } else {
-        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${peak}mi/wk. Race week: ${w1}mi total. Easy miles only — no hard workouts. Shakeout run (15-30 min easy) the day before is optional.\n`;
+        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${spMi(peak)}. Race week: ${spMi(w1)} total. Easy miles only — no hard workouts. Shakeout run (15-30 min easy) the day before is optional.\n`;
       }
       } // end non-mile taper block
     }
@@ -2618,8 +2651,8 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   const raceIsUpcoming = profileRaceDaysUntil !== null && profileRaceDaysUntil > 0;
 
   // ─── Pre-compute training state values (used in both FACTS block and training state section) ───
-  const tsUseMetric = profile?.preferred_units === "metric";
-  const tsMi = (miles: number) => tsUseMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
+  const tsUseMetric = spUseMetric;
+  const tsMi = spMi;
   const tsTargetMiles = (state?.weekly_mileage_target as number) || 0;
   const tsFormatPace = (paceStr: string | null | undefined): string => {
     if (!paceStr) return "TBD";
@@ -2850,24 +2883,24 @@ ${
         const isAdvanced = fl === "advanced";
         if (isAdvanced) {
           return `FITNESS TIER: No Strava history yet, but athlete self-reports as ADVANCED. Treat this like a moderate-to-high volume athlete returning to training — do not apply beginner volume defaults.
-⚠️ WEEK 1 VOLUME CAP (no history, advanced): Start at 25–35 mi for the week. Spread across ${profile?.days_per_week ?? 5}+ days. Include 1 quality session. Do not prescribe fewer than 20 mi — that is inconsistent with advanced fitness.`;
+⚠️ WEEK 1 VOLUME CAP (no history, advanced): Start at ${spMi(25)}–${spMi(35)} for the week. Spread across ${profile?.days_per_week ?? 5}+ days. Include 1 quality session. Do not prescribe fewer than ${spMi(20)} — that is inconsistent with advanced fitness.`;
         } else if (isIntermediate) {
           return `FITNESS TIER: No Strava history yet, but athlete self-reports as INTERMEDIATE. Treat as an athlete with an established aerobic base — do not apply beginner volume defaults.
-⚠️ WEEK 1 VOLUME CAP (no history, intermediate): Start at 15–25 mi for the week. Spread across ${profile?.days_per_week ?? 4}+ days. Include at least 1 easy quality session (strides or short tempo). Do not prescribe fewer than 12 mi — that is inconsistent with intermediate fitness.`;
+⚠️ WEEK 1 VOLUME CAP (no history, intermediate): Start at ${spMi(15)}–${spMi(25)} for the week. Spread across ${profile?.days_per_week ?? 4}+ days. Include at least 1 easy quality session (strides or short tempo). Do not prescribe fewer than ${spMi(12)} — that is inconsistent with intermediate fitness.`;
         } else {
           return `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
-⚠️ WEEK 1 VOLUME CAP (no history, beginner): Since no mileage data exists and this is a beginner, Week 1 must not exceed 10 mi total. Start extremely conservatively — 3 short sessions of 2–3 mi each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.`;
+⚠️ WEEK 1 VOLUME CAP (no history, beginner): Since no mileage data exists and this is a beginner, Week 1 must not exceed ${spMi(10)} total. Start extremely conservatively — 3 short sessions of ${spMi(2)}–${spMi(3)} each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.`;
         }
       })()
     : avgWeeklyMileage < 10
-    ? `FITNESS TIER: LOW VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
-⚠️ WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${avgWeeklyMileage.toFixed(1)} mi/week. Week 1 MUST NOT exceed ${Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6).toFixed(0)} mi total (current volume × 1.30, floor 6 mi). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. For example, if they run 5 mi/week, prescribing 15 mi is a 200% jump and is wrong. A safe Week 1 for 5 mi/week is 6–7 mi spread across 3 sessions (e.g., 2mi / 2mi / 2.5mi). Do not exceed this cap under any circumstances, regardless of race goals or timelines.
-⚠️ LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3).toFixed(0)} mi (35% of current weekly volume, floor 3 mi). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. If the athlete currently runs 5 mi/week, a 9 mi long run is almost double their weekly volume and is wrong. State your long run distance, then verify it does not exceed this cap before sending.`
+    ? `FITNESS TIER: LOW VOLUME (avg ${spMi(avgWeeklyMileage)}). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
+⚠️ WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${spMi(avgWeeklyMileage)}. Week 1 MUST NOT exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6))} total (current volume × 1.30, floor ${spMi(6)}). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. Do not exceed this cap under any circumstances, regardless of race goals or timelines.
+⚠️ LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3))} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.`
     : avgWeeklyMileage < 30
-    ? `FITNESS TIER: MODERATE VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
-⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${avgWeeklyMileage.toFixed(1)} mi/week. Week 1 should not jump more than 15% above that — target ${Math.round(avgWeeklyMileage * 1.05)}–${Math.round(avgWeeklyMileage * 1.15)} mi. A first-week spike above ${Math.round(avgWeeklyMileage * 1.2)} mi risks overuse injury at the start of the plan.`
-    : `FITNESS TIER: HIGH VOLUME (avg ${avgWeeklyMileage.toFixed(1)} mi/week). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
-⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${avgWeeklyMileage.toFixed(1)} mi/week → Week 1 target: ${Math.round(avgWeeklyMileage * 1.05)}–${Math.round(avgWeeklyMileage * 1.12)} mi. Don't jump to peak volume on Day 1.`
+    ? `FITNESS TIER: MODERATE VOLUME (avg ${spMi(avgWeeklyMileage)}). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
+⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${spMi(avgWeeklyMileage)}. Week 1 should not jump more than 15% above that — target ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.15))}. A first-week spike above ${spMi(Math.round(avgWeeklyMileage * 1.2))} risks overuse injury at the start of the plan.`
+    : `FITNESS TIER: HIGH VOLUME (avg ${spMi(avgWeeklyMileage)}). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
+⚠️ WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${spMi(avgWeeklyMileage)} → Week 1 target: ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.12))}. Don't jump to peak volume on Day 1.`
 }
 
 ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:
@@ -3694,13 +3727,15 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
     case "user_message": {
+      const umIsMetric = preferredUnits === "metric";
+      const umMi = (miles: number) => umIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const nextWeekContext = storedNextPlanWeek
-        ? `Week ${storedNextPlanWeek.week_number} (next week): ${storedNextPlanWeek.mileage_target} mi target, long run ${storedNextPlanWeek.long_run_target} mi, key workout: ${storedNextPlanWeek.key_workout}${weekMileageSoFar > storedNextPlanWeek.mileage_target ? ` ⚠️ NOTE: This target (${storedNextPlanWeek.mileage_target}mi) is LOWER than this week's current mileage (${weekMileageSoFar.toFixed(1)}mi). Do NOT say "steps up" or "stepping up the volume" — describe it as a planned lighter week and explain why (pre-race management, recovery, arc design).` : ''}`
+        ? `Week ${storedNextPlanWeek.week_number} (next week): ${umMi(storedNextPlanWeek.mileage_target)} target, long run ${umMi(storedNextPlanWeek.long_run_target)}, key workout: ${storedNextPlanWeek.key_workout}${weekMileageSoFar > storedNextPlanWeek.mileage_target ? ` ⚠️ NOTE: This target (${umMi(storedNextPlanWeek.mileage_target)}) is LOWER than this week's current mileage (${umMi(weekMileageSoFar)}). Do NOT say "steps up" or "stepping up the volume" — describe it as a planned lighter week and explain why (pre-race management, recovery, arc design).` : ''}`
         : null;
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
       const fullArcContext = storedPlanAllWeeks && storedPlanAllWeeks.length > 0
-        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${w.mileage_target} mi, long run ~${w.long_run_target} mi${w.key_workout ? ` — ${w.key_workout}` : ''}`).join('\n')}`
+        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}`).join('\n')}`
         : '';
       return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
 
@@ -3828,8 +3863,10 @@ Otherwise, send a short reminder text about tomorrow's workout. Three parts, all
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
     case "weekly_recap": {
       // Inject stored plan context so Dean reflects on what was planned vs. actual.
+      const recapIsMetric = preferredUnits === "metric";
+      const recapMi = (miles: number) => recapIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const storedPlanContext = storedPlanWeek
-        ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${storedPlanWeek.mileage_target}mi | Long run: ~${storedPlanWeek.long_run_target}mi\nKey workout: ${storedPlanWeek.key_workout || "n/a"}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
+        ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${recapMi(storedPlanWeek.mileage_target)} | Long run: ~${recapMi(storedPlanWeek.long_run_target)}\nKey workout: ${storedPlanWeek.key_workout || "n/a"}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
         : "";
       const isMetric = preferredUnits === "metric";
       const weekVolumeVal = isMetric ? (weekMileageSoFar * 1.60934).toFixed(1) : weekMileageSoFar.toFixed(1);
@@ -3843,9 +3880,9 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
         ? `⚠️ MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
         : `⚠️ THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
       const deloadInstruction = periodization?.isDeloadWeek
-        ? `\n⚠️ RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${periodization.suggestedWeeklyMiles.toFixed(1)} mi.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.\n`
+        ? `\n⚠️ RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.\n`
         : periodization?.suggestedWeeklyMiles != null
-        ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${periodization.suggestedWeeklyMiles.toFixed(1)} mi (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
+        ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${recapMi(periodization.suggestedWeeklyMiles)} (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
         : "";
       return `${storedPlanContext}${weekMileageContext}${deloadInstruction}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 

@@ -1,0 +1,59 @@
+{
+  "id": "plan-half-marathon-metric",
+  "description": "Metric-units runner (Pec, ~55km/week, 4 days) building toward a half marathon in 27 weeks. All plan distances must be in km — never miles. Volume, long run, and quality sessions must be structurally sound AND stated in km.",
+  "category": "plan_quality",
+  "trigger": "initial_plan",
+  "today": "2026-04-10",
+  "user": {
+    "name": "Pec",
+    "timezone": "Europe/Madrid",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Valencia Half Marathon",
+    "goal_race_date": "2026-10-11",
+    "goal_race_distance": "half marathon (21.1 km)",
+    "weeks_until_race": 27,
+    "experience_level": "intermediate — running 3 years, comfortable at 50-60km/week, has completed several half marathons",
+    "current_weekly_miles": 34,
+    "vdot": 48,
+    "easy_pace": "9:08/mi",
+    "tempo_pace": "7:18/mi",
+    "interval_pace": "6:33/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "metric",
+    "weekly_mileage_target": 34,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "notes": "Spanish runner who tracks everything in km. Comfortable half marathon runner aiming for a strong performance at Valencia.",
+    "recent_activities": [
+      { "date": "2026-04-06", "type": "Long Run", "distance_miles": 10.5, "pace": "9:20/mi" },
+      { "date": "2026-04-05", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:10/mi" },
+      { "date": "2026-04-03", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:25/mi" },
+      { "date": "2026-04-01", "type": "Easy Run", "distance_miles": 6.5, "pace": "9:05/mi" }
+    ],
+    "recent_conversation": [],
+    "current_week": 1,
+    "current_phase": "base"
+  },
+  "ground_truth": {
+    "max_week1_miles": 42,
+    "min_week1_miles": 28,
+    "max_peak_weekly_miles": 58,
+    "min_peak_weekly_miles": 40,
+    "max_long_run_miles": 16,
+    "min_long_run_miles": 12,
+    "sessions_per_week": 4,
+    "required_session_types": ["easy run", "long run", "tempo"],
+    "must_use_metric": true,
+    "forbidden_phrases": ["/mi", " mi ", " mi\n", "miles total", "miles this week", "mi/week", " miles ", " miles\n"],
+    "forbidden_content": [
+      "distances stated in miles or mi",
+      "pace stated as per mile rather than per km",
+      "week 1 total over 68 km",
+      "peak week over 93 km",
+      "long run capped under 19 km at peak"
+    ],
+    "notes": "27-week half marathon plan for an experienced 55km/week runner. Week 1 should stay close to current base (~55km). Peak week should reach 65-90km — appropriate for an experienced HM runner. Long run must build toward 19-24km. ALL distances must appear in km (e.g. '9 km', '18 km'), never miles. Paces must be min/km, not min/mi. The evaluator must check: does EVERY distance reference use km? Does EVERY pace reference use /km? If the plan says any distance in miles or any pace in /mi, that is a critical failure."
+  }
+}
