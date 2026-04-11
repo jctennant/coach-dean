@@ -674,6 +674,43 @@ describe("coach/respond — initial_plan beginner tier (stale Strava history)", 
   });
 });
 
+describe("coach/respond — initial_plan beginner tier (stale Strava history)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Let's get you started!" }],
+    });
+  });
+
+  it("uses beginner-stale-history fitness tier when fitness_level=beginner and weekly_miles=16", async () => {
+    // A user who self-identifies as a beginner but has old Strava activity (16mi/week)
+    // must NOT get the MODERATE VOLUME fitness tier. The system prompt should call out
+    // that the Strava history is stale and cap the plan at beginner levels.
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 16 } }),
+      profile: baseProfile({ fitness_level: "beginner" }),
+      state: baseState({ current_week: 1 }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    // Find the main Sonnet call — it has a long system prompt (not the short Haiku calls)
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const sonnetCall = calls.find((c: unknown[]) => {
+      const args = c[0] as Record<string, unknown>;
+      return typeof args.system === "string" && (args.system as string).length > 200;
+    });
+    expect(sonnetCall).toBeDefined();
+    const systemPrompt = (sonnetCall![0] as Record<string, unknown>).system as string;
+
+    expect(systemPrompt).toContain("stale history");
+    expect(systemPrompt).not.toContain("MODERATE VOLUME");
+  });
+});
+
 describe("coach/respond — post_run cadence follow-up", () => {
   beforeEach(() => {
     vi.clearAllMocks();
