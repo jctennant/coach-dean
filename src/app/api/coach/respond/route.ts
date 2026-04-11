@@ -4061,8 +4061,24 @@ ${raceHistory.length > 0 ? `
 RACE HISTORY (from Strava, workout_type=race):
 ${raceHistory.map((r) => {
   const date = r.start_date ? (r.start_date as string).slice(0, 10) : "unknown date";
-  const distMiles = Math.round(((r.distance_meters as number) / 1609.34) * 10) / 10;
-  return `- ${date}: ${spMi(distMiles)} @ ${spUseMetric && r.average_pace ? convertPaceStrToKm(r.average_pace as string) : (r.average_pace || "unknown pace")}`;
+  const distMeters = r.distance_meters as number;
+  const distDisplay = tsUseMetric
+    ? `${Math.round(distMeters / 10) / 100} km`
+    : `${Math.round(distMeters / 1609.34 * 10) / 10} mi`;
+  // Convert stored /mi pace to /km for metric users
+  const paceRaw = r.average_pace as string | null;
+  const paceDisplay = (() => {
+    if (!paceRaw) return "unknown pace";
+    if (!tsUseMetric) return paceRaw;
+    const match = paceRaw.match(/^(\d+):(\d{2})/);
+    if (!match) return paceRaw;
+    const secPerMile = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    const secPerKm = secPerMile / 1.60934;
+    const m = Math.floor(secPerKm / 60);
+    const s = Math.round(secPerKm % 60);
+    return `${m}:${s.toString().padStart(2, "0")}/km`;
+  })();
+  return `- ${date}: ${distDisplay} @ ${paceDisplay}`;
 }).join("\n")}
 ` : ""}
 CURRENT TRAINING STATE:
@@ -4316,7 +4332,7 @@ ${conversationHistory || "No previous messages."}`;
  * Strava always returns distance in meters, speed in m/s, and elevation in meters
  * regardless of whether the split is metric or imperial.
  */
-function transformSplitForClaude(split: Record<string, unknown>): Record<string, unknown> {
+function transformSplitForClaude(split: Record<string, unknown>, isMetric = false): Record<string, unknown> {
   const speed = typeof split.average_speed === "number" ? split.average_speed : null;
   const gapSpeed = typeof split.average_grade_adjusted_speed === "number" ? split.average_grade_adjusted_speed : null;
   // splits_metric uses elevation_difference (meters); laps use total_elevation_gain (meters)
@@ -4325,19 +4341,30 @@ function transformSplitForClaude(split: Record<string, unknown>): Record<string,
   const distMeters = typeof split.distance === "number" ? split.distance : null;
 
   const pace = speed && speed > 0
-    ? fmtPace(1609.34 / speed / 60, "mi")
+    ? isMetric
+      ? fmtPace(1000 / speed / 60, "km")
+      : fmtPace(1609.34 / speed / 60, "mi")
     : null;
   const gapPace = gapSpeed && gapSpeed > 0
     ? fmtPace(1609.34 / gapSpeed / 60, "mi")
     : null;
 
   const result: Record<string, unknown> = { ...split };
-  if (distMeters != null) result.distance_miles = Math.round((distMeters / 1609.34) * 100) / 100;
-  if (pace) result.pace = pace;
-  if (gapPace) result.gap_pace = gapPace;
-  // Convert elevation from meters to feet; replace raw fields so Claude can't misread units
-  if (elevDiff != null) result.elevation_difference_feet = Math.round(elevDiff * 3.28084);
-  if (elevGain != null) result.total_elevation_gain_feet = Math.round(elevGain * 3.28084);
+  if (isMetric) {
+    if (distMeters != null) result.distance_km = Math.round((distMeters / 1000) * 100) / 100;
+    if (pace) result.pace = pace;
+    if (gapPace) result.gap_pace = gapPace;
+    // Keep elevation in meters for metric users
+    if (elevDiff != null) result.elevation_difference_m = Math.round(elevDiff * 10) / 10;
+    if (elevGain != null) result.total_elevation_gain_m = Math.round(elevGain * 10) / 10;
+  } else {
+    if (distMeters != null) result.distance_miles = Math.round((distMeters / 1609.34) * 100) / 100;
+    if (pace) result.pace = pace;
+    if (gapPace) result.gap_pace = gapPace;
+    // Convert elevation from meters to feet
+    if (elevDiff != null) result.elevation_difference_feet = Math.round(elevDiff * 3.28084);
+    if (elevGain != null) result.total_elevation_gain_feet = Math.round(elevGain * 3.28084);
+  }
   delete result.distance;
   delete result.average_speed;
   delete result.average_grade_adjusted_speed;
@@ -4876,10 +4903,23 @@ function buildUserMessage(
       const dateNote = actStartDate
         ? `Activity date: ${actStartDate}. This may differ from today if the athlete logged it retroactively — use the activity date, not today's date, when referencing when the run happened.`
         : "";
-      // Convert elevation_gain from meters (how Strava/DB stores it) to feet for Claude.
+      // Convert elevation_gain from meters (how Strava/DB stores it) to the preferred unit for Claude.
       // Also transform splits and laps: Strava always returns distance in meters, speed in m/s,
-      // and elevation in meters regardless of split type — convert all to imperial/readable units.
+      // and elevation in meters regardless of split type — convert all to the athlete's preferred units.
+      const isMetricUser = preferredUnits === "metric";
       const rawSummary = activityData?.summary as { splits?: unknown[]; laps?: unknown[] } | null;
+      const storedPacePerMile = activityData?.average_pace as string | null;
+      // Convert stored /mi pace to /km for metric users by parsing the M:SS/mi string.
+      const pacePerKm = (() => {
+        if (!storedPacePerMile || !isMetricUser) return null;
+        const match = storedPacePerMile.match(/^(\d+):(\d{2})/);
+        if (!match) return null;
+        const totalSecPerMile = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+        const totalSecPerKm = totalSecPerMile / 1.60934;
+        const m = Math.floor(totalSecPerKm / 60);
+        const s = Math.round(totalSecPerKm % 60);
+        return `${m}:${s.toString().padStart(2, "0")}/km`;
+      })();
       // Compute hasHR here — before activityForClaude — so we can strip HR fields from the JSON
       // when no monitor was used. The text guard alone isn't enough: Claude reads the raw JSON
       // and will cite values it finds there even if instructed not to.
@@ -4891,44 +4931,55 @@ function buildUserMessage(
             // to infer "breaks were built in" when the athlete just forgot to stop their watch.
             // moving_time_seconds is the meaningful figure for coaching.
             elapsed_time_seconds: undefined,
+            // Show distance in the athlete's preferred unit alongside the raw meters
+            ...(isMetricUser
+              ? {
+                  distance_km: activityData.distance_meters != null ? Math.round((activityData.distance_meters as number) / 10) / 100 : null,
+                  average_pace: pacePerKm ?? storedPacePerMile,
+                  elevation_gain_m: activityData.elevation_gain != null ? Math.round((activityData.elevation_gain as number) * 10) / 10 : null,
+                  elevation_gain: undefined,
+                }
+              : {
+                  elevation_gain_feet: activityData.elevation_gain != null ? Math.round((activityData.elevation_gain as number) * 3.28084) : null,
+                  elevation_gain: undefined,
+                }),
             // Strip HR fields when no monitor was worn — keeps the raw JSON honest so
             // Claude cannot read a value that contradicts the "no HR data" guard.
             average_heartrate: hasHR ? activityData.average_heartrate : undefined,
             max_heartrate: hasHR ? (activityData as Record<string, unknown>).max_heartrate : undefined,
-            elevation_gain_feet: activityData.elevation_gain != null
-              ? Math.round((activityData.elevation_gain as number) * 3.28084)
-              : null,
-            elevation_gain: undefined,
             summary: rawSummary
               ? {
-                  // Filter out paused-device splits (pace > 20 min/mile = clearly not running).
+                  // Filter out paused-device splits (pace > 20 min/unit = clearly not running).
                   // These appear when the athlete forgets to stop Strava, creating a wildly-slow
                   // final partial split that Claude then flags as a concerning anomaly.
                   // splits_standard gives one entry per mile (matching what the athlete sees in
-                  // the Strava app). Add cumulative_miles so Claude knows the actual position —
-                  // the last split is often partial (e.g. a 5.1mi run has 5 full splits + 1 partial).
+                  // the Strava app). Add cumulative distance so Claude knows the actual position.
                   splits: (() => {
-                    let cumulativeMiles = 0;
+                    let cumulative = 0;
                     return rawSummary.splits
-                      ?.map(s => transformSplitForClaude(s as Record<string, unknown>))
+                      ?.map(s => transformSplitForClaude(s as Record<string, unknown>, isMetricUser))
                       .filter(s => {
                         const pace = s.pace as string | null;
                         if (!pace) return true;
                         const mins = parseInt(pace.split(":")[0], 10);
+                        // Threshold: 20 min/mi (~12.4 min/km) — filters stalled/paused device splits
                         return isNaN(mins) || mins < 20;
                       })
                       .map(s => {
-                        cumulativeMiles += (s.distance_miles as number) || 0;
-                        const out: Record<string, unknown> = { ...s, cumulative_miles: Math.round(cumulativeMiles * 100) / 100 };
-                        if (!hasHR) delete out.average_heartrate;
-                        return out;
+                        if (isMetricUser) {
+                          cumulative += (s.distance_km as number) || 0;
+                          const out: Record<string, unknown> = { ...s, cumulative_km: Math.round(cumulative * 100) / 100 };
+                          if (!hasHR) delete out.average_heartrate;
+                          return out;
+                        } else {
+                          cumulative += (s.distance_miles as number) || 0;
+                          const out: Record<string, unknown> = { ...s, cumulative_miles: Math.round(cumulative * 100) / 100 };
+                          if (!hasHR) delete out.average_heartrate;
+                          return out;
+                        }
                       });
                   })(),
-                  laps: rawSummary.laps?.map(s => {
-                    const out = transformSplitForClaude(s as Record<string, unknown>);
-                    if (!hasHR) delete out.average_heartrate;
-                    return out;
-                  }),
+                  laps: rawSummary.laps?.map(s => { const out = transformSplitForClaude(s as Record<string, unknown>, isMetricUser); if (!hasHR) delete out.average_heartrate; return out; }),
                 }
               : null,
           }
@@ -4953,8 +5004,9 @@ function buildUserMessage(
       if ((activityData?.type as string) === "Ride") {
         dataGuards.push("RIDE SPEED UNITS: This is an outdoor Ride (not a VirtualRide). Strava reports cycling speed in mph or km/h — do NOT express it as min/mile or min/km pace (those are running-pace units). Report speed as mph for imperial athletes or km/h for metric athletes (e.g. '18.2 mph avg' or '29.3 km/h avg').");
       }
-      if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
-      if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead. CRITICAL: Do NOT state how many intervals, repeats, or reps were completed (e.g. '5x800m', '6 repeats', '4 strides'). Without lap data you cannot know the rep count — the athlete knows their own workout and will immediately notice if you get it wrong. Describe the workout structure generically (e.g. 'your interval session showed strong pace variation') without citing a specific count.");
+      const splitUnitLabel = isMetricUser ? "km" : "mile";
+      if (!hasSplits) dataGuards.push(`No per-${splitUnitLabel} split data was synced from Strava. Do NOT quote specific ${splitUnitLabel} split paces — ask the athlete how it felt instead.`);
+      if (!hasLaps) dataGuards.push(`No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around ${splitUnitLabel} X' instead.`);
       if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference HR values, heart rate, specific BPM figures, aerobic zone labels (Zone 1/2/3/4/5), or make any effort-level inference that requires HR data (e.g. 'your heart rate seemed controlled', 'you stayed aerobic', 'it looked like a zone 2 effort'). Describe effort using pace, splits, and elapsed time only.");
       const activityTypeStr = (activityData?.activity_type ?? activityData?.type) as string | null;
       if (hasHR && activityTypeStr === "Swim") dataGuards.push("SWIM HR NOTE: Heart rate data for swim activities is often unreliable — wrist optical sensors do not work well underwater. Do NOT cite a specific average BPM for this swim. If you want to comment on effort, describe it qualitatively (e.g. 'comfortable aerobic effort') without stating a number.");
@@ -4965,40 +5017,45 @@ function buildUserMessage(
       // Cadence guard: only reference cadence when it's stored in the activity record.
       const hasCadence = !!(activityData?.average_cadence != null);
       if (!hasCadence) dataGuards.push("No cadence data is available for this activity. Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, or range.");
-      // Per-mile and per-lap elevation breakdown is not a Strava-provided field — only total elevation gain is.
-      dataGuards.push("Per-mile and per-lap elevation breakdowns (e.g. '500ft gain on lap 2', '721ft at miles 11-12') are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific footage to individual miles or laps.");
+      // Per-split elevation breakdown is not a Strava-provided field — only total elevation gain is.
+      dataGuards.push(`Per-${splitUnitLabel} and per-lap elevation breakdowns are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific ${isMetricUser ? "meters" : "footage"} to individual ${splitUnitLabel}s or laps.`);
+      // splits_standard gives one split per mile; for metric users we output per-km fields.
+      // This guard catches legacy activities with km-based splits stored before splits_standard.
+      if (!isMetricUser && hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
       // max_heartrate is this activity's single-run peak, NOT the athlete's physiological maximum.
       // Do not multiply it by ~1.02 or otherwise derive a "true max HR" estimate from it.
       dataGuards.push("The `max_heartrate` field in the activity JSON is this run's single-activity peak reading, NOT the athlete's physiological maximum heart rate. Do NOT use it to estimate or state the athlete's max HR (e.g. do NOT say 'your max is around X based on today's peak'). If you need to reference HR zones, describe them in relative terms (e.g. 'zone 4-5', 'high aerobic effort') without asserting a specific max HR figure.");
-      // splits_standard gives one split per mile, so splitCount ≈ ceil(runDistanceMiles).
-      // Guard: if splits look like km data (far more splits than miles), warn Claude.
-      // This handles legacy activities stored before the switch to splits_standard.
-      if (hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
         dataGuards.push(`SPLIT UNIT WARNING: This run is ${runDistanceMiles.toFixed(2)} miles but has ${splitCount} split entries — the splits appear to be per-kilometer, not per-mile. Each split's "cumulative_miles" field shows its actual position in the run. NEVER reference "mile ${splitCount}" or any mile number beyond ${Math.ceil(runDistanceMiles)} — that mile does not exist in this run. Use cumulative_miles to describe position (e.g. "around mile 2.5" or "in the final stretch").`);
       }
       const dataGuardBlock = dataGuards.length > 0
         ? `\nDATA AVAILABILITY GUARD — the following data is NOT present; do not fabricate it:\n${dataGuards.map(g => `- ${g}`).join("\n")}`
         : "";
 
-      const weekMilesStr = umUseMetric
+      const weekVolumeDisplay = isMetricUser
         ? `${(weekMileageSoFar * 1.60934).toFixed(1)} km`
         : `${weekMileageSoFar.toFixed(1)} mi`;
       const isRunActivity = ["Run", "TrailRun", "VirtualRun"].includes((activityData?.type as string) ?? "");
       const weekMileageContext = isRunActivity
-        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
+        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
         : crossTrainingPostRunContext
         ? `\n${crossTrainingPostRunContext}\n`
-        : `\n<rule>This is a non-run activity. Do NOT cite the week's running mileage total in your response — leave weekly mileage commentary for post-run messages. Keep your response to 2–3 sentences focused on the cross-training session itself.</rule>\n`;
+        : `\n<rule>WEEK-TO-DATE RUNNING: ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
+
+      const dataGlossaryUnits = isMetricUser
+        ? "All paces are min/km. Elevation in meters. Distances in km (distance_km field) and meters (distance_meters field)."
+        : "All paces are min/mile. Elevation in feet. Distances in miles.";
+      const cumulativeField = isMetricUser ? "cumulative_km" : "cumulative_miles";
+      const splitUnit = isMetricUser ? "km" : "mile";
 
       const activitySemanticGuard = buildActivityDataGuard(activityForClaude as Record<string, unknown> | null);
 
       return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
-${activitySemanticGuard ? `${activitySemanticGuard}\n` : ""}
-CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 8:12/mi avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
+
+CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 5:06/km avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
 
 DATA GLOSSARY for the details below:
-- summary.splits: auto-generated by Strava, one entry per kilometer (NOT per mile). Each entry includes a "cumulative_miles" field showing how far into the run that split ends. Use cumulative_miles to describe position — do NOT treat the array index or the "split" field as a mile number. For a 3.1mi run there will be ~5 km splits; calling the last one "mile 5" is wrong.${hasLaps ? "\n- summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown. IMPORTANT: Lap data provides per-lap AVERAGES for pace and HR only. Do NOT cite per-lap elevation gain, per-lap cadence, or per-lap power/watt ranges — Strava does not provide these per lap. Do NOT cite specific elapsed-time markers within a lap (e.g. \"at 48:46 into the run, HR jumped to 140\") — Strava does not record event-level timestamps within a lap. Only reference per-lap pace and HR averages. Do NOT refer to laps by specific index numbers (e.g. \"lap 3\", \"laps 3/6/7/8\") — lap ordering is not reliably meaningful to the athlete. Instead describe them by effort pattern: \"the hard intervals\", \"the high-effort segments\", \"your recovery laps\", \"the harder efforts\" etc." : ""}
-- All paces in the JSON below are min/mile. Elevation in feet. Distances in miles. ${umUseMetric ? "This athlete uses metric — convert all paces to min/km, distances to km, and elevation to meters in your response." : "Use these units as-is in your response."}${dataGuardBlock}
+- summary.splits: auto-generated by Strava, one entry per ${splitUnit}. Each entry includes a "${cumulativeField}" field showing how far into the run that split ends. Use ${cumulativeField} to describe position — do NOT treat the array index or the "split" field as a ${splitUnit} number.${hasLaps ? "\n- summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown. IMPORTANT: Lap data provides per-lap AVERAGES for pace and HR only. Do NOT cite per-lap elevation gain, per-lap cadence, or per-lap power/watt ranges — Strava does not provide these per lap. Do NOT cite specific elapsed-time markers within a lap (e.g. \"at 48:46 into the run, HR jumped to 140\") — Strava does not record event-level timestamps within a lap. Only reference per-lap pace and HR averages." : ""}
+- ${dataGlossaryUnits}${dataGuardBlock}
 ${intervalPattern ? `\n${intervalPattern}\n` : ""}
 Details:
 ${JSON.stringify(activityForClaude, null, 2)}

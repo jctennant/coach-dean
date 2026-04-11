@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Post-run messages now use metric units consistently for metric users
+
+**Type:** Bug Fix
+**Reported by:** User (PE's friend, metric user)
+**User feedback:** "Can you also take a look at Dean saying a mix of min / mi and then using kilometers? For this user everything should be in KM"
+**Root cause:** The post_run user message fed Claude entirely imperial data (average_pace stored as "/mi", splits with distance_miles and pace as "/mi", week-to-date in miles, data glossary saying "all paces are min/mile") while the system prompt told Claude to "use km and min/km." Claude had to self-convert which produced inconsistent output (e.g. "5 mi — 8:11/mi avg" for a metric user). Race history in the system prompt also always showed miles and /mi pace.
+**Fix / Change:** `transformSplitForClaude` now accepts `isMetric` param and outputs `distance_km`, `cumulative_km`, and `/km` paces for metric users. Activity JSON for metric users gets `distance_km` and `average_pace` pre-converted to `/km`. Week-to-date context, data glossary, and race history all now display in km/min/km when `preferred_units = "metric"`. All data guards updated to use the correct unit label.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-11 — Fix beginner plan generating 16mi/week and fartlek for never-run-before user
 
 **Type:** Bug Fix
