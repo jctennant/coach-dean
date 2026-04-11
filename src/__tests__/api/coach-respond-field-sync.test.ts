@@ -357,14 +357,15 @@ describe("persistProfileUpdates — standing schedule change", () => {
   });
 });
 
-describe("persistProfileUpdates — this-week schedule override", () => {
+describe("tag-based this-week schedule override ([WEEK_OVERRIDE:] tag)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     afterQueue.splice(0);
   });
 
-  it("saves this_week_override_days as lowercase with a Sunday expiry", async () => {
-    mockExtractionThenCoach({ this_week_override_days: ["Tuesday", "Wednesday", "Friday"] });
+  it("saves this_week_override_days as lowercase with a Sunday expiry when Dean emits [WEEK_OVERRIDE:] tag", async () => {
+    // Override now driven by [WEEK_OVERRIDE:] tag in Dean's response, not Haiku extraction
+    mockExtractionThenCoach({}, "Done — running Tue/Wed/Fri this week only. [WEEK_OVERRIDE: Tuesday,Wednesday,Friday]");
     const { profileChain } = setupSupabase({
       user: baseUser(),
       profile: baseProfile(),
@@ -386,8 +387,8 @@ describe("persistProfileUpdates — this-week schedule override", () => {
     expect(expiresDate.getUTCDay()).toBe(0); // 0 = Sunday
   });
 
-  it("does not overwrite training_days when saving a week override", async () => {
-    mockExtractionThenCoach({ this_week_override_days: ["Monday", "Saturday"] });
+  it("does not overwrite training_days when saving a week override via [WEEK_OVERRIDE:] tag", async () => {
+    mockExtractionThenCoach({}, "Sure — just Monday and Saturday this week. [WEEK_OVERRIDE: Monday,Saturday]");
     const { profileChain } = setupSupabase({
       user: baseUser(),
       profile: baseProfile({ training_days: ["tuesday", "thursday", "sunday"] }),

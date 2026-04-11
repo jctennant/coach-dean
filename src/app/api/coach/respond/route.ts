@@ -977,7 +977,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     model: "claude-sonnet-4-5-20250929",
     // Plans can be longer (full week schedule); SMS triggers cap at 512 (SMS max ~640 chars ≈ 150 tokens)
     // user_message gets 1000 to handle full plan arc requests
-    max_tokens: (trigger === "initial_plan" || trigger === "weekly_recap") ? 800 : trigger === "user_message" ? 1000 : 512,
+    max_tokens: (trigger === "initial_plan" || trigger === "weekly_recap") ? 1000 : trigger === "user_message" ? 1000 : 512,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
     ...(shouldUseWebSearch
@@ -1029,8 +1029,26 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // further processing. These should never reach the athlete's SMS.
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
   const wantsRebuild = /\[REBUILD_PLAN\]/i.test(rawText);
+  // Structured action tags — parsed here, stripped before SMS send
+  const sessionListMatch = rawText.match(/\[SESSION_LIST:\s*(\[[\s\S]*?\])\]/i);
+  const rawSessionListJson = sessionListMatch ? sessionListMatch[1].trim() : null;
+  const sessionUpdateMatch = rawText.match(/\[SESSION_UPDATE:\s*(\[[\s\S]*?\])\]/i);
+  const rawSessionUpdateJson = sessionUpdateMatch ? sessionUpdateMatch[1].trim() : null;
+  const weekOverrideMatch = rawText.match(/\[WEEK_OVERRIDE:\s*([^\]]+)\]/i);
+  const tagWeekOverrideDays = weekOverrideMatch
+    ? weekOverrideMatch[1].trim().split(",").map((d: string) => d.trim().toLowerCase()).filter(Boolean)
+    : null;
+  const skipDayMatch = rawText.match(/\[SKIP_DAY:\s*(\d{4}-\d{2}-\d{2})\]/i);
+  const tagSkipDayDate = skipDayMatch ? skipDayMatch[1] : null;
   const strippedRaw = stripReasoningPreamble(
-    rawText.replace(/\[NO_REPLY\]/gi, "").replace(/\[REBUILD_PLAN\]/gi, "").trim()
+    rawText
+      .replace(/\[NO_REPLY\]/gi, "")
+      .replace(/\[REBUILD_PLAN\]/gi, "")
+      .replace(/\[SESSION_LIST:\s*\[[\s\S]*?\]\]/gi, "")
+      .replace(/\[SESSION_UPDATE:\s*\[[\s\S]*?\]\]/gi, "")
+      .replace(/\[WEEK_OVERRIDE:[^\]]+\]/gi, "")
+      .replace(/\[SKIP_DAY:\s*\d{4}-\d{2}-\d{2}\]/gi, "")
+      .trim()
   );
   // correctMileageTotal catches math errors where Claude states a weekly total that
   // doesn't match the sum of session distances in the response.
@@ -1241,16 +1259,39 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // the plan message is now in the DB, so sync_sessions can read it from conversations.
     after(async () => {
       try {
-        const syncBody: Record<string, unknown> = { userId, trigger: "sync_sessions" };
-        // Pass partial-week target so syncArcCurrentWeek's session-sum doesn't clobber it.
-        if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
-          syncBody.partialWeekTarget = weekMileageTarget;
+        let sessionsWritten = false;
+        if (rawSessionListJson) {
+          try {
+            const sessions = JSON.parse(rawSessionListJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
+            if (Array.isArray(sessions) && sessions.length > 0) {
+              await supabase.from("training_state")
+                .update({ weekly_plan_sessions: sessions as unknown as Json })
+                .eq("user_id", userId);
+              await syncArcCurrentWeek(userId, 1, "base", (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
+              if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
+                await supabase.from("training_state")
+                  .update({ weekly_mileage_target: weekMileageTarget })
+                  .eq("user_id", userId);
+              }
+              sessionsWritten = true;
+              console.log(`[initial_plan] [SESSION_LIST] tag: wrote ${sessions.length} sessions directly`);
+            }
+          } catch (parseErr) {
+            console.error("[initial_plan] [SESSION_LIST] parse failed, falling back to sync_sessions:", parseErr);
+          }
         }
-        await fetch(`${appUrl}/api/coach/respond`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(syncBody),
-        });
+        if (!sessionsWritten) {
+          const syncBody: Record<string, unknown> = { userId, trigger: "sync_sessions" };
+          // Pass partial-week target so syncArcCurrentWeek's session-sum doesn't clobber it.
+          if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
+            syncBody.partialWeekTarget = weekMileageTarget;
+          }
+          await fetch(`${appUrl}/api/coach/respond`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(syncBody),
+          });
+        }
       } catch (err) {
         console.error("[coach/respond] sync_sessions trigger failed (initial_plan):", err);
         void trackEvent(userId, "after_error", { trigger: "sync_sessions_initial_plan", error: String(err) });
@@ -1294,11 +1335,29 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // Fire sync_sessions in a fresh invocation — saves ~3s vs inline Haiku calls.
     after(async () => {
       try {
-        await fetch(`${appUrl}/api/coach/respond`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, trigger: "sync_sessions" }),
-        });
+        let sessionsWritten = false;
+        if (rawSessionListJson) {
+          try {
+            const sessions = JSON.parse(rawSessionListJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
+            if (Array.isArray(sessions) && sessions.length > 0) {
+              await supabase.from("training_state")
+                .update({ weekly_plan_sessions: sessions as unknown as Json })
+                .eq("user_id", userId);
+              await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
+              sessionsWritten = true;
+              console.log(`[weekly_recap] [SESSION_LIST] tag: wrote ${sessions.length} sessions directly`);
+            }
+          } catch (parseErr) {
+            console.error("[weekly_recap] [SESSION_LIST] parse failed, falling back to sync_sessions:", parseErr);
+          }
+        }
+        if (!sessionsWritten) {
+          await fetch(`${appUrl}/api/coach/respond`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId, trigger: "sync_sessions" }),
+          });
+        }
       } catch (err) {
         console.error("[coach/respond] sync_sessions trigger failed (weekly_recap):", err);
         void trackEvent(userId, "after_error", { trigger: "sync_sessions_weekly_recap", error: String(err) });
@@ -1341,12 +1400,62 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         });
       } else {
         const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
-        await maybeUpdatePlanSessions(
-          userId, currentSessions, latestUserMsg.content, coachMessage,
-          storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek,
-        );
+        if (rawSessionUpdateJson) {
+          try {
+            const sessions = JSON.parse(rawSessionUpdateJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
+            if (Array.isArray(sessions) && sessions.length > 0) {
+              await supabase.from("training_state")
+                .update({ weekly_plan_sessions: sessions as unknown as Json })
+                .eq("user_id", userId);
+              // Patch key_workout in arc if a quality session is present
+              if (storedPlanId && storedPlanAllWeeks.length > 0) {
+                const qualitySession = sessions.find(s => {
+                  const l = s.label.toLowerCase();
+                  return l.includes("tempo") || l.includes("interval") || l.includes("×") || l.includes("threshold") || l.includes("fartlek") || l.includes("hills");
+                });
+                if (qualitySession) {
+                  const updatedWeeks = storedPlanAllWeeks.map(w =>
+                    w.week_number === periodization.effectiveWeek ? { ...w, key_workout: qualitySession.label } : w
+                  );
+                  await supabase.from("training_plans")
+                    .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
+                    .eq("id", storedPlanId);
+                }
+              }
+              console.log(`[user_message] [SESSION_UPDATE] tag: wrote ${sessions.length} sessions directly`);
+            }
+          } catch (parseErr) {
+            console.error("[user_message] [SESSION_UPDATE] parse failed, falling back to maybeUpdatePlanSessions:", parseErr);
+            await maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage, storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek);
+          }
+        } else {
+          await maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage, storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek);
+        }
         if (storedPlanId && storedPlanAllWeeks.length > 0) {
           await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
+        }
+        // Handle structured schedule tags from Dean's response
+        if (tagWeekOverrideDays && tagWeekOverrideDays.length > 0) {
+          const tz = userTimezone || "America/New_York";
+          const localDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+          const localDate = new Date(localDateStr + "T12:00:00Z");
+          const nowDow = localDate.getUTCDay();
+          const daysUntilSunday = nowDow === 0 ? 0 : 7 - nowDow;
+          const sundayDate = new Date(localDate.getTime() + daysUntilSunday * 24 * 60 * 60 * 1000);
+          await supabase.from("training_profiles").update({
+            this_week_override_days: tagWeekOverrideDays,
+            this_week_override_expires: sundayDate.toISOString().slice(0, 10),
+          }).eq("user_id", userId);
+          console.log(`[user_message] [WEEK_OVERRIDE] tag: set override days [${tagWeekOverrideDays.join(", ")}]`);
+        }
+        if (tagSkipDayDate) {
+          const existing = (profile?.skip_dates as string[]) || [];
+          if (!existing.includes(tagSkipDayDate)) {
+            await supabase.from("training_profiles").update({
+              skip_dates: [...existing, tagSkipDayDate],
+            }).eq("user_id", userId);
+            console.log(`[user_message] [SKIP_DAY] tag: added skip date ${tagSkipDayDate}`);
+          }
         }
       }
     }
@@ -1416,6 +1525,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   // Strava activity annotation — fire-and-forget, doesn't affect SMS response
   if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean)) {
+    const storedSummary = activityData?.summary as Record<string, unknown> | null;
+    const storedSplits = Array.isArray(storedSummary?.splits)
+      ? (storedSummary.splits as Array<Record<string, unknown>>)
+      : [];
     void annotateStravaActivity(userId, activityId, {
       activityData,
       weekMileageSoFar,
@@ -1423,6 +1536,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       currentWeek: (state?.current_week as number | null) ?? null,
       upcomingRace: (upcomingRaces[0] as Record<string, unknown> | null) ?? null,
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
+      splits: storedSplits,
     }).catch((err) => console.error("[strava-annotation] failed:", err));
   }
 
@@ -3370,11 +3484,9 @@ type ExtractedProfileData = {
   recent_race_time_minutes?: number | null;
   easy_pace?: string | null;
   timezone?: string | null;
-  skip_date?: string | null;
   race_date?: string | null;
   goal_time_minutes?: number | null;
   updated_training_days?: string[] | null;
-  this_week_override_days?: string[] | null;
   goal_race_type?: string | null;
   workout?: {
     activity_type: string;
@@ -3417,14 +3529,12 @@ Extract ONLY explicitly stated NEW information:
   - elevation_gain: in meters, convert from feet÷3.281 (null if not stated)
   - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
 - Their location or timezone if explicitly mentioned (e.g. "I'm in Denver", "I live in Seattle", "I'm on Pacific time", "I'm in PST") → timezone as IANA string (e.g. "America/Denver", "America/Los_Angeles"). Only set if they are clearly stating where they are, not just mentioning a city in passing.
-- A one-off request to skip a specific training day this week (e.g. "skip Sunday", "I won't run this Saturday", "skipping my workout Thursday", "can we move Sunday's run") → skip_date as "YYYY-MM-DD" for the upcoming occurrence of that day. Today is ${todayDateStr}. Compute the date of the next occurrence of the named weekday (if today is that day, use today). Only set for explicit skip/cancel requests, not vague mentions.
 - A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th", "late May", "end of June") → race_date as "YYYY-MM-DD". Resolve vague phrases: "early [month]" → first Saturday of that month, "mid [month]" → Saturday nearest the 15th, "late [month]" or "end of [month]" → last Saturday of that month, month only → first Saturday of that month. Always use the next upcoming occurrence of that month. Today is ${todayDateStr}. IMPORTANT: Only set race_date when the athlete is CHANGING or SETTING their PRIMARY goal race date. Do NOT set race_date when they are adding a secondary, tune-up, or B-race alongside their existing goal — indicated by phrases like "also", "too", "as well", "build towards that too", "make sure my plan covers", or when the named race is clearly different from their current primary goal.
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip, swap, or "this week only" request (e.g. "I want to run Mon, Tue, Fri this week" should NOT set updated_training_days).
-- A one-week-only schedule change (e.g. "I want to run Mon/Wed/Fri this week", "just this week I'm running Tuesday and Thursday", "this week I can only do Mon and Sat", "running Tue/Wed/Fri instead this week") → this_week_override_days as array of full day names. Only set when the athlete explicitly scopes the change to the current week. Do NOT set if it sounds like a permanent change.
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "skip_date": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "this_week_override_days": string[] | null, "goal_race_type": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -3460,16 +3570,14 @@ async function persistProfileUpdates(
     const hasRaceData = !!(extracted.recent_race_distance_km && extracted.recent_race_time_minutes);
     const hasEasyPace = !!extracted.easy_pace;
     const hasTimezone = !!(extracted.timezone && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(extracted.timezone));
-    const hasSkipDate = !!(extracted.skip_date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.skip_date));
     const hasRaceDate = !!(extracted.race_date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.race_date));
     const hasGoalTime = typeof extracted.goal_time_minutes === "number" && extracted.goal_time_minutes > 0;
     const hasWorkout = !!extracted.workout;
 
     const hasInjuryBodyPart = !!extracted.injury_body_part;
     const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
-    const hasWeekOverride = Array.isArray(extracted.this_week_override_days) && (extracted.this_week_override_days as string[]).length > 0;
     const hasGoalRaceType = !!(extracted.goal_race_type);
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasSkipDate && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasWeekOverride && !hasGoalRaceType) return;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -3516,12 +3624,6 @@ async function persistProfileUpdates(
       const existing = (profile?.crosstraining_tools as string[]) || [];
       profileUpdate.crosstraining_tools = Array.from(new Set([...existing, ...(extracted.new_crosstraining as string[])]));
     }
-    if (hasSkipDate) {
-      const existing = (profile?.skip_dates as string[]) || [];
-      if (!existing.includes(extracted.skip_date as string)) {
-        profileUpdate.skip_dates = [...existing, extracted.skip_date as string];
-      }
-    }
     if (computedPaces) {
       profileUpdate.current_easy_pace = computedPaces.easy;
       if (computedPaces.tempo) profileUpdate.current_tempo_pace = computedPaces.tempo;
@@ -3535,18 +3637,6 @@ async function persistProfileUpdates(
       // Clear any active week override — the standing schedule takes precedence
       profileUpdate.this_week_override_days = null;
       profileUpdate.this_week_override_expires = null;
-    }
-    if (hasWeekOverride) {
-      profileUpdate.this_week_override_days = (extracted.this_week_override_days as string[]).map(d => d.toLowerCase());
-      // Expires end of current week: compute local date string, then add days to reach Sunday
-      const tz = timezone || "America/New_York";
-      const now = new Date();
-      const localDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now); // "YYYY-MM-DD"
-      const localDate = new Date(localDateStr + "T12:00:00Z"); // noon UTC proxy for local date
-      const nowDow = localDate.getUTCDay(); // 0=Sun … 6=Sat
-      const daysUntilSunday = nowDow === 0 ? 0 : 7 - nowDow;
-      const sundayDate = new Date(localDate.getTime() + daysUntilSunday * 24 * 60 * 60 * 1000);
-      profileUpdate.this_week_override_expires = sundayDate.toISOString().slice(0, 10);
     }
     if (hasGoalRaceType) {
       profileUpdate.goal = extracted.goal_race_type;
@@ -3899,6 +3989,18 @@ If the request is ambiguous about scope (no "just this week" or "from now on"), 
 
 If they clearly want it as a permanent schedule change (e.g. "from now on", "every week", "going forward"), confirm the permanent update: e.g. "Done — moving strength to Sundays as your new standing schedule." The system will sync confirmed changes to their dashboard automatically.
 
+When you confirm a session swap (any scope), immediately append at the end of your response:
+[SESSION_UPDATE: [{"day":"Sat","date":"4/11","label":"Long run 10mi","optional":false},{"day":"Sun","date":"4/12","label":"Easy 6mi","optional":false},...]]
+Include the FULL updated session list (all sessions this week, not just changed ones). Preserve unchanged sessions from THIS WEEK'S PLANNED SESSIONS exactly. The tag is stripped before SMS delivery.
+
+When you agree to a this-week-only schedule change (athlete can only run certain days this week), append:
+[WEEK_OVERRIDE: Saturday,Sunday]
+Use full day names, comma-separated. Only emit when the athlete is explicitly reducing which days they train this week — NOT for session swaps.
+
+When you agree to skip a specific training day, append:
+[SKIP_DAY: 2026-04-12]
+Use YYYY-MM-DD format. Compute from the DATE CONTEXT block.
+
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
 
 DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." This includes situations where the dashboard is showing wrong or mismatched data (e.g. "the dashboard shows 16 miles but you only gave me two short sessions" — that is a plan correction request, not a system bug outside your control). In all cases: describe what you're changing in 1-2 sentences and ask them to confirm. Do NOT say you can't edit the system, can't touch the database, or that the plan is auto-generated.
@@ -4074,7 +4176,17 @@ Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown 
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
 TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the miles from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: 32.5 mi". Wrong: adding past-week miles to next week’s total (e.g. if the plan is 32.5 mi but the recap week had 30.8 mi, the Total is 32.5 mi, not 63.3 mi).
-<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.</rule>`;
+<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.</rule>
+
+SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the upcoming week's plan. Format exactly:
+[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"Easy 6mi","optional":false},{"day":"Wed","date":"M/D","label":"6×800m @ 5K pace 3mi","optional":false}]]
+Rules:
+- day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
+- date: M/D format matching the calendar date you assigned to this session
+- label: concise session description including distance (e.g. "Easy 6mi", "Long run 10mi", "6×800m @ 5K pace 3mi", "Strength 30min")
+- optional: true only for explicitly optional sessions, false otherwise
+- Include every session in the upcoming week — do not omit any
+- The tag is stripped before the athlete sees the message — they will never see it`;
     }
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
@@ -4230,7 +4342,17 @@ Do NOT add any other closing line — no "this number's always open", no reminde
 
 ONE QUESTION RULE: Do not ask any questions in this response — no follow-ups about injuries, niggles, schedule, reminders, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.
 ${!hasStrava ? `
-NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so there's no automatic activity sync. Weave a natural, low-key line into the closing of the plan that tells them to text you after each run. Make it feel like a coach thing, not a system requirement. Examples: "Since you're not on Strava, just shoot me a text after each run — even a quick 'done, 5 miles' — and I'll track from there." or "No Strava sync here, so just drop me a message after each workout and I'll keep tabs on your progress." Vary the phrasing. One sentence only — don't dwell on it.` : ""}`;
+NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so there's no automatic activity sync. Weave a natural, low-key line into the closing of the plan that tells them to text you after each run. Make it feel like a coach thing, not a system requirement. Examples: "Since you're not on Strava, just shoot me a text after each run — even a quick 'done, 5 miles' — and I'll track from there." or "No Strava sync here, so just drop me a message after each workout and I'll keep tabs on your progress." Vary the phrasing. One sentence only — don't dwell on it.` : ""}
+
+SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the week's plan. Format exactly:
+[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"Easy 6mi","optional":false},{"day":"Wed","date":"M/D","label":"6×800m @ 5K pace 3mi","optional":false}]]
+Rules:
+- day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
+- date: M/D format matching the calendar date you assigned to this session
+- label: concise session description including distance (e.g. "Easy 6mi", "Long run 10mi", "6×800m @ 5K pace 3mi", "Strength 30min")
+- optional: true only for explicitly optional sessions, false otherwise
+- Include every session in the week — do not omit any
+- The tag is stripped before the athlete sees the message — they will never see it`;
     }
     default:
       return "";
@@ -4248,6 +4370,8 @@ interface AnnotationContext {
   currentWeek: number | null;
   upcomingRace: Record<string, unknown> | null;
   preferredUnits: "imperial" | "metric";
+  // splits_standard from activityData.summary — already fetched by the webhook
+  splits: Array<Record<string, unknown>>;
 }
 
 async function annotateStravaActivity(
@@ -4255,9 +4379,10 @@ async function annotateStravaActivity(
   stravaActivityId: number,
   ctx: AnnotationContext
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRace, preferredUnits } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRace, preferredUnits, splits } = ctx;
 
-  // Single Strava fetch — returns full activity including splits + existing description
+  // Fetch token + existing description (one Strava call).
+  // Splits come from DB-stored summary — no duplicate fetch needed.
   const accessToken = await getValidAccessToken(userId);
   const stravaActivity = await getActivity(accessToken, stravaActivityId);
   const existingDescription = (stravaActivity.description as string) || "";
@@ -4308,15 +4433,32 @@ async function annotateStravaActivity(
     raceName = (upcomingRace.race_name as string | null) ?? null;
   }
 
-  // Split analysis — use splits_standard (imperial) or splits_metric
-  const splitsKey = isMetric ? "splits_metric" : "splits_standard";
-  const rawSplits = (stravaActivity[splitsKey] as Array<Record<string, unknown>> | null) ?? [];
-  const splitAnalysis = buildSplitAnalysis(rawSplits, isMetric);
+  // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
+  // The webhook stores splits_standard regardless of user preference, so buildSplitAnalysis
+  // gets imperial splits; isMetric only affects the unit label in the output string.
+  const splitAnalysis = buildSplitAnalysis(splits, isMetric);
 
-  // Aerobic efficiency (pace + HR signal)
-  const avgSpeedMs = (stravaActivity.average_speed as number | null) ?? null;
-  const efficiencyLine = hr && avgSpeedMs
-    ? `Aerobic efficiency: ${(avgSpeedMs / hr * 60).toFixed(2)} m/beat`
+  // Aerobic efficiency — compute grade-adjusted speed from split-level values (distance-weighted).
+  // This is more accurate on hilly runs than the activity-level average_speed.
+  // Per-split average_grade_adjusted_speed is already stored in summary.splits.
+  const avgSpeedMs = (activityData?.moving_time_seconds && activityData?.distance_meters)
+    ? (activityData.distance_meters as number) / (activityData.moving_time_seconds as number)
+    : null;
+  let weightedGaSum = 0;
+  let weightedGaTotal = 0;
+  for (const split of splits) {
+    const gas = split.average_grade_adjusted_speed as number | null;
+    const dist = split.distance as number | null;
+    if (gas && gas > 0 && dist && dist > 0) {
+      weightedGaSum += gas * dist;
+      weightedGaTotal += dist;
+    }
+  }
+  const gaSpeedMs = weightedGaTotal > 0 ? weightedGaSum / weightedGaTotal : null;
+  const speedForEfficiency = (gaSpeedMs && gaSpeedMs > 0) ? gaSpeedMs : avgSpeedMs;
+  const efficiencyLabel = (gaSpeedMs && gaSpeedMs > 0) ? "Grade-adj efficiency" : "Aerobic efficiency";
+  const efficiencyLine = hr && speedForEfficiency
+    ? `${efficiencyLabel}: ${(speedForEfficiency / hr * 60).toFixed(2)} m/beat`
     : null;
 
   // Header line
@@ -4380,8 +4522,9 @@ async function annotateStravaActivity(
 /**
  * Parse Strava splits into a formatted string for the LLM.
  * Computes per-split paces and first-half vs second-half comparison.
+ * Exported for unit testing.
  */
-function buildSplitAnalysis(
+export function buildSplitAnalysis(
   splits: Array<Record<string, unknown>>,
   isMetric: boolean
 ): string | null {
@@ -4396,12 +4539,17 @@ function buildSplitAnalysis(
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  // Derive pace from average_speed (m/s) — present on all Strava split objects
+  // Derive pace from average_speed (m/s).
+  // Filter paused-device splits (athlete forgot to stop Strava) — same threshold
+  // used by transformSplitForClaude in the post_run SMS path: pace > 20 min/mile.
+  const MAX_SEC_PER_UNIT = isMetric ? (20 * 60) / 1.60934 : 20 * 60;
   const pacesPerSec: number[] = [];
   for (const split of splits) {
     const speed = split.average_speed as number | null;
     if (!speed || speed <= 0) continue;
-    pacesPerSec.push(metersPerUnit / speed);
+    const secPerUnit = metersPerUnit / speed;
+    if (secPerUnit > MAX_SEC_PER_UNIT) continue; // paused device
+    pacesPerSec.push(secPerUnit);
   }
 
   if (pacesPerSec.length < 2) return null;

@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Structured action tags replace Haiku extraction for session/schedule changes
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Session list storage and schedule overrides were driven by a secondary Haiku extraction pass after the main Sonnet response. This added latency (~3s), cost, and reliability issues — Haiku would sometimes mis-classify session swaps as week overrides or fail to detect changes.
+**Fix / Change:** Sonnet (Dean) now emits structured action tags directly in its response: `[SESSION_LIST:]` (initial_plan/weekly_recap), `[SESSION_UPDATE:]` (user_message session swaps), `[WEEK_OVERRIDE:]` (this-week schedule changes), `[SKIP_DAY:]` (day skips). Tags are parsed deterministically on the server and stripped before SMS delivery. Haiku-based `extractAndStorePlanSessions` and `maybeUpdatePlanSessions` remain as fallbacks when no tag is present. `skip_date` and `this_week_override_days` removed from Haiku profile extractor — now tag-driven only. max_tokens for plan triggers increased 800→1000 to accommodate SESSION_LIST JSON overhead.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond-field-sync.test.ts`
+
+## 2026-04-10 — Fixed profile extractor setting this_week_override_days on session swap requests
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "looks like I now have a 20 mi run tomorrow since my weekly goal was 29 miles!"
+**Root cause:** When the athlete asked "Can you update my dashboard to have the long run tomorrow on Saturday and 6 mi on Sunday?", the profile field extractor (Haiku) interpreted this as a one-week schedule override and set `this_week_override_days: ["Saturday", "Sunday"]`. This changed `effectiveTrainingDays` to [Sat, Sun] only, causing `buildDailyPlan([Sat, Sun])` to compute: totalEasy = 29.5 - 9.5 = 20mi for Saturday (the only easy day).
+**Fix / Change:** Added explicit CRITICAL note to the `this_week_override_days` extraction rule: session swap requests ("do the long run on Saturday instead", "move my tempo to Tuesday") must never trigger this field. Only actual availability reductions ("I can only run 2 days this week", "skipping all weekday runs") should set it.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-10 — Fixed weekly_plan_sessions null when initial plan SMS is split into multiple bubbles
 
 **Type:** Bug Fix
