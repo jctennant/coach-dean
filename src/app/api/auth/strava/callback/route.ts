@@ -45,7 +45,8 @@ export async function GET(request: Request) {
   }
 
   const tokenData = await tokenResponse.json();
-  const { access_token, refresh_token, expires_at, athlete } = tokenData;
+  const { access_token, refresh_token, expires_at, athlete, scope } = tokenData;
+  const hasWriteScope = typeof scope === "string" && scope.includes("activity:write");
 
   // Extract timezone from Strava athlete profile
   // Strava returns e.g. "(GMT-08:00) America/Los_Angeles" — extract the IANA part
@@ -125,6 +126,7 @@ export async function GET(request: Request) {
       strava_access_token: access_token,
       strava_refresh_token: refresh_token,
       strava_token_expires_at: new Date(expires_at * 1000).toISOString(),
+      ...(hasWriteScope ? { strava_write_enabled: true } : {}),
       name: resolvedName,
       ...(shouldAdvanceToSchedule ? { onboarding_step: "onboarding" } : {}),
       ...(timezone ? { timezone } : {}),

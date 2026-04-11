@@ -9,6 +9,7 @@ import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors } from "@/lib/plan-validation";
+import { getValidAccessToken, getActivityDescription, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
@@ -1403,6 +1404,18 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     });
   }
 
+  // Strava activity annotation — fire-and-forget, doesn't affect SMS response
+  if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean)) {
+    void annotateStravaActivity(userId, activityId, {
+      activityData,
+      weekMileageSoFar,
+      weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
+      currentWeek: (state?.current_week as number | null) ?? null,
+      upcomingRace: (upcomingRaces[0] as Record<string, unknown> | null) ?? null,
+      preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
+    }).catch((err) => console.error("[strava-annotation] failed:", err));
+  }
+
   return NextResponse.json({ ok: true, message: coachMessage });
 }
 
@@ -2524,11 +2537,6 @@ function buildSystemPrompt(
     : "TBD";
 
   const ALL_WEEK_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-  const restDays = profile?.training_days && (profile.training_days as string[]).length > 0
-    ? ALL_WEEK_DAYS
-        .filter(d => !(profile!.training_days as string[]).map((x: string) => x.toLowerCase()).includes(d))
-        .map(d => d.charAt(0).toUpperCase() + d.slice(1))
-    : [];
 
   // Build date context in user's timezone
   const tz = timezone || "America/New_York";
@@ -2548,6 +2556,23 @@ function buildSystemPrompt(
   // We use "en-CA" to get "YYYY-MM-DD" format reliably.
   const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
   const [ty, tm, td] = todayLocal.split("-").map(Number);
+
+  // Compute effective training days — use this-week override if active, else base schedule.
+  // This mirrors the logic in the nightly-reminder cron (effectiveTrainingDays()) so the
+  // rest-days rule Claude sees is consistent with which days the cron fires on.
+  const overrideDays = profile?.this_week_override_days as string[] | null;
+  const overrideExpires = profile?.this_week_override_expires as string | null;
+  const effectiveProfileTrainingDays: string[] = (
+    overrideDays && overrideDays.length > 0 && overrideExpires && todayLocal <= overrideExpires
+      ? overrideDays
+      : (profile?.training_days as string[] | null) ?? []
+  ).map((d: string) => d.toLowerCase());
+
+  const restDays = effectiveProfileTrainingDays.length > 0
+    ? ALL_WEEK_DAYS
+        .filter(d => !effectiveProfileTrainingDays.includes(d))
+        .map(d => d.charAt(0).toUpperCase() + d.slice(1))
+    : [];
 
   // Full weekday name ("Friday, Feb 27") matches the long format used for
   // todayStr and eliminates any ambiguity from abbreviated day names.
@@ -4196,4 +4221,129 @@ NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so the
     default:
       return "";
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Strava activity annotation
+// ─────────────────────────────────────────────────────────────
+
+interface AnnotationContext {
+  activityData: Record<string, unknown> | null;
+  weekMileageSoFar: number;
+  weekTarget: number | null;
+  currentWeek: number | null;
+  upcomingRace: Record<string, unknown> | null;
+  preferredUnits: "imperial" | "metric";
+}
+
+async function annotateStravaActivity(
+  userId: string,
+  stravaActivityId: number,
+  ctx: AnnotationContext
+): Promise<void> {
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRace, preferredUnits } = ctx;
+
+  // Fetch a valid Strava access token
+  const accessToken = await getValidAccessToken(userId);
+
+  // Fetch total weeks from the training plan (best-effort)
+  const { data: planRow } = await supabase
+    .from("training_plans")
+    .select("total_weeks")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
+
+  // Activity stats
+  const isMetric = preferredUnits === "metric";
+  const distanceMeters = (activityData?.distance_meters as number | null) ?? 0;
+  const distanceMiles = distanceMeters / 1609.34;
+  const distanceKm = distanceMeters / 1000;
+  const distanceDisplay = isMetric
+    ? `${distanceKm.toFixed(1)} km`
+    : `${distanceMiles.toFixed(1)} mi`;
+  const pace = (activityData?.average_pace as string | null) ?? null;
+  const hr = (activityData?.average_heartrate as number | null) ?? null;
+  const elevGain = (activityData?.elevation_gain as number | null) ?? null;
+  const elevDisplay = elevGain
+    ? isMetric
+      ? `${Math.round(elevGain)}m gain`
+      : `${Math.round(elevGain * 3.28084)}ft gain`
+    : null;
+
+  // Week stats
+  const weekMilesDisplay = isMetric
+    ? `${(weekMileageSoFar * 1.60934).toFixed(0)} km`
+    : `${weekMileageSoFar.toFixed(0)} mi`;
+  const weekTargetDisplay = weekTarget
+    ? isMetric
+      ? `${Math.round(weekTarget * 1.60934)} km`
+      : `${weekTarget} mi`
+    : null;
+
+  // Race context
+  let daysToRace: number | null = null;
+  let raceName: string | null = null;
+  if (upcomingRace?.race_date) {
+    const raceDate = new Date(upcomingRace.race_date as string);
+    daysToRace = Math.ceil((raceDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    raceName = (upcomingRace.race_name as string | null) ?? null;
+  }
+
+  // Header line
+  const weekLabel = currentWeek
+    ? totalWeeks
+      ? `WEEK ${currentWeek} OF ${totalWeeks}`
+      : `WEEK ${currentWeek}`
+    : null;
+  const raceLabel = raceName && daysToRace !== null ? `${raceName} (${daysToRace}d)` : null;
+  const headerParts = [weekLabel, raceLabel].filter(Boolean);
+  const header = headerParts.length > 0 ? headerParts.join(" — ") : "Coach Dean";
+
+  // Generate Dean's note via a quick Haiku call
+  const notePrompt = [
+    `Activity: ${distanceDisplay}${pace ? ` @ ${pace}` : ""}${hr ? `, avg HR ${hr}` : ""}${elevDisplay ? `, ${elevDisplay}` : ""}`,
+    `Week so far: ${weekMilesDisplay}${weekTargetDisplay ? ` / ${weekTargetDisplay} target` : ""}`,
+    currentWeek ? `Training week: ${currentWeek}${totalWeeks ? ` of ${totalWeeks}` : ""}` : "",
+    raceName && daysToRace !== null ? `Race: ${raceName} in ${daysToRace} days` : "",
+  ].filter(Boolean).join("\n");
+
+  const noteResponse = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 120,
+    messages: [
+      {
+        role: "user",
+        content: `You are Coach Dean. Write 1-2 sentences analyzing this specific run for the training log. Reference actual numbers. No generic encouragement. Direct and analytical — like a coach's handwritten note.\n\n${notePrompt}`,
+      },
+    ],
+  });
+  const deanNote = noteResponse.content[0].type === "text"
+    ? noteResponse.content[0].text.trim()
+    : "";
+
+  // Build the annotation block
+  const divider = "────────────────────";
+  const weekLine = weekTargetDisplay
+    ? `Week: ${weekMilesDisplay} / ${weekTargetDisplay}`
+    : `Week: ${weekMilesDisplay}`;
+  const block = [
+    header,
+    divider,
+    `${distanceDisplay}${pace ? ` @ ${pace}` : ""}`,
+    weekLine,
+    "",
+    deanNote,
+    "",
+    "coachdean.ai",
+  ].join("\n");
+
+  // Fetch existing description and prepend
+  const existing = await getActivityDescription(accessToken, stravaActivityId);
+  const newDescription = existing ? `${block}\n\n${existing}` : block;
+
+  await updateActivityDescription(accessToken, stravaActivityId, newDescription);
+  console.log(`[strava-annotation] annotated activity ${stravaActivityId} for user ${userId}`);
 }

@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fixed nightly reminder saying "rest day" when override schedule includes tomorrow
+
+**Type:** Bug Fix
+**Reported by:** User (Jake)
+**User feedback:** "got a message from Dean that tomorrow is a rest day (evening cron) but I'm supposed to run tomorrow!"
+**Root cause:** `buildSystemPrompt` computed `restDays` from `profile.training_days` (the base standing schedule) without considering `this_week_override_days`. When a user has a one-week schedule override that adds a day (e.g. Saturday) that isn't in their base schedule, the nightly cron correctly fires (it uses `effectiveTrainingDays()`), but the system prompt told Claude "NEVER schedule a run on Saturday" — causing Dean to say tomorrow is a rest day despite the session plan showing a run.
+**Fix / Change:** Moved `restDays` computation to after `tz` and `todayLocal` are defined. Now mirrors the nightly-reminder cron's `effectiveTrainingDays()` logic: if `this_week_override_days` is set and not expired, use those days instead of the base schedule when computing which days are rest days.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-10 — Strava activity description annotation (dev testing)
+
+**Type:** Feature
+**Reported by:** Internal / product exploration
+**User feedback:** N/A
+**Root cause:** N/A — new feature
+**Fix / Change:** When `strava_write_enabled = true` on a user, Coach Dean appends a brief training note to the Strava activity description after every `post_run` webhook. Uses Haiku to generate a 1-2 sentence analytical note grounded in the actual run data. Block is prepended above any existing description. New `/api/auth/strava/write` re-auth route requests `activity:write` scope; callback detects the scope and sets the flag automatically.
+**Files changed:** `supabase/migrations/026_strava_write.sql`, `src/lib/database.types.ts`, `src/app/api/auth/strava/write/route.ts`, `src/app/api/auth/strava/callback/route.ts`, `src/lib/strava.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-10 — Fix 4 eval failures: deload weeks, mile TT intervals, general fitness tempo, judge fixture
 
 **Type:** Improvement
