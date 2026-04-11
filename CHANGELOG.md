@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Improved Strava annotation: emojis, GAP analysis, remove redundant stats, multi-race
+
+**Type:** Improvement
+**Reported by:** Jake (user feedback after first annotation)
+**User feedback:** "we probably shouldn't repeat stuff that's already in the strava activity details (10 mi @ X pace) - that is redundant. Also Dean's analysis said I slowed down a ton which could have been 'pacing miscalcuation' but those were on miles I gained like 600 ft in elevation. Can we provide insights on GAP or aerobic efficiency... Also says Week 1 of 14 -- Dipsea (64d), I wonder if that is confusing... Can we add in a few emojis to make it more exciting"
+**Root cause:** Annotation block duplicated distance/pace already shown by Strava; LLM prompt didn't instruct it to consider grade-adjusted pace on hilly terrain; week label included "of X" which confuses users when plan total weeks ≠ remaining weeks to race; only one upcoming race was shown.
+**Fix / Change:**
+- Removed distance/pace line from block (Strava already displays these)
+- Added emoji to header based on activity type: ⛰️ trail + high elevation, 🌲 trail, ⚡️ intervals, 🏃 road run
+- Removed "of X" from `WEEK N OF X` — now just `WEEK N` to avoid confusion
+- Pass all upcoming races (was `upcomingRaces[0]` only); header now shows up to 2 race countdowns
+- Added grade-adjusted pace to LLM prompt context for trail runs with GAP data
+- Updated LLM prompt to explicitly NOT restate distance/pace and to reference GAP instead of raw pace on hilly runs
+- Moved efficiency line (`Grade-adj eff: X m/beat`) into the visible annotation block
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-11 — Fixed Strava annotation not running; fixed write scope detection on re-auth
 
 **Type:** Bug Fix

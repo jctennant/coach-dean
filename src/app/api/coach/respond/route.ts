@@ -1526,7 +1526,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       weekMileageSoFar,
       weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
       currentWeek: (state?.current_week as number | null) ?? null,
-      upcomingRace: (upcomingRaces[0] as Record<string, unknown> | null) ?? null,
+      upcomingRaces: upcomingRaces,
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
     }).catch((err) => console.error("[strava-annotation] failed:", err));
@@ -4359,7 +4359,7 @@ interface AnnotationContext {
   weekMileageSoFar: number;
   weekTarget: number | null;
   currentWeek: number | null;
-  upcomingRace: Record<string, unknown> | null;
+  upcomingRaces: Array<Record<string, unknown>>;
   preferredUnits: "imperial" | "metric";
   // splits_standard from activityData.summary — already fetched by the webhook
   splits: Array<Record<string, unknown>>;
@@ -4370,7 +4370,7 @@ async function annotateStravaActivity(
   stravaActivityId: number,
   ctx: AnnotationContext
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRace, preferredUnits, splits } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits } = ctx;
 
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
@@ -4378,32 +4378,30 @@ async function annotateStravaActivity(
   const stravaActivity = await getActivity(accessToken, stravaActivityId);
   const existingDescription = (stravaActivity.description as string) || "";
 
-  // Fetch total weeks from the training plan (best-effort)
-  const { data: planRow } = await supabase
-    .from("training_plans")
-    .select("total_weeks")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-  const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
-
   // Activity stats
   const isMetric = preferredUnits === "metric";
   const distanceMeters = (activityData?.distance_meters as number | null) ?? 0;
   const distanceMiles = distanceMeters / 1609.34;
   const distanceKm = distanceMeters / 1000;
-  const distanceDisplay = isMetric
-    ? `${distanceKm.toFixed(1)} km`
-    : `${distanceMiles.toFixed(1)} mi`;
   const pace = (activityData?.average_pace as string | null) ?? null;
   const hr = (activityData?.average_heartrate as number | null) ?? null;
   const elevGain = (activityData?.elevation_gain as number | null) ?? null;
+  const elevGainFt = elevGain ? elevGain * 3.28084 : 0;
   const elevDisplay = elevGain
     ? isMetric
       ? `${Math.round(elevGain)}m gain`
-      : `${Math.round(elevGain * 3.28084)}ft gain`
+      : `${Math.round(elevGainFt)}ft gain`
     : null;
+
+  // Activity type emoji — trail, intervals, or road run
+  const activityType = (activityData?.activity_type as string | null) ?? "Run";
+  const workoutType = (activityData?.workout_type as number | null) ?? 0;
+  const isTrail = activityType === "TrailRun";
+  const isIntervals = workoutType === 3;
+  let emoji = "🏃";
+  if (isTrail && elevGainFt >= 500) emoji = "⛰️";
+  else if (isTrail) emoji = "🌲";
+  else if (isIntervals) emoji = "⚡️";
 
   // Week stats
   const weekMilesDisplay = isMetric
@@ -4415,14 +4413,16 @@ async function annotateStravaActivity(
       : `${weekTarget} mi`
     : null;
 
-  // Race context
-  let daysToRace: number | null = null;
-  let raceName: string | null = null;
-  if (upcomingRace?.race_date) {
-    const raceDate = new Date(upcomingRace.race_date as string);
-    daysToRace = Math.ceil((raceDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    raceName = (upcomingRace.race_name as string | null) ?? null;
-  }
+  // Race context — show up to 2 upcoming races
+  const raceLabels = upcomingRaces
+    .slice(0, 2)
+    .map(race => {
+      if (!race.race_date) return null;
+      const d = Math.ceil((new Date(race.race_date as string).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      const name = (race.race_name as string | null) ?? "Race";
+      return `${name} (${d}d)`;
+    })
+    .filter((l): l is string => l !== null);
 
   // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
   // The webhook stores splits_standard regardless of user preference, so buildSplitAnalysis
@@ -4447,29 +4447,51 @@ async function annotateStravaActivity(
   }
   const gaSpeedMs = weightedGaTotal > 0 ? weightedGaSum / weightedGaTotal : null;
   const speedForEfficiency = (gaSpeedMs && gaSpeedMs > 0) ? gaSpeedMs : avgSpeedMs;
-  const efficiencyLabel = (gaSpeedMs && gaSpeedMs > 0) ? "Grade-adj efficiency" : "Aerobic efficiency";
+  const efficiencyLabel = (gaSpeedMs && gaSpeedMs > 0) ? "Grade-adj eff" : "Aerobic eff";
   const efficiencyLine = hr && speedForEfficiency
     ? `${efficiencyLabel}: ${(speedForEfficiency / hr * 60).toFixed(2)} m/beat`
     : null;
 
-  // Header line
-  const weekLabel = currentWeek
-    ? totalWeeks
-      ? `WEEK ${currentWeek} OF ${totalWeeks}`
-      : `WEEK ${currentWeek}`
-    : null;
-  const raceLabel = raceName && daysToRace !== null ? `${raceName} (${daysToRace}d)` : null;
-  const headerParts = [weekLabel, raceLabel].filter(Boolean);
-  const header = headerParts.length > 0 ? headerParts.join(" — ") : "Coach Dean";
+  // Top GAP split — fastest grade-adjusted pace across all splits
+  const metersPerUnit = isMetric ? 1000 : 1609.34;
+  const unitLabel = isMetric ? "/km" : "/mi";
+  const splitLabel = isMetric ? "km" : "mi";
+  const MAX_SEC_PER_UNIT_GAP = isMetric ? (20 * 60) / 1.60934 : 20 * 60;
+  let bestGas: number | null = null;
+  let bestGapSplitNum: number | null = null;
+  for (let i = 0; i < splits.length; i++) {
+    const gas = splits[i].average_grade_adjusted_speed as number | null;
+    if (!gas || gas <= 0) continue;
+    const secPerUnit = metersPerUnit / gas;
+    if (secPerUnit > MAX_SEC_PER_UNIT_GAP) continue; // paused split
+    if (bestGas === null || gas > bestGas) {
+      bestGas = gas;
+      bestGapSplitNum = i + 1;
+    }
+  }
+  let topGapLine: string | null = null;
+  if (bestGas !== null && bestGapSplitNum !== null) {
+    const secPerUnit = metersPerUnit / bestGas;
+    const m = Math.floor(secPerUnit / 60);
+    const s = Math.round(secPerUnit % 60);
+    topGapLine = `Top GAP: ${m}:${s.toString().padStart(2, "0")}${unitLabel} (${splitLabel} ${bestGapSplitNum})`;
+  }
 
-  // Build LLM context — richer data = more specific note
+  // Header — emoji + week + races (no "of X" to avoid confusion when plan weeks ≠ race countdown)
+  const weekLabel = currentWeek ? `WEEK ${currentWeek}` : null;
+  const headerParts = [weekLabel, ...raceLabels].filter(Boolean);
+  const header = `${emoji} ${headerParts.length > 0 ? headerParts.join(" — ") : "Coach Dean"}`;
+
+  // Build LLM context for the coach note
+  const distanceDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
   const notePrompt = [
     `Activity: ${distanceDisplay}${pace ? ` @ ${pace}` : ""}${hr ? `, avg HR ${hr} bpm` : ""}${elevDisplay ? `, ${elevDisplay}` : ""}`,
+    isTrail && gaSpeedMs ? `Grade-adjusted pace: ${(1000 / (gaSpeedMs * 60)).toFixed(2)} min/km equivalent` : "",
     efficiencyLine ?? "",
+    topGapLine ?? "",
     splitAnalysis ?? "",
     `Week so far: ${weekMilesDisplay}${weekTargetDisplay ? ` / ${weekTargetDisplay} target` : ""}`,
-    currentWeek ? `Training week: ${currentWeek}${totalWeeks ? ` of ${totalWeeks}` : ""}` : "",
-    raceName && daysToRace !== null ? `Race: ${raceName} in ${daysToRace} days` : "",
+    raceLabels.length > 0 ? `Races: ${raceLabels.join(", ")}` : "",
   ].filter(Boolean).join("\n");
 
   const noteResponse = await anthropic.messages.create({
@@ -4478,7 +4500,7 @@ async function annotateStravaActivity(
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write 1-2 sentences analyzing this specific run for the training log. Prioritize the most interesting signal — splits, pacing pattern, HR, or training context. Reference actual numbers. No generic encouragement. Direct and analytical — like a coach's handwritten note.\n\n${notePrompt}`,
+        content: `You are Coach Dean. Write 1-2 sentences analyzing this specific run for the training log. Focus on the most interesting signal — pacing pattern relative to terrain, aerobic efficiency, HR response, or training progress. For hilly or trail runs, reference grade-adjusted effort rather than raw pace. Do NOT restate the distance or average pace — Strava already shows those. Reference actual numbers. Be direct and analytical, like a coach's handwritten note. No generic encouragement.\n\n${notePrompt}`,
       },
     ],
   });
@@ -4494,13 +4516,14 @@ async function annotateStravaActivity(
   const block = [
     header,
     divider,
-    `${distanceDisplay}${pace ? ` @ ${pace}` : ""}`,
     weekLine,
+    efficiencyLine,
+    topGapLine,
     "",
     deanNote,
     "",
     "coachdean.ai",
-  ].join("\n");
+  ].filter((l): l is string => l !== null).join("\n");
 
   const newDescription = existingDescription
     ? `${block}\n\n${existingDescription}`
