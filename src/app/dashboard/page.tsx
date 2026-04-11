@@ -294,7 +294,9 @@ export default async function DashboardPage({
   const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
   const planCreatedAt = new Date(planData.created_at as string);
   const dayOfWeek = planCreatedAt.getUTCDay(); // 0=Sun, 1=Mon...
-  const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  // Sunday: plan starts next week, anchor to upcoming Monday (+1).
+  // Mon–Sat: anchor to Monday of the current calendar week.
+  const daysToMonday = dayOfWeek === 0 ? 1 : 1 - dayOfWeek;
   const week1Monday = new Date(planCreatedAt);
   week1Monday.setUTCDate(week1Monday.getUTCDate() + daysToMonday);
   week1Monday.setUTCHours(0, 0, 0, 0);
