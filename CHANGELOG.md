@@ -4,6 +4,13 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Fix beginner plan generating 16mi/week and fartlek for never-run-before user
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis email (user bcf3ffa5 "Pookie")
+**User feedback:** "Why does it say I'm running 16 miles this week" / "I've never run continuously, how can I do a 5 mile long run?"
+**Root cause:** Two compounding issues: (1) The plan arc base mileage was derived from Strava's historical average even when the user explicitly self-identified as a beginner. A "never run before" user with old Strava running activity (e.g. occasional jogs, runs from a prior fitness phase) would get their plan anchored to that historical avg (e.g. 16mi/week) rather than the 8mi beginner default. (2) The system prompt fitness tier block used the raw Strava avg to select the coaching tier — so `avgWeeklyMileage = 16` triggered "MODERATE VOLUME" treatment, telling Claude to prescribe ~16-17mi for week 1 and include fartlek/quality sessions from week 2.
+**Fix / Change:** Two targeted changes: (1) In `generateAndSaveFullPlan`, when `fitness_level === "beginner"` (explicitly set, not defaulted), cap the Strava-derived `avgWeeklyMileage` at `noHistoryDefault` (8mi) before computing `baseMileage`. This prevents the arc from being anchored to stale historical data. Uses strict equality check so legacy profiles without a `fitness_level` are unaffected. (2) In `buildSystemPrompt`, added `forceBeginnerTier` flag — when `trigger === "initial_plan"` and `fitness_level === "beginner"` and `avgWeeklyMileage > 8`, force the beginner-tier block in the fitness tier section instead of MODERATE/HIGH VOLUME. The beginner block for this case uses updated wording: "Strava history likely reflects past fitness, not current ability — do not use historical average to set volume." Cap stays at 10mi/week for week 1.
 ## 2026-05-02 — Surface GAP (grade-adjusted pace) per split for trail runs
 
 **Type:** Bug Fix
