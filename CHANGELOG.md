@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Comprehensive metric units throughout coaching pipeline
+
+**Type:** Bug Fix
+**Reported by:** Internal audit (follow-up to post-run units fix)
+**User feedback:** N/A
+**Root cause:** Several places in the system still fed imperial data to Claude for metric users: (1) `buildActivitySummary` showed historical weekly volumes in miles, paces as `/mi`, and elevation in feet — all hardcoded. (2) `parseSessionMiles`/`computeProjectedWeekMiles` only parsed `mi` in session labels, silently returning 0 for `km` labels (breaking projected mileage math). (3) `correctProjectedTotal` regexes only matched `/mi` patterns, so the projection-correction post-processing was skipped for metric users. (4) The weekly_recap session format instructions (example runs, SESSION_LIST tag format, quality session warmup/cooldown examples) all showed imperial units, causing Claude to generate km labels inconsistently.
+**Fix / Change:** (1) `buildActivitySummary` now accepts `isMetric` and outputs km/min/km/m for metric users. (2) All `parseSessionMiles` / `parseMilesFromLabel` / `computeProjectedWeekMiles` now match both `mi` and `km` (converting km → miles internally for math). (3) `correctProjectedTotal` now takes `isMetric`, converts the system projection to km, and matches km patterns in Claude's output. (4) Weekly_recap session format instructions are now fully dynamic — example sessions, SESSION_LIST tag format, quality session WU/CD examples, and total format all use km for metric users.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-11 — Post-run messages now use metric units consistently for metric users
 
 **Type:** Bug Fix
