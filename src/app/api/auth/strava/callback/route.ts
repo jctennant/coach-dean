@@ -14,6 +14,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const userId = searchParams.get("state"); // User ID passed via OAuth state
+  const urlScope = searchParams.get("scope"); // Strava includes granted scope in redirect URL
 
   console.log("[strava-callback] code:", !!code, "userId:", userId);
 
@@ -46,8 +47,11 @@ export async function GET(request: Request) {
 
   const tokenData = await tokenResponse.json();
   const { access_token, refresh_token, expires_at, athlete, scope } = tokenData;
-  const hasWriteScope = typeof scope === "string" && scope.includes("activity:write");
-  console.log("[strava-callback] scope returned:", scope, "hasWriteScope:", hasWriteScope);
+  // Strava sometimes omits `scope` from the token response body on re-auth.
+  // Fall back to the scope param Strava always includes in the redirect URL.
+  const effectiveScope = scope ?? urlScope ?? "";
+  const hasWriteScope = typeof effectiveScope === "string" && effectiveScope.includes("activity:write");
+  console.log("[strava-callback] scope returned:", scope, "urlScope:", urlScope, "hasWriteScope:", hasWriteScope);
 
   // Extract timezone from Strava athlete profile
   // Strava returns e.g. "(GMT-08:00) America/Los_Angeles" — extract the IANA part
