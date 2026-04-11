@@ -4535,13 +4535,12 @@ async function annotateStravaActivity(
       const drift = avgHR2 - avgHR1;
       hrDriftLine = `HR drift: ${avgHR1} → ${avgHR2} bpm (${drift >= 0 ? "+" : ""}${drift})`;
 
-      // Cardiac decoupling: Pa:HR efficiency factor drift (uses GAP speed where available)
-      const ef = (sm: SplitMetrics) => {
-        const spd = sm.gas && sm.gas > 0 ? sm.gas : sm.speed;
-        return sm.hr && sm.hr > 0 ? spd / sm.hr : null;
-      };
-      const h1EFs = h1.map(ef).filter((v): v is number => v !== null);
-      const h2EFs = h2.map(ef).filter((v): v is number => v !== null);
+      // Cardiac decoupling: GAP:HR efficiency factor drift — strictly GAP only.
+      // Splits without GAP data are excluded so raw-speed fallback can't skew the result.
+      const gapEf = (sm: SplitMetrics) =>
+        sm.gas && sm.gas > 0 && sm.hr && sm.hr > 0 ? sm.gas / sm.hr : null;
+      const h1EFs = h1.map(gapEf).filter((v): v is number => v !== null);
+      const h2EFs = h2.map(gapEf).filter((v): v is number => v !== null);
       if (h1EFs.length > 0 && h2EFs.length > 0) {
         const avgEF1 = h1EFs.reduce((a, b) => a + b, 0) / h1EFs.length;
         const avgEF2 = h2EFs.reduce((a, b) => a + b, 0) / h2EFs.length;
