@@ -272,8 +272,13 @@ export default async function DashboardPage({
   const distUnit = useMetric ? "km" : "mi";
   const upcomingRaces = (racesData ?? []) as Race[];
   const weeklyPlanSessions = (stateData?.weekly_plan_sessions as PlanSession[] | null) ?? null;
-  const dailyPlan = weeklyPlanSessions && weeklyPlanSessions.length > 0
-    ? buildDailyPlanFromSessions(weeklyPlanSessions)
+  // Filter out sessions dated before the plan was created — when a plan is generated midweek,
+  // the first week's sessions include days the user never could have done. Showing those dimmed
+  // implies the user skipped them. For week 2+, all sessions postdate plan creation, so no-op.
+  const planCreatedDateStr = (planData.created_at as string).split("T")[0]!;
+  const visiblePlanSessions = weeklyPlanSessions?.filter(s => s.date >= planCreatedDateStr) ?? null;
+  const dailyPlan = visiblePlanSessions && visiblePlanSessions.length > 0
+    ? buildDailyPlanFromSessions(visiblePlanSessions)
     : (currentWeek && effectiveTrainingDays && effectiveTrainingDays.length > 0
       ? buildDailyPlan(currentWeek, effectiveTrainingDays)
       : null);
