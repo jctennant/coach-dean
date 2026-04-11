@@ -967,10 +967,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   }
   const typingStartMs = Date.now();
 
-  // For initial_plan, set awaiting_cadence BEFORE calling Claude so the routing
-  // is in place even if the function times out mid-send. Don't void — this is critical.
+  // For initial_plan, complete onboarding immediately: default cadence to nightly_reminders
+  // and clear onboarding_step so the user is treated as fully onboarded from here on.
+  // Do this BEFORE the Claude call so routing is correct even if the function times out.
   if (trigger === "initial_plan") {
-    await supabase.from("users").update({ onboarding_step: "awaiting_cadence" }).eq("id", userId);
+    await Promise.all([
+      supabase.from("users").update({ onboarding_step: null }).eq("id", userId),
+      supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", userId),
+    ]);
   }
 
   const response = await anthropic.messages.create({
@@ -1321,8 +1325,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         message_type: "initial_plan_link",
       });
 
-      // Third bubble: invite feedback on the full plan now that they have the link.
-      const howDoesItLookMsg = "How does this look? Happy to adjust anything.";
+      // Third bubble: invite feedback and mention the default reminder cadence.
+      // No question — just let them know the default and how to change it.
+      const howDoesItLookMsg = "How does this look? Happy to adjust anything. I'll send you a reminder the evening before each session — text me if you'd prefer morning-of reminders or just a weekly Sunday plan.";
       if (!dry_run) {
         if (chatId) await startTyping(chatId);
         await new Promise((r) => setTimeout(r, 1200));
@@ -1509,41 +1514,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .eq("user_id", userId);
   }
 
-  // If the user is still awaiting_cadence (i.e. they haven't answered the reminders question
-  // yet — either they just got their initial plan or they replied about the plan without
-  // answering cadence), ask it now as a natural follow-up to the post-run response.
-  if (trigger === "post_run" && user.onboarding_step === "awaiting_cadence" && !dry_run) {
-    const onboardingDataForCadence = (user.onboarding_data as Record<string, unknown>) || {};
-    const stravaCity2 = onboardingDataForCadence.strava_city as string | null;
-    const stravaState2 = onboardingDataForCadence.strava_state as string | null;
-    const stravaLocation2 = stravaCity2
-      ? (stravaState2 ? `${stravaCity2}, ${stravaState2}` : stravaCity2)
-      : null;
-    const timezoneConfirmed2 = !!(onboardingDataForCadence.timezone_confirmed) || !!(user.strava_athlete_id);
-    const cadenceQ = stravaLocation2
-      ? `One quick thing — would you like reminders about your upcoming workouts the morning of, or the evening before? I have you in ${stravaLocation2} from Strava so I'll get the timing right.`
-      : !timezoneConfirmed2
-      ? `One quick thing — would you like reminders about your upcoming workouts the morning of, or the evening before? What city are you in so I get the timing right?`
-      : `One quick thing — would you like reminders about your upcoming workouts the morning of, or the evening before?`;
-    const cadenceChatId = requestChatId ?? learnedChatId ?? (user.linq_chat_id as string | null) ?? null;
-    if (cadenceChatId) await startTyping(cadenceChatId);
-    await new Promise((r) => setTimeout(r, 1500));
-    await sendSMS(user.phone_number, cadenceQ);
-    await supabase.from("conversations").insert({
-      user_id: userId,
-      role: "assistant",
-      content: cadenceQ,
-      message_type: "post_run",
-    });
-  }
-
-  // Strava activity annotation — fire-and-forget, doesn't affect SMS response
+  // Strava activity annotation — runs after SMS is sent (already inside after(), so awaiting
+  // is safe and ensures Vercel doesn't terminate the function before the annotation completes)
   if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean)) {
     const storedSummary = activityData?.summary as Record<string, unknown> | null;
     const storedSplits = Array.isArray(storedSummary?.splits)
       ? (storedSummary.splits as Array<Record<string, unknown>>)
       : [];
-    void annotateStravaActivity(userId, activityId, {
+    await annotateStravaActivity(userId, activityId, {
       activityData,
       weekMileageSoFar,
       weekTarget: (state?.weekly_mileage_target as number | null) ?? null,

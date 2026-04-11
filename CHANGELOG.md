@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Fixed Strava annotation not running; fixed write scope detection on re-auth
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "I didn't get an analysis on my strava activity today"
+**Root cause:** Two separate bugs: (1) `annotateStravaActivity` was called with `void` inside `processCoachRequest`, which itself runs inside `after()`. When `processCoachRequest` returned after sending the SMS, the `after()` block resolved and Vercel terminated the function before the unawaited annotation promise completed. (2) Strava omits the `scope` field from the token exchange response body on re-auth flows — the callback read scope only from `tokenData.scope`, which was `undefined`, so `hasWriteScope` was always false and `strava_write_enabled` was never set.
+**Fix / Change:** (1) Changed `void annotateStravaActivity(...)` to `await annotateStravaActivity(...)` — safe to await since it's already inside `after()` and the HTTP response is already sent. (2) Added fallback in callback to read scope from the URL query param (`searchParams.get("scope")`) when the token response body doesn't include it.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/auth/strava/callback/route.ts`
+
+---
+
+## 2026-04-11 — Removed awaiting_cadence state; default to nightly reminders at plan generation
+
+**Type:** Improvement
+**Reported by:** Jake Tennant
+**User feedback:** N/A
+**Root cause:** The `awaiting_cadence` post-plan state was designed to collect reminder preferences after the plan was sent, but it created a structural loop: any coaching question asked before the user answered cadence would re-ask the cadence question, making it impossible to escape. The state machine added complexity without proportionate value — most users don't have strong opinions about reminder timing.
+**Fix / Change:** Removed `awaiting_cadence` entirely. All new users are now defaulted to `nightly_reminders` at plan generation time (both `training_profiles.proactive_cadence` and `users.onboarding_step` are set in the same `initial_plan` DB write). The "How does this look?" closing message now includes a one-liner: "I'll send you a reminder the evening before each session — text me if you'd prefer morning-of reminders or just a weekly Sunday plan." Users can change their preference at any time via a normal `user_message`. `handleCadence` and `handleNonCadenceMessage` functions deleted. Existing users stuck in `awaiting_cadence` are silently graduated to onboarded on their next inbound message (step cleared, cadence set to nightly_reminders, no SMS sent).
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/coach-respond.test.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-04-11 — Fixed repeat loop, plan feedback detection, and "How does this look?" ordering (Gwyneth onboarding)
 
 **Type:** Bug Fix

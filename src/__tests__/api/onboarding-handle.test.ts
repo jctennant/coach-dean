@@ -296,107 +296,26 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
   });
 });
 
-describe("POST /api/onboarding/handle — awaiting_cadence step", () => {
+describe("POST /api/onboarding/handle — awaiting_cadence step (legacy transition)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("morning preference: sets morning_reminders cadence", async () => {
+  // awaiting_cadence is a legacy state — new users never enter it (cadence is defaulted to
+  // nightly_reminders at plan generation time). Users stuck in this state are silently
+  // graduated: onboarding_step cleared, proactive_cadence set to nightly_reminders, no SMS.
+  it("silently graduates legacy awaiting_cadence users — clears state, no SMS sent", async () => {
     mockTables({
       users: {
         data: onboardingUser({ onboarding_step: "awaiting_cadence", onboarding_data: { timezone_confirmed: true } }),
         error: null,
       },
-      conversations: { data: [{ id: "plan-msg" }], error: null },
       training_profiles: { data: null, error: null },
     });
-
-    // Cadence classifier
-    mockLLMResponse("morning");
 
     await POST(makeRequest({ userId: "user-001", message: "morning works for me" }));
 
+    // No SMS should be sent — user is silently transitioned
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
-    expect(textSent).toContain("morning of each session");
-  });
-
-  it("nightly preference: sets nightly_reminders cadence", async () => {
-    mockTables({
-      users: {
-        data: onboardingUser({ onboarding_step: "awaiting_cadence", onboarding_data: { timezone_confirmed: true } }),
-        error: null,
-      },
-      conversations: { data: [{ id: "plan-msg" }], error: null },
-      training_profiles: { data: null, error: null },
-    });
-
-    mockLLMResponse("nightly");
-
-    await POST(makeRequest({ userId: "user-001", message: "evening before please" }));
-
-    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
-    expect(textSent).toContain("evening before");
-  });
-
-  it("weekly preference: sets weekly_only cadence", async () => {
-    mockTables({
-      users: {
-        data: onboardingUser({ onboarding_step: "awaiting_cadence", onboarding_data: { timezone_confirmed: true } }),
-        error: null,
-      },
-      conversations: { data: [{ id: "plan-msg" }], error: null },
-      training_profiles: { data: null, error: null },
-    });
-
-    mockLLMResponse("weekly");
-
-    await POST(makeRequest({ userId: "user-001", message: "no thanks, just weekly" }));
-
-    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
-    expect(textSent).toContain("weekly plan every Sunday");
-  });
-
-  it("unclear cadence: routes to non-cadence handler (cancel)", async () => {
-    mockTables({
-      users: {
-        data: onboardingUser({ onboarding_step: "awaiting_cadence", onboarding_data: { timezone_confirmed: true } }),
-        error: null,
-      },
-      conversations: { data: [{ id: "plan-msg" }], error: null },
-      training_profiles: { data: null, error: null },
-    });
-
-    // Cadence classifier → unclear, then message classifier → cancel
-    mockLLMResponse("unclear");
-    mockLLMResponse("cancel");
-
-    await POST(makeRequest({ userId: "user-001", message: "I want to cancel" }));
-
-    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
-    expect(textSent).toContain("cancel");
-    // Should either send a portal URL or a fallback contact message
-    expect(textSent.toLowerCase()).toMatch(/cancel|sorry to see you go/);
-  });
-
-  it("plan not yet sent: sends holding message and re-triggers initial_plan", async () => {
-    mockTables({
-      users: {
-        data: onboardingUser({ onboarding_step: "awaiting_cadence", onboarding_data: { timezone_confirmed: true } }),
-        error: null,
-      },
-      conversations: { data: [], error: null },  // empty → plan not sent
-      training_profiles: { data: null, error: null },
-    });
-
-    mockLLMResponse("morning");
-
-    await POST(makeRequest({ userId: "user-001", message: "morning" }));
-
-    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
-    expect(textSent).toContain("get your plan together");
+    expect(smsCalls).toHaveLength(0);
   });
 });
 

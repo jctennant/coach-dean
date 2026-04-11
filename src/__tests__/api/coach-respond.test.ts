@@ -619,9 +619,11 @@ describe("coach/respond — initial_plan closing message", () => {
     });
   });
 
-  it("calls generateAndSaveFullPlan with skipLinkSms=true and sends no cadence question", async () => {
+  it("calls generateAndSaveFullPlan with skipLinkSms=true and mentions default reminder cadence (no question)", async () => {
     // The dashboard link is now included in our own closing message (not sent from
     // generateAndSaveFullPlan), so skipLinkSms must be true to avoid a duplicate link SMS.
+    // Cadence defaults to nightly_reminders at plan generation — the closing "How does this
+    // look?" message mentions the default but does NOT ask a question about it.
     const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
     const { sendSMS } = await import("@/lib/linq");
 
@@ -641,13 +643,14 @@ describe("coach/respond — initial_plan closing message", () => {
     const opts = gpCalls[0][4] as Record<string, unknown>;
     expect(opts.skipLinkSms).toBe(true);
 
-    // No cadence question should be sent at plan time — it's deferred until the
-    // user responds to the plan (via inbound SMS or post-run)
+    // The closing message mentions the default reminder cadence (evening before) but
+    // does NOT ask a question — it states the default and invites them to change it.
     const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
       (c: unknown[]) => c[1] as string
     );
     const combined = allTexts.join("\n");
-    expect(combined).not.toMatch(/morning of|evening before|reminder.*workout|workout.*reminder/i);
+    expect(combined).toMatch(/evening before each session/i);
+    expect(combined).not.toMatch(/would you like|morning of, or the evening before/i);
   });
 });
 
@@ -660,33 +663,9 @@ describe("coach/respond — post_run cadence follow-up", () => {
     });
   });
 
-  it("appends cadence question after post-run response when onboarding_step is awaiting_cadence", async () => {
-    setupSupabase({
-      user: baseUser({
-        onboarding_step: "awaiting_cadence",
-        strava_athlete_id: "strava-123",
-        onboarding_data: { timezone_confirmed: true },
-      }),
-      profile: baseProfile(),
-      state: baseState(),
-    });
-
-    const { sendSMS } = await import("@/lib/linq");
-    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
-    await POST(req);
-    await flush();
-
-    const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
-      (c: unknown[]) => c[1] as string
-    );
-
-    // Cadence question must appear as a follow-up SMS
-    expect(
-      allTexts.some((t) => /morning of|evening before/i.test(t))
-    ).toBe(true);
-  });
-
-  it("does NOT append cadence question for a fully onboarded post-run user", async () => {
+  // Cadence is now defaulted to nightly_reminders at plan generation time.
+  // The post-run handler never sends a cadence question regardless of onboarding_step.
+  it("never appends a cadence question on post-run (cadence is set at plan generation)", async () => {
     setupSupabase({
       user: baseUser({ onboarding_step: null }),
       profile: baseProfile(),
