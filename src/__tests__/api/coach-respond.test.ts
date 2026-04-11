@@ -734,7 +734,7 @@ describe("coach/respond — sync_sessions trigger (extractAndStorePlanSessions t
       if (table === "users") return makeChain({ data: { id: "user-001", name: "Jake" }, error: null });
       if (table === "training_profiles") return makeChain({ data: { goal: "half_marathon" }, error: null });
       if (table === "training_state") return stateChain;
-      if (table === "conversations") return makeChain({ data: { content: planText }, error: null });
+      if (table === "conversations") return makeChain({ data: [{ content: planText, created_at: new Date().toISOString() }], error: null });
       if (table === "training_plans") return makeChain({
         data: { id: "plan-1", weeks: [{ week_number: 3, phase: "base", mileage_target: 28, long_run_target: 10, key_workout: "Tempo", notes: "" }] },
         error: null,

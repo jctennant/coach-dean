@@ -306,27 +306,37 @@ async function handleSyncSessions(userId: string, partialWeekTarget: number | nu
     supabase.from("users").select("id, name").eq("id", userId).single(),
     supabase.from("training_profiles").select("goal").eq("user_id", userId).single(),
     supabase.from("training_state").select("current_week, current_phase").eq("user_id", userId).single(),
+    // Fetch the 5 most recent plan rows — the initial_plan/weekly_recap message may be split
+    // into multiple SMS bubbles each saved as a separate row. Reading only the last one
+    // risks getting a closing message with no session list. Instead, we grab up to 5,
+    // identify rows from the same generation (within 90s of the most recent), and
+    // concatenate their content so Haiku sees the full plan text.
     supabase.from("conversations")
-      .select("content")
+      .select("content, created_at")
       .eq("user_id", userId)
       .eq("role", "assistant")
       .in("message_type", ["initial_plan", "weekly_recap"])
       .order("created_at", { ascending: false })
-      .limit(1)
-      .single(),
+      .limit(5),
   ]);
 
   const user = userResult.data as { id: string; name: string | null } | null;
   const profile = profileResult.data as { goal: string | null } | null;
   const state = stateResult.data as { current_week: number | null; current_phase: string | null } | null;
-  const planMessage = convResult.data as { content: string } | null;
+  const planRows = (convResult.data ?? []) as Array<{ content: string; created_at: string }>;
 
   if (!user || !profile || !state) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  if (planMessage) {
-    await extractAndStorePlanSessions(userId, planMessage.content);
+  if (planRows.length > 0) {
+    // Group rows from the same plan generation: keep all rows whose created_at is within
+    // 90 seconds of the most recent row (the plan generation window).
+    const mostRecentMs = new Date(planRows[0].created_at).getTime();
+    const samePlanRows = planRows.filter(r => mostRecentMs - new Date(r.created_at).getTime() <= 90_000);
+    // Rows are newest-first; reverse so the concatenated text reads in send order.
+    const planText = samePlanRows.reverse().map(r => r.content).join("\n\n");
+    await extractAndStorePlanSessions(userId, planText);
   }
 
   await syncArcCurrentWeek(
@@ -2350,7 +2360,11 @@ If changes WERE made, return the full updated sessions list AND the new key work
 {"changed": true, "sessions": [{"day": "Mon"|"Tue"|..., "date": "M/D", "label": "..."}], "key_workout": "brief label for the defining quality session this week, e.g. '6×800m @ 5K pace' or '4mi tempo'. Null if no quality session was added or changed."}
 
 Rules:
-- Mark changed=true if the coach agreed to a session change — explicit past-tense ("Done — moved strength to Sunday", "I've moved...", "Switched...") OR explicit future-tense confirmation ("Moving strength to Sunday", "I'll put the easy 3mi on Tuesday instead", "Sure — strength goes to Sunday"). Do NOT require "I've updated" specifically.
+- Mark changed=true if the coach agreed to a session change. This includes:
+  - Explicit past-tense: "Done — moved strength to Sunday", "I've moved...", "Switched...", "already swapped", "already updated"
+  - Explicit future-tense: "Moving strength to Sunday", "I'll put the easy 3mi on Tuesday instead", "Sure — strength goes to Sunday"
+  - Implicit confirmation where the coach restates the new arrangement without objection, e.g. "Perfect — Saturday long run 10mi, Sunday easy 6mi" or "Sounds good — 10mi Saturday, 6mi Sunday". If the coach's response lists the sessions in an order different from the current plan and doesn't push back, treat this as a confirmed change.
+  - "Already" language ("already swapped", "already updated") still means the DB needs updating — mark changed=true regardless.
 - Mark changed=false if the coach only gave general advice, asked a clarifying question, or suggested a change without agreeing to it.
 - For day swaps: update BOTH the "day" field AND the "date" field. The date for each session should match the calendar date of its new day. Infer dates from the existing sessions (e.g. if Mon is "4/7" and Tue is "4/8", Sun would be "4/13").
 - Preserve all unchanged sessions exactly as-is

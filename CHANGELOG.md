@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-10 — Fixed weekly_plan_sessions null when initial plan SMS is split into multiple bubbles
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** Dashboard showing computed mileage (5.7mi, 9.5mi) instead of Dean's actual prescribed distances
+**Root cause:** `handleSyncSessions` queried for the single most-recently-saved `initial_plan` conversation row. But the SMS send loop saves each split bubble as a separate row with the same `message_type: "initial_plan"`. The most recent row is the last bubble — typically a closing message ("Your dashboard is ready...") with no session list. Haiku found no sessions and stored `[]`, leaving `weekly_plan_sessions` empty. The dashboard then fell back to `buildDailyPlan`, which does arithmetic from plan arc targets (long_run_target, key_workout parse, etc.) producing values like 5.7mi and 9.5mi.
+**Fix / Change:** Changed the conversations query to fetch the 5 most recent `initial_plan`/`weekly_recap` rows, group those within 90 seconds of the most recent (same plan generation), and concatenate their content in send order before passing to `extractAndStorePlanSessions`. Haiku now sees the full plan text regardless of where in the split the session list appears.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+## 2026-04-10 — Fixed session swaps not reflecting on dashboard when confirmation was implicit
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "the dates were not swapped on my dashboard - noting that this is just a swap during week 1"
+**Root cause:** `maybeUpdatePlanSessions` uses a Haiku model call to detect if a coaching exchange confirmed a plan change. The detection rules only covered explicit confirmation language ("Done — moved X", "I've moved...", "Switched..."). When Dean implicitly confirmed a swap by restating the new arrangement ("Perfect — Saturday long run 10mi, Sunday easy 6mi 👊"), Haiku returned `{"changed": false}` and the DB was not updated. The follow-up exchange where Dean said "already swapped on your dashboard" was also vulnerable because "already" language could be misread as "no action needed."
+**Fix / Change:** Expanded the Haiku detection rules to include: implicit confirmation (coach restates new arrangement without objection), past-perfect "already swapped/updated" language (still requires a DB write), and explicit examples of each pattern.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-10 — Fixed nightly reminder saying "rest day" when override schedule includes tomorrow
 
 **Type:** Bug Fix
