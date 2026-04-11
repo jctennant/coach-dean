@@ -9,7 +9,7 @@ import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors } from "@/lib/plan-validation";
-import { getValidAccessToken, getActivityDescription, updateActivityDescription } from "@/lib/strava";
+import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
@@ -4257,8 +4257,10 @@ async function annotateStravaActivity(
 ): Promise<void> {
   const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRace, preferredUnits } = ctx;
 
-  // Fetch a valid Strava access token
+  // Single Strava fetch — returns full activity including splits + existing description
   const accessToken = await getValidAccessToken(userId);
+  const stravaActivity = await getActivity(accessToken, stravaActivityId);
+  const existingDescription = (stravaActivity.description as string) || "";
 
   // Fetch total weeks from the training plan (best-effort)
   const { data: planRow } = await supabase
@@ -4306,6 +4308,17 @@ async function annotateStravaActivity(
     raceName = (upcomingRace.race_name as string | null) ?? null;
   }
 
+  // Split analysis — use splits_standard (imperial) or splits_metric
+  const splitsKey = isMetric ? "splits_metric" : "splits_standard";
+  const rawSplits = (stravaActivity[splitsKey] as Array<Record<string, unknown>> | null) ?? [];
+  const splitAnalysis = buildSplitAnalysis(rawSplits, isMetric);
+
+  // Aerobic efficiency (pace + HR signal)
+  const avgSpeedMs = (stravaActivity.average_speed as number | null) ?? null;
+  const efficiencyLine = hr && avgSpeedMs
+    ? `Aerobic efficiency: ${(avgSpeedMs / hr * 60).toFixed(2)} m/beat`
+    : null;
+
   // Header line
   const weekLabel = currentWeek
     ? totalWeeks
@@ -4316,9 +4329,11 @@ async function annotateStravaActivity(
   const headerParts = [weekLabel, raceLabel].filter(Boolean);
   const header = headerParts.length > 0 ? headerParts.join(" — ") : "Coach Dean";
 
-  // Generate Dean's note via a quick Haiku call
+  // Build LLM context — richer data = more specific note
   const notePrompt = [
-    `Activity: ${distanceDisplay}${pace ? ` @ ${pace}` : ""}${hr ? `, avg HR ${hr}` : ""}${elevDisplay ? `, ${elevDisplay}` : ""}`,
+    `Activity: ${distanceDisplay}${pace ? ` @ ${pace}` : ""}${hr ? `, avg HR ${hr} bpm` : ""}${elevDisplay ? `, ${elevDisplay}` : ""}`,
+    efficiencyLine ?? "",
+    splitAnalysis ?? "",
     `Week so far: ${weekMilesDisplay}${weekTargetDisplay ? ` / ${weekTargetDisplay} target` : ""}`,
     currentWeek ? `Training week: ${currentWeek}${totalWeeks ? ` of ${totalWeeks}` : ""}` : "",
     raceName && daysToRace !== null ? `Race: ${raceName} in ${daysToRace} days` : "",
@@ -4326,11 +4341,11 @@ async function annotateStravaActivity(
 
   const noteResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 120,
+    max_tokens: 150,
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write 1-2 sentences analyzing this specific run for the training log. Reference actual numbers. No generic encouragement. Direct and analytical — like a coach's handwritten note.\n\n${notePrompt}`,
+        content: `You are Coach Dean. Write 1-2 sentences analyzing this specific run for the training log. Prioritize the most interesting signal — splits, pacing pattern, HR, or training context. Reference actual numbers. No generic encouragement. Direct and analytical — like a coach's handwritten note.\n\n${notePrompt}`,
       },
     ],
   });
@@ -4354,10 +4369,58 @@ async function annotateStravaActivity(
     "coachdean.ai",
   ].join("\n");
 
-  // Fetch existing description and prepend
-  const existing = await getActivityDescription(accessToken, stravaActivityId);
-  const newDescription = existing ? `${block}\n\n${existing}` : block;
+  const newDescription = existingDescription
+    ? `${block}\n\n${existingDescription}`
+    : block;
 
   await updateActivityDescription(accessToken, stravaActivityId, newDescription);
   console.log(`[strava-annotation] annotated activity ${stravaActivityId} for user ${userId}`);
+}
+
+/**
+ * Parse Strava splits into a formatted string for the LLM.
+ * Computes per-split paces and first-half vs second-half comparison.
+ */
+function buildSplitAnalysis(
+  splits: Array<Record<string, unknown>>,
+  isMetric: boolean
+): string | null {
+  if (splits.length < 2) return null;
+
+  const unit = isMetric ? "/km" : "/mi";
+  const metersPerUnit = isMetric ? 1000 : 1609.34;
+
+  const formatPace = (secPerUnit: number): string => {
+    const m = Math.floor(secPerUnit / 60);
+    const s = Math.round(secPerUnit % 60);
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  // Derive pace from average_speed (m/s) — present on all Strava split objects
+  const pacesPerSec: number[] = [];
+  for (const split of splits) {
+    const speed = split.average_speed as number | null;
+    if (!speed || speed <= 0) continue;
+    pacesPerSec.push(metersPerUnit / speed);
+  }
+
+  if (pacesPerSec.length < 2) return null;
+
+  const splitLabels = pacesPerSec.map((p, i) => `${i + 1}: ${formatPace(p)}${unit}`).join(", ");
+
+  // First-half vs second-half comparison (only meaningful with >= 4 splits)
+  let comparisonLine = "";
+  if (pacesPerSec.length >= 4) {
+    const mid = Math.floor(pacesPerSec.length / 2);
+    const avgFirst = pacesPerSec.slice(0, mid).reduce((a, b) => a + b, 0) / mid;
+    const avgSecond = pacesPerSec.slice(mid).reduce((a, b) => a + b, 0) / (pacesPerSec.length - mid);
+    const diff = Math.abs(avgFirst - avgSecond);
+    if (diff >= 5) {
+      const direction = avgFirst > avgSecond ? "negative split" : "positive split";
+      const fasterHalf = avgFirst > avgSecond ? "second" : "first";
+      comparisonLine = `\n${direction} — ${fasterHalf} half avg ${formatPace(Math.min(avgFirst, avgSecond))}${unit} vs ${formatPace(Math.max(avgFirst, avgSecond))}${unit} (${Math.round(diff)}s${unit} difference)`;
+    }
+  }
+
+  return `Splits: ${splitLabels}${comparisonLine}`;
 }

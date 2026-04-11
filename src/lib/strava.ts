@@ -154,21 +154,6 @@ export async function getAllActivities(
   return allActivities;
 }
 
-/**
- * Update the description of a Strava activity.
- * Fetches the existing description first so the caller can prepend without overwriting.
- */
-export async function getActivityDescription(accessToken: string, activityId: number): Promise<string> {
-  const response = await fetch(`${STRAVA_API_BASE}/activities/${activityId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!response.ok) {
-    throw new Error(`Strava getActivity failed: ${response.statusText}`);
-  }
-  const data = await response.json();
-  return (data.description as string) || "";
-}
-
 export async function updateActivityDescription(
   accessToken: string,
   activityId: number,
