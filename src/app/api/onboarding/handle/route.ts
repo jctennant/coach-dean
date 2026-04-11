@@ -807,12 +807,12 @@ async function handleNonCadenceMessage(
   }
 
   // Classify remaining messages. Default to coaching_question — only route to plan_feedback
-  // when the message contains explicit modification language. This prevents "what's week 2?"
-  // from being misclassified as a plan change request just because it mentions "plan".
-  const PLAN_MODIFY_KEYWORDS = /\b(add|remove|drop|change|swap|switch|update|rebuild|redo|modify|adjust|fewer|more|less|different|restructure|redo|rewrite)\b/i;
+  // when the message contains modification OR complaint language. This catches both explicit
+  // requests ("change my Tuesday run") and objections ("that's way too aggressive").
+  const PLAN_MODIFY_KEYWORDS = /\b(add|remove|drop|change|swap|switch|update|rebuild|redo|modify|adjust|fewer|more|less|different|restructure|rewrite|aggressive|injur|too much|too many|too long|too far|too hard|way too|too high|too low|cut back|scale back|tone down|reduce)\b/i;
   const isPlanModify = PLAN_MODIFY_KEYWORDS.test(message);
 
-  // If it's clearly a modification request, confirm and skip the LLM classification.
+  // If it's clearly a modification/complaint, confirm and skip the LLM classification.
   // Otherwise, let Haiku distinguish coaching_question from other.
   let msgType: string;
   if (isPlanModify) {
@@ -820,16 +820,17 @@ async function handleNonCadenceMessage(
   } else {
     const classifyResponse = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 16,
-      system: `The athlete received their training plan and sent a message that is NOT a plan modification request. Classify it as one word:
-- "coaching_question" — asking what the plan says, asking about a specific week, asking about their mileage, or any training/race prep question. This is the DEFAULT — use it when in doubt.
-- "other" — genuinely off-topic (personal chat, emoji-only, test messages, etc.)`,
+      max_tokens: 8,
+      system: `Classify this athlete message in one word.
+- "coaching" — any question about their training plan, sessions, mileage, pacing, or race prep. DEFAULT — use when in doubt.
+- "other" — genuinely off-topic (personal chat, emoji-only, test message, unrelated topic).`,
       messages: [{ role: "user", content: message }],
     });
-    msgType =
-      classifyResponse.content[0].type === "text"
-        ? classifyResponse.content[0].text.trim().toLowerCase()
-        : "coaching_question";
+    const raw = classifyResponse.content[0].type === "text"
+      ? classifyResponse.content[0].text.trim().toLowerCase()
+      : "coaching";
+    // Treat anything that isn't explicitly "other" as coaching (catches unexpected outputs)
+    msgType = raw.startsWith("other") ? "other" : "coaching_question";
   }
 
   if (msgType.startsWith("plan_feedback")) {
@@ -865,43 +866,74 @@ async function handleNonCadenceMessage(
   }
 
   if (msgType.startsWith("coaching_question")) {
-    // Fetch the stored training plan arc so Dean can answer "what's week 2?" accurately.
-    const { data: planRow } = await supabase
-      .from("training_plans")
-      .select("weeks, total_weeks")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-    const planArc = planRow?.weeks && Array.isArray(planRow.weeks)
-      ? (planRow.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>)
+    // Fetch the stored training plan arc AND current week sessions so Dean can answer
+    // questions like "what's next week?" or "what are my sessions this week?" accurately.
+    const [planResult, stateResult] = await Promise.all([
+      supabase
+        .from("training_plans")
+        .select("weeks, total_weeks")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single(),
+      supabase
+        .from("training_state")
+        .select("current_week, weekly_plan_sessions, weekly_mileage_target")
+        .eq("user_id", user.id)
+        .single(),
+    ]);
+
+    const planArc = planResult.data?.weeks && Array.isArray(planResult.data.weeks)
+      ? (planResult.data.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>)
           .map(w => `Week ${w.week_number} (${w.phase}): ${w.mileage_target}mi, long run ~${w.long_run_target}mi${w.key_workout ? ` — ${w.key_workout}` : ""}`)
           .join("\n")
       : null;
-    const planContext = planArc
-      ? `\n\nTRAINING PLAN ARC (use this to answer questions about specific weeks — answer directly from the data, do NOT say you don't have access):\n${planArc}`
+
+    const currentWeek = stateResult.data?.current_week ?? 1;
+    const currentSessions = stateResult.data?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null;
+    const currentWeekMiles = stateResult.data?.weekly_mileage_target ?? null;
+
+    const sessionContext = currentSessions && currentSessions.length > 0
+      ? `\n\nCURRENT WEEK (week ${currentWeek}) SESSIONS:\n${currentSessions.map(s => `${s.day} ${s.date}: ${s.label}`).join("\n")}${currentWeekMiles ? `\nWeekly target: ~${currentWeekMiles}mi` : ""}`
       : "";
+
+    const arcContext = planArc
+      ? `\n\nFULL PLAN ARC (weekly overview — individual sessions for future weeks are finalized on Sunday):\n${planArc}`
+      : "";
+
+    const planContext = sessionContext + arcContext;
+
+    // Answer the question first, then send the cadence question as a SEPARATE follow-up.
+    // Do NOT append the cadence question inline — Sonnet tends to return only the cadence
+    // question when told to "add it after your answer", swallowing the actual answer.
     const answerResponse = await anthropic.messages.create({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 300,
-      system: `You are Coach Dean. This is an ongoing coaching relationship — do NOT use greeting phrases like "Thanks for reaching out!" or "Hi!" — jump straight into the answer. Answer the athlete's coaching question directly in 2-4 sentences. Do not explain your reasoning or approach — just answer. If the question is about a product/dashboard feature you can't control, say "Got it — I'll pass that along." in one sentence.${!cadenceAlreadyAsked ? ` After your answer, on a new line, add exactly: "${cadenceQuestion}"` : ""}${planContext}`,
+      system: `You are Coach Dean. This is an ongoing coaching relationship — do NOT use greeting phrases like "Thanks for reaching out!" or "Hi!" — jump straight into the answer. Answer the athlete's coaching question directly in 2-4 sentences. Do not explain your reasoning or approach — just answer. If they ask about specific sessions for next week and you only have weekly totals (not individual sessions yet), tell them next week's target is X miles and they'll get the full session breakdown in Sunday's weekly plan. If the question is about a product/dashboard feature you can't control, say "Got it — I'll pass that along." in one sentence.${planContext}`,
       messages: [{ role: "user", content: message }],
     });
     const answer =
       answerResponse.content[0].type === "text"
         ? answerResponse.content[0].text.trim()
-        : cadenceQuestion;
+        : "Check your plan dashboard for the full details — let me know if anything needs adjusting.";
     await sendAndStore(user.id, user.phone_number, answer, "awaiting_cadence");
+
+    // Follow up with the cadence question separately if it hasn't been asked yet.
+    // Sending it as its own message prevents it from being ignored when buried at
+    // the end of a coaching answer.
+    if (!cadenceAlreadyAsked) {
+      await new Promise(r => setTimeout(r, 1500));
+      await sendAndStore(user.id, user.phone_number, cadenceQuestion, "awaiting_cadence");
+    }
+
     return NextResponse.json({ ok: true });
   }
 
-  // Fallback: re-ask the cadence question
-  await sendAndStore(
-    user.id,
-    user.phone_number,
-    cadenceQuestion,
-    "awaiting_cadence"
-  );
+  // Fallback for "other" (genuinely off-topic). Re-ask cadence only if not already asked;
+  // otherwise stay silent — the reengagement cron handles prolonged stalls.
+  if (!cadenceAlreadyAsked) {
+    await sendAndStore(user.id, user.phone_number, cadenceQuestion, "awaiting_cadence");
+  }
   return NextResponse.json({ ok: true });
 }
 

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Fixed repeat loop, plan feedback detection, and "How does this look?" ordering (Gwyneth onboarding)
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (observed during Gwyneth's Saturday onboarding)
+**User feedback:** "Didn't reply to question after asking 'How does this look?' After the plan is sent. Got into a repeat loop - I thought we had a way to determine if Dean is repeating himself and kind of restart / get out of the loop. This was the biggest issue in this conversation. When first asked about next week he then gave sessions that added to 9 miles instead 7 miles. He rewrote 'this week' for sessions in the past instead of next week on the dashboard."
+**Root cause:** Three compounding bugs: (1) In `handleNonCadenceMessage`, the Haiku classification prompt used "coaching_question" as the expected return token but any unexpected output (extra words, punctuation variants, different capitalization) fell through to the fallback which blindly re-asked the cadence question — creating an infinite loop where the user's question was never answered. (2) The coaching_question handler appended the cadence question inline via `${!cadenceAlreadyAsked ? ... }` in the system prompt — Sonnet would sometimes return ONLY the cadence question, swallowing the actual answer entirely. (3) Complaint language ("that's too aggressive", "you're going to injure someone") wasn't in `PLAN_MODIFY_KEYWORDS`, so objections that should have triggered `rebuild_plan` fell through to the coaching answer path — Dean would verbally describe a corrected plan but never actually rebuild the dashboard. (4) "How does this look?" was the last line of the plan message but the dashboard link came AFTER it as a separate message, so users were asked to react before seeing the full plan.
+**Fix / Change:** (1) Simplified Haiku classification to "coaching" vs "other" (single tokens, harder to confuse) — any output not explicitly "other" is now treated as a coaching question. (2) Moved the cadence question out of the inline system prompt append and into a separate `sendAndStore` call after the coaching answer, ensuring Sonnet always answers the actual question first. (3) Added complaint and objection language to `PLAN_MODIFY_KEYWORDS`: aggressive, injur(e/y), too much/many/long/far/hard, way too, cut back, scale back, tone down, reduce. (4) Removed "How does this look?" from the initial_plan system prompt; it is now sent as a third SMS bubble after the dashboard link. (5) Coaching question handler now also fetches `weekly_plan_sessions` from training_state to give Dean the current week's sessions, and explicitly tells Dean to explain that next week's session details aren't finalized until Sunday's recap.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-11 — Post-run message no longer mentions next week's sessions as "remaining"
 
 **Type:** Bug Fix
