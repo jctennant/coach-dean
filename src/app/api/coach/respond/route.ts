@@ -4458,70 +4458,130 @@ async function annotateStravaActivity(
     .filter((l): l is string => l !== null);
 
   // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
-  // The webhook stores splits_standard regardless of user preference, so buildSplitAnalysis
-  // gets imperial splits; isMetric only affects the unit label in the output string.
   const splitAnalysis = buildSplitAnalysis(splits, isMetric);
 
-  // Aerobic efficiency — compute grade-adjusted speed from split-level values (distance-weighted).
-  // This is more accurate on hilly runs than the activity-level average_speed.
-  // Per-split average_grade_adjusted_speed is already stored in summary.splits.
-  const avgSpeedMs = (activityData?.moving_time_seconds && activityData?.distance_meters)
-    ? (activityData.distance_meters as number) / (activityData.moving_time_seconds as number)
-    : null;
-  let weightedGaSum = 0;
-  let weightedGaTotal = 0;
-  for (const split of splits) {
-    const gas = split.average_grade_adjusted_speed as number | null;
-    const dist = split.distance as number | null;
-    if (gas && gas > 0 && dist && dist > 0) {
-      weightedGaSum += gas * dist;
-      weightedGaTotal += dist;
-    }
-  }
-  const gaSpeedMs = weightedGaTotal > 0 ? weightedGaSum / weightedGaTotal : null;
-  const speedForEfficiency = (gaSpeedMs && gaSpeedMs > 0) ? gaSpeedMs : avgSpeedMs;
-  const efficiencyLabel = (gaSpeedMs && gaSpeedMs > 0) ? "Grade-adj eff" : "Aerobic eff";
-  const efficiencyLine = hr && speedForEfficiency
-    ? `${efficiencyLabel}: ${(speedForEfficiency / hr * 60).toFixed(2)} m/beat`
-    : null;
-
-  // Top GAP split — fastest grade-adjusted pace across all splits
+  // Single consolidated pass over splits to compute all split-derived metrics.
   const metersPerUnit = isMetric ? 1000 : 1609.34;
   const unitLabel = isMetric ? "/km" : "/mi";
   const splitLabel = isMetric ? "km" : "mi";
-  const MAX_SEC_PER_UNIT_GAP = isMetric ? (20 * 60) / 1.60934 : 20 * 60;
+  const MAX_SPLIT_SEC = isMetric ? (20 * 60) / 1.60934 : 20 * 60;
+
+  const avgSpeedMs = (activityData?.moving_time_seconds && activityData?.distance_meters)
+    ? (activityData.distance_meters as number) / (activityData.moving_time_seconds as number)
+    : null;
+
+  type SplitMetrics = { speed: number; gas: number | null; hr: number | null };
+  const validSplitMetrics: SplitMetrics[] = [];
+  let weightedGaSum = 0;
+  let weightedGaTotal = 0;
   let bestGas: number | null = null;
   let bestGapSplitNum: number | null = null;
+
   for (let i = 0; i < splits.length; i++) {
+    const speed = splits[i].average_speed as number | null;
+    if (!speed || speed <= 0) continue;
+    if (metersPerUnit / speed > MAX_SPLIT_SEC) continue; // paused split
     const gas = splits[i].average_grade_adjusted_speed as number | null;
-    if (!gas || gas <= 0) continue;
-    const secPerUnit = metersPerUnit / gas;
-    if (secPerUnit > MAX_SEC_PER_UNIT_GAP) continue; // paused split
-    if (bestGas === null || gas > bestGas) {
-      bestGas = gas;
-      bestGapSplitNum = i + 1;
+    const splitHr = splits[i].average_heartrate as number | null;
+    const dist = splits[i].distance as number | null;
+    validSplitMetrics.push({ speed, gas: gas ?? null, hr: splitHr });
+    if (gas && gas > 0 && dist && dist > 0) {
+      weightedGaSum += gas * dist;
+      weightedGaTotal += dist;
+      if (metersPerUnit / gas <= MAX_SPLIT_SEC && (bestGas === null || gas > bestGas)) {
+        bestGas = gas;
+        bestGapSplitNum = validSplitMetrics.length; // 1-indexed within valid splits
+      }
     }
   }
-  let topGapLine: string | null = null;
-  if (bestGas !== null && bestGapSplitNum !== null) {
-    const secPerUnit = metersPerUnit / bestGas;
-    const m = Math.floor(secPerUnit / 60);
-    const s = Math.round(secPerUnit % 60);
-    topGapLine = `Top GAP: ${m}:${s.toString().padStart(2, "0")}${unitLabel} (${splitLabel} ${bestGapSplitNum})`;
+
+  const gaSpeedMs = weightedGaTotal > 0 ? weightedGaSum / weightedGaTotal : null;
+
+  // Raw + grade-adjusted efficiency (m/beat) — show both when GAP data available
+  const rawEff = hr && avgSpeedMs ? avgSpeedMs / hr * 60 : null;
+  const gaEff = hr && gaSpeedMs ? gaSpeedMs / hr * 60 : null;
+  let efficiencyLine: string | null = null;
+  if (rawEff !== null && gaEff !== null) {
+    efficiencyLine = `Aerobic eff: ${rawEff.toFixed(2)} raw → ${gaEff.toFixed(2)} GA m/beat`;
+  } else if (gaEff !== null) {
+    efficiencyLine = `Grade-adj eff: ${gaEff.toFixed(2)} m/beat`;
+  } else if (rawEff !== null) {
+    efficiencyLine = `Aerobic eff: ${rawEff.toFixed(2)} m/beat`;
   }
 
-  // Header — emoji + week + races (no "of X" to avoid confusion when plan weeks ≠ race countdown)
-  const weekLabel = currentWeek ? `WEEK ${currentWeek}` : null;
-  const headerParts = [weekLabel, ...raceLabels].filter(Boolean);
-  const header = `${emoji} ${headerParts.length > 0 ? headerParts.join(" — ") : "Coach Dean"}`;
+  // Best GAP mile
+  let bestGapLine: string | null = null;
+  if (bestGas !== null && bestGapSplitNum !== null) {
+    const sec = metersPerUnit / bestGas;
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    bestGapLine = `Best GAP: ${m}:${s.toString().padStart(2, "0")}${unitLabel} (${splitLabel} ${bestGapSplitNum})`;
+  }
+
+  // Cardiac decoupling + HR drift — first-half vs second-half from per-split data
+  let hrDriftLine: string | null = null;
+  let decouplingLine: string | null = null;
+  if (validSplitMetrics.length >= 4) {
+    const mid = Math.floor(validSplitMetrics.length / 2);
+    const h1 = validSplitMetrics.slice(0, mid);
+    const h2 = validSplitMetrics.slice(mid);
+
+    // HR drift
+    const h1HRs = h1.map(s => s.hr).filter((h): h is number => h !== null && h > 0);
+    const h2HRs = h2.map(s => s.hr).filter((h): h is number => h !== null && h > 0);
+    if (h1HRs.length > 0 && h2HRs.length > 0) {
+      const avgHR1 = Math.round(h1HRs.reduce((a, b) => a + b, 0) / h1HRs.length);
+      const avgHR2 = Math.round(h2HRs.reduce((a, b) => a + b, 0) / h2HRs.length);
+      const drift = avgHR2 - avgHR1;
+      hrDriftLine = `HR drift: ${avgHR1} → ${avgHR2} bpm (${drift >= 0 ? "+" : ""}${drift})`;
+
+      // Cardiac decoupling: Pa:HR efficiency factor drift (uses GAP speed where available)
+      const ef = (sm: SplitMetrics) => {
+        const spd = sm.gas && sm.gas > 0 ? sm.gas : sm.speed;
+        return sm.hr && sm.hr > 0 ? spd / sm.hr : null;
+      };
+      const h1EFs = h1.map(ef).filter((v): v is number => v !== null);
+      const h2EFs = h2.map(ef).filter((v): v is number => v !== null);
+      if (h1EFs.length > 0 && h2EFs.length > 0) {
+        const avgEF1 = h1EFs.reduce((a, b) => a + b, 0) / h1EFs.length;
+        const avgEF2 = h2EFs.reduce((a, b) => a + b, 0) / h2EFs.length;
+        const pct = Math.abs((avgEF1 - avgEF2) / avgEF1 * 100);
+        const quality = pct < 5 ? "aerobic system held together well" : pct < 10 ? "moderate aerobic drift" : "high aerobic drift";
+        decouplingLine = `Cardiac decoupling: ${pct.toFixed(1)}% — ${quality}`;
+      }
+    }
+  }
+
+  // Fetch total plan weeks for header
+  const { data: planRow } = await supabase
+    .from("training_plans")
+    .select("total_weeks")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
+
+  // Header line — coachdean.ai at top as branding anchor
+  const weekLabel = currentWeek
+    ? totalWeeks ? `Week ${currentWeek} of ${totalWeeks}` : `Week ${currentWeek}`
+    : null;
+  const raceShortLabels = raceLabels.map(l => l.replace("(", "").replace(")", "").replace("d", "d out"));
+  const headerMeta = [weekLabel, ...raceShortLabels].filter(Boolean).join(" · ");
+  const headerLine = headerMeta ? `${emoji} coachdean.ai — ${headerMeta}` : `${emoji} coachdean.ai`;
 
   // Build LLM context for the coach note
   const distanceDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
+  const gaAvgPaceStr = gaSpeedMs
+    ? (() => { const sec = metersPerUnit / gaSpeedMs; return `${Math.floor(sec / 60)}:${Math.round(sec % 60).toString().padStart(2, "0")}${unitLabel}`; })()
+    : null;
   const notePrompt = [
     `Activity: ${distanceDisplay}${pace ? ` @ ${pace}` : ""}${hr ? `, avg HR ${hr} bpm` : ""}${elevDisplay ? `, ${elevDisplay}` : ""}`,
-    isTrail && gaSpeedMs ? `Grade-adjusted pace: ${(1000 / (gaSpeedMs * 60)).toFixed(2)} min/km equivalent` : "",
+    gaAvgPaceStr ? `Overall grade-adjusted avg pace: ${gaAvgPaceStr}` : "",
     efficiencyLine ?? "",
-    topGapLine ?? "",
+    bestGapLine ?? "",
+    hrDriftLine ?? "",
+    decouplingLine ?? "",
     splitAnalysis ?? "",
     `Week so far: ${weekMilesDisplay}${weekTargetDisplay ? ` / ${weekTargetDisplay} target` : ""}`,
     raceLabels.length > 0 ? `Races: ${raceLabels.join(", ")}` : "",
@@ -4529,11 +4589,20 @@ async function annotateStravaActivity(
 
   const noteResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 150,
+    max_tokens: 200,
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write 1-2 sentences for this athlete's public Strava training log. Be positive, specific, and encouraging — this will be visible to their friends and followers. Highlight what went well or what the data shows about their effort. For hilly splits, acknowledge the elevation context (a slow mile with big climbing is impressive, not a failure). For hilly or trail runs, reference grade-adjusted effort rather than raw pace. Do NOT restate the distance or average pace — Strava already shows those. Do NOT use negative framing like "fell apart", "struggled", or "dropped off". Reference actual numbers. Sound like a supportive coach, not a critic.\n\n${notePrompt}`,
+        content: `You are Coach Dean. Write 2-3 sentences for this athlete's public Strava training log. Rules:
+1. Read the split data carefully before writing — only describe what the numbers actually show. If splits slow late, say so honestly but contextually (elevation? fatigue?).
+2. Be positive and supportive — this is public and visible to friends. Frame findings as insights, not criticism.
+3. For hilly splits, acknowledge elevation context — a slow mile with big climbing is impressive effort.
+4. Reference grade-adjusted pace/effort rather than raw pace on hilly runs.
+5. Do NOT restate distance or average pace — Strava shows those.
+6. No filler phrases like "running smart and strong" or generic encouragement. Specific observations only.
+7. Based on decoupling and HR drift, close with one sentence on recommended next-day intensity (easy, rest, or normal depending on the data).
+
+${notePrompt}`,
       },
     ],
   });
@@ -4541,21 +4610,21 @@ async function annotateStravaActivity(
     ? noteResponse.content[0].text.trim()
     : "";
 
-  // Build the annotation block
+  // Build the annotation block — coachdean.ai header at top
   const divider = "────────────────────";
   const weekLine = weekTargetDisplay
     ? `Week: ${weekMilesDisplay} / ${weekTargetDisplay}`
     : `Week: ${weekMilesDisplay}`;
   const block = [
-    header,
+    headerLine,
     divider,
     weekLine,
+    hrDriftLine,
+    decouplingLine,
     efficiencyLine,
-    topGapLine,
+    bestGapLine,
     "",
     deanNote,
-    "",
-    "coachdean.ai",
   ].filter((l): l is string => l !== null).join("\n");
 
   const newDescription = existingDescription
