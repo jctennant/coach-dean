@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Derive timezone from Strava city/state instead of athlete.timezone preference
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal observation)
+**User feedback:** "my users.timezone is america new york, even though I connected strava and it says provo, UT there"
+**Root cause:** `athlete.timezone` in the Strava token response reflects an account-level preference that users set when they signed up and rarely update when they move. A user in Provo, UT could have `athlete.timezone = "America/Los_Angeles"` or an entirely wrong timezone from years ago.
+**Fix / Change:** Derive timezone from `athlete.city` + `athlete.state` via `parseTimezoneFromLocation` (Claude Haiku) on Strava connect. Fall back to parsing `athlete.timezone` only if no city is available. Also extracted `parseTimezoneFromMessage` from `onboarding/handle` into the shared `src/lib/timezone.ts` as `parseTimezoneFromLocation`, fixing a secondary bug where multi-part IANA strings like `America/Indiana/Indianapolis` failed the validation regex.
+**Files changed:** src/lib/timezone.ts, src/app/api/auth/strava/callback/route.ts, src/app/api/onboarding/handle/route.ts
+
 ## 2026-04-11 — Improved Strava annotation: emojis, GAP analysis, remove redundant stats, multi-race
 
 **Type:** Improvement

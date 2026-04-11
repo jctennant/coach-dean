@@ -1,3 +1,41 @@
+import { anthropic } from "@/lib/anthropic";
+
+/**
+ * Convert a city/location string to an IANA timezone string using Claude Haiku.
+ * Returns null if no location is detected or the result is ambiguous.
+ */
+export async function parseTimezoneFromLocation(location: string): Promise<string | null> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 50,
+    system: `Convert the location in this message to an IANA timezone string. Return ONLY the IANA string. If no location is mentioned, return "none".
+
+Examples:
+- "San Francisco" → "America/Los_Angeles"
+- "Provo, UT" → "America/Denver"
+- "Denver" → "America/Denver"
+- "Chicago" → "America/Chicago"
+- "Columbus, OH" → "America/New_York"
+- "Detroit" → "America/Detroit"
+- "Indianapolis" → "America/Indiana/Indianapolis"
+- "Nashville" → "America/Chicago"
+- "Dallas" → "America/Chicago"
+- "New York" → "America/New_York"
+- "Boston" → "America/New_York"
+- "Miami" → "America/New_York"
+- "Seattle" → "America/Los_Angeles"
+- "Phoenix" → "America/Phoenix"
+- "Honolulu" → "Pacific/Honolulu"
+- "Anchorage" → "America/Anchorage"`,
+    messages: [{ role: "user", content: location }],
+  });
+  const raw =
+    response.content[0].type === "text" ? response.content[0].text.trim() : "none";
+  if (raw === "none") return null;
+  // Accept single-slash (e.g. America/Denver) and double-slash (e.g. America/Indiana/Indianapolis)
+  return /^[A-Za-z_]+\/[A-Za-z_]+(\/[A-Za-z_]+)?$/.test(raw) ? raw : null;
+}
+
 /**
  * Infer an IANA timezone from an E.164 phone number's country code.
  * Country codes that span multiple timezones (e.g. +1 US/Canada) default

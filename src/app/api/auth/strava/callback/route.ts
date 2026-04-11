@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import { getAllActivities, getAthleteStats } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
+import { parseTimezoneFromLocation } from "@/lib/timezone";
 
 /**
  * GET /api/auth/strava/callback
@@ -53,14 +54,19 @@ export async function GET(request: Request) {
   const hasWriteScope = typeof effectiveScope === "string" && effectiveScope.includes("activity:write");
   console.log("[strava-callback] scope returned:", scope, "urlScope:", urlScope, "hasWriteScope:", hasWriteScope);
 
-  // Extract timezone from Strava athlete profile
-  // Strava returns e.g. "(GMT-08:00) America/Los_Angeles" — extract the IANA part
+  // Derive timezone from athlete city/state — more reliable than athlete.timezone,
+  // which reflects an account preference that users rarely update when they move.
+  // Fall back to parsing athlete.timezone if no city is available.
+  const athleteCity = (athlete.city as string | null) || null;
+  const athleteState = (athlete.state as string | null) || null;
   let timezone: string | null = null;
-  if (athlete.timezone) {
-    const tzMatch = (athlete.timezone as string).match(
-      /\)\s*(.+)$/
-    );
-    timezone = tzMatch ? tzMatch[1] : athlete.timezone;
+  if (athleteCity) {
+    const location = athleteState ? `${athleteCity}, ${athleteState}` : athleteCity;
+    timezone = await parseTimezoneFromLocation(location);
+  }
+  if (!timezone && athlete.timezone) {
+    const tzMatch = (athlete.timezone as string).match(/\)\s*(.+)$/);
+    timezone = tzMatch ? tzMatch[1] : (athlete.timezone as string);
   }
 
   // Strava reports the athlete's display preference as "feet" (imperial) or "meters" (metric).

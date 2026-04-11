@@ -6,6 +6,7 @@ import { trackEvent } from "@/lib/track";
 import { calculateVDOTPaces, easyPaceRange, formatRaceDistance } from "@/lib/paces";
 import { getCheckoutPageUrl } from "@/lib/stripe";
 import type { Json } from "@/lib/database.types";
+import { parseTimezoneFromLocation } from "@/lib/timezone";
 
 export const maxDuration = 60;
 
@@ -638,7 +639,7 @@ async function handleTimezone(
   user: { id: string; phone_number: string; onboarding_data: Record<string, unknown> },
   message: string
 ): Promise<NextResponse> {
-  const parsedTimezone = await parseTimezoneFromMessage(message);
+  const parsedTimezone = await parseTimezoneFromLocation(message);
 
   if (!parsedTimezone) {
     await sendAndStore(
@@ -669,36 +670,6 @@ async function handleTimezone(
 }
 
 
-async function parseTimezoneFromMessage(message: string): Promise<string | null> {
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 50,
-    system: `Convert the location in this message to an IANA timezone string. Return ONLY the IANA string. If no location is mentioned, return "none".
-
-Examples:
-- "San Francisco" → "America/Los_Angeles"
-- "Provo, UT" → "America/Denver"
-- "Denver" → "America/Denver"
-- "Chicago" → "America/Chicago"
-- "Columbus, OH" → "America/New_York"
-- "Detroit" → "America/Detroit"
-- "Indianapolis" → "America/Indiana/Indianapolis"
-- "Nashville" → "America/Chicago"
-- "Dallas" → "America/Chicago"
-- "New York" → "America/New_York"
-- "Boston" → "America/New_York"
-- "Miami" → "America/New_York"
-- "Seattle" → "America/Los_Angeles"
-- "Phoenix" → "America/Phoenix"
-- "Honolulu" → "Pacific/Honolulu"
-- "Anchorage" → "America/Anchorage"`,
-    messages: [{ role: "user", content: message }],
-  });
-  const raw =
-    response.content[0].type === "text" ? response.content[0].text.trim() : "none";
-  if (raw === "none") return null;
-  return /^[A-Za-z_]+\/[A-Za-z_]+$/.test(raw) ? raw : null;
-}
 
 // ---------------------------------------------------------------------------
 // Payment step
