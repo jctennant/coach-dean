@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Post-run message no longer mentions next week's sessions as "remaining"
+
+**Type:** Bug Fix
+**Reported by:** User (PE's friend)
+**User feedback:** "my friend is getting this message on a Friday evening - not sure why (Thursday already passed): ...Two more sessions left: Saturday's long run (6 km easy) and Thursday's tempo (5 km with 3 km @ 4:24/km)."
+**Root cause:** Two issues compounding: (1) `futureSessions` filter had an `isNaN` fallback that returned `true` for sessions with no parseable date, making them permanently appear as upcoming regardless of when they were scheduled. (2) The post_run system prompt told Claude to reference "upcoming sessions" but didn't restrict it to THIS week — Claude would see both "UPCOMING SESSIONS THIS WEEK" and "NEXT WEEK'S PLANNED SESSIONS" in the training state context and combine them into "X sessions left," making next Thursday look like a remaining session for the current week. The different session name (tempo vs strides) between the coach message and the dashboard confirmed the `weekly_plan_sessions` was also out of sync with `training_plans`.
+**Fix / Change:** (1) Changed both `isNaN` fallbacks in the session filter from `return true` to `return false` — dateless sessions are now excluded rather than permanently shown as future. (2) Added explicit instruction to the post_run prompt: "Only reference THIS WEEK'S PLANNED SESSIONS when describing what's left to do. Do NOT mention NEXT WEEK'S PLANNED SESSIONS in post-run feedback."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-10 — Structured action tags replace Haiku extraction for session/schedule changes
 
 **Type:** Improvement

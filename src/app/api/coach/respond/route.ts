@@ -2991,7 +2991,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     });
     const futureSessions = sessions.filter(s => {
       const [m, d] = s.date.split("/").map(Number);
-      if (isNaN(m) || isNaN(d)) return true;
+      if (isNaN(m) || isNaN(d)) return false; // no parseable date = exclude, not treat as perpetually future
       return new Date(Date.UTC(ty, m - 1, d)) > localTodayUTC;
     });
     const activeSessions = [...todaySessions, ...futureSessions];
@@ -3021,7 +3021,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       } else {
         const thisWeekFuture = futureSessions.filter(s => {
           const [mm, dd] = s.date.split("/").map(Number);
-          if (isNaN(mm) || isNaN(dd)) return true;
+          if (isNaN(mm) || isNaN(dd)) return false; // no parseable date = exclude from this week
           return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
         });
         const nextWeekFuture = futureSessions.filter(s => {
@@ -3953,6 +3953,7 @@ MILEAGE ACCURACY — CRITICAL: The WEEK-TO-DATE figure in CURRENT TRAINING STATE
 PLAN CONSISTENCY RULES — follow these exactly:
 - Week-to-date mileage: use the WEEK-TO-DATE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
 - Upcoming sessions: if THIS WEEK'S PLANNED SESSIONS is present in CURRENT TRAINING STATE, use those exact sessions and distances. Do not recalculate, substitute, or invent different numbers. Only omit sessions that have already been completed (i.e. activity date falls on or before today's date).
+- Only reference THIS WEEK'S PLANNED SESSIONS when describing what's left to do. Do NOT mention NEXT WEEK'S PLANNED SESSIONS in post-run feedback — those belong in the Sunday recap.
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
     }
     case "user_message": {
