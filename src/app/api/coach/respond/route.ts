@@ -612,6 +612,38 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     trigger === "weekly_recap" ? "this_week_only" : "full";
   const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only");
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
+
+  // Dedup guard — if we've already sent a post_run SMS for this activity, skip Claude.
+  // Still run the Strava annotation so re-triggers can retry a failed annotation.
+  if (trigger === "post_run" && activityId) {
+    const { data: existingPostRun } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("strava_activity_id", activityId)
+      .eq("message_type", "post_run")
+      .limit(1);
+    if (existingPostRun && existingPostRun.length > 0) {
+      console.log(`[coach/respond] post_run already sent for activity ${activityId} — skipping Claude`);
+      if (user.strava_write_enabled as boolean) {
+        const storedSummary = activityData?.summary as Record<string, unknown> | null;
+        const storedSplits = Array.isArray(storedSummary?.splits)
+          ? (storedSummary.splits as Array<Record<string, unknown>>)
+          : [];
+        await annotateStravaActivity(userId, activityId, {
+          activityData,
+          weekMileageSoFar,
+          weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
+          currentWeek: (state?.current_week as number | null) ?? null,
+          upcomingRaces: upcomingRaces,
+          preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
+          splits: storedSplits,
+        }).catch((err) => console.error("[strava-annotation] failed:", err));
+      }
+      return NextResponse.json({ ok: true, skipped: "duplicate_post_run" });
+    }
+  }
+
   const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
   // Fall back to the onboarding-stated mileage baseline for non-Strava users until
   // enough activity history accumulates for a real 6-week average.
@@ -1106,6 +1138,25 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
+  // Strava activity annotation — runs here (before [NO_REPLY] check) so it fires even when
+  // Claude decides nothing new needs to be said (e.g. manual re-trigger of an already-analysed run).
+  // Annotation is independent of SMS; it runs as long as we have write access and an activity.
+  if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean)) {
+    const storedSummary = activityData?.summary as Record<string, unknown> | null;
+    const storedSplits = Array.isArray(storedSummary?.splits)
+      ? (storedSummary.splits as Array<Record<string, unknown>>)
+      : [];
+    await annotateStravaActivity(userId, activityId, {
+      activityData,
+      weekMileageSoFar,
+      weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
+      currentWeek: (state?.current_week as number | null) ?? null,
+      upcomingRaces: upcomingRaces,
+      preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
+      splits: storedSplits,
+    }).catch((err) => console.error("[strava-annotation] failed:", err));
+  }
+
   // Claude signals "nothing to send" with [NO_REPLY] — skip all SMS and DB writes.
   // Also skip if the response is empty (can happen if web search returns no final text block,
   // or Claude times out mid-generation) — sending an empty body causes Linq to deliver a ".".
@@ -1512,24 +1563,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         updated_at: new Date().toISOString(),
       })
       .eq("user_id", userId);
-  }
-
-  // Strava activity annotation — runs after SMS is sent (already inside after(), so awaiting
-  // is safe and ensures Vercel doesn't terminate the function before the annotation completes)
-  if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean)) {
-    const storedSummary = activityData?.summary as Record<string, unknown> | null;
-    const storedSplits = Array.isArray(storedSummary?.splits)
-      ? (storedSummary.splits as Array<Record<string, unknown>>)
-      : [];
-    await annotateStravaActivity(userId, activityId, {
-      activityData,
-      weekMileageSoFar,
-      weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
-      currentWeek: (state?.current_week as number | null) ?? null,
-      upcomingRaces: upcomingRaces,
-      preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
-      splits: storedSplits,
-    }).catch((err) => console.error("[strava-annotation] failed:", err));
   }
 
   return NextResponse.json({ ok: true, message: coachMessage });
