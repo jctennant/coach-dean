@@ -4432,9 +4432,9 @@ async function annotateStravaActivity(
   const isTrail = activityType === "TrailRun";
   const isIntervals = workoutType === 3;
   let emoji = "🏃";
-  if (isTrail && elevGainFt >= 500) emoji = "⛰️";
-  else if (isTrail) emoji = "🌲";
-  else if (isIntervals) emoji = "⚡️";
+  if (isIntervals) emoji = "⚡️";
+  if (isTrail && elevGainFt < 500) emoji = "🌲";
+  if (elevGainFt >= 500) emoji = "⛰️"; // elevation wins regardless of activity type
 
   // Week stats
   const weekMilesDisplay = isMetric
@@ -4533,7 +4533,7 @@ async function annotateStravaActivity(
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write 1-2 sentences analyzing this specific run for the training log. Focus on the most interesting signal — pacing pattern relative to terrain, aerobic efficiency, HR response, or training progress. For hilly or trail runs, reference grade-adjusted effort rather than raw pace. Do NOT restate the distance or average pace — Strava already shows those. Reference actual numbers. Be direct and analytical, like a coach's handwritten note. No generic encouragement.\n\n${notePrompt}`,
+        content: `You are Coach Dean. Write 1-2 sentences for this athlete's public Strava training log. Be positive, specific, and encouraging — this will be visible to their friends and followers. Highlight what went well or what the data shows about their effort. For hilly splits, acknowledge the elevation context (a slow mile with big climbing is impressive, not a failure). For hilly or trail runs, reference grade-adjusted effort rather than raw pace. Do NOT restate the distance or average pace — Strava already shows those. Do NOT use negative framing like "fell apart", "struggled", or "dropped off". Reference actual numbers. Sound like a supportive coach, not a critic.\n\n${notePrompt}`,
       },
     ],
   });
@@ -4590,18 +4590,31 @@ export function buildSplitAnalysis(
   // Filter paused-device splits (athlete forgot to stop Strava) — same threshold
   // used by transformSplitForClaude in the post_run SMS path: pace > 20 min/mile.
   const MAX_SEC_PER_UNIT = isMetric ? (20 * 60) / 1.60934 : 20 * 60;
-  const pacesPerSec: number[] = [];
+  type SplitInfo = { pace: number; elevDiff: number | null };
+  const validSplits: SplitInfo[] = [];
   for (const split of splits) {
     const speed = split.average_speed as number | null;
     if (!speed || speed <= 0) continue;
     const secPerUnit = metersPerUnit / speed;
     if (secPerUnit > MAX_SEC_PER_UNIT) continue; // paused device
-    pacesPerSec.push(secPerUnit);
+    const elevDiff = split.elevation_difference as number | null;
+    validSplits.push({ pace: secPerUnit, elevDiff: elevDiff ?? null });
   }
 
-  if (pacesPerSec.length < 2) return null;
+  if (validSplits.length < 2) return null;
+  const pacesPerSec = validSplits.map(s => s.pace);
 
-  const splitLabels = pacesPerSec.map((p, i) => `${i + 1}: ${formatPace(p)}${unit}`).join(", ");
+  // Format elevation suffix — only shown when non-trivial (≥5m)
+  const formatElev = (meters: number | null): string => {
+    if (meters === null || Math.abs(meters) < 5) return "";
+    if (isMetric) return ` (${meters > 0 ? "+" : ""}${Math.round(meters)}m)`;
+    const ft = Math.round(meters * 3.28084);
+    return ` (${ft > 0 ? "+" : ""}${ft}ft)`;
+  };
+
+  const splitLabels = validSplits.map((s, i) =>
+    `${i + 1}: ${formatPace(s.pace)}${unit}${formatElev(s.elevDiff)}`
+  ).join(", ");
 
   // First-half vs second-half comparison (only meaningful with >= 4 splits)
   let comparisonLine = "";
