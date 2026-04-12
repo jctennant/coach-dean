@@ -4447,15 +4447,16 @@ async function annotateStravaActivity(
     : null;
 
   // Race context — show up to 2 upcoming races
-  const raceLabels = upcomingRaces
+  const raceData = upcomingRaces
     .slice(0, 2)
     .map(race => {
       if (!race.race_date) return null;
       const d = Math.ceil((new Date(race.race_date as string).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       const name = (race.race_name as string | null) ?? "Race";
-      return `${name} (${d}d)`;
+      return { label: `${name} (${d}d)`, shortLabel: `${name} ${d}d out` };
     })
-    .filter((l): l is string => l !== null);
+    .filter((r): r is { label: string; shortLabel: string } => r !== null);
+  const raceLabels = raceData.map(r => r.label);
 
   // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
   const splitAnalysis = buildSplitAnalysis(splits, isMetric);
@@ -4565,7 +4566,7 @@ async function annotateStravaActivity(
   const weekLabel = currentWeek
     ? totalWeeks ? `Week ${currentWeek} of ${totalWeeks}` : `Week ${currentWeek}`
     : null;
-  const raceShortLabels = raceLabels.map(l => l.replace("(", "").replace(")", "").replace("d", "d out"));
+  const raceShortLabels = raceData.map(r => r.shortLabel);
   const headerMeta = [weekLabel, ...raceShortLabels].filter(Boolean).join(" · ");
   const headerLine = headerMeta ? `${emoji} coachdean.ai — ${headerMeta}` : `${emoji} coachdean.ai`;
 
@@ -4606,7 +4607,7 @@ ${notePrompt}`,
     ],
   });
   const deanNote = noteResponse.content[0].type === "text"
-    ? noteResponse.content[0].text.trim()
+    ? stripMarkdown(noteResponse.content[0].text.trim())
     : "";
 
   // Build the annotation block — coachdean.ai header at top
@@ -4618,10 +4619,10 @@ ${notePrompt}`,
     headerLine,
     divider,
     weekLine,
+    bestGapLine,
     hrDriftLine,
     decouplingLine,
     efficiencyLine,
-    bestGapLine,
     "",
     deanNote,
   ].filter((l): l is string => l !== null).join("\n");
