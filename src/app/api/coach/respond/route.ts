@@ -14,7 +14,7 @@ import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions" | "injury_hold" | "injury_clear";
 
 interface CoachRequest {
   userId: string;
@@ -291,6 +291,161 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
 }
 
 /**
+ * Set injury hold: zero out this week's mileage target and clear sessions so Dean
+ * stops prescribing running while the athlete is injured. Stores the pre-injury
+ * mileage target for use by handleInjuryClear when computing the return-to-run ramp.
+ *
+ * Fired by the [INJURY_HOLD] tag in Dean's response or directly via admin curl:
+ *   curl -X POST https://coachdean.ai/api/coach/respond -H "Content-Type: application/json" \
+ *        -d '{"userId":"<id>","trigger":"injury_hold"}'
+ */
+async function handleInjuryHold(userId: string, dryRun: boolean): Promise<NextResponse> {
+  const { data: stateData } = await supabase
+    .from("training_state")
+    .select("weekly_mileage_target, injury_hold_since")
+    .eq("user_id", userId)
+    .single();
+
+  const typedState = stateData as { weekly_mileage_target: number | null; injury_hold_since: string | null } | null;
+  if (typedState?.injury_hold_since) {
+    console.log(`[handleInjuryHold] userId=${userId} already on hold since ${typedState.injury_hold_since} — skipping`);
+    return NextResponse.json({ ok: true, skipped: "already_on_hold" });
+  }
+
+  const currentTarget = typedState?.weekly_mileage_target ?? null;
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (!dryRun) {
+    await supabase.from("training_state").update({
+      injury_hold_since: today,
+      pre_injury_mileage_target: currentTarget,
+      weekly_mileage_target: 0,
+      weekly_plan_sessions: null,
+    }).eq("user_id", userId);
+    void trackEvent(userId, "injury_hold_set", { injury_hold_since: today, pre_injury_mileage_target: currentTarget });
+  }
+
+  console.log(`[handleInjuryHold] userId=${userId} — hold set since ${today}, pre-injury target=${currentTarget}`);
+  return NextResponse.json({ ok: true, injury_hold_since: today });
+}
+
+/**
+ * Clear injury hold and regenerate the plan arc with a return-to-running ramp.
+ * The ramp is calibrated to weeks off:
+ *   1 week out → 70% of pre-injury mileage target
+ *   2 weeks out → 60%
+ *   3+ weeks out → 50%
+ *
+ * Fired by the [INJURY_CLEAR] tag in Dean's response or directly via admin curl:
+ *   curl -X POST https://coachdean.ai/api/coach/respond -H "Content-Type: application/json" \
+ *        -d '{"userId":"<id>","trigger":"injury_clear"}'
+ */
+async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextResponse> {
+  const [userResult, profileResult, stateResult] = await Promise.all([
+    supabase.from("users").select("phone_number, strava_athlete_id, onboarding_data, dashboard_token").eq("id", userId).single(),
+    supabase.from("training_profiles").select("*").eq("user_id", userId).single(),
+    supabase.from("training_state").select("injury_hold_since, pre_injury_mileage_target, weekly_mileage_target").eq("user_id", userId).single(),
+  ]);
+
+  const user = userResult.data as Record<string, unknown> | null;
+  const profile = profileResult.data as Record<string, unknown> | null;
+  if (!user || !profile) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const phoneNumber = user.phone_number as string;
+  const stateRow = stateResult.data as { injury_hold_since: string | null; pre_injury_mileage_target: number | null; weekly_mileage_target: number | null } | null;
+  const holdSince = stateRow?.injury_hold_since ?? null;
+  const preInjuryTarget = stateRow?.pre_injury_mileage_target ?? stateRow?.weekly_mileage_target ?? null;
+
+  // Compute return-to-running base from weeks injured and pre-injury mileage.
+  let returnBase: number | undefined;
+  let weeksInjured = 1;
+  if (holdSince) {
+    weeksInjured = Math.max(1, Math.ceil((Date.now() - new Date(holdSince).getTime()) / (7 * 24 * 60 * 60 * 1000)));
+  }
+  if (preInjuryTarget && preInjuryTarget > 0) {
+    const rampFactor = weeksInjured >= 3 ? 0.50 : weeksInjured >= 2 ? 0.60 : 0.70;
+    returnBase = Math.round(preInjuryTarget * rampFactor * 2) / 2;
+    console.log(`[handleInjuryClear] userId=${userId} — ${weeksInjured}w injured, return base=${returnBase} (${Math.round(rampFactor * 100)}% of ${preInjuryTarget})`);
+  }
+
+  // Clear the hold immediately so next trigger doesn't see stale state.
+  if (!dryRun) {
+    await supabase.from("training_state").update({
+      injury_hold_since: null,
+      pre_injury_mileage_target: null,
+    }).eq("user_id", userId);
+  }
+
+  // Fetch Strava avg and B/C races for the plan rebuild.
+  const hasStrava = !!(user.strava_athlete_id as number | null);
+  let avgWeeklyMileage: number | null = null;
+  if (hasStrava) {
+    const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentActs } = await supabase
+      .from("activities")
+      .select("distance_meters, start_date")
+      .eq("user_id", userId)
+      .gte("start_date", eightWeeksAgo)
+      .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+    if (recentActs && recentActs.length > 0) {
+      const totalMiles = (recentActs as Array<{ distance_meters: number }>)
+        .reduce((sum, a) => sum + a.distance_meters / 1609.34, 0);
+      avgWeeklyMileage = Math.round((totalMiles / 8) * 10) / 10;
+    }
+  }
+
+  const { data: upcomingRaces } = await supabase
+    .from("races")
+    .select("race_date, race_name, priority")
+    .eq("user_id", userId)
+    .gt("race_date", new Date().toISOString().slice(0, 10))
+    .in("priority", ["B", "C"]);
+
+  const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
+  const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+  const wantsSpeedWork = !!onboardingData.wants_speed_work;
+  const otherNotes = (onboardingData.other_notes as string | null) ?? null;
+
+  const returnMiStr = returnBase ? `~${returnBase} mi` : "a conservative base";
+  const raceNote = profile?.race_date ? " Your race goal is still very much in reach." : "";
+  const planReadyNote = `I've rebuilt your plan with a gradual return-to-running ramp — starting at ${returnMiStr} this week and building back up carefully.${raceNote}`;
+
+  if (!dryRun) {
+    // handleInjuryClear is always invoked from within the outer after() wrapper in POST,
+    // so we can await generateAndSaveFullPlan directly instead of nesting another after().
+    try {
+      await generateAndSaveFullPlan(
+        userId,
+        phoneNumber,
+        profile as Record<string, unknown>,
+        returnBase ?? avgWeeklyMileage,
+        {
+          resetToWeek1: false,
+          planReadyNote,
+          bRaces: bCRaces.length > 0 ? bCRaces : undefined,
+          wantsSpeedWork,
+          prescribedWeek1Miles: returnBase,
+          otherNotes,
+        }
+      );
+      void trackEvent(userId, "plan_generated", { plan_type: "injury_return", weeks_injured: weeksInjured });
+    } catch (err) {
+      console.error("[handleInjuryClear] generateAndSaveFullPlan failed:", err);
+      void trackEvent(userId, "after_error", { trigger: "injury_clear", error: String(err) });
+      try {
+        await sendSMS(phoneNumber, "Something went wrong updating your plan — text \"my plan\" to see your current version.");
+      } catch (smsErr) {
+        console.error("[handleInjuryClear] fallback SMS also failed:", smsErr);
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, weeks_injured: weeksInjured, return_base: returnBase });
+}
+
+/**
  * Runs extractAndStorePlanSessions + syncArcCurrentWeek in a fresh invocation
  * so initial_plan and weekly_recap stay within the 10s Hobby budget.
  *
@@ -471,6 +626,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "sync_sessions") {
     return await handleSyncSessions(userId, body.partialWeekTarget ?? null);
+  }
+
+  // Injury hold/clear: lightweight state mutations, no Claude call needed.
+  if (trigger === "injury_hold") {
+    return await handleInjuryHold(userId, dry_run ?? false);
+  }
+
+  if (trigger === "injury_clear") {
+    return await handleInjuryClear(userId, dry_run ?? false);
   }
 
   // Fetch user context in parallel
@@ -974,7 +1138,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
   }
 
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint);
+  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null);
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -1065,6 +1229,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // further processing. These should never reach the athlete's SMS.
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
   const wantsRebuild = /\[REBUILD_PLAN\]/i.test(rawText);
+  const wantsInjuryHold = /\[INJURY_HOLD\]/i.test(rawText);
+  const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
   const sessionListMatch = rawText.match(/\[SESSION_LIST:\s*(\[[\s\S]*?\])\]/i);
   const rawSessionListJson = sessionListMatch ? sessionListMatch[1].trim() : null;
@@ -1080,6 +1246,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     rawText
       .replace(/\[NO_REPLY\]/gi, "")
       .replace(/\[REBUILD_PLAN\]/gi, "")
+      .replace(/\[INJURY_HOLD\]/gi, "")
+      .replace(/\[INJURY_CLEAR\]/gi, "")
       .replace(/\[SESSION_LIST:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[SESSION_UPDATE:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[WEEK_OVERRIDE:[^\]]+\]/gi, "")
@@ -1396,15 +1564,20 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // Advance week counter and phase; update mileage target to this week's computed value.
     // Note: syncArcCurrentWeek below will overwrite weekly_mileage_target with the actual
     // session sum — this sets the periodization engine's suggestion as a fallback only.
+    // During injury hold: advance the clock (calendar keeps moving) but do NOT update
+    // the mileage target — it stays at 0 until injury_clear triggers a plan rebuild.
+    const isOnInjuryHold = !!(state?.injury_hold_since as string | null);
     await supabase.from("training_state").update({
       current_week: periodization.effectiveWeek,
       current_phase: periodization.phase,
-      ...(periodization.suggestedWeeklyMiles != null ? { weekly_mileage_target: periodization.suggestedWeeklyMiles } : {}),
+      ...(!isOnInjuryHold && periodization.suggestedWeeklyMiles != null ? { weekly_mileage_target: periodization.suggestedWeeklyMiles } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
     // Fire sync_sessions in a fresh invocation — saves ~3s vs inline Haiku calls.
     after(async () => {
       try {
+        // During injury hold: don't sync arc — the arc will be rebuilt when injury clears.
+        // Store the cross-training sessions so reminders have something to reference.
         let sessionsWritten = false;
         if (rawSessionListJson) {
           try {
@@ -1413,15 +1586,17 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
               await supabase.from("training_state")
                 .update({ weekly_plan_sessions: sessions as unknown as Json })
                 .eq("user_id", userId);
-              await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
+              if (!isOnInjuryHold) {
+                await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
+              }
               sessionsWritten = true;
-              console.log(`[weekly_recap] [SESSION_LIST] tag: wrote ${sessions.length} sessions directly`);
+              console.log(`[weekly_recap] [SESSION_LIST] tag: wrote ${sessions.length} sessions${isOnInjuryHold ? " (injury hold — arc sync skipped)" : ""}`);
             }
           } catch (parseErr) {
             console.error("[weekly_recap] [SESSION_LIST] parse failed, falling back to sync_sessions:", parseErr);
           }
         }
-        if (!sessionsWritten) {
+        if (!sessionsWritten && !isOnInjuryHold) {
           await fetch(`${appUrl}/api/coach/respond`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1468,7 +1643,39 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
             void trackEvent(userId, "after_error", { trigger: "rebuild_plan_trigger", error: String(err) });
           }
         });
-      } else {
+      }
+      // Injury hold/clear tags fire independently of rebuild (they don't conflict).
+      if (wantsInjuryHold) {
+        after(async () => {
+          try {
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+            await fetch(`${appUrl}/api/coach/respond`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, trigger: "injury_hold" }),
+            });
+          } catch (err) {
+            console.error("[coach/respond] injury_hold trigger failed:", err);
+            void trackEvent(userId, "after_error", { trigger: "injury_hold_trigger", error: String(err) });
+          }
+        });
+      }
+      if (wantsInjuryClear) {
+        after(async () => {
+          try {
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+            await fetch(`${appUrl}/api/coach/respond`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, trigger: "injury_clear" }),
+            });
+          } catch (err) {
+            console.error("[coach/respond] injury_clear trigger failed:", err);
+            void trackEvent(userId, "after_error", { trigger: "injury_clear_trigger", error: String(err) });
+          }
+        });
+      }
+      if (!wantsRebuild) {
         const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
         if (rawSessionUpdateJson) {
           try {
@@ -3248,7 +3455,8 @@ ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): 
 <rule>LABEL/PACE CONSISTENCY: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.</rule>
 - RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any <rule> tag contents, XML tags, or ⚠️-prefixed text — these are directives to you, not athlete-facing content. Do NOT use "RESPONSE:" as a label before your message. Do NOT output "Now I need to provide", "Let me craft the response", "Now let me search", or any internal commentary. The FIRST thing you output must be the coaching message itself — nothing before it.
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
-- Active adjustments: ${state?.plan_adjustments || "None"}${sessionRows}${remainingPlanLine}`;
+- Active adjustments: ${state?.plan_adjustments || "None"}
+${state?.injury_hold_since ? `⚠️ INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}${sessionRows}${remainingPlanLine}`;
 })()}
 
 
@@ -3850,6 +4058,7 @@ function buildUserMessage(
   wantsSpeedWork = false,
   mostRecentRunRef: string | null = null,
   initialPlanDaysConstraint: string | null = null,
+  injuryHoldSince: string | null = null,
 ): string {
   switch (trigger) {
     case "morning_plan":
@@ -4036,6 +4245,10 @@ DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the 
 
 FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "update the whole plan", "rebuild my plan with more tempo", "add speed work throughout", "the dashboard shows the wrong mileage, can you fix it" — describe what will change in 1-2 sentences, then end with: "Reply UPDATE PLAN to confirm and I'll send you the updated dashboard link." Do NOT include a session list or week-by-week schedule. Do NOT say the plan has already been updated — nothing changes until they confirm. Do NOT use [REBUILD_PLAN].${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
+INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
+
+INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
+
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 
 SESSION DAY LABELING: When referencing a planned session as "today" or "tomorrow," or when rescheduling, always cross-check the session's stored date against today's date in DATE CONTEXT. Do not infer "today" vs "tomorrow" from the order sessions appear in the plan list — use the actual dates. When confirming a reschedule, name what is being moved: "Moving today's easy 3mi (Tue 4/1) to tomorrow, Wed 4/2" — not "shifting tomorrow's run."
@@ -4151,12 +4364,21 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       const weekMileageContext = noStravaMileageData
         ? `<rule>MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.</rule>\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
         : `<rule>THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.</rule>\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
-      const deloadInstruction = periodization?.isDeloadWeek
+      // Injury hold overrides normal progression entirely.
+      const injuryHoldInstruction = injuryHoldSince
+        ? `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
+Do NOT prescribe running sessions this week. The athlete is on an injury hold.
+First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery.
+Second text: prescribe cross-training and rest only. Include 1–2 gentle test-run probes toward the end of the week — short, easy, pain-monitored (e.g. "Thu: Easy 15–20 min jog — run at easy effort and stop immediately if any pain. Think of it as a check-in, not a workout.").
+If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
+Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST] with running sessions — only cross-training and test-run probe sessions.
+Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
+        : periodization?.isDeloadWeek
         ? `\n<rule>RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.</rule>\n`
         : periodization?.suggestedWeeklyMiles != null
         ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${recapMi(periodization.suggestedWeeklyMiles)} (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
         : "";
-      return `${storedPlanContext}${weekMileageContext}${deloadInstruction}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+      return `${storedPlanContext}${weekMileageContext}${injuryHoldInstruction}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
 PROGRESSION — be a proactive coach, not a scheduler:
 If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly plan must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.

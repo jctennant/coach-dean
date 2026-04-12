@@ -377,10 +377,12 @@ export type Database = {
           current_phase: string | null
           current_week: number | null
           id: string
+          injury_hold_since: string | null
           last_activity_date: string | null
           last_activity_summary: Json | null
           long_run_target: number | null
           plan_adjustments: string | null
+          pre_injury_mileage_target: number | null
           taper_peak_miles: number | null
           updated_at: string | null
           user_id: string
@@ -392,10 +394,12 @@ export type Database = {
           current_phase?: string | null
           current_week?: number | null
           id?: string
+          injury_hold_since?: string | null
           last_activity_date?: string | null
           last_activity_summary?: Json | null
           long_run_target?: number | null
           plan_adjustments?: string | null
+          pre_injury_mileage_target?: number | null
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id: string
@@ -407,10 +411,12 @@ export type Database = {
           current_phase?: string | null
           current_week?: number | null
           id?: string
+          injury_hold_since?: string | null
           last_activity_date?: string | null
           last_activity_summary?: Json | null
           long_run_target?: number | null
           plan_adjustments?: string | null
+          pre_injury_mileage_target?: number | null
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id?: string
@@ -448,7 +454,7 @@ export type Database = {
           strava_athlete_id: number | null
           strava_refresh_token: string | null
           strava_token_expires_at: string | null
-          strava_write_enabled: boolean
+          strava_write_enabled: boolean | null
           stripe_customer_id: string | null
           stripe_subscription_id: string | null
           subscription_status: string | null
@@ -474,7 +480,7 @@ export type Database = {
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null
           strava_token_expires_at?: string | null
-          strava_write_enabled?: boolean
+          strava_write_enabled?: boolean | null
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           subscription_status?: string | null
@@ -500,7 +506,7 @@ export type Database = {
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null
           strava_token_expires_at?: string | null
-          strava_write_enabled?: boolean
+          strava_write_enabled?: boolean | null
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           subscription_status?: string | null

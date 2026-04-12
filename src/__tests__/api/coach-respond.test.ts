@@ -74,7 +74,7 @@ function makeChain(response: { data: unknown; error: unknown } = { data: null, e
   const chain: Record<string, unknown> = {};
   const methods = [
     "select", "insert", "update", "upsert", "delete",
-    "eq", "neq", "is", "not", "gte", "lte", "in", "or", "order", "limit",
+    "eq", "neq", "is", "not", "gt", "gte", "lt", "lte", "in", "or", "order", "limit",
   ];
   for (const m of methods) chain[m] = vi.fn().mockReturnValue(chain);
   chain.single = vi.fn().mockResolvedValue(response);
@@ -768,5 +768,103 @@ describe("coach/respond — sync_sessions trigger (extractAndStorePlanSessions t
     // sync_sessions never sends SMS
     const { sendSMS } = await import("@/lib/linq");
     expect(sendSMS).not.toHaveBeenCalled();
+  });
+});
+
+describe("coach/respond — injury_hold trigger", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("sets injury_hold_since and stores pre_injury_mileage_target when not already on hold", async () => {
+    const stateChain = makeChain({
+      data: { weekly_mileage_target: 28, injury_hold_since: null },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "training_state") return stateChain;
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "injury_hold" });
+    const result = await POST(req);
+    await flush();
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const holdUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => payload?.injury_hold_since != null
+    );
+    expect(holdUpdate).toBeDefined();
+    expect(holdUpdate![0].pre_injury_mileage_target).toBe(28);
+    expect(holdUpdate![0].weekly_mileage_target).toBe(0);
+    expect(holdUpdate![0].weekly_plan_sessions).toBeNull();
+    expect((result as { data: unknown }).data).toMatchObject({ ok: true });
+  });
+
+  it("skips update when already on hold", async () => {
+    const stateChain = makeChain({
+      data: { weekly_mileage_target: 0, injury_hold_since: "2026-04-10" },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "training_state") return stateChain;
+      return makeChain({ data: null, error: null });
+    });
+
+    // dry_run so the handler runs inline and we can inspect the return value
+    const req = mockRequest({ userId: "user-001", trigger: "injury_hold", dry_run: true });
+    const result = await POST(req);
+    await flush();
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    expect(updateCalls.length).toBe(0);
+    expect((result as { data: unknown }).data).toMatchObject({ ok: true, skipped: "already_on_hold" });
+  });
+});
+
+describe("coach/respond — injury_clear trigger", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("clears injury_hold_since and pre_injury_mileage_target, then fires generateAndSaveFullPlan", async () => {
+    const holdDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); // ~10 days ago — clearly in the 2-week ramp bucket (≥2w, <3w)
+    const stateChain = makeChain({
+      data: { injury_hold_since: holdDate, pre_injury_mileage_target: 30, weekly_mileage_target: 0 },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: { phone_number: "+12025550001", strava_athlete_id: null, onboarding_data: {} }, error: null });
+      if (table === "training_profiles") return makeChain({ data: { goal: "half_marathon", race_date: null }, error: null });
+      if (table === "training_state") return stateChain;
+      if (table === "races") return makeChain({ data: [], error: null });
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "injury_clear" });
+    const result = await POST(req);
+    await flush();
+
+    // Should clear the hold
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const clearUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => payload?.injury_hold_since === null
+    );
+    expect(clearUpdate).toBeDefined();
+    expect(clearUpdate![0].pre_injury_mileage_target).toBeNull();
+
+    // Should trigger plan rebuild with 60% ramp (2 weeks injured)
+    const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
+    expect(generateAndSaveFullPlan).toHaveBeenCalled();
+    const callArgs = (generateAndSaveFullPlan as ReturnType<typeof vi.fn>).mock.calls[0];
+    // prescribedWeek1Miles should be 60% of 30 = 18mi
+    expect(callArgs[3]).toBeCloseTo(18, 0); // avgWeeklyMileage arg (null → returnBase used via prescribedWeek1Miles)
+    const opts = callArgs[4] as Record<string, unknown>;
+    expect(opts.prescribedWeek1Miles).toBeCloseTo(18, 0);
+    expect(opts.resetToWeek1).toBe(false);
+
+    expect((result as { data: unknown }).data).toMatchObject({ ok: true });
   });
 });

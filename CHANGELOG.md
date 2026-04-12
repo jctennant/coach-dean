@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Injury hold & return-to-running system
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** No structured path for athletes who get injured mid-plan. Dean had no way to pause running prescriptions, and no mechanism to rebuild a plan with a conservative return-to-running ramp on clearance.
+**Fix / Change:** Added `[INJURY_HOLD]` and `[INJURY_CLEAR]` tag-based triggers (same pattern as `[REBUILD_PLAN]`). When an athlete explicitly says they can't run (doctor's orders, acute flare), Dean appends `[INJURY_HOLD]` which fires the `injury_hold` trigger: stores `injury_hold_since` and `pre_injury_mileage_target` in `training_state`, zeros out `weekly_mileage_target`, and clears session prescriptions. Weekly recap skips mileage progression and `syncArcCurrentWeek` during a hold. On clearance (`[INJURY_CLEAR]`), the ramp is computed from weeks injured (1w→70%, 2w→60%, 3+w→50% of pre-injury base) and `generateAndSaveFullPlan` rebuilds the arc with that base. Admin triggers also available (`trigger: "injury_hold"` / `"injury_clear"`). Added `injury_hold_since` and `pre_injury_mileage_target` columns via migration `027_injury_hold.sql`. Also fixed `makeChain` in tests to include `gt` and `lt` operators (were missing, causing silent failures on queries using `.gt()`).
+**Files changed:** src/app/api/coach/respond/route.ts, src/lib/database.types.ts, supabase/migrations/027_injury_hold.sql, src/__tests__/api/coach-respond.test.ts
+
 ## 2026-04-12 — Plan generation improvements from plan health audit
 
 **Type:** Improvement
