@@ -547,6 +547,117 @@ async function handleSyncSessions(userId: string, partialWeekTarget: number | nu
 }
 
 /**
+ * Weekly recap for Analyst Mode users — no plan, no week advancement.
+ * Summarizes the past week's runs: mileage, paces, notable efforts, trends vs prior week.
+ */
+async function handleAnalystWeeklyRecap(
+  userId: string,
+  user: Record<string, unknown>,
+  recentActivities: ActivityRow[],
+  userTimezone: string,
+  dryRun: boolean,
+  requestChatId: string | undefined
+): Promise<NextResponse> {
+  const phoneNumber = user.phone_number as string;
+  const userName = (user.name as string | null) ?? null;
+  const preferredUnits = ((user as Record<string, unknown>)?.preferred_units as string) === "metric" ? "metric" : "imperial";
+
+  // Compute this week's and last week's activity data
+  const now = new Date();
+  const weekStart = new Date(now);
+  const dayOfWeek = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: userTimezone }).format(now);
+  const daysMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const daysFromMonday = ((daysMap[dayOfWeek] ?? 0) + 6) % 7; // Mon=0 … Sun=6
+  weekStart.setDate(now.getDate() - daysFromMonday);
+  weekStart.setHours(0, 0, 0, 0);
+  const prevWeekStart = new Date(weekStart);
+  prevWeekStart.setDate(weekStart.getDate() - 7);
+
+  const runTypes = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+  const thisWeekRuns = recentActivities.filter(a =>
+    runTypes.has(a.activity_type) && new Date(a.start_date) >= weekStart
+  );
+  const prevWeekRuns = recentActivities.filter(a =>
+    runTypes.has(a.activity_type) &&
+    new Date(a.start_date) >= prevWeekStart &&
+    new Date(a.start_date) < weekStart
+  );
+
+  const toMiles = (m: number) => Math.round((m / 1609.34) * 10) / 10;
+  const toKm = (m: number) => Math.round((m / 1000) * 10) / 10;
+  const fmtDist = (m: number) => preferredUnits === "metric" ? `${toKm(m)} km` : `${toMiles(m)} mi`;
+
+  const thisWeekMiles = thisWeekRuns.reduce((s, a) => s + toMiles(a.distance_meters), 0);
+  const prevWeekMiles = prevWeekRuns.reduce((s, a) => s + toMiles(a.distance_meters), 0);
+  const thisWeekTotal = preferredUnits === "metric"
+    ? `${thisWeekRuns.reduce((s, a) => s + toKm(a.distance_meters), 0).toFixed(1)} km`
+    : `${thisWeekMiles.toFixed(1)} mi`;
+
+  const runSummaries = thisWeekRuns.map(a => {
+    const date = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: userTimezone }).format(new Date(a.start_date));
+    return `${date}: ${fmtDist(a.distance_meters)} @ ${a.average_pace}/mi${a.average_heartrate ? `, avg HR ${Math.round(a.average_heartrate)}` : ""}`;
+  }).join("\n");
+
+  const changeNote = prevWeekMiles > 0
+    ? ` (${thisWeekMiles > prevWeekMiles ? "+" : ""}${(thisWeekMiles - prevWeekMiles).toFixed(1)} mi vs last week)`
+    : "";
+
+  const userMessage = `Weekly recap for ${userName ?? "athlete"} — Analyst Mode.
+
+This week's runs (${thisWeekRuns.length} total, ${thisWeekTotal}${changeNote}):
+${runSummaries || "No runs logged this week."}
+
+Last week: ${prevWeekRuns.length} runs, ${prevWeekMiles.toFixed(1)} mi
+
+Preferred units: ${preferredUnits}`;
+
+  const systemPrompt = `You are Coach Dean, an AI running coach. This athlete uses Analyst Mode — they get post-run insights and a weekly trends summary, but no structured training plan.
+
+Your task: write a Sunday weekly trends recap. Focus on:
+- What they did this week (total mileage, run count, any notable efforts — long run, fast run, etc.)
+- One or two observations about trends (consistency, pace progression, volume vs prior week)
+- A brief encouraging close
+
+Rules:
+- 3–5 sentences total. Keep it punchy — this is a text message.
+- No markdown, no bullet points, no asterisks.
+- Do NOT prescribe sessions or suggest a schedule for next week. You're an analyst, not a planner.
+- If they ran 0 times this week, acknowledge it warmly without guilt-tripping.
+- Plain text only.`;
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 300,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userMessage }],
+  });
+
+  const rawText = response.content
+    .filter(b => b.type === "text")
+    .map(b => (b as { type: "text"; text: string }).text.trim())
+    .join(" ")
+    .trim();
+
+  if (!rawText) return NextResponse.json({ ok: true, skipped: "empty_response" });
+
+  if (dryRun) return NextResponse.json({ ok: true, dry_run: true, message: rawText });
+
+  const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+  if (chatId) await startTyping(chatId);
+
+  await sendSMS(phoneNumber, rawText);
+  await supabase.from("conversations").insert({
+    user_id: userId,
+    role: "assistant",
+    content: rawText,
+    message_type: "weekly_recap",
+  });
+
+  void trackEvent(userId, "coaching_response_sent", { trigger: "weekly_recap", coaching_mode: "analyst" });
+  return NextResponse.json({ ok: true });
+}
+
+/**
  * Handles a Strava activity event for a user who hasn't finished onboarding yet.
  * Sends a brief, warm reaction to the run, then re-asks the current onboarding question
  * so the user knows to reply and finish setup.
@@ -790,6 +901,24 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }
   }
 
+  // Analyst mode gate — skip plan-only triggers; route weekly_recap to a separate handler.
+  const isAnalystMode = (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst';
+  const userTimezoneEarly = (user.timezone as string) || "America/New_York";
+  if (isAnalystMode) {
+    const planOnlyTriggers: TriggerType[] = [
+      "initial_plan", "rebuild_plan", "sync_sessions",
+      "morning_plan", "morning_reminder", "nightly_reminder",
+      "lighter_week", "injury_hold", "injury_clear",
+    ];
+    if ((planOnlyTriggers as string[]).includes(trigger)) {
+      console.log(`[coach/respond] analyst mode — skipping plan trigger: ${trigger}`);
+      return NextResponse.json({ ok: true, skipped: "analyst_mode_no_plans" });
+    }
+    if (trigger === "weekly_recap") {
+      return await handleAnalystWeeklyRecap(userId, user, recentActivities, userTimezoneEarly, dry_run ?? false, requestChatId);
+    }
+  }
+
   // If post_run, fetch the activity
   let activityData = null;
   if (trigger === "post_run" && activityId) {
@@ -949,6 +1078,71 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: cancelMsg, message_type: "user_message" });
       }
       return NextResponse.json({ ok: true, message: cancelMsg });
+    }
+  }
+
+  // Mode switch short-circuit — detect requests to switch between Full Coach and Analyst Mode.
+  // Handled before LLM calls because the coaching context changes fundamentally after a switch.
+  if (trigger === "user_message") {
+    const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
+    const msgText = (latestUserMsg?.content as string) ?? "";
+
+    // Full Coach → Analyst
+    const fullCoachWantsAnalyst = !isAnalystMode && (
+      /\bswitch\s+(?:me\s+)?to\s+analyst(\s+mode)?\b/i.test(msgText) ||
+      /\bjust\s+(?:want|do)\s+(?:the\s+)?analyst(\s+mode)?\b/i.test(msgText) ||
+      (/\banalyst\s+mode\b/i.test(msgText) && /\bswitch\b|\bchange\b|\bmove\b|\bgo\b/i.test(msgText))
+    );
+
+    // Analyst → Full Coach
+    const analystWantsFullCoach = isAnalystMode && (
+      /\b(switch|change|upgrade|move)\s+(?:me\s+)?to\s+(?:full\s*coach|full\s+coaching|structured\s+plan|training\s+plan)\b/i.test(msgText) ||
+      /\bwant\s+a\s+(training\s+)?plan\b/i.test(msgText) ||
+      /\bfull\s*coach(?:ing)?\s+mode\b/i.test(msgText)
+    );
+
+    if (fullCoachWantsAnalyst) {
+      if (!dry_run) {
+        await supabase.from("training_profiles")
+          // coaching_mode is a new column — cast until types are regenerated after migration
+          .update({ ...({ coaching_mode: "analyst" } as Record<string, unknown>), proactive_cadence: "weekly_only" })
+          .eq("user_id", userId);
+        void trackEvent(userId, "coaching_mode_switch", { from: "full_coach", to: "analyst" });
+      }
+      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+      if (chatId) await startTyping(chatId);
+      const switchMsg = "Switched to Analyst Mode! I'll stop sending plan reminders and session schedules. After each run you post to Strava I'll send you insights, and you'll get a trends summary every Sunday. Text me anytime.";
+      if (!dry_run) {
+        await sendSMS(user.phone_number as string, switchMsg);
+        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: switchMsg, message_type: "user_message" });
+      }
+      return NextResponse.json({ ok: true, message: switchMsg });
+    }
+
+    if (analystWantsFullCoach) {
+      // Put them back in the onboarding flow to collect goal/race/schedule for the plan
+      if (!dry_run) {
+        const existingOnboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+        await Promise.all([
+          supabase.from("users").update({
+            onboarding_step: "onboarding",
+            onboarding_data: { ...existingOnboardingData, coaching_mode: "full_coach", mode_switched_from_analyst: true },
+          }).eq("id", userId),
+          supabase.from("training_profiles")
+            // coaching_mode is a new column — cast until types are regenerated after migration
+            .update({ ...({ coaching_mode: "full_coach" } as Record<string, unknown>) })
+            .eq("user_id", userId),
+        ]);
+        void trackEvent(userId, "coaching_mode_switch", { from: "analyst", to: "full_coach" });
+      }
+      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+      if (chatId) await startTyping(chatId);
+      const switchMsg = "Switching you to Full Coach! I have a few quick questions to build your plan — just reply and we'll get it set up.";
+      if (!dry_run) {
+        await sendSMS(user.phone_number as string, switchMsg);
+        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: switchMsg, message_type: "user_message" });
+      }
+      return NextResponse.json({ ok: true, message: switchMsg });
     }
   }
 

@@ -210,7 +210,10 @@ Your job: collect the information below through natural conversation, then signa
 WHAT TO COLLECT:
 Required before signaling [READY]:
 - Athlete's name (ask in your first message if not already known)
+- Coaching mode (Full Coach or Analyst — see COACHING MODE section below)
 - Training goal (specific race/event name and type, or general fitness). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
+
+Required for Full Coach mode only (skip all of these for Analyst Mode):
 - Training schedule (which days of the week work best)
 - Race date (if they have a named race — MANDATORY: always web_search the exact date, never state one from memory)
 - Fitness baseline: a recent race PR, current easy pace, OR Strava is connected
@@ -248,6 +251,23 @@ INSTRUCTIONS:
 ${isFirstResponse
   ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
   : ""}
+
+COACHING MODE — offer this after you have the athlete's name and goal, before asking about Strava:
+Present two options briefly in one message (2–3 sentences total). Name them exactly:
+- "Full Coach" — I build a structured multi-week training plan with weekly sessions, daily check-ins, and Sunday recaps. Best when you're working toward a specific goal.
+- "Analyst Mode" — No plan. I'll analyze every run you post to Strava and send a weekly trends summary. Best if you want run-by-run feedback without a rigid schedule.
+
+Wait for their answer before moving on. If they ask follow-up questions about either mode, answer them briefly.
+
+If they choose Analyst Mode:
+- Strava is REQUIRED — all insights come from actual run data. Tell them this clearly in the same message where you confirm their mode choice.
+- Do NOT ask for training_days, race_date, race times, goal pace, or weekly mileage — none of these are needed without a plan.
+- Ask only about Strava. Once Strava is connected (or the STRAVA context shows "Connected"), signal [READY] immediately.
+- If they say they don't have Strava or want to skip it: explain Strava is required for Analyst Mode and offer Full Coach as an alternative. Do not proceed with Analyst Mode without Strava.
+- Their coaching_mode is "analyst".
+
+If they choose Full Coach: continue the normal onboarding flow below.
+- Their coaching_mode is "full_coach".
 
 STRAVA:
 Ask about Strava as your NEXT question once you have the athlete's name and goal — before asking for race times, pace, or weekly mileage. Strava can provide all of that automatically, so don't collect fitness data manually if Strava might have it. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
@@ -465,6 +485,7 @@ function summarizeCollected(data: Record<string, unknown>): string {
   const lines: string[] = [];
 
   if (data.name) lines.push(`Name: ${data.name}`);
+  if (data.coaching_mode) lines.push(`Coaching mode: ${data.coaching_mode === 'analyst' ? 'Analyst Mode (no plan — post-run insights + weekly recap only)' : 'Full Coach (structured plan + sessions + reminders)'}`);
   if (data.goal) {
     const distSuffix = data.goal_distance_miles ? `, ${data.goal_distance_miles} mi` : "";
     const goalStr = data.race_name
@@ -543,7 +564,8 @@ Rules:
 - other_races: B/C secondary races only, not the main A race.
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
 - strava_skipped: true if athlete says they don't have or won't use Strava. Null otherwise.
-- wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.`,
+- wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.
+- coaching_mode: "analyst" if the athlete explicitly chose or confirmed Analyst Mode. "full_coach" if they chose Full Coach. Null if not yet decided.`,
     messages: [{ role: "user", content: transcript }],
     tools: [{
       name: "save_training_fields",
@@ -590,6 +612,7 @@ Rules:
           timezone: { type: ["string", "null"] },
           strava_skipped: { type: ["boolean", "null"] },
           wants_speed_work: { type: ["boolean", "null"] },
+          coaching_mode: { type: ["string", "null"], enum: ["full_coach", "analyst", null] },
         },
         required: [],
       },
@@ -626,9 +649,29 @@ async function handleStrava(
     return NextResponse.json({ ok: true });
   }
 
+  // Analyst mode: Strava is required — block skip attempts
+  const isAnalystMode = onboardingData.coaching_mode === 'analyst';
+  if (isSkip && isAnalystMode) {
+    const reply = `Strava is required for Analyst Mode — all the run insights come from your actual GPS data. If you'd rather not use Strava, I can set you up as Full Coach instead and collect your paces manually. Just reply "full coach" to switch, or connect Strava here:\n\n${stravaUrl}`;
+    await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
+    return NextResponse.json({ ok: true });
+  }
+
+  // Analyst mode: handle "full coach" pivot from the Strava block
+  if (isAnalystMode && /\bfull\s*coach\b/i.test(message)) {
+    const mergedData = { ...onboardingData, coaching_mode: 'full_coach', strava_skipped: true };
+    await supabase.from("users").update({
+      onboarding_step: "onboarding",
+      onboarding_data: mergedData as unknown as Json,
+    }).eq("id", user.id);
+    void trackEvent(user.id, "onboarding_mode_switch", { from: 'analyst', to: 'full_coach' });
+    return handleConversation(user, message, mergedData, chatId);
+  }
+
   if (!isSkip) {
     // Non-skip, non-question — just re-send the link
-    const reply = `Connect Strava for automatic run tracking:\n\n${stravaUrl}\n\nOr reply "skip" to continue without it.`;
+    const skipLine = isAnalystMode ? "" : "\n\nOr reply \"skip\" to continue without it.";
+    const reply = `Connect Strava for automatic run tracking:\n\n${stravaUrl}${skipLine}`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
@@ -925,11 +968,12 @@ function assessFitnessLevel(
 }
 
 async function completeOnboarding(
-  user: { id: string },
+  user: { id: string; phone_number?: string },
   data: Record<string, unknown>,
   chatId?: string | null,
   opts?: { skipInitialPlan?: boolean }
 ): Promise<void> {
+  const isAnalystMode = (data.coaching_mode as string | null) === 'analyst';
   const goal = (data.goal as string) || "general_fitness";
   const raceDate = (data.race_date as string) || null;
   const experienceYears = (data.experience_years as number) ?? 1;
@@ -970,45 +1014,57 @@ async function completeOnboarding(
   const longRun =
     currentLongRunMiles ?? (isUltra ? Math.max(longRunRaw, 10) : longRunRaw);
 
-  const [profileResult, stateResult] = await Promise.all([
+  // Analyst mode: create a minimal profile without a training plan.
+  // training_state is skipped — there are no weekly targets or sessions.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const profileOps: any[] = [
     supabase.from("training_profiles").upsert(
       {
         user_id: user.id,
         goal,
         race_date: raceDate,
         fitness_level: fitnessLevel,
-        days_per_week: daysPerWeek,
-        training_days: trainingDays,
+        days_per_week: isAnalystMode ? null : daysPerWeek,
+        training_days: isAnalystMode ? [] : trainingDays,
         current_easy_pace: easyPace,
         current_tempo_pace: tempoPace,
         current_interval_pace: intervalPace,
         crosstraining_tools: crosstrain,
         proactive_cadence: "weekly_only",
+        // coaching_mode is a new column — cast until types are regenerated after migration
+        ...({ coaching_mode: isAnalystMode ? "analyst" : "full_coach" } as Record<string, unknown>),
         injury_notes: injuryNotes,
         goal_distance_miles: goalDistanceMiles,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
     ),
-    supabase.from("training_state").upsert(
-      {
-        user_id: user.id,
-        current_week: 1,
-        current_phase: "base",
-        weekly_mileage_target: weeklyMileage,
-        long_run_target: longRun,
-        week_mileage_so_far: 0,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    ),
-  ]);
+  ];
+
+  if (!isAnalystMode) {
+    profileOps.push(
+      supabase.from("training_state").upsert(
+        {
+          user_id: user.id,
+          current_week: 1,
+          current_phase: "base",
+          weekly_mileage_target: weeklyMileage,
+          long_run_target: longRun,
+          week_mileage_so_far: 0,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      )
+    );
+  }
+
+  const [profileResult, stateResult] = await Promise.all(profileOps);
 
   if (profileResult.error) {
     console.error("[onboarding] training_profiles upsert failed:", profileResult.error);
     return;
   }
-  if (stateResult.error) {
+  if (!isAnalystMode && stateResult?.error) {
     console.error("[onboarding] training_state upsert failed:", stateResult.error);
     return;
   }
@@ -1101,9 +1157,11 @@ async function completeOnboarding(
         day: "numeric",
       });
       const checkoutUrl = getCheckoutPageUrl(dashboardToken);
-      const sms = `${firstName}, your plan is ready! To access it, sign up for your free 7-day trial — no charge until ${trialEndFormatted}. Cancel any time: ${checkoutUrl}`;
+      const billingMsg = isAnalystMode
+        ? `${firstName}, you're all set with Analyst Mode! To activate it, sign up for your free 7-day trial — no charge until ${trialEndFormatted}. Cancel any time: ${checkoutUrl}`
+        : `${firstName}, your plan is ready! To access it, sign up for your free 7-day trial — no charge until ${trialEndFormatted}. Cancel any time: ${checkoutUrl}`;
       const phoneNumber = billingUser?.phone_number as string;
-      await sendAndStore(user.id, phoneNumber, sms, "awaiting_payment");
+      await sendAndStore(user.id, phoneNumber, billingMsg, "awaiting_payment");
     }
     void trackEvent(user.id, "onboarding_completed", { goal, billing_gate: true });
     return;
@@ -1111,6 +1169,19 @@ async function completeOnboarding(
 
   if (opts?.skipInitialPlan) {
     void trackEvent(user.id, "onboarding_completed", { goal, plan_skipped: true });
+    return;
+  }
+
+  // Analyst mode: skip plan generation entirely — send a welcome message instead.
+  if (isAnalystMode) {
+    void trackEvent(user.id, "onboarding_completed", { goal, coaching_mode: "analyst" });
+    const phoneNumber = (user.phone_number as string | undefined) ?? (billingUser?.phone_number as string | undefined);
+    if (phoneNumber) {
+      const firstName = (name ?? "").split(" ")[0] || null;
+      const greeting = firstName ? `${firstName}, you're all set!` : "You're all set!";
+      const welcomeMsg = `${greeting} Analyst Mode is active. I'll send you feedback and insights after every run you log on Strava, plus a weekly trend summary every Sunday. Text me anytime with questions.`;
+      await sendAndStore(user.id, phoneNumber, welcomeMsg, "onboarding");
+    }
     return;
   }
 

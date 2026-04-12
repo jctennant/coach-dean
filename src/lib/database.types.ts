@@ -282,6 +282,7 @@ export type Database = {
       }
       training_profiles: {
         Row: {
+          coaching_mode: string
           constraints: string | null
           crosstraining_tools: string[] | null
           current_easy_pace: string | null
@@ -309,6 +310,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          coaching_mode?: string
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null
@@ -336,6 +338,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          coaching_mode?: string
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null

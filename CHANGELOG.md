@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Analyst Mode: post-run insights without a training plan
+
+**Type:** Feature
+**Reported by:** Internal product decision
+**User feedback:** N/A
+**Root cause:** N/A — new capability
+**Fix / Change:** Added "Analyst Mode" alongside the existing "Full Coach" mode. Analyst Mode users get post-run insights after every Strava activity and a weekly trends summary every Sunday, but no structured training plan, sessions, or daily reminders. Strava is required for Analyst Mode. Onboarding now presents both options after name + goal collection. Users can switch between modes at any time by texting "switch to analyst mode" or "switch to full coach". Switching to Full Coach re-enters the onboarding flow to collect goal/race/schedule details. DB: new `coaching_mode` column (`full_coach` | `analyst`) on `training_profiles`. All existing users default to `full_coach`.
+**Files changed:** `supabase/migrations/028_analyst_mode.sql`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-12 — Restrict Strava annotation to run-type activities only
 
 **Type:** Bug Fix
