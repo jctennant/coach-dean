@@ -826,7 +826,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .limit(1);
     if (existingPostRun && existingPostRun.length > 0) {
       console.log(`[coach/respond] post_run already sent for activity ${activityId} — skipping Claude`);
-      if (user.strava_write_enabled as boolean) {
+      const isRunActivity = ["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(activityData?.activity_type as string);
+      if ((user.strava_write_enabled as boolean) && isRunActivity) {
         const storedSummary = activityData?.summary as Record<string, unknown> | null;
         const storedSplits = Array.isArray(storedSummary?.splits)
           ? (storedSummary.splits as Array<Record<string, unknown>>)
@@ -1348,7 +1349,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // Strava activity annotation — runs here (before [NO_REPLY] check) so it fires even when
   // Claude decides nothing new needs to be said (e.g. manual re-trigger of an already-analysed run).
   // Annotation is independent of SMS; it runs as long as we have write access and an activity.
-  if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean)) {
+  // Only annotate run-type activities — bikes, hikes, swims, etc. are excluded.
+  const isRunActivityForAnnotation = ["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(activityData?.activity_type as string);
+  if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean) && isRunActivityForAnnotation) {
     const storedSummary = activityData?.summary as Record<string, unknown> | null;
     const storedSplits = Array.isArray(storedSummary?.splits)
       ? (storedSummary.splits as Array<Record<string, unknown>>)
@@ -3472,7 +3475,7 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 - The same applies to hilly trail workouts: if a trail segment averages 8-10% grade, the athlete's pace will and should be much slower than their flat easy pace. Don't flag this as "slow" — it's correct.
 
 ATHLETE HISTORY:
-${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}- Strava: ${user.strava_athlete_id ? "connected" : "not connected"}
+${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}- Strava: ${user.strava_athlete_id ? "connected" : "not connected"}${!user.strava_athlete_id ? `\n<rule>STRAVA NOT CONNECTED: This athlete does not have Strava linked to Coach Dean. If they say they "uploaded to Strava" or that their run "is on Strava", do NOT say it will sync shortly or imply it will appear in your feed — it won't. Instead: acknowledge their run, let them know you don't have a Strava connection for them so it won't auto-sync, and offer to connect it — tell them to text you "connect strava" and you'll send the link. Keep this brief and conversational — don't make it a big deal.</rule>` : ""}
 ${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}${profile?.training_days && (profile.training_days as string[]).length > 0 ? `\n- <rule>TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${(profile.training_days as string[]).length} running session${(profile.training_days as string[]).length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${(profile.training_days as string[]).length <= 3 ? ` With only ${(profile.training_days as string[]).length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${(profile.training_days as string[]).length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}</rule>` : ""}
 ${restDays.length > 0 ? `- <rule>REST DAYS — NEVER schedule a run on: ${restDays.join(", ")}. This is a hard constraint — it applies to all weeks including the initial plan and any future-week previews.</rule>\n` : ""}- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}

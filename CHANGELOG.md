@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Restrict Strava annotation to run-type activities only
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** `annotateStravaActivity` was called for any `post_run` trigger regardless of activity type, so hikes, bike rides, swims, etc. would get a run coaching annotation written to their Strava description.
+**Fix / Change:** Added activity type guard at both annotation call sites (main path and dedup early-exit path). Only `Run`, `TrailRun`, `VirtualRun`, and `Treadmill` activities are annotated.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-12 — Fix Dean falsely implying Strava will sync for non-connected users
+
+**Type:** Bug Fix
+**Reported by:** Jake (observed in Madie's conversation)
+**User feedback:** Madie said "I already finished today's run and uploaded it to Strava" — Dean responded "sometimes there's a delay before activities sync over" implying it would appear soon, when in fact Madie has no Strava account connected to Coach Dean.
+**Root cause:** System prompt told Dean "Strava: not connected" but gave no guidance on what to say when a non-connected user mentions Strava. Dean defaulted to a plausible-sounding sync delay response, which was factually wrong and would leave the user waiting for a sync that will never happen.
+**Fix / Change:** Added a `<rule>` adjacent to the Strava status line (for non-connected athletes) instructing Dean to acknowledge the run, clarify there's no Strava link so it won't auto-sync, and invite the user to share how it went so it can be logged manually.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-12 — Double-text guard and "today already done" prompt fix
 
 **Type:** Bug Fix
