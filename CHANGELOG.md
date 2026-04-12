@@ -13,14 +13,14 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Fix / Change:** Header now looks up the A race from the `races` table (matching by `race_date` or `priority === "A"`) and uses that entry's `goal`/`goal_distance_miles` to derive the distance suffix — with the same non-standard-distance logic used by the UpcomingRaces component. Falls back to `onboarding_data` only when no races table entry exists. Races section condition changed from `> 1` to `>= 1` so it always renders when there are upcoming races.
 **Files changed:** `src/app/dashboard/page.tsx`
 
-## 2026-04-11 — Ultra training plans: lower peak mileage cap + plateau at peak instead of ramping through
+## 2026-04-11 — Ultra training plans: lower peak mileage + plateau at peak instead of ramping through
 
 **Type:** Improvement
-**Reported by:** Internal observation (reviewing a 100K plan for a ~48 mi/week runner)
-**User feedback:** "Do we think this is too high of weekly mileage? She's at like 40 m / week right now" — plan was showing a 96-mile peak week.
-**Root cause:** Two compounding issues: (1) `hardCap` for 100K was 110, so the 2.0× multiplier on a 48 mi/week base produced a 96-mile peak — well above the 65-85 mi/week range appropriate for recreational 100K runners. (2) `realBuildWeeks` included peak-phase weeks in the build factor calculation, so the plan kept ramping through all 5 peak weeks (83.5 → 86.5 → 89.5 → 93 → 96) rather than plateauing at the target.
-**Fix / Change:** Lowered `hardCap` for 100K from 110 → 85, 50mi from 100 → 80, 100mi from 110 → 95. Excluded peak weeks from `realBuildWeeks` so the build factor is calibrated to reach `targetPeak` by the *start* of peak phase; peak weeks now all plateau at `targetPeak`. Same 48 mi/week base for 100K now produces: peak = 85 mi, all 5 peak weeks at 85 mi flat, taper drops to ~60 → 21.
-**Files changed:** `src/lib/training-plan.ts`
+**Reported by:** Internal observation (reviewing a 100K plan for a ~45–48 mi/week runner)
+**User feedback:** "Do we think this is too high of weekly mileage? She's at like 40 m / week right now" — plan was showing a 96-mile peak, still 85 after initial fix.
+**Root cause:** Three compounding issues: (1) `hardCap` for 100K was 110, so the 2.0× multiplier produced a 96-mile peak. (2) `realBuildWeeks` included peak-phase weeks, so the plan kept ramping through all 5 peak weeks instead of plateauing. (3) Even after lowering `hardCap` to 85, the 2.0× multiplier still hit the cap for anyone above ~43 mi/week — the cap was always the binding constraint, not the multiplier.
+**Fix / Change:** Lowered `hardCap` for 100K → 85, 50mi → 80, 100mi → 95. Excluded peak weeks from `realBuildWeeks` so peak weeks plateau at `targetPeak`. Added a goal-aware growth multiplier: ultra goals use 1.6× (not 2.0×) so the multiplier scales correctly with base — a 45 mi/week runner peaks at 72 mi, 48 mi/week at ~77 mi, with hardCap still protecting high-volume runners. Fixed `other_races` extraction schema (was untyped `object`, so Haiku guessed field names; now fully specified with `date`, `name`, `goal`, `priority`, `goal_distance_miles`).
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/onboarding/handle/route.ts`
 
 ## 2026-04-11 — GTM attribution tracking: UTM source in SMS body + strava_connected event
 

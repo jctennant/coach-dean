@@ -101,10 +101,14 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   } else {
     hardCap = 60; floor = 20;
   }
-  // Allow up to 100% growth from base (doubles over a full training cycle),
-  // but never outside [floor, hardCap]. Previous 1.5x cap was too conservative —
-  // athletes routinely build from 15 to 30+ mi/week over a 14-week HM plan.
-  return Math.max(Math.min(baseMileage * 2.0, hardCap), floor);
+  // Growth multiplier: how much volume can increase over the full training cycle.
+  // Ultra goals use 1.6x — doubling is too aggressive when the base is already high
+  // (45 mi/week × 2.0 = 90, which overshoots what's appropriate for a recreational 100K).
+  // Road races use 2.0x — a half marathon runner going from 15 → 30 mi/week is normal.
+  const isUltra = g.includes("100k") || g.includes("100mi") || g.includes("100 m")
+    || g.includes("50mi") || g.includes("50 mi") || g.includes("50k") || g.includes("50 k");
+  const growthMultiplier = isUltra ? 1.6 : 2.0;
+  return Math.max(Math.min(baseMileage * growthMultiplier, hardCap), floor);
 }
 
 /**
