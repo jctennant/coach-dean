@@ -339,13 +339,39 @@ export default async function DashboardPage({
     return_to_running: "Return to Running", injury_recovery: "Injury Recovery",
   };
   const standardLabel = GOAL_LABELS[goalBucket as string] ?? null;
-  // For named races: show the actual distance (e.g. "7.4 mi") if it was explicitly parsed.
-  // Do NOT fall back to the standard bucket label for named races — the bucket may be stale
-  // from a previously-named race (e.g. "10K" from Dipsea showing on Sierre Zinal).
-  // For unnamed goals, show the standard bucket label as usual.
-  const distanceSuffix = raceName
-    ? (specificDistanceMiles ? `${specificDistanceMiles} mi` : null)
-    : standardLabel;
+  // Standard bucket distances — used to detect genuinely non-standard race distances.
+  const STANDARD_BUCKET_MILES_HEADER: Record<string, number> = {
+    mile: 1.0, "5k": 3.107, "10k": 6.214, half_marathon: 13.109, marathon: 26.219,
+    "30k": 18.641, "50k": 31.069, "50mi": 50.0, "100k": 62.137, "100mi": 100.0,
+  };
+  // For the header distance suffix, prefer the A race's entry in the races table over
+  // onboarding_data.goal_distance_miles. onboarding_data can be stale when the user has
+  // multiple races — e.g. the parser captured Broken Arrow 46K (28.5 mi) but the A race
+  // is Kodiak 100K, so the header was showing "Kodiak 100K · 28.5 mi".
+  const aRaceEntry = upcomingRaces.find(r => r.race_date === (raceDate as string))
+    ?? upcomingRaces.find(r => r.priority === "A")
+    ?? null;
+  let distanceSuffix: string | null;
+  if (raceName) {
+    if (aRaceEntry) {
+      // Use the races table entry — it has the correct goal and distance for THIS race.
+      // Only show a suffix for genuinely non-standard distances (e.g. "Dipsea · 7.4 mi").
+      // For standard bucket races (100K, marathon, etc.) the race name already contains
+      // the distance, so suppress the suffix to avoid "Kodiak 100K · 100K".
+      const isNonStd = aRaceEntry.goal_distance_miles != null
+        && Math.abs(aRaceEntry.goal_distance_miles - (STANDARD_BUCKET_MILES_HEADER[aRaceEntry.goal ?? ""] ?? -1)) > 0.5;
+      distanceSuffix = isNonStd ? fmtDist(aRaceEntry.goal_distance_miles!, useMetric) : null;
+    } else {
+      // No races table entry yet (rare — e.g. during initial plan generation before races are saved).
+      // Only show a suffix if the distance is genuinely non-standard.
+      const odMi = specificDistanceMiles;
+      const stdMi = STANDARD_BUCKET_MILES_HEADER[goalBucket as string] ?? -1;
+      const isNonStd = odMi != null && Math.abs(odMi - stdMi) > 0.5;
+      distanceSuffix = isNonStd ? fmtDist(odMi!, useMetric) : null;
+    }
+  } else {
+    distanceSuffix = standardLabel;
+  }
   const goalLabel = raceName
     ? `${raceName}${distanceSuffix ? ` · ${distanceSuffix}` : ""}`
     : standardLabel

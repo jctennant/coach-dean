@@ -568,7 +568,25 @@ Rules:
           injury_notes: { type: ["string", "null"] },
           ultra_race_history: { type: ["string", "null"] },
           experience_years: { type: ["number", "null"] },
-          other_races: { oneOf: [{ type: "array", items: { type: "object" } }, { type: "null" }] },
+          other_races: {
+            oneOf: [
+              {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    date: { type: "string", description: "YYYY-MM-DD" },
+                    name: { type: ["string", "null"] },
+                    goal: { type: ["string", "null"] },
+                    priority: { type: "string", enum: ["B", "C"] },
+                    goal_distance_miles: { type: ["number", "null"] },
+                  },
+                  required: ["date", "priority"],
+                },
+              },
+              { type: "null" },
+            ],
+          },
           timezone: { type: ["string", "null"] },
           strava_skipped: { type: ["boolean", "null"] },
           wants_speed_work: { type: ["boolean", "null"] },

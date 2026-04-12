@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Dashboard: fix stale race distance in header + always show races section
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (reviewing Maddy's dashboard)
+**User feedback:** "the 28.5 mi doesn't match the 100k label" — header showed "Kodiak 100K · 28.5 mi"; also races section wasn't visible at all.
+**Root cause:** Two bugs: (1) The header distance suffix was pulled from `onboarding_data.goal_distance_miles`, which had captured Broken Arrow 46K's distance (28.5 mi) during onboarding — stale once Kodiak 100K became the A race. (2) The races section only rendered when `upcomingRaces.length > 1`; with only one race in the table, the section was hidden entirely.
+**Fix / Change:** Header now looks up the A race from the `races` table (matching by `race_date` or `priority === "A"`) and uses that entry's `goal`/`goal_distance_miles` to derive the distance suffix — with the same non-standard-distance logic used by the UpcomingRaces component. Falls back to `onboarding_data` only when no races table entry exists. Races section condition changed from `> 1` to `>= 1` so it always renders when there are upcoming races.
+**Files changed:** `src/app/dashboard/page.tsx`
+
 ## 2026-04-11 — Ultra training plans: lower peak mileage cap + plateau at peak instead of ramping through
 
 **Type:** Improvement
