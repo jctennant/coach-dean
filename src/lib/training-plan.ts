@@ -108,7 +108,7 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   const isUltra = g.includes("100k") || g.includes("100mi") || g.includes("100 m")
     || g.includes("50mi") || g.includes("50 mi") || g.includes("50k") || g.includes("50 k");
   const growthMultiplier = isUltra ? 1.6 : 2.0;
-  return Math.max(Math.min(baseMileage * growthMultiplier, hardCap), floor);
+  return Math.round(Math.max(Math.min(baseMileage * growthMultiplier, hardCap), floor) * 2) / 2;
 }
 
 /**
