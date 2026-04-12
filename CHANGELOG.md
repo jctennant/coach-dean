@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Initial plan: explicitly frame partial-week plans as a short starter
+
+**Type:** Improvement
+**Reported by:** Maddie Chamberlain
+**User feedback:** "it looked at my strava and it was like 'nice you have been doing a 45 mile week average let's start with a 12 mile week next week' and I had to kinda prompt it to start me where I already am"
+**Root cause:** When a user onboards mid-week, Dean prescribes a partial-week plan (e.g. just 2 remaining days = ~12 miles). But the messaging didn't frame it as a short starter — it looked like Dean was dropping their weekly volume from 45 miles to 12. The context about "this is just for the rest of this week" was never communicated to the athlete.
+**Fix / Change:** Updated the `initial_plan` prompt's `WEEK BOUNDARY` instruction to explicitly tell Dean to communicate the partial-week framing to the athlete in the first bubble. Dean must now say something like "This covers the rest of this week — on Sunday I'll send your first full week plan." This is especially important for Strava users with high volume averages, where the discrepancy is most jarring.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-11 — Dashboard: fix stale race distance in header + always show races section
 
 **Type:** Bug Fix
