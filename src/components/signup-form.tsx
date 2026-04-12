@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import posthog from "posthog-js";
@@ -10,13 +11,25 @@ interface SignupFormProps {
 }
 
 export function SignupForm({ smsPhone, centered }: SignupFormProps) {
-  // Use `?` (not `&`) per RFC 5724, and a literal space so the OS SMS app
-  // doesn't pass "%20" through as literal characters in the message body.
-  const smsUrl = `sms:${smsPhone ?? "+18336373002"}?body=Hi Coach Dean!`;
+  const basePhone = smsPhone ?? "+18336373002";
   const location = centered ? "bottom" : "hero";
 
+  // Build the SMS URL. If utm_source is present in the page URL, embed it in
+  // the SMS body as `src=X` so the linq webhook can attribute the new user
+  // to the right acquisition channel without requiring a web-side identity link.
+  const [smsUrl, setSmsUrl] = useState(`sms:${basePhone}?body=Hi Coach Dean!`);
+  useEffect(() => {
+    const src = new URLSearchParams(window.location.search).get("utm_source");
+    if (src) {
+      // Keep the token compact and alphanumeric-safe for the SMS body
+      const safeSrc = src.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
+      setSmsUrl(`sms:${basePhone}?body=Hi Coach Dean! src=${safeSrc}`);
+    }
+  }, [basePhone]);
+
   function trackCta(device: "mobile" | "desktop") {
-    posthog.capture("cta_clicked", { location, device });
+    const src = new URLSearchParams(window.location.search).get("utm_source") || undefined;
+    posthog.capture("cta_clicked", { location, device, ...(src && { utm_source: src }) });
   }
 
   return (

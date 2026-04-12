@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — GTM attribution tracking: UTM source in SMS body + strava_connected event
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** No way to attribute social media GTM posts to actual sign-ups. `cta_clicked` used an anonymous browser identity; `onboarding_started` used a Supabase user ID — they were unlinked in PostHog. Also missing a `strava_connected` event.
+**Fix / Change:** (1) `signup-form.tsx` now reads `utm_source` from the page URL on mount and appends `src=X` to the SMS body if present. (2) `linq/route.ts` parses and strips the `src=` token from a new user's first message, stores it in `onboarding_data.acquisition_source`, and passes it as a property on `onboarding_started`. (3) Strava OAuth callback now fires `strava_connected` with a `during_onboarding` flag. To use: add `?utm_source=linkedin` (or `twitter`, `instagram`) to any shared link — PostHog and the DB will both carry attribution through to `onboarding_started` and `onboarding_completed`.
+**Files changed:** src/components/signup-form.tsx, src/app/api/webhooks/linq/route.ts, src/app/api/auth/strava/callback/route.ts
+
 ## 2026-04-11 — Derive timezone from Strava city/state instead of athlete.timezone preference
 
 **Type:** Bug Fix

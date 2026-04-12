@@ -268,17 +268,24 @@ async function handleInboundMessage(
       return;
     }
 
-    void trackEvent(newUser.id, "onboarding_started");
+    // Parse acquisition source embedded by signup-form.tsx when utm_source is present.
+    // Strip the token before storing the message so Dean never sees "src=linkedin".
+    const srcMatch = body.match(/\bsrc=([a-zA-Z0-9_-]{1,32})/);
+    const acquisitionSource = srcMatch ? srcMatch[1] : null;
+    const cleanBody = acquisitionSource ? body.replace(/\s*\bsrc=[a-zA-Z0-9_-]{1,32}/, "").trim() : body;
+
+    void trackEvent(newUser.id, "onboarding_started", acquisitionSource ? { acquisition_source: acquisitionSource } : {});
     void trackEvent(newUser.id, "message_received", { has_image: !!imageUrl, onboarding: true });
 
-    // Persist chatId for future messages (typing indicator started above already)
-    if (payloadChatId) {
-      void supabase.from("users").update({ linq_chat_id: payloadChatId }).eq("id", newUser.id);
-    }
+    // Persist chatId and acquisition source for future reference
+    void supabase.from("users").update({
+      ...(payloadChatId ? { linq_chat_id: payloadChatId } : {}),
+      ...(acquisitionSource ? { onboarding_data: { acquisition_source: acquisitionSource } } : {}),
+    }).eq("id", newUser.id);
 
     // For new users, images before onboarding are unusual — treat as no message
     // and let onboarding start normally.
-    const messageBody = body || (imageUrl ? "[Workout image received]" : "");
+    const messageBody = cleanBody || (imageUrl ? "[Workout image received]" : "");
     await supabase.from("conversations").insert({
       user_id: newUser.id,
       role: "user",

@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import { getAllActivities, getAthleteStats } from "@/lib/strava";
+import { trackEvent } from "@/lib/track";
 import type { Json } from "@/lib/database.types";
 import { parseTimezoneFromLocation } from "@/lib/timezone";
 
@@ -155,6 +156,7 @@ export async function GET(request: Request) {
   }
 
   console.log("[strava-callback] user updated:", user.id, "tz:", timezone, "units:", preferredUnits);
+  void trackEvent(user.id, "strava_connected", { during_onboarding: !alreadyOnboarded });
 
   // Persist preferred_units to training_profiles (upsert in case row doesn't exist yet).
   // This is fire-and-forget — a failure here doesn't block the flow.
