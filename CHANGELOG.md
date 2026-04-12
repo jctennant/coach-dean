@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Fix ghost Strava-connected message, duplicate post-run SMS, and mid-week mileage total
+
+**Type:** Bug Fix
+**Reported by:** Automated conversation analysis (2026-04-11 digest)
+**User feedback:** Ghost "Strava connected" message fired 4× mid-conversation; same 10-mile run triggered 3 separate post-run check-ins; plan summary said "14 mi for the week" when user had already logged 36 mi.
+**Root cause:**
+- **Ghost Strava message:** The OAuth callback (`/api/auth/strava/callback`) sends the "Strava connected" SMS unconditionally on every request. Re-auth flows (e.g. clicking the Strava link again, or hitting the write-scope re-auth route) each trigger a fresh callback → duplicate messages.
+- **Duplicate post-run messages:** The webhook's second dedup guard only checked for a post_run conversation within the last 10 minutes. Strava can re-fire the same activity_id event hours apart (observed at 19:04, 19:15, 19:48 for the same run). The 44-minute gap between the first and third event slipped through the 10-minute window.
+- **Mileage total error:** Dean prescribed "Sun 4/13 · Long run 14mi" for a user who had already logged 36 miles this week, then said "That brings you to 14 mi for the week." No prompt rule existed to require stating the full projected total (existing + new) when mid-week miles are already logged.
+**Fix / Change:**
+- `strava/callback/route.ts`: Query `strava_access_token` from the user record before sending the welcome SMS. If already set (Strava was already connected), skip the SMS. First-time connects still send the message normally.
+- `webhooks/strava/route.ts`: Replaced the 10-minute time-based second guard with a permanent per-activity check: query conversations for an existing `post_run` row with this specific `strava_activity_id`. Falls back to the 10-minute guard only as a race-condition safety net for near-simultaneous events.
+- `coach/respond/route.ts`: Added a `WHEN AN ATHLETE REPORTS MID-WEEK MILEAGE` prompt rule with a `<rule>` block requiring Dean to always state the projected total (existing + new sessions) — never just the new session's distance — when a user discloses their current week mileage.
 ## 2026-04-11 — Comprehensive metric units throughout coaching pipeline
 
 **Type:** Bug Fix
