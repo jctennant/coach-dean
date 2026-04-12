@@ -132,6 +132,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Deduplicate by external message ID *before* entering after() — two identical
+  // webhook deliveries arriving within milliseconds of each other would both pass
+  // an async check since neither has inserted a conversation row yet. Checking
+  // synchronously here means only the first one proceeds.
+  if (messageId) {
+    const { data: existing } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("external_message_id", messageId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      console.log("[linq-webhook] duplicate message (pre-after), skipping:", messageId);
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   // Return 200 immediately, process in background
   after(async () => {
     try {
@@ -159,21 +177,6 @@ async function handleInboundMessage(
     // onboarding/handle and coach/respond each run their own keep-alive loop
     // that stops when the message is sent. A continuation loop here would
     // re-trigger typing *after* the response was already delivered.
-  }
-
-  // Deduplicate by external message ID
-  if (messageId) {
-    const { data: existing } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("external_message_id", messageId)
-      .limit(1)
-      .maybeSingle();
-
-    if (existing) {
-      console.log("[linq-webhook] duplicate message, skipping:", messageId);
-      return;
-    }
   }
 
   // Look up user by phone number.

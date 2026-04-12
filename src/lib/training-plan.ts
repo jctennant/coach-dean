@@ -98,6 +98,19 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
     // Mile time trial: speed-focused, moderate volume. No long runs needed.
     // Peak of 40mi provides enough aerobic base + room for quality sessions.
     hardCap = 40; floor = 15;
+  } else if (g === "ironman") {
+    // Ironman: marathon-distance run leg, but athletes also swim/bike heavily.
+    // Run-specific volume is lower than standalone marathon training.
+    hardCap = 55; floor = 30;
+  } else if (g === "70.3") {
+    // 70.3 / Half Ironman: half-marathon run leg. Cross-training burden reduces run volume.
+    hardCap = 45; floor = 20;
+  } else if (g === "olympic_tri") {
+    // Olympic triathlon: 10K run leg. Run-only coaching keeps volume moderate.
+    hardCap = 40; floor = 15;
+  } else if (g === "sprint_tri") {
+    // Sprint triathlon: 5K run leg. Athletes cross-train heavily; run volume stays low.
+    hardCap = 30; floor = 10;
   } else {
     hardCap = 60; floor = 20;
   }
@@ -449,6 +462,9 @@ ULTRA-SPECIFIC REQUIREMENTS (mandatory):
       system: `You are a running coach generating a structured training plan arc.
 For each week provide:
 - key_workout: the quality/speed session for that week (1 line). CRITICAL RULE: When a week includes BOTH a long run AND a quality session (tempo, intervals, strides, fartlek, hill repeats), set key_workout to the QUALITY session — NOT the long run. The long run is displayed separately in the dashboard. Only use the long run as key_workout for pure long-run-only weeks (recovery, low-volume deload). Examples: "6×800m @ 5K pace", "4${unitLabel} tempo @ threshold", "6×strides + easy 5${unitLabel}", "20min fartlek", "Race simulation 5${unitLabel} @ goal pace", "Hill repeats 6×90sec". Deload weeks: "Easy 30min + 4×strides" or similar. IMPORTANT: All distances in key_workout and notes must use ${unitLabel} (${useKm ? "kilometers" : "miles"}) — never mix units.
+
+SESSION MATH RULE: If a key_workout includes a structured breakdown with warm-up, main set, and cool-down (e.g. "1${unitLabel} WU + X${unitLabel} @ pace + 1${unitLabel} CD"), the distance label prefix MUST equal the SUM of all components. Wrong: "Tempo 2${unitLabel} (1${unitLabel} WU + 1.5${unitLabel} @ threshold + 1${unitLabel} CD)" — 1+1.5+1=3.5, not 2. Right: "Tempo 3.5${unitLabel} (1${unitLabel} WU + 1.5${unitLabel} @ threshold + 1${unitLabel} CD)". When in doubt, omit the total distance from the prefix: "Tempo session (1${unitLabel} WU + 1.5${unitLabel} @ threshold + 1${unitLabel} CD)".
+
 - notes: 2-3 sentences for the athlete to read on their dashboard. First sentence: the week's purpose and why it matters at this stage of training (e.g. "Week 6 is about building your aerobic base — consistent easy mileage here pays dividends in the peak phase."). Then 1-2 sentences on the key workout: what it is, the target effort or pace, and one brief execution tip (e.g. "The tempo run on Wednesday should feel comfortably hard — you should be able to speak in short phrases but not hold a conversation. Start controlled and aim to hold pace in the second half."). Deload weeks should acknowledge the pullback and why recovery is productive. Keep it direct and practical, not generic.
 
 Return ONLY a valid JSON array:
@@ -456,7 +472,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileageDisplay}/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\nPreferred units: ${unitLabel}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${injuryNotes ? `\n\nINJURY/PHYSICAL LIMITATIONS: ${injuryNotes}. Avoid exercises that could aggravate this; suggest lower-impact alternatives where relevant.` : ""}${otherNotes ? `\n\nATHLETE PREFERENCES: ${otherNotes}. Incorporate these into key_workout and notes where appropriate — spread across multiple weeks (e.g. if hill repeats requested, designate 2-3 build/peak weeks with hill repeats as key_workout; if cycling requested, mention optional bike sessions in notes for rest/recovery days, not as the key_workout).` : ""}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileageDisplay}/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\nPreferred units: ${unitLabel}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${!easyPace && !tempoPace && !intervalPace ? "\n\nNO PACE DATA: This athlete has not yet established pace baselines. In key_workout and notes, use effort-based language only: 'easy effort', 'comfortably hard', 'hard/near-maximal effort'. Do NOT invent or estimate specific minute/mile or minute/km pace targets — the athlete has no race time or VDOT on file yet." : ""}${injuryNotes ? `\n\nINJURY/PHYSICAL LIMITATIONS: ${injuryNotes}. Avoid exercises that could aggravate this; suggest lower-impact alternatives where relevant.` : ""}${otherNotes ? `\n\nATHLETE PREFERENCES: ${otherNotes}. Incorporate these into key_workout and notes where appropriate — spread across multiple weeks (e.g. if hill repeats requested, designate 2-3 build/peak weeks with hill repeats as key_workout; if cycling requested, mention optional bike sessions in notes for rest/recovery days, not as the key_workout).` : ""}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 

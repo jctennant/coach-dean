@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Plan generation improvements from plan health audit
+
+**Type:** Improvement
+**Reported by:** Internal plan health audit (2026-04-09, 15/37 users with issues)
+**User feedback:** N/A
+**Root cause:** Three systematic issues identified across active users: (1) Triathlon goal types (sprint_tri, olympic_tri, 70.3, ironman) had no dedicated volume targets in `getTargetPeakMileage`, falling through to the generic default (floor=20mi, cap=60mi) — too high for sprint/olympic tris where athletes cross-train heavily and run volume should be lower. (2) Haiku plan enrichment could generate session descriptions where the stated distance label didn't match the sum of WU + main set + CD components (e.g. "Tempo 2mi (1mi WU + 1.5mi @ threshold + 1mi CD)" = 3.5mi, not 2mi). (3) Haiku invented specific pace targets for users with no VDOT or easy pace on file, producing potentially inaccurate prescriptions.
+**Fix / Change:** Added triathlon-specific floor/cap pairs to `getTargetPeakMileage` (sprint_tri: 10–30mi, olympic_tri: 15–40mi, 70.3: 20–45mi, ironman: 30–55mi). Added SESSION MATH RULE to the Haiku enrichment prompt requiring that structured WU/main/CD labels sum to the stated total distance. Added NO PACE DATA guard to the Haiku user message injecting effort-only language instructions when no pace baselines are available.
+**Files changed:** src/lib/training-plan.ts
+
+---
+
+## 2026-04-12 — Fix duplicate inbound message processing (race condition)
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Maddy, user 2e5a7e92)
+**User feedback:** Nearly every onboarding message was saved twice in rapid succession — "Hello! I have some runs…" appearing back-to-back, same with subsequent messages.
+**Root cause:** Linq was delivering each webhook twice within milliseconds. The deduplication check (`external_message_id` lookup) was inside `after()`, so both deliveries would read the DB before either had inserted a conversation row — both passed the check and both processed the message.
+**Fix / Change:** Moved the `external_message_id` dedup check to before `after()`, in the synchronous part of the POST handler. The first delivery hits the DB, finds nothing, and proceeds. The second delivery arrives while the first is still in `after()`, hits the DB, still finds nothing — but now returns 200 before entering `after()` at all, so only one message is ever processed. The redundant check inside `handleInboundMessage` was removed.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`
+
+---
+
 ## 2026-04-11 — Initial plan: explicitly frame partial-week plans as a short starter
 
 **Type:** Improvement
