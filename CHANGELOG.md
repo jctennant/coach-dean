@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Ultra training plans: lower peak mileage cap + plateau at peak instead of ramping through
+
+**Type:** Improvement
+**Reported by:** Internal observation (reviewing a 100K plan for a ~48 mi/week runner)
+**User feedback:** "Do we think this is too high of weekly mileage? She's at like 40 m / week right now" — plan was showing a 96-mile peak week.
+**Root cause:** Two compounding issues: (1) `hardCap` for 100K was 110, so the 2.0× multiplier on a 48 mi/week base produced a 96-mile peak — well above the 65-85 mi/week range appropriate for recreational 100K runners. (2) `realBuildWeeks` included peak-phase weeks in the build factor calculation, so the plan kept ramping through all 5 peak weeks (83.5 → 86.5 → 89.5 → 93 → 96) rather than plateauing at the target.
+**Fix / Change:** Lowered `hardCap` for 100K from 110 → 85, 50mi from 100 → 80, 100mi from 110 → 95. Excluded peak weeks from `realBuildWeeks` so the build factor is calibrated to reach `targetPeak` by the *start* of peak phase; peak weeks now all plateau at `targetPeak`. Same 48 mi/week base for 100K now produces: peak = 85 mi, all 5 peak weeks at 85 mi flat, taper drops to ~60 → 21.
+**Files changed:** `src/lib/training-plan.ts`
+
 ## 2026-04-11 — GTM attribution tracking: UTM source in SMS body + strava_connected event
 
 **Type:** Feature

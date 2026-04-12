@@ -60,12 +60,22 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   //   30K       18.6 mi    14 mi         ~34 mi        14.3 ✓
   //   50K       31 mi      20 mi         ~48 mi        20.2 ✓  (50 gives headroom)
   //   50mi      50 mi      22 mi         ~52 mi        21.8 ✓  (55 gives headroom)
-  //   100K/mi   62+ mi     24 mi         ~57 mi        23.9 ✓  (65 gives headroom)
+  //   100K      62 mi      25 mi         ~60 mi        25.2 ✓  (65 gives headroom)
+  //   100mi     100 mi     28 mi         ~67 mi        28.1 ✓  (70 gives headroom)
+  //
+  // Hard caps for ultra distances are intentionally conservative: recreational ultra
+  // runners peak at 65-85 mi/week for 100K, 75-90 for 100mi. The old 110 cap allowed
+  // the 2.0x multiplier to push a 48 mi/week runner to a 96-mile peak — too aggressive.
 
-  if (g.includes("100k") || g.includes("100mi") || g.includes("100 m")) {
-    hardCap = 110; floor = 65;
+  if (g.includes("100mi") || g.includes("100 m")) {
+    // 100-milers genuinely require high volume; cap is higher but still bounded.
+    hardCap = 95; floor = 70;
+  } else if (g.includes("100k")) {
+    // 100K (62mi): recreational peak of 65-85 mi/week is sufficient. 85 cap prevents
+    // doubling from a 48 mi/week base to 96 miles.
+    hardCap = 85; floor = 65;
   } else if (g.includes("50mi") || g.includes("50 mi")) {
-    hardCap = 100; floor = 55;
+    hardCap = 80; floor = 55;
   } else if (g.includes("50k") || g.includes("50 k")) {
     hardCap = 90; floor = 50;
   } else if (g.includes("30k") || g.includes("30 k")) {
@@ -253,13 +263,14 @@ export async function generateAndSaveFullPlan(
   // reaches targetPeak at exactly the right rate regardless of plan length.
   const targetPeak = getTargetPeakMileage(goal, baseMileage);
 
-  // Count real build weeks (non-deload, non-taper, after week 1) so we can derive
-  // a build factor that reaches targetPeak smoothly by peak phase.
+  // Count real build weeks (non-deload, non-taper, non-peak, after week 1) so we can
+  // derive a build factor that reaches targetPeak by the START of peak phase — peak
+  // weeks then plateau at targetPeak rather than continuing to ramp through peak.
   let realBuildWeeks = 0;
   for (let w = 2; w <= totalWeeks; w++) {
     const ph = computePhaseForPlan(w, totalWeeks, hasRace);
     const isD = w % 4 === 0 && ph !== "taper" && ph !== "peak";
-    if (!isD && ph !== "taper") realBuildWeeks++;
+    if (!isD && ph !== "taper" && ph !== "peak") realBuildWeeks++;
   }
   // Derived factor: (targetPeak / baseMileage) ^ (1 / realBuildWeeks)
   // Clamped to 2%–10%/week: never slower than a plateau, never faster than convention allows.
@@ -332,10 +343,17 @@ export async function generateAndSaveFullPlan(
       // Week 1 IS the base — don't apply buildFactor so the arc starts at exactly
       // prescribedWeek1Miles (or baseMileage). Build begins from week 2 onward.
       if (week > 1) {
-        buildMileage = Math.min(
-          Math.round(buildMileage * weeklyBuildFactor * 2) / 2,
-          targetPeak,
-        );
+        if (phase === "peak") {
+          // Peak phase: plateau at targetPeak. The build factor was calibrated to reach
+          // targetPeak by the start of peak, so we just lock in the max here rather than
+          // continuing to ramp through all 5 peak weeks.
+          buildMileage = targetPeak;
+        } else {
+          buildMileage = Math.min(
+            Math.round(buildMileage * weeklyBuildFactor * 2) / 2,
+            targetPeak,
+          );
+        }
       }
       weekMileage = buildMileage;
       if (phase === "peak") peakMileage = buildMileage;
