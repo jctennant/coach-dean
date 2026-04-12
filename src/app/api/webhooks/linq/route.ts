@@ -478,6 +478,25 @@ async function handleInboundMessage(
       console.log("[linq-webhook] debounce: newer message arrived, skipping response for", storedMsg.id);
       return;
     }
+
+    // Also guard against double-responses when two messages arrived >15s apart (both pass
+    // the newer-message check but fire coach/respond in rapid succession). If an assistant
+    // reply was already sent within the last 45 seconds, the first message already triggered
+    // a response — skip so we don't send two independent replies to a multi-part send.
+    const cutoff = new Date(Date.now() - 45_000).toISOString();
+    const { data: recentReply } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("role", "assistant")
+      .gte("created_at", cutoff)
+      .limit(1)
+      .maybeSingle();
+
+    if (recentReply) {
+      console.log("[linq-webhook] debounce: assistant reply sent within last 45s, skipping double-response for", storedMsg.id);
+      return;
+    }
   }
 
   // Await the fetch — void fetch() doesn't work in after() because the runtime

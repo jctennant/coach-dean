@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Double-text guard and "today already done" prompt fix
+
+**Type:** Bug Fix
+**Reported by:** Jake (self)
+**User feedback:** "Got a bit of a double text here - also I told Dean yesterday I wasn't going to run today, cycle instead so it's weird that he's asking me if I'm going to run"
+**Root cause:** Two bugs: (1) If a user sends two messages more than 15s apart, both pass the debounce window independently and each triggers a separate coach/respond call — resulting in two independent Dean replies. (2) The TODAY'S PLANNED SESSION prompt label said "may already be completed — check conversation history" but Dean wasn't correctly inferring that reporting a completed cross-training workout (cycling) means today is done — he'd still ask "still planning that easy 6mi?"
+**Fix / Change:** (1) Added a 45-second assistant-reply dedup guard in the linq webhook debounce section. After the 15s wait and newer-message check, we now also check if an assistant message was sent within the last 45s — if yes, skip to prevent a second independent reply. (2) Strengthened the TODAY'S PLANNED SESSION system prompt label to explicitly say: if the athlete's message reports completing ANY workout today (running, cycling, strength, etc.), treat today as DONE and do NOT ask if they're still planning today's run.
+**Files changed:** src/app/api/webhooks/linq/route.ts, src/app/api/coach/respond/route.ts
+
 ## 2026-04-12 — [LIGHTER_WEEK] tag + injury accommodation evals
 
 **Type:** Feature

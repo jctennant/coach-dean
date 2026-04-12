@@ -3297,7 +3297,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
       const todayLabel = trigger === "post_run"
         ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
-        : `TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice)`;
+        : `TODAY'S PLANNED SESSION (check RECENT CONVERSATION before giving future-tense advice — if the athlete's message reports completing ANY workout today, whether running, cycling, strength, or other, treat today as DONE and do NOT ask if they're still planning to do today's run)`;
       sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
     }
     if (futureSessions.length > 0) {
