@@ -1,0 +1,42 @@
+{
+  "id": "quality-lighter-week-tag",
+  "description": "Athlete reports calf tightness and fatigue — can still run but needs a lighter week. Dean must append [LIGHTER_WEEK] and suggest cross-training, NOT [INJURY_HOLD].",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-04-14",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-10-11",
+    "goal_time_minutes": 240,
+    "current_week": 9,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 44,
+    "miles_logged_this_week": 8.0,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "notes": "First marathon. Wants to break 4 hours.",
+    "recent_activities": [
+      { "date": "2026-04-13", "type": "Easy Run", "distance_miles": 8.0, "pace": "9:10/mi" },
+      { "date": "2026-04-10", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:20/mi" },
+      { "date": "2026-04-09", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:05/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "My calf has been really tight the last few days and I've been feeling pretty fatigued. I think I need an easier week — I can still run but probably shouldn't push it.",
+  "ground_truth": {
+    "must_contain_tag": "[LIGHTER_WEEK]",
+    "forbidden_tags": ["[INJURY_HOLD]", "[INJURY_CLEAR]"],
+    "must_mention_cross_training": true,
+    "notes": "PRIMARY TEST: Dean must append [LIGHTER_WEEK] (not [INJURY_HOLD]) — the athlete says they CAN still run, just needs to dial back. [INJURY_HOLD] would be wrong here: the athlete explicitly says they can still run. Dean should: (1) acknowledge the calf tightness and fatigue, (2) suggest shorter easy runs this week (drop tempo/quality sessions), (3) mention cross-training (bike, elliptical, or swim) as an option for days they skip running, (4) confirm next week returns to normal. If [LIGHTER_WEEK] is present and [INJURY_HOLD] is absent: score 10. If [INJURY_HOLD] appears instead: score 0. If [LIGHTER_WEEK] is absent: score 2. Cross-training mention is expected but not a scoring criterion."
+  }
+}

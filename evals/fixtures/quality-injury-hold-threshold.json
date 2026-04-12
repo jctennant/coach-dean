@@ -1,0 +1,39 @@
+{
+  "id": "quality-injury-hold-threshold",
+  "description": "Athlete mentions mild knee soreness after a long run — Dean must NOT fire [INJURY_HOLD]. Soreness is below the threshold.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-04-14",
+  "user": {
+    "name": "Elena",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Brooklyn Half",
+    "goal_race_date": "2026-05-16",
+    "goal_time_minutes": 105,
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 44,
+    "easy_pace": "9:45/mi",
+    "tempo_pace": "7:48/mi",
+    "interval_pace": "7:00/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 32,
+    "miles_logged_this_week": 12.0,
+    "runs_this_week": 2,
+    "injury_notes": "None",
+    "notes": "Targeting sub-1:45 finish.",
+    "recent_activities": [
+      { "date": "2026-04-13", "type": "Long Run", "distance_miles": 9.0, "pace": "9:55/mi" },
+      { "date": "2026-04-10", "type": "Tempo Run", "distance_miles": 6.0, "pace": "7:55/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "My knee is a little sore after yesterday's long run. Nothing major, just a bit achy. Thinking of taking it easy tomorrow.",
+  "ground_truth": {
+    "forbidden_tags": ["[INJURY_HOLD]", "[INJURY_CLEAR]"],
+    "notes": "PRIMARY TEST: Dean must NOT output [INJURY_HOLD]. Mild post-long-run soreness is well below the threshold — the athlete says 'a bit achy' and is only considering taking it easy, not complete rest. Dean should respond empathetically: acknowledge the soreness, validate taking it easier tomorrow, and give a practical suggestion (e.g., easy effort, shorter run, or rest day). Dean may suggest monitoring it. If [INJURY_HOLD] is absent: score 10. If [INJURY_HOLD] appears: score 0. [LIGHTER_WEEK] is optional and acceptable here — do not penalize it. All other aspects (pace suggestions, length) are irrelevant for scoring."
+  }
+}

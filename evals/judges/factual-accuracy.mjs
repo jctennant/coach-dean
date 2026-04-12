@@ -178,6 +178,9 @@ function buildGroundTruthBlock(gt) {
   if (gt.miles_already_done != null) lines.push(`- Miles already done this week: ${gt.miles_already_done}`);
   if (gt.planned_sessions_miles != null) lines.push(`- Planned future sessions sum to: ${gt.planned_sessions_miles} mi`);
   if (gt.forbidden_phrases) lines.push(`- FORBIDDEN phrases in response: ${gt.forbidden_phrases.join(", ")}`);
+  if (gt.forbidden_content) lines.push(`- FORBIDDEN content in response: ${gt.forbidden_content.join(", ")}`);
+  if (gt.must_contain_tag) lines.push(`- REQUIRED TAG: Response MUST end with ${gt.must_contain_tag} (after the coaching message text). If this tag is absent: score 0.`);
+  if (gt.forbidden_tags) lines.push(`- FORBIDDEN TAGS (must NOT appear): ${gt.forbidden_tags.join(", ")}. If any forbidden tag appears: score 0.`);
   if (gt.notes) lines.push(`- Evaluator note: ${gt.notes}`);
   return lines.join("\n");
 }

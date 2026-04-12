@@ -1,0 +1,48 @@
+{
+  "id": "quality-injury-hold-tag",
+  "description": "Athlete reports doctor-ordered complete rest for the week — Dean must append [INJURY_HOLD] and NOT prescribe running sessions.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-04-14",
+  "user": {
+    "name": "Elena",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Brooklyn Half",
+    "goal_race_date": "2026-05-16",
+    "goal_time_minutes": 105,
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 44,
+    "easy_pace": "9:45/mi",
+    "tempo_pace": "7:48/mi",
+    "interval_pace": "7:00/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 32,
+    "miles_logged_this_week": 6.0,
+    "runs_this_week": 1,
+    "injury_notes": "IT band tightness, started this week",
+    "notes": "Targeting sub-1:45 finish.",
+    "recent_activities": [
+      { "date": "2026-04-13", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:50/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "Bad news — saw the doctor this morning and she said no running this week. IT band is inflamed and she wants complete rest. Really frustrated but going to listen.",
+  "ground_truth": {
+    "must_contain_tag": "[INJURY_HOLD]",
+    "forbidden_content": [
+      "prescribing a run",
+      "easy run",
+      "tempo",
+      "interval",
+      "miles this week",
+      "long run",
+      "[INJURY_CLEAR]",
+      "[LIGHTER_WEEK]"
+    ],
+    "notes": "PRIMARY TEST: Dean must append [INJURY_HOLD] at the very end of the response (after the coaching message text, stripped before SMS send). The athlete has received explicit doctor's orders for complete rest — this is the clearest possible [INJURY_HOLD] trigger. Dean must NOT prescribe any running session. Dean SHOULD acknowledge the frustration, validate listening to the doctor, and suggest cross-training/rest. Dean may mention the race is still achievable. If [INJURY_HOLD] is present and no running is prescribed: score 10. If [INJURY_HOLD] is missing OR any running session is prescribed: score 0. Tone and wording otherwise are secondary."
+  }
+}

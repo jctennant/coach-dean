@@ -14,7 +14,7 @@ import type { Json } from "@/lib/database.types";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions" | "injury_hold" | "injury_clear";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions" | "injury_hold" | "injury_clear" | "lighter_week";
 
 interface CoachRequest {
   userId: string;
@@ -446,6 +446,39 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
 }
 
 /**
+ * Lighter week: reduce this week's mileage target by ~25% and clear the stored
+ * session list so the next morning_plan / user_message picks up the lower volume.
+ * Fired by the [LIGHTER_WEEK] tag or directly:
+ *   curl -X POST https://coachdean.ai/api/coach/respond -H "Content-Type: application/json" -d '{"userId":"<id>","trigger":"lighter_week"}'
+ */
+async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextResponse> {
+  const { data: stateData } = await supabase
+    .from("training_state")
+    .select("weekly_mileage_target")
+    .eq("user_id", userId)
+    .single();
+
+  const currentTarget = (stateData as { weekly_mileage_target: number | null } | null)?.weekly_mileage_target ?? 0;
+  // Reduce by 25%, rounded to nearest 0.5mi
+  const reducedTarget = Math.round(currentTarget * 0.75 * 2) / 2;
+
+  console.log(`[handleLighterWeek] userId=${userId} — reducing ${currentTarget} → ${reducedTarget} mi`);
+
+  if (!dryRun) {
+    await supabase
+      .from("training_state")
+      .update({
+        weekly_mileage_target: reducedTarget,
+        weekly_plan_sessions: null,
+      })
+      .eq("user_id", userId);
+    void trackEvent(userId, "lighter_week_set", { previous_target: currentTarget, new_target: reducedTarget });
+  }
+
+  return NextResponse.json({ ok: true, previous_target: currentTarget, new_target: reducedTarget });
+}
+
+/**
  * Runs extractAndStorePlanSessions + syncArcCurrentWeek in a fresh invocation
  * so initial_plan and weekly_recap stay within the 10s Hobby budget.
  *
@@ -635,6 +668,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "injury_clear") {
     return await handleInjuryClear(userId, dry_run ?? false);
+  }
+
+  if (trigger === "lighter_week") {
+    return await handleLighterWeek(userId, dry_run ?? false);
   }
 
   // Fetch user context in parallel
@@ -1231,6 +1268,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const wantsRebuild = /\[REBUILD_PLAN\]/i.test(rawText);
   const wantsInjuryHold = /\[INJURY_HOLD\]/i.test(rawText);
   const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
+  const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
   const sessionListMatch = rawText.match(/\[SESSION_LIST:\s*(\[[\s\S]*?\])\]/i);
   const rawSessionListJson = sessionListMatch ? sessionListMatch[1].trim() : null;
@@ -1248,6 +1286,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .replace(/\[REBUILD_PLAN\]/gi, "")
       .replace(/\[INJURY_HOLD\]/gi, "")
       .replace(/\[INJURY_CLEAR\]/gi, "")
+      .replace(/\[LIGHTER_WEEK\]/gi, "")
       .replace(/\[SESSION_LIST:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[SESSION_UPDATE:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[WEEK_OVERRIDE:[^\]]+\]/gi, "")
@@ -1672,6 +1711,21 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           } catch (err) {
             console.error("[coach/respond] injury_clear trigger failed:", err);
             void trackEvent(userId, "after_error", { trigger: "injury_clear_trigger", error: String(err) });
+          }
+        });
+      }
+      if (wantsLighterWeek) {
+        after(async () => {
+          try {
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+            await fetch(`${appUrl}/api/coach/respond`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, trigger: "lighter_week" }),
+            });
+          } catch (err) {
+            console.error("[coach/respond] lighter_week trigger failed:", err);
+            void trackEvent(userId, "after_error", { trigger: "lighter_week_trigger", error: String(err) });
           }
         });
       }
@@ -4248,6 +4302,8 @@ FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (no
 INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
+
+LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and offer cross-training (easy bike, elliptical, swim) as an option for any days they'd otherwise skip. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
 
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 

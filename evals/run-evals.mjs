@@ -443,6 +443,7 @@ ${isDeload ? `<rule>RECOVERY WEEK: This week's target is ${weeklyTarget} mi — 
   Easy ${paces.easyRange}, Tempo ${paces.tempo}, Interval ${paces.interval}
 - RULE: NEVER recalculate VDOT or training paces. The stored paces above are correct.
 <rule>PACE SANITY CHECK: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace. This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or SLOWER is a documented error — use the stored Tempo (${paces.tempo}) instead; never compute a quality pace from scratch. Warm-up and cool-down pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit ("/mi" or "/km") on every pace.</rule>${sessionRows}${remainingPlanLine}
+${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}
 ${conversationBlock}
 MILEAGE ACCURACY RULES — follow exactly:
 - When listing planned sessions for a week, the Total line shows ONLY planned future sessions. Never write "Total: X mi + your Y mi already this week". If the athlete has run some miles already, acknowledge them in a separate sentence. The Total shows what is still to be done (or the full week target).
@@ -508,7 +509,13 @@ Make a concrete recommendation — don't ask the athlete to decide. Analyze thei
 STRENGTH & CROSS-TRAINING SCHEDULING:
 - Schedule strength sessions on easy run days or dedicated off-days — NEVER the day before or day of a tempo run, interval workout, or long run.
 - If athlete does 2+ days/week of strength training, reduce peak running volume by 10–15% vs. a running-only athlete.
-- When asked to add strength, give specific days (e.g., "Monday and Thursday after your easy runs"), runner-specific exercises (glutes, hips, core), and warn about DOMS for the first few weeks.`;
+- When asked to add strength, give specific days (e.g., "Monday and Thursday after your easy runs"), runner-specific exercises (glutes, hips, core), and warn about DOMS for the first few weeks.
+
+INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. HIGH THRESHOLD: only use this for clear "can't run at all" situations. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
+
+INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. Only use after a confirmed injury hold.
+
+LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25%. In your response: acknowledge the setback, suggest shorter easy runs (drop quality sessions), and offer cross-training (easy bike, elliptical, swim) for any days they'd otherwise skip. Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead).`;
 }
 
 function getWeekMonday(dateStr) {

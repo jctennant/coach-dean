@@ -1,0 +1,44 @@
+{
+  "id": "quality-injury-clear-tag",
+  "description": "Athlete on injury hold reports being cleared by doctor — Dean must append [INJURY_CLEAR].",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-04-14",
+  "user": {
+    "name": "Elena",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Brooklyn Half",
+    "goal_race_date": "2026-05-16",
+    "goal_time_minutes": 105,
+    "current_week": 8,
+    "current_phase": "build",
+    "vdot": 44,
+    "easy_pace": "9:45/mi",
+    "tempo_pace": "7:48/mi",
+    "interval_pace": "7:00/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 0,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_hold_since": "2026-04-07",
+    "injury_notes": "IT band inflammation — on complete rest per doctor's orders since Apr 7",
+    "notes": "Targeting sub-1:45 finish.",
+    "recent_activities": [],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "date": "2026-04-07",
+        "content": "Got it — complete rest this week, no running. IT band needs time to calm down. Keep up with easy cross-training (bike, pool) if it feels okay. Focus on the long game."
+      }
+    ]
+  },
+  "inbound_sms": "Good news! Doctor cleared me to run this morning. Said the IT band has settled down and I can ease back into it. So ready to get back out there.",
+  "ground_truth": {
+    "must_contain_tag": "[INJURY_CLEAR]",
+    "forbidden_tags": ["[INJURY_HOLD]", "[LIGHTER_WEEK]"],
+    "notes": "PRIMARY TEST: Dean must append [INJURY_CLEAR] at the end of the response. The athlete has been on an explicit injury hold (injury_hold_since is set, weekly_mileage_target is 0) and has now received explicit medical clearance. This is the clearest possible [INJURY_CLEAR] trigger. Dean should be encouraging, mention the gradual return approach, and NOT prescribe a full normal training week immediately. If [INJURY_CLEAR] is present and [INJURY_HOLD] is absent: score 10. If [INJURY_CLEAR] is missing: score 0. Tone and session details are secondary."
+  }
+}

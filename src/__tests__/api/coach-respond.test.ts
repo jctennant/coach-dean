@@ -868,3 +868,53 @@ describe("coach/respond — injury_clear trigger", () => {
     expect((result as { data: unknown }).data).toMatchObject({ ok: true });
   });
 });
+
+describe("coach/respond — lighter_week trigger", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("reduces weekly_mileage_target by 25% and clears weekly_plan_sessions", async () => {
+    const stateChain = makeChain({
+      data: { weekly_mileage_target: 40 },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "training_state") return stateChain;
+      return makeChain({ data: null, error: null });
+    });
+
+    // Non-dry_run: POST returns immediately, update runs inside after()
+    const req = mockRequest({ userId: "user-001", trigger: "lighter_week" });
+    await POST(req);
+    await flush();
+
+    // 40 * 0.75 = 30 → rounded to nearest 0.5 = 30
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const lighterUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => payload?.weekly_mileage_target != null
+    );
+    expect(lighterUpdate).toBeDefined();
+    expect(lighterUpdate![0].weekly_mileage_target).toBeCloseTo(30, 0);
+    expect(lighterUpdate![0].weekly_plan_sessions).toBeNull();
+  });
+
+  it("returns correct previous_target and new_target, rounding to nearest 0.5", async () => {
+    // 35 * 0.75 = 26.25 → Math.round(26.25 * 2) / 2 = Math.round(52.5) / 2 = 53 / 2 = 26.5
+    const stateChain = makeChain({
+      data: { weekly_mileage_target: 35 },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "training_state") return stateChain;
+      return makeChain({ data: null, error: null });
+    });
+
+    // dry_run so the return value is inline (includes previous_target / new_target)
+    const req = mockRequest({ userId: "user-001", trigger: "lighter_week", dry_run: true });
+    const result = await POST(req);
+
+    expect((result as { data: unknown }).data).toMatchObject({ ok: true, previous_target: 35, new_target: 26.5 });
+  });
+});

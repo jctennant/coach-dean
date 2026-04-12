@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — [LIGHTER_WEEK] tag + injury accommodation evals
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Minor injuries (3–10 days) had no structured handling. An athlete reporting calf tightness or fatigue would get a conversational response but no plan adjustment — the next morning_plan or weekly recap still saw full volume. [INJURY_HOLD] was too blunt (complete rest only), leaving a gap for "can still run, just less" cases.
+**Fix / Change:** Added `[LIGHTER_WEEK]` tag (same pattern as `[REBUILD_PLAN]`/`[INJURY_HOLD]`). When fired, reduces `weekly_mileage_target` by 25% (rounded to nearest 0.5mi) and clears `weekly_plan_sessions` so the next interaction picks up the lower volume. System prompt instructs Dean to append `[LIGHTER_WEEK]` for nagging soreness/fatigue/minor aches, suggest cross-training for skipped days, and confirm next week returns to normal. Tag is stripped before SMS send. Added 4 eval fixtures: `quality-injury-hold-tag` (doctor says no running → must fire `[INJURY_HOLD]`), `quality-injury-hold-threshold` (mild soreness → must NOT fire `[INJURY_HOLD]`), `quality-injury-clear-tag` (cleared after hold → must fire `[INJURY_CLEAR]`), `quality-lighter-week-tag` (calf tight, can still run → must fire `[LIGHTER_WEEK]` not `[INJURY_HOLD]`). Updated eval runner (`run-evals.mjs`) to inject injury hold state and tag instructions for `user_message` fixtures. Updated judge (`factual-accuracy.mjs`) to handle `must_contain_tag` and `forbidden_tags` ground truth fields.
+**Files changed:** src/app/api/coach/respond/route.ts, src/__tests__/api/coach-respond.test.ts, evals/run-evals.mjs, evals/judges/factual-accuracy.mjs, evals/fixtures/quality-injury-hold-tag.json, evals/fixtures/quality-injury-hold-threshold.json, evals/fixtures/quality-injury-clear-tag.json, evals/fixtures/quality-lighter-week-tag.json
+
 ## 2026-04-12 — Injury hold & return-to-running system
 
 **Type:** Feature
