@@ -4,6 +4,39 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Sync B/C races from onboarding_data to races table during rebuild_plan
+
+**Type:** Bug Fix
+**Reported by:** Jake (dashboard review)
+**User feedback:** "I thought it was weird that the plan didn't include my July 11th race — it used to, and now I just see Dipsea"
+**Root cause:** `handleRebuildPlan` queries the `races` table for B/C races to pass to `generateAndSaveFullPlan`. If a race was captured in `onboarding_data.other_races` but never written to (or was accidentally omitted from) the `races` table, it gets silently excluded from the plan arc. Jake's Snowbird race was in `onboarding_data.other_races` but not in `races`.
+**Fix / Change:** Added a sync step in `handleRebuildPlan` that, before querying B/C races, reads `onboarding_data.other_races`, finds any future-dated entries not already in the `races` table, inserts them, and merges them into the local `bCRaces` array so they're included in the plan generation. Non-fatal: if the insert fails, it logs and continues with whatever is in the `races` table.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-13 — Extracted and tested Strava annotation metric helpers
+
+**Type:** Refactor / Tests
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Aerobic efficiency, cardiac decoupling, best GAP, and emoji selection logic were all private inline code inside `annotateStravaActivity`, making them impossible to unit test without full integration-test scaffolding.
+**Fix / Change:** Extracted five pure functions (`selectActivityEmoji`, `processSplitsForMetrics`, `computeAerobicEfficiency`, `computeCardiacDecoupling`, `formatBestGapLine`) and exported them. Added 42 new unit tests covering filtering logic, edge cases (no HR, no GA data, paused splits), drift thresholds, and format correctness. No behavior changed.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/strava-annotation.test.ts`
+
+---
+
+## 2026-04-13 — Rebuilt Jake's plan: 9→11 weeks, fixed weekly target mismatch
+
+**Type:** Bug Fix / Data
+**Reported by:** Jake (dashboard review)
+**User feedback:** "Plan is now too short - it ends before my first race. This week doesn't match arc target after adjustment. Coach's note talks about tempo but quality session is intervals."
+**Root cause:** The `rebuild_plan` trigger fired at 04:03 UTC on April 13, before the anchor fix (`73e97fc`) was deployed at 14:56 UTC. Without `anchorMonday`, `totalWeeks = ceil(Apr 13 → Jun 14 / 7) = 9` instead of the correct `ceil(Mar 30 → Jun 14 / 7) = 11`. The plan ended May 31 — two weeks before the June 14 Dipsea. The coach note/interval mismatch was a Haiku enrichment artifact from the same stale rebuild. The `weekly_mileage_target` (27) was left over from the old plan's week 1 target and didn't match the arc (32.5) or the prescribed sessions sum (~33mi).
+**Fix / Change:** Manually triggered `rebuild_plan` again with the anchor fix deployed — plan is now 11 weeks (Mar 30 – Jun 14). Haiku enrichment regenerated week 3 notes, which now correctly describe the 600m interval session. Updated `training_state.weekly_mileage_target` from 27 → 32.5 to match the arc.
+**Files changed:** N/A (data fix via admin triggers)
+
+---
+
 ## 2026-04-13 — Fixed mid-plan rebuild anchoring wrong taper weeks
 
 **Type:** Bug Fix

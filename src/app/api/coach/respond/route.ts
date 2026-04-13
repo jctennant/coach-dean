@@ -149,7 +149,53 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
     avgWeeklyMileage = Math.round((totalMiles / 8) * 10) / 10;
   }
 
-  const bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
+  let bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
+
+  // Sync B/C races from onboarding_data.other_races → races table.
+  // If a race was captured in onboarding_data but never written to the races table
+  // (e.g. it was mentioned mid-onboarding then the races insert was skipped, or it was
+  // mentioned post-onboarding before per-message race extraction existed), the rebuild
+  // would silently omit it from the plan arc. This pass inserts any missing future races
+  // so the plan always reflects what the athlete has told us.
+  {
+    const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+    const rawOtherRaces = (onboardingData.other_races as Array<{
+      date: string;
+      name: string | null;
+      goal: string | null;
+      priority: "B" | "C";
+      goal_distance_miles?: number | null;
+    }> | null) ?? [];
+    const todayStr = now.toISOString().slice(0, 10);
+    const existingDates = new Set(bCRaces.map(r => r.race_date));
+    const missingRaces = rawOtherRaces.filter(
+      r => r.date && r.date > todayStr && !existingDates.has(r.date)
+    );
+    if (missingRaces.length > 0) {
+      console.log(`[handleRebuildPlan] syncing ${missingRaces.length} missing B/C race(s) from onboarding_data to races table:`, missingRaces.map(r => r.date));
+      const goal = (profile?.goal as string | null) ?? "trail_race";
+      const racesToInsert = missingRaces.map(r => ({
+        user_id: userId,
+        race_date: r.date,
+        race_name: r.name ?? null,
+        goal: r.goal ?? goal,
+        priority: r.priority,
+        goal_time_minutes: null,
+        goal_distance_miles: r.goal_distance_miles ?? null,
+      }));
+      const { error: syncErr } = await supabase.from("races").insert(racesToInsert);
+      if (syncErr) {
+        console.error("[handleRebuildPlan] B/C race sync insert failed (non-fatal):", syncErr);
+      } else {
+        // Include the newly synced races in bCRaces so this rebuild picks them up.
+        bCRaces = [
+          ...bCRaces,
+          ...missingRaces.map(r => ({ race_date: r.date, race_name: r.name ?? null, priority: r.priority })),
+        ];
+      }
+    }
+  }
+
   const typedStateData = stateData as { weekly_mileage_target: number | null; current_week: number | null; weekly_plan_sessions: unknown } | null;
   const existingTarget = typedStateData?.weekly_mileage_target ?? null;
   const currentWeek = typedStateData?.current_week ?? 1;
@@ -4965,12 +5011,7 @@ async function annotateStravaActivity(
   // Activity type emoji — trail, intervals, or road run
   const activityType = (activityData?.activity_type as string | null) ?? "Run";
   const workoutType = (activityData?.workout_type as number | null) ?? 0;
-  const isTrail = activityType === "TrailRun";
-  const isIntervals = workoutType === 3;
-  let emoji = "🏃";
-  if (isIntervals) emoji = "⚡️";
-  if (isTrail && elevGainFt < 500) emoji = "🌲";
-  if (elevGainFt >= 500) emoji = "⛰️"; // elevation wins regardless of activity type
+  const emoji = selectActivityEmoji(activityType, workoutType, elevGainFt);
 
   // Week stats
   const weekMilesDisplay = isMetric
@@ -5005,84 +5046,24 @@ async function annotateStravaActivity(
   // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
   const splitAnalysis = buildSplitAnalysis(splits, isMetric);
 
-  // Single consolidated pass over splits to compute all split-derived metrics.
+  // Compute all split-derived metrics in a single pass via helper functions.
   const metersPerUnit = isMetric ? 1000 : 1609.34;
   const unitLabel = isMetric ? "/km" : "/mi";
-  const splitLabel = isMetric ? "km" : "mi";
-  const MAX_SPLIT_SEC = isMetric ? (20 * 60) / 1.60934 : 20 * 60;
 
   const avgSpeedMs = (activityData?.moving_time_seconds && activityData?.distance_meters)
     ? (activityData.distance_meters as number) / (activityData.moving_time_seconds as number)
     : null;
 
-  type SplitMetrics = { speed: number; gas: number | null; hr: number | null };
-  const validSplitMetrics: SplitMetrics[] = [];
-  let weightedGaSum = 0;
-  let weightedGaTotal = 0;
-  let bestGas: number | null = null;
-  let bestGapSplitNum: number | null = null;
-
-  for (let i = 0; i < splits.length; i++) {
-    const speed = splits[i].average_speed as number | null;
-    if (!speed || speed <= 0) continue;
-    if (metersPerUnit / speed > MAX_SPLIT_SEC) continue; // paused split
-    const gas = splits[i].average_grade_adjusted_speed as number | null;
-    const splitHr = splits[i].average_heartrate as number | null;
-    const dist = splits[i].distance as number | null;
-    validSplitMetrics.push({ speed, gas: gas ?? null, hr: splitHr });
-    if (gas && gas > 0 && dist && dist > 0) {
-      weightedGaSum += gas * dist;
-      weightedGaTotal += dist;
-      if (metersPerUnit / gas <= MAX_SPLIT_SEC && (bestGas === null || gas > bestGas)) {
-        bestGas = gas;
-        bestGapSplitNum = validSplitMetrics.length; // 1-indexed within valid splits
-      }
-    }
-  }
-
-  const gaSpeedMs = weightedGaTotal > 0 ? weightedGaSum / weightedGaTotal : null;
+  const { validSplitMetrics, gaSpeedMs, bestGas, bestGapSplitNum } = processSplitsForMetrics(splits, isMetric);
 
   // Aerobic efficiency (m/beat): speed per heartbeat — higher = more economical.
-  // Prefer grade-adjusted speed (GAP) over raw speed on hilly runs.
-  const rawEff = hr && avgSpeedMs ? avgSpeedMs / hr * 60 : null;
-  const gaEff = hr && gaSpeedMs ? gaSpeedMs / hr * 60 : null;
-  const storedEff = gaEff ?? rawEff; // best available value to persist
-  let efficiencyLine: string | null = null;
-  if (gaEff !== null) {
-    efficiencyLine = `Aerobic eff: ${gaEff.toFixed(2)} m/beat (GA)`;
-  } else if (rawEff !== null) {
-    efficiencyLine = `Aerobic eff: ${rawEff.toFixed(2)} m/beat`;
-  }
+  const { storedEff, efficiencyLine } = computeAerobicEfficiency(hr, avgSpeedMs, gaSpeedMs);
 
-  // Best GAP mile
-  let bestGapLine: string | null = null;
-  if (bestGas !== null && bestGapSplitNum !== null) {
-    const sec = metersPerUnit / bestGas;
-    const m = Math.floor(sec / 60);
-    const s = Math.round(sec % 60);
-    bestGapLine = `Best GAP: ${m}:${s.toString().padStart(2, "0")}${unitLabel} (${splitLabel} ${bestGapSplitNum})`;
-  }
+  // Best GAP line
+  const bestGapLine = formatBestGapLine(bestGas, bestGapSplitNum, isMetric);
 
   // Cardiac decoupling — first-half vs second-half GAP:HR efficiency factor drift.
-  // Strictly GAP-only: splits without grade-adjusted data are excluded.
-  let decouplingLine: string | null = null;
-  let decouplingPct: number | null = null;
-  if (validSplitMetrics.length >= 4) {
-    const mid = Math.floor(validSplitMetrics.length / 2);
-    const h1 = validSplitMetrics.slice(0, mid);
-    const h2 = validSplitMetrics.slice(mid);
-    const gapEf = (sm: SplitMetrics) =>
-      sm.gas && sm.gas > 0 && sm.hr && sm.hr > 0 ? sm.gas / sm.hr : null;
-    const h1EFs = h1.map(gapEf).filter((v): v is number => v !== null);
-    const h2EFs = h2.map(gapEf).filter((v): v is number => v !== null);
-    if (h1EFs.length > 0 && h2EFs.length > 0) {
-      const avgEF1 = h1EFs.reduce((a, b) => a + b, 0) / h1EFs.length;
-      const avgEF2 = h2EFs.reduce((a, b) => a + b, 0) / h2EFs.length;
-      decouplingPct = Math.round(Math.abs((avgEF1 - avgEF2) / avgEF1 * 100) * 10) / 10;
-      const quality = decouplingPct < 5 ? "aerobic system held steady" : decouplingPct < 10 ? "moderate drift" : "high drift";
-      decouplingLine = `Cardiac decoupling: ${decouplingPct.toFixed(1)}% — ${quality}`;
-    }
-  }
+  const { decouplingPct, decouplingLine } = computeCardiacDecoupling(validSplitMetrics);
 
   // Persist aerobic metrics to the activities table for trend analysis over time.
   // Fire-and-forget — don't block annotation on this write.
@@ -5190,6 +5171,158 @@ ${notePrompt}`,
 
   await updateActivityDescription(accessToken, stravaActivityId, newDescription);
   console.log(`[strava-annotation] annotated activity ${stravaActivityId} for user ${userId}`);
+}
+
+/**
+ * Select the activity emoji based on type, workout type, and elevation gain.
+ * Elevation >= 500ft wins over all other signals. Exported for unit testing.
+ */
+export function selectActivityEmoji(
+  activityType: string,
+  workoutType: number,
+  elevGainFt: number
+): string {
+  const isTrail = activityType === "TrailRun";
+  const isIntervals = workoutType === 3;
+  let emoji = "🏃";
+  if (isIntervals) emoji = "⚡️";
+  if (isTrail && elevGainFt < 500) emoji = "🌲";
+  if (elevGainFt >= 500) emoji = "⛰️"; // elevation wins regardless of activity type
+  return emoji;
+}
+
+export type SplitMetrics = { speed: number; gas: number | null; hr: number | null };
+
+export interface SplitMetricsResult {
+  validSplitMetrics: SplitMetrics[];
+  gaSpeedMs: number | null;
+  bestGas: number | null;
+  bestGapSplitNum: number | null;
+}
+
+/**
+ * Process raw Strava splits into validated metric arrays and aggregate values.
+ * Filters out zero-speed and paused-device splits (pace > 20 min/mile).
+ * Returns weighted GA speed, best GA split, and per-split structs for decoupling.
+ * Exported for unit testing.
+ */
+export function processSplitsForMetrics(
+  splits: Array<Record<string, unknown>>,
+  isMetric: boolean
+): SplitMetricsResult {
+  const metersPerUnit = isMetric ? 1000 : 1609.34;
+  const MAX_SPLIT_SEC = isMetric ? (20 * 60) / 1.60934 : 20 * 60;
+
+  const validSplitMetrics: SplitMetrics[] = [];
+  let weightedGaSum = 0;
+  let weightedGaTotal = 0;
+  let bestGas: number | null = null;
+  let bestGapSplitNum: number | null = null;
+
+  for (let i = 0; i < splits.length; i++) {
+    const speed = splits[i].average_speed as number | null;
+    if (!speed || speed <= 0) continue;
+    if (metersPerUnit / speed > MAX_SPLIT_SEC) continue; // paused split
+    const gas = splits[i].average_grade_adjusted_speed as number | null;
+    const splitHr = splits[i].average_heartrate as number | null;
+    const dist = splits[i].distance as number | null;
+    validSplitMetrics.push({ speed, gas: gas ?? null, hr: splitHr });
+    if (gas && gas > 0 && dist && dist > 0) {
+      weightedGaSum += gas * dist;
+      weightedGaTotal += dist;
+      if (metersPerUnit / gas <= MAX_SPLIT_SEC && (bestGas === null || gas > bestGas)) {
+        bestGas = gas;
+        bestGapSplitNum = validSplitMetrics.length; // 1-indexed within valid splits
+      }
+    }
+  }
+
+  const gaSpeedMs = weightedGaTotal > 0 ? weightedGaSum / weightedGaTotal : null;
+  return { validSplitMetrics, gaSpeedMs, bestGas, bestGapSplitNum };
+}
+
+export interface AerobicEfficiencyResult {
+  rawEff: number | null;
+  gaEff: number | null;
+  storedEff: number | null;
+  efficiencyLine: string | null;
+}
+
+/**
+ * Compute aerobic efficiency (m/beat) from HR and speed data.
+ * Prefers grade-adjusted speed (GAP) over raw speed on hilly runs.
+ * Returns null fields when HR or speed are unavailable.
+ * Exported for unit testing.
+ */
+export function computeAerobicEfficiency(
+  hr: number | null,
+  avgSpeedMs: number | null,
+  gaSpeedMs: number | null
+): AerobicEfficiencyResult {
+  const rawEff = hr && avgSpeedMs ? avgSpeedMs / hr * 60 : null;
+  const gaEff = hr && gaSpeedMs ? gaSpeedMs / hr * 60 : null;
+  const storedEff = gaEff ?? rawEff;
+  let efficiencyLine: string | null = null;
+  if (gaEff !== null) {
+    efficiencyLine = `Aerobic eff: ${gaEff.toFixed(2)} m/beat (GA)`;
+  } else if (rawEff !== null) {
+    efficiencyLine = `Aerobic eff: ${rawEff.toFixed(2)} m/beat`;
+  }
+  return { rawEff, gaEff, storedEff, efficiencyLine };
+}
+
+export interface CardiacDecouplingResult {
+  decouplingPct: number | null;
+  decouplingLine: string | null;
+}
+
+/**
+ * Compute cardiac decoupling: first-half vs second-half GAP:HR efficiency factor drift.
+ * Strictly GAP-only — splits without grade-adjusted data are excluded.
+ * Requires >= 4 valid splits to produce a result.
+ * Exported for unit testing.
+ */
+export function computeCardiacDecoupling(
+  validSplitMetrics: SplitMetrics[]
+): CardiacDecouplingResult {
+  if (validSplitMetrics.length < 4) return { decouplingPct: null, decouplingLine: null };
+
+  const mid = Math.floor(validSplitMetrics.length / 2);
+  const h1 = validSplitMetrics.slice(0, mid);
+  const h2 = validSplitMetrics.slice(mid);
+  const gapEf = (sm: SplitMetrics) =>
+    sm.gas && sm.gas > 0 && sm.hr && sm.hr > 0 ? sm.gas / sm.hr : null;
+  const h1EFs = h1.map(gapEf).filter((v): v is number => v !== null);
+  const h2EFs = h2.map(gapEf).filter((v): v is number => v !== null);
+
+  if (h1EFs.length === 0 || h2EFs.length === 0) return { decouplingPct: null, decouplingLine: null };
+
+  const avgEF1 = h1EFs.reduce((a, b) => a + b, 0) / h1EFs.length;
+  const avgEF2 = h2EFs.reduce((a, b) => a + b, 0) / h2EFs.length;
+  const decouplingPct = Math.round(Math.abs((avgEF1 - avgEF2) / avgEF1 * 100) * 10) / 10;
+  const quality = decouplingPct < 5 ? "aerobic system held steady" : decouplingPct < 10 ? "moderate drift" : "high drift";
+  const decouplingLine = `Cardiac decoupling: ${decouplingPct.toFixed(1)}% — ${quality}`;
+  return { decouplingPct, decouplingLine };
+}
+
+/**
+ * Format the best grade-adjusted pace line for the annotation block.
+ * Returns null when no valid GAP data is available.
+ * Exported for unit testing.
+ */
+export function formatBestGapLine(
+  bestGas: number | null,
+  bestGapSplitNum: number | null,
+  isMetric: boolean
+): string | null {
+  if (bestGas === null || bestGapSplitNum === null) return null;
+  const metersPerUnit = isMetric ? 1000 : 1609.34;
+  const unitLabel = isMetric ? "/km" : "/mi";
+  const splitLabel = isMetric ? "km" : "mi";
+  const sec = metersPerUnit / bestGas;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `Best GAP: ${m}:${s.toString().padStart(2, "0")}${unitLabel} (${splitLabel} ${bestGapSplitNum})`;
 }
 
 /**

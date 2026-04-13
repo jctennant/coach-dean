@@ -15,3 +15,32 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 - Ultra path (`awaiting_ultra_background`) correctly auto-skips "anything else" when background data captures what's needed
 - `no_event: true` and `injury_recovery` paths route correctly
 - Multi-distance race detection (Behind the Rocks) worked perfectly
+
+---
+
+## Post-onboarding B/C race extraction
+**Priority:** P1
+**Context:** When a user mentions a new B/C race in a post-onboarding SMS, `persistProfileUpdates` has no field for it — `ExtractedProfileData` only captures A-race date, goal type, paces, injuries, etc. The race gets mentioned in `other_notes` as freeform text (if at all), but never makes it to the `races` table. Only races in the `races` table are passed to `generateAndSaveFullPlan` as `bRaces`, so the plan won't extend to cover the new race until an admin manually adds it.
+
+**Partial mitigation already in place (2026-04-13):** `handleRebuildPlan` now syncs `onboarding_data.other_races` → `races` table before each rebuild, which catches races captured during onboarding but never inserted. Doesn't help for races mentioned post-onboarding.
+
+**What the fix looks like:**
+1. Add `new_b_races?: Array<{ date: string; name: string | null; priority: "B"|"C"; goal_distance_miles?: number | null }> | null` to `ExtractedProfileData`
+2. Update the Haiku extraction prompt in `extractProfileData` to capture B/C races from phrases like "I also signed up for X race on Y date"
+3. In `persistProfileUpdates`, upsert extracted B/C races into the `races` table (insert if `race_date` not already present for this user)
+4. Trigger a silent rebuild after the upsert so the arc extends to cover the new race immediately
+
+**Files:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## Plan integrity check in weekly_recap
+**Priority:** P2
+**Context:** If a user's B/C race is missing from the `races` table (and thus from the plan arc), they'll never know unless they look at the dashboard carefully or ask Dean to rebuild. The weekly_recap rebuilds the current week's sessions but doesn't check whether the arc still covers all the user's races.
+
+**What the fix looks like:**
+- At the start of `weekly_recap` processing, run the same B/C race sync that now exists in `handleRebuildPlan` (sync `onboarding_data.other_races` → `races`)
+- If any new races were inserted, trigger a silent full plan rebuild before generating the week's sessions
+- This means every Sunday the plan self-heals if a race was missing
+
+**Files:** `src/app/api/coach/respond/route.ts`
