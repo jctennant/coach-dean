@@ -2136,12 +2136,31 @@ function correctTotalFromSessionList(
     ? /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*km(?:s)?)/gi
     : /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi;
 
-  return message.replace(totalLineRe, (full, pre, num, post) => {
+  let corrected = message.replace(totalLineRe, (full, pre, num, post) => {
     const stated = parseFloat(num);
     if (Math.abs(stated - roundedTotal) <= 0.4) return full; // already correct
     console.warn(`[correctTotalFromSessionList] stated ${stated}${unit}, SESSION_LIST sum is ${roundedTotal}${unit} — correcting`);
     return `${pre}${roundedTotal}${post}`;
   });
+
+  // Also fix prose references like "pulling back to ~40 mi" or "targeting ~35 mi this week"
+  // that appear before the session list. These are different from the "Total:" line —
+  // Dean often states the periodization target in prose, then prescribes sessions that
+  // sum to a different number. The session sum is authoritative; the prose must match.
+  // Only trigger when the deviation is >2 mi to avoid spurious fixes on last-week references.
+  const proseWeeklyTotalRe = useMetric
+    ? /(?:(?:pulling back|step(?:ping)? back|back(?:ing)? (?:down|off)|dropping|recover[yi]|easing|bringing(?:\s+\w+)*?\s+(?:down|back)|targeting|aiming for|going for|doing)\b[^.\n]*?)(~?)(\d+(?:\.\d+)?)(\s*km(?:s)?\b)/gi
+    : /(?:(?:pulling back|step(?:ping)? back|back(?:ing)? (?:down|off)|dropping|recover[yi]|easing|bringing(?:\s+\w+)*?\s+(?:down|back)|targeting|aiming for|going for|doing)\b[^.\n]*?)(~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\b)/gi;
+
+  corrected = corrected.replace(proseWeeklyTotalRe, (full, tilde, num, post) => {
+    const stated = parseFloat(num);
+    if (Math.abs(stated - roundedTotal) <= 2) return full; // close enough — don't risk false positive
+    console.warn(`[correctTotalFromSessionList] prose total: stated ${stated}${unit}, SESSION_LIST sum is ${roundedTotal}${unit} — correcting`);
+    const suffix = (tilde as string) + (num as string) + (post as string);
+    return full.slice(0, full.length - suffix.length) + tilde + roundedTotal + post;
+  });
+
+  return corrected;
 }
 
 function stripMarkdown(text: string): string {
@@ -3427,7 +3446,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   })();
   const tsPhaseLabel = tsPhaseDisplay.charAt(0).toUpperCase() + tsPhaseDisplay.slice(1);
   const tsDeloadBlock = periodization?.isDeloadWeek
-    ? `<rule>RECOVERY WEEK — MANDATORY: Week ${tsEffectiveWeek} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${tsMi(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances. Recovery weeks are when adaptation happens — do not skip this.</rule>\n` : "";
+    ? `<rule>RECOVERY WEEK — MANDATORY: Week ${tsEffectiveWeek} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${tsMi(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances — do NOT add extra rest days to hit the lower total. If the athlete has ongoing soreness, annotate the run (softer surface, easy effort) rather than canceling it. Recovery weeks are when adaptation happens — do not skip this.</rule>\n` : "";
   const tsProgressionLine = !periodization?.isDeloadWeek && periodization?.suggestedWeeklyMiles != null && tsPhaseDisplay !== "taper"
     ? `- Progression target this week: ~${tsMi(periodization.suggestedWeeklyMiles)} (~${tsPhaseDisplay === "peak" ? "5%" : "8%"} step up from recent avg)\n`
     : "";
@@ -3658,7 +3677,7 @@ ${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${we
 ${allTimeInfo}- Sport: ${sportType}
 - Training days: ${trainingDays}${profile?.training_days && (profile.training_days as string[]).length > 0 ? `\n- <rule>TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${(profile.training_days as string[]).length} running session${(profile.training_days as string[]).length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${(profile.training_days as string[]).length <= 3 ? ` With only ${(profile.training_days as string[]).length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${(profile.training_days as string[]).length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}</rule>` : ""}
 ${restDays.length > 0 ? `- <rule>REST DAYS — NEVER schedule a run on: ${restDays.join(", ")}. This is a hard constraint — it applies to all weeks including the initial plan and any future-week previews.</rule>\n` : ""}- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}
-${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. If the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through. Do not continue with normal coaching mode.` : ""; })()}
+${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${timeConstraintBlock ? `${timeConstraintBlock}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
 
@@ -4625,7 +4644,7 @@ If they complete test runs pain-free, note that next Sunday you'll rebuild the f
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST] with running sessions — only cross-training and test-run probe sessions.
 Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
         : periodization?.isDeloadWeek
-        ? `\n<rule>RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. Recovery weeks are not optional — skipping them is how athletes break down.</rule>\n`
+        ? `\n<rule>RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. CRITICAL: Do NOT add extra rest days to hit this target — keep the same number of running days. If the athlete mentioned soreness or tightness, annotate the affected runs (e.g. "(softer surface, stop if pain)") rather than canceling them. The mileage reduction is the recovery — not fewer running days. Recovery weeks are not optional — skipping them is how athletes break down.</rule>\n`
         : periodization?.suggestedWeeklyMiles != null
         ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${recapMi(periodization.suggestedWeeklyMiles)} (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
         : "";

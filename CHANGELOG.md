@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Fix recovery week over-resting when athlete mentions soreness
+
+**Type:** Bug Fix
+**Reported by:** User observation
+**User feedback:** "I think she said her calves were tight so it recommended not running Monday...but 29 feels like a big drop for 'my calves are tight'"
+**Root cause:** The `RECURRING INJURY ALERT` in the system prompt instructs Dean to "recommend taking a rest day or reducing intensity — do not continue with normal coaching mode." This fires for all trigger types, including `weekly_recap`. So when planning the week, Dean saw calf tightness in `injury_body_parts`, added Monday rest + Friday rest + strength on Wednesday, and ended up with 4 runs (29 mi) instead of 6 runs (~40 mi). The recovery week rule already said "same number of runs, just shorter" but Dean overrode it via the injury alert.
+**Fix / Change:** (1) Scoped the `RECURRING INJURY ALERT` to exclude plan generation: during `weekly_recap`, instead of canceling runs, Dean must annotate them ("softer surface, stop if pain") and keep the run count. (2) Added an explicit callout to both recovery week rules (`tsDeloadBlock` and the recap-context rule): "Do NOT add extra rest days to hit the lower total — the mileage reduction is the recovery, not fewer running days."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-13 — Fix prose weekly mileage target inconsistency in weekly_recap
+
+**Type:** Bug Fix
+**Reported by:** User observation
+**User feedback:** "He said going to 40 miles but only creates a week with 29. Kind of surprising since the week after that is 50+ and they are both base."
+**Root cause:** `correctTotalFromSessionList` only fixes the explicit `"Total: X mi"` line at the bottom of the session list. It did not scan back and correct prose references like "pulling back to ~40 mi" in the first text bubble. The periodization engine passed the target (40 mi) to Dean, Dean stated it correctly in prose, but then prescribed sessions summing to only 29 mi. The two numbers never got reconciled.
+**Fix / Change:** Extended `correctTotalFromSessionList` to also find and rewrite prose weekly total mentions (patterns like "pulling back to ~40 mi", "targeting ~45 mi", "step back week — ~38 mi") when they deviate from the SESSION_LIST sum by more than 2 mi. The 2 mi tolerance avoids false positives on closely matching values. Last-week mileage references (e.g. "54.2 mi across 6 runs") are unaffected because they don't follow the keyword patterns.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-13 — Fix duplicate coach responses from Linq webhook race condition
 
 **Type:** Bug Fix
