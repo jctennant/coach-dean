@@ -918,3 +918,134 @@ describe("coach/respond — lighter_week trigger", () => {
     expect((result as { data: unknown }).data).toMatchObject({ ok: true, previous_target: 35, new_target: 26.5 });
   });
 });
+
+// ---------- analyst mode ----------
+
+describe("coach/respond — analyst mode gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  // rebuild_plan and sync_sessions have dedicated early-exits before the gate — tested separately.
+  const planOnlyTriggers = [
+    "morning_plan",
+    "morning_reminder",
+    "nightly_reminder",
+    "initial_plan",
+    "lighter_week",
+    "injury_hold",
+    "injury_clear",
+  ] as const;
+
+  for (const trigger of planOnlyTriggers) {
+    it(`skips '${trigger}' for analyst-mode users without calling Claude`, async () => {
+      setupSupabase({
+        user: baseUser(),
+        profile: baseProfile({ coaching_mode: "analyst" }),
+        state: baseState(),
+      });
+
+      const req = mockRequest({ userId: "user-001", trigger });
+      await POST(req);
+      await flush(); // runs processCoachRequest (outer after())
+
+      // Gate fires before any Claude call — no LLM or SMS side effects
+      expect((anthropic.messages.create as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+      const { sendSMS } = await import("@/lib/linq");
+      expect((sendSMS as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    });
+  }
+});
+
+describe("coach/respond — analyst mode switch via tag", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("switches full_coach → analyst when Claude emits [ANALYST_MODE]", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Switching you to Analyst Mode — no more scheduled sessions, just insights. [ANALYST_MODE]" }],
+    });
+
+    const profileChain = makeChain({ data: baseProfile({ coaching_mode: "full_coach" }), error: null });
+    // conversations returns newest-first; route reverses internally — one user message is enough
+    const conversations = [{ role: "user", content: "switch me to analyst mode", created_at: new Date().toISOString() }];
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return profileChain;
+      if (table === "training_state") return makeChain({ data: baseState(), error: null });
+      if (table === "races") return makeChain({ data: [], error: null });
+      if (table === "conversations") return makeChain({ data: conversations, error: null });
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({
+      userId: "user-001",
+      trigger: "user_message",
+    });
+    await POST(req);
+    await flush(); // runs processCoachRequest (outer after())
+    await flush(); // runs mode-switch DB update (inner after() queued inside processCoachRequest)
+
+    // [ANALYST_MODE] tag stripped from SMS
+    const { sendSMS } = await import("@/lib/linq");
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    expect(smsCalls.length).toBeGreaterThan(0);
+    expect(smsCalls[0][1]).not.toContain("[ANALYST_MODE]");
+
+    // DB updated to analyst mode
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const modeUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => (payload as Record<string, unknown>)?.coaching_mode === "analyst"
+    );
+    expect(modeUpdate).toBeDefined();
+  });
+
+  it("switches analyst → full_coach when Claude emits [FULL_COACH_MODE]", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Let's get you set up with a full training plan! [FULL_COACH_MODE]" }],
+    });
+
+    const usersChain = makeChain({ data: baseUser(), error: null });
+    const profileChain = makeChain({ data: baseProfile({ coaching_mode: "analyst" }), error: null });
+    const conversations = [{ role: "user", content: "I want a training plan", created_at: new Date().toISOString() }];
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return usersChain;
+      if (table === "training_profiles") return profileChain;
+      if (table === "training_state") return makeChain({ data: baseState(), error: null });
+      if (table === "races") return makeChain({ data: [], error: null });
+      if (table === "conversations") return makeChain({ data: conversations, error: null });
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({
+      userId: "user-001",
+      trigger: "user_message",
+    });
+    await POST(req);
+    await flush(); // runs processCoachRequest (outer after())
+    await flush(); // runs mode-switch DB update (inner after() queued inside processCoachRequest)
+
+    // [FULL_COACH_MODE] tag stripped from SMS
+    const { sendSMS } = await import("@/lib/linq");
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    expect(smsCalls.length).toBeGreaterThan(0);
+    expect(smsCalls[0][1]).not.toContain("[FULL_COACH_MODE]");
+
+    // users table updated with onboarding_step
+    const userUpdateCalls = (usersChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const onboardingUpdate = userUpdateCalls.find(
+      ([payload]: [Record<string, unknown>]) => (payload as Record<string, unknown>)?.onboarding_step === "onboarding"
+    );
+    expect(onboardingUpdate).toBeDefined();
+
+    // training_profiles updated to full_coach
+    const profileUpdateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const profileModeUpdate = profileUpdateCalls.find(
+      ([payload]: [Record<string, unknown>]) => (payload as Record<string, unknown>)?.coaching_mode === "full_coach"
+    );
+    expect(profileModeUpdate).toBeDefined();
+  });
+});

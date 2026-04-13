@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Analyst mode: tag-based mode switching + tests
+
+**Type:** Improvement + Refactor
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Analyst mode switching was implemented as a regex short-circuit on the user's raw SMS text, which misses natural phrasings ("I want the analyst thing", "can you turn off plans") and bypasses Dean's judgment (e.g. confirming ambiguous requests). No tests existed for analyst mode at all.
+**Fix / Change:** Replaced the regex short-circuit with tag-based mode switching (`[ANALYST_MODE]`, `[FULL_COACH_MODE]`) consistent with the pattern used for `[REBUILD_PLAN]`, `[INJURY_HOLD]`, etc. Dean now decides whether to switch based on full conversation context and signals intent inline; the route handles the DB update in an `after()` callback. Added system prompt instructions for both tags. Added 10 new tests covering: analyst mode gate (7 plan-only triggers skipped), `[ANALYST_MODE]` tag strips from SMS and updates DB, `[FULL_COACH_MODE]` tag strips from SMS and sets `onboarding_step: "onboarding"` on users table.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
 ## 2026-04-12 — Aerobic metrics: efficiency + decoupling stored and trended over time
 
 **Type:** Feature / Improvement

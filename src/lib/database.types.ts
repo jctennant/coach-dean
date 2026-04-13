@@ -17,10 +17,12 @@ export type Database = {
       activities: {
         Row: {
           activity_type: string | null
+          aerobic_efficiency: number | null
           average_cadence: number | null
           average_heartrate: number | null
           average_pace: string | null
           average_watts: number | null
+          cardiac_decoupling_pct: number | null
           created_at: string | null
           distance_meters: number | null
           elapsed_time_seconds: number | null
@@ -40,10 +42,12 @@ export type Database = {
         }
         Insert: {
           activity_type?: string | null
+          aerobic_efficiency?: number | null
           average_cadence?: number | null
           average_heartrate?: number | null
           average_pace?: string | null
           average_watts?: number | null
+          cardiac_decoupling_pct?: number | null
           created_at?: string | null
           distance_meters?: number | null
           elapsed_time_seconds?: number | null
@@ -63,10 +67,12 @@ export type Database = {
         }
         Update: {
           activity_type?: string | null
+          aerobic_efficiency?: number | null
           average_cadence?: number | null
           average_heartrate?: number | null
           average_pace?: string | null
           average_watts?: number | null
+          cardiac_decoupling_pct?: number | null
           created_at?: string | null
           distance_meters?: number | null
           elapsed_time_seconds?: number | null

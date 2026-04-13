@@ -1088,71 +1088,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }
   }
 
-  // Mode switch short-circuit — detect requests to switch between Full Coach and Analyst Mode.
-  // Handled before LLM calls because the coaching context changes fundamentally after a switch.
-  if (trigger === "user_message") {
-    const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
-    const msgText = (latestUserMsg?.content as string) ?? "";
-
-    // Full Coach → Analyst
-    const fullCoachWantsAnalyst = !isAnalystMode && (
-      /\bswitch\s+(?:me\s+)?to\s+analyst(\s+mode)?\b/i.test(msgText) ||
-      /\bjust\s+(?:want|do)\s+(?:the\s+)?analyst(\s+mode)?\b/i.test(msgText) ||
-      (/\banalyst\s+mode\b/i.test(msgText) && /\bswitch\b|\bchange\b|\bmove\b|\bgo\b/i.test(msgText))
-    );
-
-    // Analyst → Full Coach
-    const analystWantsFullCoach = isAnalystMode && (
-      /\b(switch|change|upgrade|move)\s+(?:me\s+)?to\s+(?:full\s*coach|full\s+coaching|structured\s+plan|training\s+plan)\b/i.test(msgText) ||
-      /\bwant\s+a\s+(training\s+)?plan\b/i.test(msgText) ||
-      /\bfull\s*coach(?:ing)?\s+mode\b/i.test(msgText)
-    );
-
-    if (fullCoachWantsAnalyst) {
-      if (!dry_run) {
-        await supabase.from("training_profiles")
-          // coaching_mode is a new column — cast until types are regenerated after migration
-          .update({ ...({ coaching_mode: "analyst" } as Record<string, unknown>), proactive_cadence: "weekly_only" })
-          .eq("user_id", userId);
-        void trackEvent(userId, "coaching_mode_switch", { from: "full_coach", to: "analyst" });
-      }
-      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
-      if (chatId) await startTyping(chatId);
-      const switchMsg = "Switched to Analyst Mode! I'll stop sending plan reminders and session schedules. After each run you post to Strava I'll send you insights, and you'll get a trends summary every Sunday. Text me anytime.";
-      if (!dry_run) {
-        await sendSMS(user.phone_number as string, switchMsg);
-        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: switchMsg, message_type: "user_message" });
-      }
-      return NextResponse.json({ ok: true, message: switchMsg });
-    }
-
-    if (analystWantsFullCoach) {
-      // Put them back in the onboarding flow to collect goal/race/schedule for the plan
-      if (!dry_run) {
-        const existingOnboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
-        await Promise.all([
-          supabase.from("users").update({
-            onboarding_step: "onboarding",
-            onboarding_data: { ...existingOnboardingData, coaching_mode: "full_coach", mode_switched_from_analyst: true },
-          }).eq("id", userId),
-          supabase.from("training_profiles")
-            // coaching_mode is a new column — cast until types are regenerated after migration
-            .update({ ...({ coaching_mode: "full_coach" } as Record<string, unknown>) })
-            .eq("user_id", userId),
-        ]);
-        void trackEvent(userId, "coaching_mode_switch", { from: "analyst", to: "full_coach" });
-      }
-      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
-      if (chatId) await startTyping(chatId);
-      const switchMsg = "Switching you to Full Coach! I have a few quick questions to build your plan — just reply and we'll get it set up.";
-      if (!dry_run) {
-        await sendSMS(user.phone_number as string, switchMsg);
-        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: switchMsg, message_type: "user_message" });
-      }
-      return NextResponse.json({ ok: true, message: switchMsg });
-    }
-  }
-
   // For user_message: extract race/pace data BEFORE building the system prompt so the
   // coach responds with accurate paces immediately (not one message later).
   let pendingExtracted: Awaited<ReturnType<typeof extractProfileData>> | null = null;
@@ -1522,6 +1457,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const wantsInjuryHold = /\[INJURY_HOLD\]/i.test(rawText);
   const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
+  const wantsAnalystMode = /\[ANALYST_MODE\]/i.test(rawText);
+  const wantsFullCoachMode = /\[FULL_COACH_MODE\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
   const sessionListMatch = rawText.match(/\[SESSION_LIST:\s*(\[[\s\S]*?\])\]/i);
   const rawSessionListJson = sessionListMatch ? sessionListMatch[1].trim() : null;
@@ -1540,6 +1477,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .replace(/\[INJURY_HOLD\]/gi, "")
       .replace(/\[INJURY_CLEAR\]/gi, "")
       .replace(/\[LIGHTER_WEEK\]/gi, "")
+      .replace(/\[ANALYST_MODE\]/gi, "")
+      .replace(/\[FULL_COACH_MODE\]/gi, "")
       .replace(/\[SESSION_LIST:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[SESSION_UPDATE:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[WEEK_OVERRIDE:[^\]]+\]/gi, "")
@@ -1985,6 +1924,42 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           } catch (err) {
             console.error("[coach/respond] lighter_week trigger failed:", err);
             void trackEvent(userId, "after_error", { trigger: "lighter_week_trigger", error: String(err) });
+          }
+        });
+      }
+      // Mode switch tags — fired by Dean when the user clearly requests a coaching mode change.
+      if (wantsAnalystMode && !isAnalystMode) {
+        after(async () => {
+          try {
+            await supabase.from("training_profiles")
+              // coaching_mode is a new column — cast until types are regenerated after migration
+              .update({ ...({ coaching_mode: "analyst" } as Record<string, unknown>), proactive_cadence: "weekly_only" })
+              .eq("user_id", userId);
+            void trackEvent(userId, "coaching_mode_switch", { from: "full_coach", to: "analyst" });
+          } catch (err) {
+            console.error("[coach/respond] analyst mode switch failed:", err);
+            void trackEvent(userId, "after_error", { trigger: "analyst_mode_switch", error: String(err) });
+          }
+        });
+      }
+      if (wantsFullCoachMode && isAnalystMode) {
+        after(async () => {
+          try {
+            const existingOnboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+            await Promise.all([
+              supabase.from("users").update({
+                onboarding_step: "onboarding",
+                onboarding_data: { ...existingOnboardingData, coaching_mode: "full_coach", mode_switched_from_analyst: true },
+              }).eq("id", userId),
+              supabase.from("training_profiles")
+                // coaching_mode is a new column — cast until types are regenerated after migration
+                .update({ ...({ coaching_mode: "full_coach" } as Record<string, unknown>) })
+                .eq("user_id", userId),
+            ]);
+            void trackEvent(userId, "coaching_mode_switch", { from: "analyst", to: "full_coach" });
+          } catch (err) {
+            console.error("[coach/respond] full coach mode switch failed:", err);
+            void trackEvent(userId, "after_error", { trigger: "full_coach_mode_switch", error: String(err) });
           }
         });
       }
@@ -4561,6 +4536,10 @@ FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (no
 INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
+
+SWITCH TO ANALYST MODE: If the athlete clearly asks to switch to Analyst Mode (no structured plan, just post-run insights and a weekly trends summary) — confirm what Analyst Mode means in 1-2 sentences, then append [ANALYST_MODE] at the end of your response. Only use when the intent is unambiguous. If they seem unsure, explain the two modes and ask them to confirm before switching.
+
+SWITCH TO FULL COACH: If the athlete is currently in Analyst Mode and clearly asks to switch to Full Coach (structured training plan with daily sessions) — confirm you'll ask a few questions to build their plan, then append [FULL_COACH_MODE] at the end of your response. Only use when the intent is unambiguous.
 
 LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and offer cross-training (easy bike, elliptical, swim) as an option for any days they'd otherwise skip. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
 
