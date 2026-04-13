@@ -406,6 +406,143 @@ describe("tag-based this-week schedule override ([WEEK_OVERRIDE:] tag)", () => {
   });
 });
 
+describe("persistProfileUpdates — new B/C race extraction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    // Reset fetch mock between tests
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+  });
+
+  it("inserts a new B race into the races table with its own goal type when extracted", async () => {
+    mockExtractionThenCoach({
+      new_b_races: [{ date: "2026-08-15", name: "Summer Trail 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
+    });
+    const { racesChain } = setupSupabase({
+      user: baseUser(),
+      // A race is a marathon — B race goal should be "10k", not "marathon"
+      profile: baseProfile({ goal: "marathon", race_date: "2026-10-01" }),
+      state: baseState(),
+      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
+      conversations: baseConversations("I also signed up for a summer 10K on August 15th as a tune-up"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const insertCalls = (racesChain.insert as ReturnType<typeof vi.fn>).mock.calls;
+    const raceInsert = insertCalls.find(([rows]: [unknown]) =>
+      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === "2026-08-15")
+    );
+    expect(raceInsert).toBeDefined();
+    expect(raceInsert?.[0][0]).toMatchObject({
+      race_date: "2026-08-15",
+      race_name: "Summer Trail 10K",
+      priority: "B",
+      goal: "10k",          // B race's own type, not the A-race "marathon"
+      goal_distance_miles: 6.214,
+    });
+  });
+
+  it("falls back to A-race goal type when B race goal_race_type is null", async () => {
+    mockExtractionThenCoach({
+      new_b_races: [{ date: "2026-08-15", name: "Local Race", priority: "C", goal_race_type: null, goal_distance_miles: null }],
+    });
+    const { racesChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ goal: "marathon", race_date: "2026-10-01" }),
+      state: baseState(),
+      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
+      conversations: baseConversations("There's a fun local race on August 15th I want to do"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const insertCalls = (racesChain.insert as ReturnType<typeof vi.fn>).mock.calls;
+    const raceInsert = insertCalls.find(([rows]: [unknown]) =>
+      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === "2026-08-15")
+    );
+    expect(raceInsert?.[0][0]).toMatchObject({ goal: "marathon" }); // fallback to A-race goal
+  });
+
+  it("does not insert a B race that already exists in the races table", async () => {
+    mockExtractionThenCoach({
+      new_b_races: [{ date: "2026-08-15", name: "Summer Trail 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
+    });
+    const { racesChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ goal: "10k", race_date: "2026-10-01" }),
+      state: baseState(),
+      // Race already in DB — dedup should prevent a second insert
+      races: [
+        { id: "race-1", priority: "A", race_date: "2026-10-01" },
+        { id: "race-2", priority: "B", race_date: "2026-08-15" },
+      ],
+      conversations: baseConversations("Reminder — I have that 10K on August 15th too"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const insertCalls = (racesChain.insert as ReturnType<typeof vi.fn>).mock.calls;
+    const raceInsert = insertCalls.find(([rows]: [unknown]) =>
+      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === "2026-08-15")
+    );
+    expect(raceInsert).toBeUndefined();
+  });
+
+  it("triggers a silent rebuild_plan after inserting a new B race", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockExtractionThenCoach({
+      new_b_races: [{ date: "2026-08-15", name: "Summer 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ goal: "10k", race_date: "2026-10-01" }),
+      state: baseState(),
+      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
+      conversations: baseConversations("I signed up for a 10K on August 15th"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const rebuildCall = fetchMock.mock.calls.find(([, opts]: [string, RequestInit]) => {
+      const body = JSON.parse(opts?.body as string ?? "{}");
+      return body.trigger === "rebuild_plan" && body.silent === true;
+    });
+    expect(rebuildCall).toBeDefined();
+  });
+
+  it("does not trigger a rebuild when the B race date is in the past", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    mockExtractionThenCoach({
+      new_b_races: [{ date: "2020-01-01", name: "Old Race", priority: "B", goal_race_type: null, goal_distance_miles: null }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ goal: "10k", race_date: "2026-10-01" }),
+      state: baseState(),
+      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
+      conversations: baseConversations("I did a race back in 2020"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const rebuildCall = fetchMock.mock.calls.find(([, opts]: [string, RequestInit]) => {
+      const body = JSON.parse(opts?.body as string ?? "{}");
+      return body.trigger === "rebuild_plan";
+    });
+    expect(rebuildCall).toBeUndefined();
+  });
+});
+
 describe("persistProfileUpdates — no spurious writes", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -4094,6 +4094,13 @@ type ExtractedProfileData = {
   goal_time_minutes?: number | null;
   updated_training_days?: string[] | null;
   goal_race_type?: string | null;
+  new_b_races?: Array<{
+    date: string;
+    name: string | null;
+    priority: "B" | "C";
+    goal_race_type: string | null;
+    goal_distance_miles: number | null;
+  }> | null;
   workout?: {
     activity_type: string;
     distance_meters: number | null;
@@ -4117,7 +4124,7 @@ async function extractProfileData(message: string, timezone?: string): Promise<E
   try {
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 400,
+      max_tokens: 500,
       system: `Today is ${todayName}. Extract structured data from an athlete's message to their coach.
 
 Extract ONLY explicitly stated NEW information:
@@ -4139,8 +4146,9 @@ Extract ONLY explicitly stated NEW information:
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip, swap, or "this week only" request (e.g. "I want to run Mon, Tue, Fri this week" should NOT set updated_training_days).
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
+- A secondary (B or C) race mentioned alongside their existing primary goal — e.g. "I also signed up for X on [date]", "I'm doing Y as a tune-up", "there's a local 10K on [date] I want to do", "I registered for Z too" → new_b_races as array of objects with: date (YYYY-MM-DD, resolve the same way as race_date), name (string or null), priority ("B" for tune-up/goal races, "C" for low-key/fun runs), goal_race_type (the race's own distance type — one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "trail_race", or null if unclear), goal_distance_miles (number or null — 5K=3.107, 10K=6.214, half=13.109, marathon=26.219, null if unknown). Only set when the race is ADDITIONAL to their primary goal, not a replacement for it.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -4183,7 +4191,8 @@ async function persistProfileUpdates(
     const hasInjuryBodyPart = !!extracted.injury_body_part;
     const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
     const hasGoalRaceType = !!(extracted.goal_race_type);
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType) return;
+    const hasNewBRaces = Array.isArray(extracted.new_b_races) && (extracted.new_b_races as unknown[]).length > 0;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -4387,6 +4396,48 @@ async function persistProfileUpdates(
         }
       }
     }
+    // Persist new B/C races into the races table and trigger a silent plan rebuild so
+    // the arc extends to cover them. Deduplicates by race_date to avoid double inserts.
+    if (hasNewBRaces && extracted.new_b_races) {
+      const newBRaces = extracted.new_b_races as Array<{ date: string; name: string | null; priority: "B" | "C"; goal_race_type: string | null; goal_distance_miles: number | null }>;
+      const todayStr = new Date().toISOString().slice(0, 10);
+      // Fetch existing race dates for this user (any priority) to deduplicate
+      const { data: existingRaces } = await supabase
+        .from("races")
+        .select("race_date")
+        .eq("user_id", userId);
+      const existingDates = new Set((existingRaces ?? []).map((r: { race_date: string }) => r.race_date));
+      const aGoal = (profile?.goal as string | null) ?? "trail_race";
+      const racesToInsert = newBRaces.filter(r => r.date && r.date > todayStr && !existingDates.has(r.date));
+      if (racesToInsert.length > 0) {
+        const { error: insertErr } = await supabase.from("races").insert(
+          racesToInsert.map(r => ({
+            user_id: userId,
+            race_date: r.date,
+            race_name: r.name ?? null,
+            // Use the race's own type when extracted; fall back to A-race goal only if unknown
+            goal: r.goal_race_type ?? aGoal,
+            priority: r.priority,
+            goal_time_minutes: null,
+            goal_distance_miles: r.goal_distance_miles ?? null,
+          }))
+        );
+        if (insertErr) {
+          console.error("[persistProfileUpdates] B/C race insert failed:", insertErr);
+        } else {
+          console.log(`[persistProfileUpdates] inserted ${racesToInsert.length} new B/C race(s):`, racesToInsert.map(r => `${r.name ?? "unnamed"} ${r.date}`));
+          // Trigger a silent rebuild so the arc extends to cover the new race(s).
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+          await fetch(`${appUrl}/api/coach/respond`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId, trigger: "rebuild_plan", silent: true }),
+          }).catch(err => console.error("[persistProfileUpdates] rebuild_plan trigger failed (non-fatal):", err));
+          didFullRegenerate = true;
+        }
+      }
+    }
+
     // When VDOT paces change (race data provided) or goal race type changes, regenerate
     // the full training plan arc so session labels, key workouts, and volume targets
     // reflect the updated profile. Skip if hasRaceDate already triggered a full regen above.

@@ -18,21 +18,24 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 
 ---
 
-## Post-onboarding B/C race extraction
-**Priority:** P1
-**Context:** When a user mentions a new B/C race in a post-onboarding SMS, `persistProfileUpdates` has no field for it — `ExtractedProfileData` only captures A-race date, goal type, paces, injuries, etc. The race gets mentioned in `other_notes` as freeform text (if at all), but never makes it to the `races` table. Only races in the `races` table are passed to `generateAndSaveFullPlan` as `bRaces`, so the plan won't extend to cover the new race until an admin manually adds it.
-
-**Partial mitigation already in place (2026-04-13):** `handleRebuildPlan` now syncs `onboarding_data.other_races` → `races` table before each rebuild, which catches races captured during onboarding but never inserted. Doesn't help for races mentioned post-onboarding.
-
-**What the fix looks like:**
-1. Add `new_b_races?: Array<{ date: string; name: string | null; priority: "B"|"C"; goal_distance_miles?: number | null }> | null` to `ExtractedProfileData`
-2. Update the Haiku extraction prompt in `extractProfileData` to capture B/C races from phrases like "I also signed up for X race on Y date"
-3. In `persistProfileUpdates`, upsert extracted B/C races into the `races` table (insert if `race_date` not already present for this user)
-4. Trigger a silent rebuild after the upsert so the arc extends to cover the new race immediately
-
-**Files:** `src/app/api/coach/respond/route.ts`
+## ~~Post-onboarding B/C race extraction~~ ✓ Shipped 2026-04-13
+Added `new_b_races` to `ExtractedProfileData` and the Haiku extraction prompt. `persistProfileUpdates` now deduplicates against existing `races` rows and inserts new ones, then triggers a silent `rebuild_plan` so the arc extends immediately. 4 tests added to `coach-respond-field-sync.test.ts`.
 
 ---
 
 ## ~~Plan integrity check in weekly_recap~~ ✓ Shipped 2026-04-13
 Every Sunday `weekly_recap` now syncs `onboarding_data.other_races` → `races` table and triggers a silent `rebuild_plan` if any were missing. Arc self-heals weekly for all users.
+
+---
+
+## Make `races` the single source of truth for the A race (eliminate dual state)
+**Priority:** P1 — before next growth push
+**Context:** The A race date and goal type currently live in two places: `training_profiles.race_date` / `training_profiles.goal` (what `generateAndSaveFullPlan` uses) and `races` (priority=A) (what the dashboard and rebuild flow use). `persistProfileUpdates` tries to keep them in sync after every change, but any gap in coverage (a new update path, a failed DB write, an admin operation that touches one table) creates drift that causes plan bugs. Today's session was partly caused by this — the plan generation ignored the `races` table and computed length from `training_profiles.race_date` alone.
+
+**What the fix looks like:**
+1. `generateAndSaveFullPlan` fetches `raceDate` from `races` (priority=A) instead of accepting it from `profile.race_date`
+2. All plan-affecting mutations (race date change, goal type change) write to `races` as the primary write, and `training_profiles` becomes a denormalized cache updated secondarily
+3. Long-term: drop `training_profiles.race_date` and `training_profiles.goal` in favour of always joining `races`
+4. Migration: backfill `races` for any user who has `training_profiles.race_date` set but no A-race row
+
+**Why not done yet:** Touches `generateAndSaveFullPlan`, `persistProfileUpdates`, `buildSystemPrompt`, and all call sites — high blast radius. Needs a dedicated session with full test coverage.

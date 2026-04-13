@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Post-onboarding B/C race extraction and auto-rebuild
+
+**Type:** Feature
+**Reported by:** Jake (roadmap item)
+**User feedback:** "can we tackle the roadmap item right now and test it?"
+**Root cause:** `ExtractedProfileData` had no field for secondary races, so when a user mentioned "I also signed up for X on [date]" post-onboarding, the race never made it to the `races` table and the plan arc never extended to cover it.
+**Fix / Change:** Added `new_b_races` to `ExtractedProfileData` and the Haiku extraction prompt. Phrases like "I also signed up for X", "doing Y as a tune-up", "I registered for Z too" now extract into `new_b_races` with date, name, priority (B/C), and goal_distance_miles. `persistProfileUpdates` deduplicates against existing `races` rows by date, inserts any new ones, and fires a silent `rebuild_plan` so the arc extends immediately. Past-dated races are filtered out. 4 tests added.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond-field-sync.test.ts`
+
+---
+
 ## 2026-04-13 — Weekly recap self-heals missing B/C races from onboarding_data
 
 **Type:** Bug Fix / Reliability
