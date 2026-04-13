@@ -5,6 +5,11 @@ import { Resend } from "resend";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+/** Strip markdown code fences (```html ... ``` or ``` ... ```) that Claude sometimes wraps around HTML output. */
+function stripMarkdownFences(text: string): string {
+  return text.replace(/^```(?:html)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+}
+
 /**
  * GET /api/cron/analyze-conversations
  * Runs daily. Fetches yesterday's conversations, analyzes them with Claude for
@@ -186,10 +191,11 @@ ${transcripts}`;
     buildPlanHealthSection(now),
   ]);
 
-  const analysisHtml =
+  const analysisHtml = stripMarkdownFences(
     convAnalysisResponse.content[0].type === "text"
       ? convAnalysisResponse.content[0].text
-      : "<p>Analysis unavailable.</p>";
+      : "<p>Analysis unavailable.</p>"
+  );
 
   // Send email
   const resend = new Resend(process.env.RESEND_API_KEY);
@@ -368,10 +374,11 @@ ${userSummaries.join("\n\n")}`;
       messages: [{ role: "user", content: planHealthPrompt }],
     });
 
-    const planAnalysisHtml =
+    const planAnalysisHtml = stripMarkdownFences(
       planResponse.content[0].type === "text"
         ? planResponse.content[0].text
-        : "<p>Plan health analysis unavailable.</p>";
+        : "<p>Plan health analysis unavailable.</p>"
+    );
 
     return `
       <h2 style="font-size: 16px; margin-top: 32px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">

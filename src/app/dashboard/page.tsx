@@ -286,20 +286,30 @@ export default async function DashboardPage({
   const todayDayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
   const todayDayIdx = DAY_ORDER.indexOf(todayDayName);
 
-  // Week 1 anchor: Monday of the plan-creation week.
-  // We no longer shift forward when a week has no remaining workouts — that shift caused
-  // the last plan week to appear one week after the race date (e.g. race May 2 showing in
-  // week 3 while week 4 displayed as May 4-10 post-race). A week that's almost over
-  // correctly shows its past days dimmed; the next week is the naturally upcoming one.
+  // Week 1 anchor: backcompute from current_week + today's date.
+  //
+  // Previously we used planData.created_at as the anchor, but rebuild_plan creates a new
+  // plan row with a fresh created_at, shifting week boundaries and misattributing past
+  // activities to wrong weeks (e.g. week 3 showing dates 2 weeks in the future when a
+  // rebuild happened today). Computing from current_week + today is always correct:
+  // if current_week=3 and today is Monday Apr 13, week 1 started Mar 30.
+  //
+  // Sunday edge case: after the Sunday recap fires and advances current_week, today is
+  // still Sunday but the new current week starts tomorrow (Monday). We advance one day
+  // so the anchor is Monday, not the Sunday that belongs to the previous week.
   const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
-  const planCreatedAt = new Date(planData.created_at as string);
-  const dayOfWeek = planCreatedAt.getUTCDay(); // 0=Sun, 1=Mon...
-  // Sunday: plan starts next week, anchor to upcoming Monday (+1).
-  // Mon–Sat: anchor to Monday of the current calendar week.
-  const daysToMonday = dayOfWeek === 0 ? 1 : 1 - dayOfWeek;
-  const week1Monday = new Date(planCreatedAt);
-  week1Monday.setUTCDate(week1Monday.getUTCDate() + daysToMonday);
-  week1Monday.setUTCHours(0, 0, 0, 0);
+  const todayUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+  const todayDOW = todayUTC.getUTCDay(); // 0=Sun, 1=Mon, ...
+  // For Sunday: treat as if it's already Monday (the new week starts tomorrow).
+  // For Mon–Sat: find the Monday of the current calendar week.
+  const thisMonday = new Date(todayUTC);
+  if (todayDOW === 0) {
+    thisMonday.setUTCDate(todayUTC.getUTCDate() + 1); // advance Sunday → Monday
+  } else {
+    thisMonday.setUTCDate(todayUTC.getUTCDate() + (1 - todayDOW));
+  }
+  const week1Monday = new Date(thisMonday);
+  week1Monday.setUTCDate(thisMonday.getUTCDate() - (currentWeekNum - 1) * 7);
 
   const actualMilesByWeek: Record<number, number> = {};
   for (const activity of activities ?? []) {

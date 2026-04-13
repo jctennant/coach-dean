@@ -489,14 +489,45 @@ No other text.`,
     console.error("[generateAndSaveFullPlan] Haiku enrichment failed (non-fatal):", err);
   }
 
-  // Save the plan
-  await supabase.from("training_plans").insert({
-    user_id: userId,
-    race_date: raceDate,
-    goal,
-    total_weeks: totalWeeks,
-    weeks: planWeeks as unknown as Json,
-  });
+  // Save the plan.
+  // On a rebuild (resetToWeek1=false), UPDATE the existing row so that created_at is
+  // preserved — the dashboard uses created_at to anchor week boundaries, and inserting
+  // a new row on every rebuild shifts those boundaries, misattributing past activities
+  // to the wrong week number.
+  if (!resetToWeek1) {
+    const { data: existingPlan } = await supabase
+      .from("training_plans")
+      .select("id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    if (existingPlan) {
+      await supabase.from("training_plans").update({
+        race_date: raceDate,
+        goal,
+        total_weeks: totalWeeks,
+        weeks: planWeeks as unknown as Json,
+        updated_at: new Date().toISOString(),
+      }).eq("id", (existingPlan as { id: string }).id);
+    } else {
+      await supabase.from("training_plans").insert({
+        user_id: userId,
+        race_date: raceDate,
+        goal,
+        total_weeks: totalWeeks,
+        weeks: planWeeks as unknown as Json,
+      });
+    }
+  } else {
+    await supabase.from("training_plans").insert({
+      user_id: userId,
+      race_date: raceDate,
+      goal,
+      total_weeks: totalWeeks,
+      weeks: planWeeks as unknown as Json,
+    });
+  }
 
   // Sync training_state: reset week counter if this is a new plan; sync mileage target.
   // When resetToWeek1 is true (new plan, new race, onboarding): reset everything —

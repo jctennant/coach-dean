@@ -26,6 +26,52 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+---
+
+## 2026-04-13 — Fix dashboard week dates, mileage attribution, and interval session distance
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "It says week 3 now but I didn't do week 2 / Doesn't show the mileage I did last week / Doesn't seem to know how to estimate the mileage of the quality session / Now says dipsea twice in the races section"
+**Root cause:** Three separate bugs:
+1. Dashboard week dates completely wrong (week 3 showing Apr 27–May 3 instead of Apr 13–19): `rebuild_plan` creates a new `training_plans` row with a fresh `created_at`, which shifted the `week1Monday` anchor 2 weeks into the future. The dashboard used `planData.created_at` to compute all week date ranges, so after a rebuild the dates drifted while `current_week` stayed correct.
+2. Mileage from last week not showing: same root cause — shifted week boundary misattributed past activities to wrong week numbers.
+3. Interval session distance wrote "?mi (check distance)": `parseMilesFromLabel` only took the first `mi` match (returning 1 from "1mi WU"), and the prompt didn't include explicit meter-to-mile conversion math for interval notation, so Claude wrote a placeholder instead of computing 6×800m = 3mi + WU/CD.
+**Fix / Change:**
+- Dashboard now backcomputes `week1Monday` from `current_week + today's date` instead of `planData.created_at`. This is resilient to rebuilds and immediately fixes the current broken state (week 3 will correctly show Apr 13–19). Sunday edge case handled: after the Sunday recap advances current_week, "this Monday" is treated as tomorrow.
+- `generateAndSaveFullPlan` now UPDATEs the existing plan row (preserving `created_at`) when `resetToWeek1=false` (i.e., all mid-plan rebuilds), rather than inserting a new row. Prevents the anchor drift from happening in the future.
+- `parseMilesFromLabel` updated to detect `N×X(m|km|mi)` interval patterns, compute the interval total in miles, and add any explicit WU/CD miles from the rest of the label.
+- Added INTERVAL SESSION DISTANCE prompt rule with explicit conversion table (400m=0.25mi, 800m=0.5mi, etc.) and format examples. Added "NEVER write ?mi" instruction. Strengthened existing QUALITY SESSION MILEAGE examples to show correct arithmetic (6×0.5mi=3mi, 1+3+1=5mi).
+**Files changed:** `src/app/dashboard/page.tsx`, `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
+## 2026-04-13 — Fix conversation analysis email formatting + tighten daily auto-fix trigger
+
+**Type:** Bug Fix / Infra
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Two issues. (1) Claude's analysis responses were sometimes wrapped in ```html ... ``` markdown code fences, which rendered as a raw text block in the Resend email instead of formatted HTML. (2) The daily auto-fix trigger had no explicit instruction against merging PRs — it used its `Bash`/`gh` access to auto-merge today's PR (#7) without waiting for human review.
+**Fix / Change:** (1) Added `stripMarkdownFences()` helper applied to both `analysisHtml` and `planAnalysisHtml` before injection into the email body. (2) Added an explicit `⚠️ IMPORTANT: NEVER merge the PR yourself` instruction to the trigger prompt. Also tightened the changelog dedup check to cover fixes from the last 48 hours (not just today).
+**Files changed:** `src/app/api/cron/analyze-conversations/route.ts`, remote trigger `trig_01EzBseDjZ7uNnFRauGy2EXW`
+
+---
+
+## 2026-04-13 — Fix 4 failing eval fixtures + strengthen eval runner prompt engineering
+
+**Type:** Improvement
+**Reported by:** Internal eval run
+**User feedback:** N/A
+**Root cause:** Four eval fixtures consistently failing (6/10, 6/10, 5/10, 4/10):
+1. `mileage-strava-correction`: fixture `today` defaulted to Mon 3/30 but conversation history said "today (Tue)" — model got confused about which day was "yesterday" and kept repeating the phantom Monday run.
+2. `plan-mile-time-trial`: `today` was mid-week Friday, causing the model to generate sessions spanning two calendar weeks; volume floors were too low (22mi min allowed 23mi which the judge correctly flagged as too conservative for a 30mpw runner).
+3. `plan-shin-splints-10k`: injury_notes said "no intensity for 2 weeks" — too vague; model introduced light tempo at weeks 3-4 and didn't mention run-walk or bike cross-training.
+4. `plan-strength-integrated-marathon`: fixture `today` was mid-week with a prior-week run bleeding into week 1 total; no hard rule preventing Tuesday quality sessions or requiring explicit S&C acknowledgment; peak cap was 52mi which the judge treated as "exceeds 52mi" when exactly hit.
+**Fix / Change:**
+- **Fixtures**: Added correct `today` field to each fixture (Mar 31, Apr 5, Apr 13), tightened volume floors (min_week1 27mi for mile TT, min_peak 30mi), strengthened injury_notes with explicit "no intensity first 4 weeks / run-walk required / bike cross-training", updated strength marathon notes as hard constraints, lowered peak cap to 50mi (aligned with notes).
+- **Eval runner**: Added `strengthConstraintBlock` — detects "lifts on X and Y" pattern in notes and injects `<rule>` preventing quality work on lifting days and requiring S&C acknowledgment. Added `max_week1_miles` and `min_week1_miles` hard caps in LONG RUN GUIDANCE (new; were not injected before). Upgraded `max_long_run_miles` from bullet to `<rule>` tag with explicit "LONG RUN slot only" scope. Added mile TT `<rule>` capping the long-run slot at 5mi while clarifying other sessions can still be 6-7mi. Added forbidden-phrase override rule after conversation block when `ground_truth.forbidden_phrases` is set — explains WHY those phrases must be avoided, not just that they're wrong.
+**Result:** 47 → 50/51 passing, 9.0 → 9.2/10 avg. All 4 target fixtures now pass consistently.
+**Files changed:** `evals/run-evals.mjs`, `evals/fixtures/mileage-strava-correction.json`, `evals/fixtures/plan-mile-time-trial.json`, `evals/fixtures/plan-shin-splints-10k.json`, `evals/fixtures/plan-strength-integrated-marathon.json`
+
+
 ## 2026-04-12 — Fix timezone fallback + show Strava location in onboarding closing message
 
 **Type:** Bug Fix / Improvement

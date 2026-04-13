@@ -2777,9 +2777,26 @@ async function syncArcCurrentWeek(
     if (sessions.length === 0) return;
 
     // Compute actual mileage from session labels.
-    // For run/walk interval sessions (time-based, e.g. "Run 2 min, walk 2 min × 6 (~24 min total)")
-    // that don't include explicit miles, estimate from total minutes at ~13 min/mile as a fallback.
+    // Handles three cases:
+    //  1. Interval sessions: "6×800m @ pace (1mi WU + ... + 1mi CD)" — sum interval distance + WU/CD
+    //  2. Explicit total distance: "Easy 6mi", "Tempo 4mi (2mi @ pace)" — first mi match
+    //  3. Time-based run/walk sessions: "Run 2 min, walk 2 min × 6 (~24 min total)" — estimate at 13 min/mi
     function parseMilesFromLabel(label: string): number {
+      // Check for track-style interval notation: N×X(m|km|mi)
+      const intervalMatch = label.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(m|km|mi)\b/i);
+      if (intervalMatch) {
+        const reps = parseInt(intervalMatch[1]!);
+        const dist = parseFloat(intervalMatch[2]!);
+        const unit = intervalMatch[3]!.toLowerCase();
+        const intervalMi = unit === "mi" ? dist : unit === "km" ? dist * 0.621371 : dist / 1609.34;
+        const intervalTotal = reps * intervalMi;
+        // Also sum explicit WU/CD miles outside the interval notation (e.g. "1mi WU", "1mi CD")
+        const labelWithoutInterval = label.replace(/\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:m|km|mi)\b/gi, "");
+        const wuCdMiles = [...labelWithoutInterval.matchAll(/(\d+(?:\.\d+)?)\s*mi(?!\w)/gi)]
+          .reduce((sum, mc) => sum + parseFloat(mc[1]!), 0);
+        return Math.round((intervalTotal + wuCdMiles) * 10) / 10;
+      }
+      // Explicit total distance in miles (takes the first match — handles "Tempo 4mi (2mi @ pace)")
       const m = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
       if (m) return parseFloat(m[1]!);
       // Fallback: time-based run/walk session → estimate at ~13 min/mile
@@ -3714,6 +3731,7 @@ ${spUseMetric ? `  Mon 3/9 · Easy 8 km @ 6:00/km
   Sat 3/14 · Long run 8mi easy`}
   Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun), M/D dates, and · as the separator. Never use full day names ("Monday, March 9"), colons, or dashes as separators for session lists. Blank lines split into separate SMS bubbles — keep the session list as one unbroken block. Always sort sessions in chronological order by date — never group by workout type (e.g. runs first, then strength). A strength session on Tuesday belongs before a run on Thursday.
 - SESSION DISTANCE FORMAT — CRITICAL: Running sessions must always include distance in the athlete's unit (${spUseMetric ? "km, e.g. \"Easy 8 km\", \"Tempo 6.5 km\", \"Long run 19 km\"" : "miles, e.g. \"Easy 5mi\", \"Tempo 4mi\", \"Long run 8mi\""}). Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate in parentheses after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~${spUseMetric ? "2.9 km" : "1.8mi"})". ${spUseMetric ? "Estimate at ~8 min/km for a beginner run/walk pace." : "Estimate at ~13 min/mile for a beginner run/walk pace."} This allows the system to track weekly volume accurately. Non-running sessions — strength, cross-training, swimming, cycling, yoga, spin, Zwift, rowing, aqua jogging, or any other non-running activity — must NEVER include a distance, even if you know the distance. Use duration or just the activity name instead (e.g. "Strength + mobility 30 min", "Master's swim", "Zwift ride 60 min", "Spin class"). This format is how the system counts weekly running volume — putting distance on a non-running session will cause it to be incorrectly counted as running volume.
+- INTERVAL SESSION DISTANCE — NEVER USE PLACEHOLDERS: When prescribing meter-based interval sessions (e.g. 6×800m, 8×400m, 5×1000m), you must compute and state the full session distance — NEVER write "?mi", "?km", "X mi", or "check distance". Conversions: 400m = 0.25mi, 800m = 0.5mi, 1000m = 0.62mi, 1200m = 0.75mi, 1600m = 1mi. Sum warmup + intervals + cooldown for the session total. Format: total first, then breakdown in parentheses. Example: 1mi WU + 6×800m (3mi) + 1mi CD = 5mi total → write "Intervals 5mi (1mi WU + 6×800m @ 5:40/mi + 1mi CD)". Another: 1mi WU + 8×400m (2mi) + 1mi CD = 4mi total → write "Intervals 4mi (1mi WU + 8×400m @ 5:15/mi + 1mi CD)".
 
 ${isRunReview ? `TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
 - Lead with genuine excitement — celebrate the effort and the fitness it reflects
@@ -4655,8 +4673,10 @@ OPTIONAL CROSS-TRAINING SESSIONS: If the athlete has requested optional workouts
 
 QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified. Format the label to show the breakdown in parentheses. Examples:
 - "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
-- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
+- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 1mi CD)" — because 6×800m = 6×0.5mi = 3mi; 1+3+1 = 5mi total
+- "Intervals 4mi (1mi WU + 8×400m @ 5:15/mi + 1mi CD)" — because 8×400m = 8×0.25mi = 2mi; 1+2+1 = 4mi total
 - "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"
+NEVER write "?mi", "X mi", or "check distance" as a placeholder — always compute the number. Meter conversions: 400m = 0.25mi, 800m = 0.5mi, 1000m = 0.62mi, 1200m = 0.75mi, 1600m = 1mi. Calculate interval total = reps × distance, then add WU+CD.
 Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava. This prevents the plan from understating the week's actual mileage.
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
@@ -4824,8 +4844,10 @@ Sat 3/7 · Easy 4mi`}
 SESSION DISTANCE FORMAT: Running sessions must include distance in ${umUseMetric ? "km (e.g. \"Easy 5 km\")" : "miles (e.g. \"Easy 3mi\")"}. Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~${umUseMetric ? "2.9 km" : "1.8mi"})". Estimate at ~${umUseMetric ? "8 min/km" : "13 min/mile"} for beginner run/walk pace. Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance — use duration or activity name only (e.g. "Strength + mobility 20 min", "Zwift ride 60 min"). Putting distance on a non-running session causes it to be incorrectly counted as running volume.
 QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified. Format the label to show the breakdown in parentheses. Examples:
 - "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
-- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
+- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 1mi CD)" — because 6×800m = 6×0.5mi = 3mi; 1+3+1 = 5mi total
+- "Intervals 4mi (1mi WU + 8×400m @ 5:15/mi + 1mi CD)" — because 8×400m = 8×0.25mi = 2mi; 1+2+1 = 4mi total
 - "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"
+NEVER write "?mi", "X mi", or "check distance" as a placeholder — always compute the number. Meter conversions: 400m = 0.25mi, 800m = 0.5mi, 1000m = 0.62mi, 1200m = 0.75mi, 1600m = 1mi. Calculate interval total = reps × distance, then add WU+CD.
 Never write "Tempo 3mi" when the athlete will also run 1.5mi of warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava.
 QUALITY SESSION "WHY": For any tempo run, interval session (800m repeats, etc.), or race-pace workout in the plan, add a brief purpose note on the same line — one short clause after a dash. Keep it specific to the athlete's goal: "— builds lactate threshold, the engine for your half marathon pace" or "— sharpens the speed you'll need at goal pace" or "— teaches your legs to run fast when tired." Easy runs and long runs do not need this treatment.
 Use short day abbreviations and M/D dates (cross-referenced against DATE CONTEXT — do not compute day names independently). End the second bubble after the Total line (and the no-Strava tracking reminder if applicable). Do NOT add any closing question or invitation to adjust — that is sent as a separate follow-up. Do NOT add any "this number's always open" line or reminders question.
