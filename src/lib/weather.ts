@@ -41,10 +41,11 @@ async function geocode(city: string, timezone: string): Promise<{ lat: number; l
 }
 
 /**
- * Fetch a 7-day daily weather forecast for the given coordinates.
+ * Fetch a daily weather forecast for the given coordinates.
  * Returns temperatures in °F, precipitation in mm, wind in mph.
+ * past_days: number of past days to include before today (default 0).
  */
-async function fetchForecast(lat: number, lon: number, timezone: string): Promise<DayWeather[]> {
+async function fetchForecast(lat: number, lon: number, timezone: string, pastDays = 0): Promise<DayWeather[]> {
   const params = new URLSearchParams({
     latitude: lat.toString(),
     longitude: lon.toString(),
@@ -60,6 +61,7 @@ async function fetchForecast(lat: number, lon: number, timezone: string): Promis
     precipitation_unit: "mm",
     timezone,
     forecast_days: "7",
+    ...(pastDays > 0 ? { past_days: pastDays.toString() } : {}),
   });
 
   const res = await fetch(`${FORECAST_URL}?${params}`, { signal: AbortSignal.timeout(5000) });
@@ -105,6 +107,32 @@ export async function fetchWeekWeather(
     if (days.length === 0) return null;
     const location = state ? `${city}, ${state}` : city;
     return { location, days };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch weather conditions for a specific activity date (e.g. yesterday's run).
+ * Returns a brief human-readable string like "68°F, partly cloudy, light wind" or null.
+ * Uses past_days=2 so recent activities are always covered.
+ */
+export async function fetchActivityWeather(
+  city: string,
+  state: string,
+  timezone: string,
+  activityDate: string  // YYYY-MM-DD
+): Promise<{ tempF: number; conditions: string; windMph: number } | null> {
+  try {
+    const coords = await geocode(city, timezone);
+    if (!coords) return null;
+    const days = await fetchForecast(coords.lat, coords.lon, timezone, 2);
+    const match = days.find(d => d.date === activityDate);
+    if (!match) return null;
+    // Use midpoint temp as a rough "running conditions" estimate
+    const tempF = Math.round((match.maxTempF + match.minTempF) / 2);
+    const conditions = weatherLabel(match.weatherCode);
+    return { tempF, conditions, windMph: match.maxWindMph };
   } catch {
     return null;
   }
