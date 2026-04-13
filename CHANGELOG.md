@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Metric units consistency + long run adaptation + week number context
+
+**Type:** Bug Fix (3 issues)
+**Reported by:** Isaac Harris (via Jake)
+**User feedback:** "It does it still in miles and sometimes switches metrics to kilometers but only sometimes" / "I did a long run yesterday and it still told me that I had to do my long run today" / "It often has told me it is week 1 of my training plan, and I wasn't sure if that was because you are resetting things in the software or it forgets."
+**Root cause:**
+1. **Metric units**: The activity summary, weekly mileage table, pace analysis, individual workouts, all-time Strava stats, and race history were all hardcoded to output miles and /mi paces regardless of `preferred_units`. Claude was told to respond in km but the raw data it read was always in miles, causing inconsistent unit usage.
+2. **Long run adaptation**: The session row instruction only told Dean to check the RECENT CONVERSATION for completed workouts today — it didn't tell Dean to check Strava activity history for sessions completed earlier in the week. If an athlete did their long run on Saturday but the plan had it on Sunday, Dean would re-prescribe it.
+3. **Week number**: No context was given about what "Week 1" means, so athletes who just generated a plan couldn't tell if the week counter was wrong or just reset.
+**Fix / Change:**
+1. Added `useMetric` parameter to `buildActivitySummary` — now converts distances to km, paces to /km, and elevation to meters for metric users. Fixed `allTimeInfo` and race history in `buildSystemPrompt` to use `spMi()`. Updated `parseSessionMiles` to parse km labels (converting to miles for internal tracking). Updated `prescribedWeek1Miles` extraction to handle km plan totals. Updated SESSION DISTANCE FORMAT instruction and example sessions to use km for metric users.
+2. Expanded the TODAY'S PLANNED SESSION instruction to also check RECENT WORKOUTS (Strava data): if a long run appears in recent activities from earlier this week, Dean treats it as done and doesn't re-prescribe.
+3. Added "(week 1 = first week of current plan; advances each Sunday)" note to the training week line in the system prompt so Dean can explain week numbers when asked.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-12 — Dean no longer invents a fake personal training life
 
 **Type:** Bug Fix

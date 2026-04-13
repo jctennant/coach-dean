@@ -813,7 +813,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const recentWorkoutsMode =
     trigger === "post_run" ? "suppress" :
     trigger === "weekly_recap" ? "this_week_only" : "full";
-  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only");
+  const isMetricUser = (profile?.preferred_units as string) === "metric";
+  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only", isMetricUser);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
 
   // Dedup guard — if we've already sent a post_run SMS for this activity, skip Claude.
@@ -1513,13 +1514,22 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     console.log("[initial_plan] weekMileageSoFar=", weekMileageSoFar, "recentActivities count=", recentActivities.length, "activityTypes=", recentActivities.slice(0, 10).map(a => `${a.activity_type}(${new Date(a.start_date).toISOString().slice(0,10)})`).join(", "));
 
     // Parse the prescribed week total from the plan text.
-    // Match various formats Dean uses: "Total: ~18mi", "~18 miles this week", etc.
-    const prescribedWeek1Match =
+    // Match various formats Dean uses: "Total: ~18mi", "~18 miles this week", "Total: ~29 km", etc.
+    const prescribedWeek1MatchMi =
       coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*mi/i) ||
       coachMessage.match(/~(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+this\s+week/i) ||
       coachMessage.match(/[Tt]hat'?s\s+~?(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+for\s+the\s+week/i) ||
       coachMessage.match(/(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+(?:total\s+)?for\s+the\s+week/i);
-    const prescribedWeek1MilesRaw = prescribedWeek1Match ? parseFloat(prescribedWeek1Match[1]) : null;
+    const prescribedWeek1MatchKm =
+      coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*km/i) ||
+      coachMessage.match(/~(\d+(?:\.\d+)?)\s+km\s+this\s+week/i) ||
+      coachMessage.match(/[Tt]hat'?s\s+~?(\d+(?:\.\d+)?)\s+km\s+for\s+the\s+week/i) ||
+      coachMessage.match(/(\d+(?:\.\d+)?)\s+km\s+(?:total\s+)?for\s+the\s+week/i);
+    const prescribedWeek1MilesRaw = prescribedWeek1MatchMi
+      ? parseFloat(prescribedWeek1MatchMi[1])
+      : prescribedWeek1MatchKm
+      ? parseFloat(prescribedWeek1MatchKm[1]) / 1.60934
+      : null;
 
     // Compute how many days this initial plan covers so we can:
     //   (a) set weekly_mileage_target to match what was actually prescribed (not a phantom full-week target)
@@ -2224,6 +2234,17 @@ function fmtPace(minsPerMile: number, unit: "mi" | "km" = "mi"): string {
   return `${m}:${String(s).padStart(2, "0")}/${unit}`;
 }
 
+/** Convert a stored "M:SS/mi" pace string to "M:SS/km". Returns original string if unparseable. */
+function convertPaceStrToKm(paceStr: string): string {
+  const match = paceStr.match(/^(\d+):(\d{2})\/mi$/);
+  if (!match) return paceStr;
+  const totalSecPerMile = parseInt(match[1]) * 60 + parseInt(match[2]);
+  const totalSecPerKm = Math.round(totalSecPerMile / 1.60934);
+  const m = Math.floor(totalSecPerKm / 60);
+  const s = totalSecPerKm % 60;
+  return `${m}:${String(s).padStart(2, "0")}/km`;
+}
+
 /**
  * Count run sessions in the current Mon–Sun week in the user's local timezone.
  */
@@ -2396,7 +2417,16 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
 /**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
-function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number, recentWorkoutsMode: "full" | "suppress" | "this_week_only" = "full"): string {
+function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number, recentWorkoutsMode: "full" | "suppress" | "this_week_only" = "full", useMetric = false): string {
+  const actDistStr = (miles: number) => useMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
+  const actPaceStr = (minPerMile: number) => {
+    const pace = useMetric ? minPerMile / 1.60934 : minPerMile;
+    const totalSec = Math.round(pace * 60);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, "0")}/${useMetric ? "km" : "mi"}`;
+  };
+  const actVertStr = (feet: number) => useMetric ? `${Math.round(feet / 3.28084)}m vert` : `${Math.round(feet)}ft vert`;
   if (activities.length === 0) return "No activity history available.";
 
   // Group by Mon–Sun week in the user's local timezone (key = "YYYY-MM-DD" of that Monday)
@@ -2435,10 +2465,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
 
   let summary = "WEEKLY MILEAGE (completed weeks, most recent first):\n";
   for (const [week, data] of sortedWeeks) {
-    const totalSec = Math.round(data.fastest * 60);
-    const fMin = Math.floor(totalSec / 60);
-    const fSec = totalSec % 60;
-    summary += `  ${week}: ${data.miles.toFixed(1)} mi (${data.runs} runs, ${Math.round(data.vert)}ft vert, fastest ${fMin}:${String(fSec).padStart(2, "0")}/mi)\n`;
+    summary += `  ${week}: ${actDistStr(data.miles)} (${data.runs} runs, ${actVertStr(data.vert)}, fastest ${actPaceStr(data.fastest)})\n`;
   }
 
   // Pace distribution from road-like runs (< 12 min/mi)
@@ -2456,21 +2483,14 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
     });
     paces.sort((a, b) => a - b);
 
-    const formatPace = (p: number) => {
-      const totalSeconds = Math.round(p * 60);
-      const m = Math.floor(totalSeconds / 60);
-      const s = totalSeconds % 60;
-      return `${m}:${String(s).padStart(2, "0")}`;
-    };
-
     const fastest5 = paces.slice(0, 3);
     const median = paces[Math.floor(paces.length / 2)];
     const slowest = paces[paces.length - 1];
 
     summary += `\nPACE ANALYSIS (${roadRuns.length} road-like runs):\n`;
-    summary += `  Fastest efforts: ${fastest5.map(formatPace).join(", ")}/mi\n`;
-    summary += `  Median pace: ${formatPace(median)}/mi\n`;
-    summary += `  Slowest easy: ${formatPace(slowest)}/mi\n`;
+    summary += `  Fastest efforts: ${fastest5.map(p => actPaceStr(p)).join(", ")}\n`;
+    summary += `  Median pace: ${actPaceStr(median)}\n`;
+    summary += `  Slowest easy: ${actPaceStr(slowest)}\n`;
   }
 
   // Trail runs
@@ -2526,14 +2546,14 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
         // Non-run activities (rides, swims, etc.) show duration, not miles, to prevent
         // Claude from accidentally summing cross-training distance as running mileage.
         const milesOrDuration = isRun && a.distance_meters
-          ? `${(a.distance_meters / 1609.34).toFixed(1)}mi`
+          ? actDistStr(a.distance_meters / 1609.34)
           : a.moving_time_seconds
           ? `${Math.round(a.moving_time_seconds / 60)}min`
           : null;
         const parts = [
           a.activity_type || "Workout",
           milesOrDuration,
-          isRun && a.average_pace ? `@ ${a.average_pace}` : null,
+          isRun && a.average_pace ? `@ ${useMetric ? convertPaceStrToKm(a.average_pace) : a.average_pace}` : null,
           a.elevation_gain ? `${Math.round(a.elevation_gain * 3.28084)}ft vert` : null,
         ].filter(Boolean);
         summary += `  ${dateLabel}${relativeLabel}: ${parts.join(", ")}\n`;
@@ -2996,14 +3016,14 @@ function buildSystemPrompt(
     const ytdRun = stravaStats.ytd_run_totals as { count?: number; distance?: number } | null;
     const recentRun = stravaStats.recent_run_totals as { count?: number; distance?: number } | null;
     if (allRun) {
-      allTimeInfo += `- All-time: ${allRun.count || 0} runs, ${Math.round((allRun.distance || 0) / 1609.34)} miles\n`;
+      allTimeInfo += `- All-time: ${allRun.count || 0} runs, ${spMi((allRun.distance || 0) / 1609.34)}\n`;
     }
     if (ytdRun) {
       const refreshedAt = stravaStats.refreshed_at as string | null;
       const freshnessNote = refreshedAt
         ? ` (as of ${new Date(refreshedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })})`
         : " (as of Strava connect — may be slightly outdated)";
-      allTimeInfo += `- Year-to-date${freshnessNote}: ${ytdRun.count || 0} runs, ${Math.round((ytdRun.distance || 0) / 1609.34)} miles\n`;
+      allTimeInfo += `- Year-to-date${freshnessNote}: ${ytdRun.count || 0} runs, ${spMi((ytdRun.distance || 0) / 1609.34)}\n`;
     }
     // recent_run_totals (last 4 weeks from Strava) intentionally omitted — it's a stale
     // snapshot from connect time and has caused hallucinations where the model confuses
@@ -3348,10 +3368,13 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     const activeSessions = [...todaySessions, ...futureSessions];
     if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
     const parseSessionMiles = (s: { label: string }) => {
-      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
-      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
-      const mMatch = explicitTotal || firstMi;
-      return mMatch ? parseFloat(mMatch[1]) : 0;
+      // Try miles first
+      const miMatch = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i) || s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
+      if (miMatch) return parseFloat(miMatch[1]);
+      // Try km — convert to miles for internal tracking
+      const kmMatch = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*km/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*km(?:\s+total)?\)/i) || s.label.match(/(\d+(?:\.\d+)?)\s*km/i);
+      if (kmMatch) return parseFloat(kmMatch[1]) / 1.60934;
+      return 0;
     };
     const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
     const todaySessionMiles = trigger !== "post_run" ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0) : 0;
@@ -3362,7 +3385,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
       const todayLabel = trigger === "post_run"
         ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
-        : `TODAY'S PLANNED SESSION (check RECENT CONVERSATION before giving future-tense advice — if the athlete's message reports completing ANY workout today, whether running, cycling, strength, or other, treat today as DONE and do NOT ask if they're still planning to do today's run)`;
+        : `TODAY'S PLANNED SESSION (check BOTH RECENT WORKOUTS AND RECENT CONVERSATION before giving future-tense advice: (1) If the athlete's message reports completing ANY workout today, treat today as DONE. (2) If today's session is a Long Run and RECENT WORKOUTS already shows a long effort from earlier this week — labeled "yesterday", "2 days ago", etc. — that long run IS already done for the week. Do NOT prescribe it again. Tell the athlete their long run is covered and what remains is rest or an easy shakeout.)`;
       sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
     }
     if (futureSessions.length > 0) {
@@ -3551,7 +3574,7 @@ RACE HISTORY (from Strava, workout_type=race):
 ${raceHistory.map((r) => {
   const date = r.start_date ? (r.start_date as string).slice(0, 10) : "unknown date";
   const distMiles = Math.round(((r.distance_meters as number) / 1609.34) * 10) / 10;
-  return `- ${date}: ${distMiles} mi @ ${r.average_pace || "unknown pace"}`;
+  return `- ${date}: ${spMi(distMiles)} @ ${spUseMetric && r.average_pace ? convertPaceStrToKm(r.average_pace as string) : (r.average_pace || "unknown pace")}`;
 }).join("\n")}
 ` : ""}
 CURRENT TRAINING STATE:
@@ -3563,7 +3586,7 @@ ${(() => {
   // Session rows, projectedWeekMiles, remainingPlanLine, and tsMileageLine are all
   // pre-computed before the return statement — use them directly here.
   // (Legacy IIFE removed; values computed once in the ts* pre-computation block above.)
-  return `- Week ${tsEffectiveWeek} of training, phase: ${tsPhaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""}
+  return `- Week ${tsEffectiveWeek} of training plan, phase: ${tsPhaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""} (week 1 = first week of current plan; advances each Sunday)
 ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): ${tsTargetMiles ? tsMi(tsTargetMiles) : "TBD"}
 <rule>THIS WEEK'S MILEAGE: ${tsMileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}</rule>
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
@@ -3602,15 +3625,18 @@ TONE:
 
 FORMATTING:
 - NEVER use asterisks, markdown bold/italic, bullet points, or dashes as list markers — SMS does not render markdown and they appear as raw characters.
-- If the athlete uses metric (km, min/km), respond in metric. If imperial (miles, min/mi), respond in imperial. Match consistently.
+- Unit system is set by the athlete's preference above (${spUseMetric ? "metric — always use km and min/km" : "imperial — always use miles and min/mile"}). Never switch units based on what the athlete types in any single message — the preference setting is definitive.
 - COUNTING RULE: Never state a count and then list items that don't match. If you write "4 training days left (Tue, Wed, Thu, Sat)" count the items in the parentheses first — that's 4, which is fine. "4 training days left (Tue, Wed, Thu, Sat, Sun)" is 5, not 4 — fix the number before sending. Same rule applies to any enumerated list followed by a stated count.
 - WHEN LISTING MULTIPLE SESSIONS (week plan, schedule, multi-day preview): always use this compact one-per-line format with NO blank lines between sessions:
-  Mon 3/9 · Easy 5mi @ 9:30/mi
+${spUseMetric ? `  Mon 3/9 · Easy 8 km @ 6:00/km
+  Tue 3/10 · Strength + mobility 20 min
+  Wed 3/11 · Tempo 6.5 km (4 km @ 5:15/km)
+  Sat 3/14 · Long run 19 km easy` : `  Mon 3/9 · Easy 5mi @ 9:30/mi
   Tue 3/10 · Strength + mobility 20 min
   Wed 3/11 · Tempo 4mi (2mi @ 8:45)
-  Sat 3/14 · Long run 8mi easy
+  Sat 3/14 · Long run 8mi easy`}
   Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun), M/D dates, and · as the separator. Never use full day names ("Monday, March 9"), colons, or dashes as separators for session lists. Blank lines split into separate SMS bubbles — keep the session list as one unbroken block. Always sort sessions in chronological order by date — never group by workout type (e.g. runs first, then strength). A strength session on Tuesday belongs before a run on Thursday.
-- SESSION DISTANCE FORMAT — CRITICAL: Running sessions must always include distance in miles (e.g. "Easy 5mi", "Tempo 4mi", "Long run 8mi"). Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate in parentheses after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~1.8mi)". Estimate at ~13 min/mile for a beginner run/walk pace. This allows the system to track weekly volume accurately. Non-running sessions — strength, cross-training, swimming, cycling, yoga, spin, Zwift, rowing, aqua jogging, or any other non-running activity — must NEVER include a distance in miles, even if you know the distance. Use duration or just the activity name instead (e.g. "Strength + mobility 30 min", "Master's swim", "Zwift ride 60 min", "Spin class"). This format is how the system counts weekly running mileage — putting miles on a non-running session will cause it to be incorrectly counted as running volume.
+- SESSION DISTANCE FORMAT — CRITICAL: Running sessions must always include distance in the athlete's unit (${spUseMetric ? "km, e.g. \"Easy 8 km\", \"Tempo 6.5 km\", \"Long run 19 km\"" : "miles, e.g. \"Easy 5mi\", \"Tempo 4mi\", \"Long run 8mi\""}). Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate in parentheses after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~${spUseMetric ? "2.9 km" : "1.8mi"})". ${spUseMetric ? "Estimate at ~8 min/km for a beginner run/walk pace." : "Estimate at ~13 min/mile for a beginner run/walk pace."} This allows the system to track weekly volume accurately. Non-running sessions — strength, cross-training, swimming, cycling, yoga, spin, Zwift, rowing, aqua jogging, or any other non-running activity — must NEVER include a distance, even if you know the distance. Use duration or just the activity name instead (e.g. "Strength + mobility 30 min", "Master's swim", "Zwift ride 60 min", "Spin class"). This format is how the system counts weekly running volume — putting distance on a non-running session will cause it to be incorrectly counted as running volume.
 
 ${isRunReview ? `TONE WHEN ATHLETE RUNS FASTER THAN PRESCRIBED:
 - Lead with genuine excitement — celebrate the effort and the fitness it reflects
@@ -3632,8 +3658,8 @@ TONE WHEN ATHLETE DOES A DIFFERENT WORKOUT THAN PRESCRIBED:
 
 WHEN AN ATHLETE REQUESTS A LIGHTER WEEK OR LOAD REDUCTION:
 If an athlete explicitly asks to scale back (e.g., "can we dial it back", "just 3 easy runs", "I'm exhausted", "need an easier week"), honor that request literally:
-- "3 easy runs" means 3 SHORT runs — cap each run at 5–6 mi maximum regardless of the athlete's normal training volume. Total added mileage should be 15–18 mi (3 × 5–6 mi). A 45 mpw athlete who has already run 8 mi and asks for "3 easy runs" should get three 5–6 mi runs, not 7/8/10 mi runs that sum to 30+ mi on the week.
-- Shorter distance IS the point — not just dropping quality sessions while keeping long distances at easy pace. Distance is load. A 10 mi "easy" run is not a recovery run for an exhausted athlete. A 6 mi "easy" run is.
+- "3 easy runs" means 3 SHORT runs — cap each run at ${spUseMetric ? "8–10 km" : "5–6 mi"} maximum regardless of the athlete's normal training volume. Total added volume should be ${spUseMetric ? "24–30 km (3 × 8–10 km)" : "15–18 mi (3 × 5–6 mi)"}. A high-mileage athlete who has already run ${spUseMetric ? "13 km" : "8 mi"} and asks for "3 easy runs" should get three ${spUseMetric ? "8–10 km" : "5–6 mi"} runs, not runs that add 50+ km on the week.
+- Shorter distance IS the point — not just dropping quality sessions while keeping long distances at easy pace. Distance is load. A ${spUseMetric ? "16 km" : "10 mi"} "easy" run is not a recovery run for an exhausted athlete. A ${spUseMetric ? "10 km" : "6 mi"} "easy" run is.
 - Stick to the athlete's existing training days — don't add sessions on non-training days when scaling back.
 - "Easy only" means remove all quality sessions (tempo, intervals) this week entirely — not "a lighter tempo".
 - Never push back or suggest they keep a hard session. Life stress is training load. Exhaustion is data. Validate it in one sentence, then give the specific lighter schedule.
@@ -4185,6 +4211,7 @@ function buildUserMessage(
   initialPlanDaysConstraint: string | null = null,
   injuryHoldSince: string | null = null,
 ): string {
+  const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
     case "morning_plan":
       return "Generate today's workout plan for this athlete. Consider their current training state, recent activity history and trends, and any adjustments needed. Be specific about distances, paces, and effort levels.";
@@ -4276,11 +4303,14 @@ function buildUserMessage(
         ? `\nDATA AVAILABILITY GUARD — the following data is NOT present; do not fabricate it:\n${dataGuards.map(g => `- ${g}`).join("\n")}`
         : "";
 
-      const weekMilesStr = weekMileageSoFar.toFixed(1);
+      const postRunIsMetric = (profile?.preferred_units as string) === "metric";
+      const weekMilesStr = postRunIsMetric
+        ? `${(weekMileageSoFar * 1.60934).toFixed(1)} km`
+        : `${weekMileageSoFar.toFixed(1)} mi`;
       const isRunActivity = ["Run", "TrailRun", "VirtualRun"].includes((activityData?.type as string) ?? "");
       const weekMileageContext = isRunActivity
-        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
-        : `\n<rule>WEEK-TO-DATE RUNNING MILES: ${weekMilesStr} mi across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
+        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
+        : `\n<rule>WEEK-TO-DATE RUNNING: ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
 
       return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
 
@@ -4288,7 +4318,7 @@ CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is A
 
 DATA GLOSSARY for the details below:
 - summary.splits: auto-generated by Strava, one entry per kilometer (NOT per mile). Each entry includes a "cumulative_miles" field showing how far into the run that split ends. Use cumulative_miles to describe position — do NOT treat the array index or the "split" field as a mile number. For a 3.1mi run there will be ~5 km splits; calling the last one "mile 5" is wrong.${hasLaps ? "\n- summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown. IMPORTANT: Lap data provides per-lap AVERAGES for pace and HR only. Do NOT cite per-lap elevation gain, per-lap cadence, or per-lap power/watt ranges — Strava does not provide these per lap. Do NOT cite specific elapsed-time markers within a lap (e.g. \"at 48:46 into the run, HR jumped to 140\") — Strava does not record event-level timestamps within a lap. Only reference per-lap pace and HR averages." : ""}
-- All paces are min/mile. Elevation in feet. Distances in miles.${dataGuardBlock}
+- All paces in the JSON below are min/mile. Elevation in feet. Distances in miles. ${postRunIsMetric ? "This athlete uses metric — convert all paces to min/km, distances to km, and elevation to meters in your response." : "Use these units as-is in your response."}${dataGuardBlock}
 
 Details:
 ${JSON.stringify(activityForClaude, null, 2)}
@@ -4705,11 +4735,14 @@ Write as EXACTLY 2 SMS bubbles separated by a blank line — no more, no less. E
 First bubble: 3-4 sentences max. If the athlete has a race date, open with a 1-2 sentence training arc orientation — briefly sketch the shape of the journey from now to race day (e.g. "You've got ~18 weeks — first 6 or so we're building your aerobic base, then we'll layer in quality work and sharpen into goal pace in the final month before the taper"). This tells them where they're going, not just what's happening this week. Then one sentence on why this specific first week is structured the way it is — e.g. "Starting with all easy miles to build your aerobic base before introducing quality work" or "Keeping volume conservative given the hip — easier to add than to walk back a flare-up." If no race date, skip the arc and just explain the week's rationale. Do NOT open with "Got it" or any generic acknowledgment phrase. Do NOT restate their goal back to them.
 
 Second bubble: this week's sessions, one per line, sorted strictly by calendar date ascending — never group by type (runs first, then strength). CRITICAL: if your training days span a month boundary (e.g. Sat 3/28, Sun 3/29, then Tue 3/31, Wed 4/1), the earlier calendar dates MUST appear first regardless of day name. Do not sort by day-of-week order — sort by the actual date.
-Mon 3/2 · Easy 3mi @ easy effort
+${umUseMetric ? `Mon 3/2 · Easy 5 km @ easy effort
+Tue 3/3 · Strength + mobility 20 min
+Wed 3/4 · Tempo 6.5 km (2 km @ 5:10/km) — builds lactate threshold, the engine for your goal pace
+Sat 3/7 · Easy 6 km` : `Mon 3/2 · Easy 3mi @ easy effort
 Tue 3/3 · Strength + mobility 20 min
 Wed 3/4 · Tempo 4mi (2mi @ 8:45) — builds lactate threshold, the engine for your goal pace
-Sat 3/7 · Easy 4mi
-SESSION DISTANCE FORMAT: Running sessions must include distance in miles (e.g. "Easy 3mi"). Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~1.8mi)". Estimate at ~13 min/mile for beginner run/walk pace. Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance in miles — use duration or activity name only (e.g. "Strength + mobility 20 min", "Zwift ride 60 min"). Putting miles on a non-running session causes it to be incorrectly counted as running volume.
+Sat 3/7 · Easy 4mi`}
+SESSION DISTANCE FORMAT: Running sessions must include distance in ${umUseMetric ? "km (e.g. \"Easy 5 km\")" : "miles (e.g. \"Easy 3mi\")"}. Run/walk interval sessions (time-based beginner workouts) must include an approximate distance estimate after the duration: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~${umUseMetric ? "2.9 km" : "1.8mi"})". Estimate at ~${umUseMetric ? "8 min/km" : "13 min/mile"} for beginner run/walk pace. Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance — use duration or activity name only (e.g. "Strength + mobility 20 min", "Zwift ride 60 min"). Putting distance on a non-running session causes it to be incorrectly counted as running volume.
 QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified. Format the label to show the breakdown in parentheses. Examples:
 - "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
 - "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
@@ -4723,11 +4756,11 @@ ${!hasStrava ? `
 NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so there's no automatic activity sync. Weave a natural, low-key line into the closing of the plan that tells them to text you after each run. Make it feel like a coach thing, not a system requirement. Examples: "Since you're not on Strava, just shoot me a text after each run — even a quick 'done, 5 miles' — and I'll track from there." or "No Strava sync here, so just drop me a message after each workout and I'll keep tabs on your progress." Vary the phrasing. One sentence only — don't dwell on it.` : ""}
 
 SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the week's plan. Format exactly:
-[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"Easy 6mi","optional":false},{"day":"Wed","date":"M/D","label":"6×800m @ 5K pace 3mi","optional":false}]]
+[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"${umUseMetric ? "Easy 10 km" : "Easy 6mi"}","optional":false},{"day":"Wed","date":"M/D","label":"${umUseMetric ? "6×800m @ 5K pace 4.8 km" : "6×800m @ 5K pace 3mi"}","optional":false}]]
 Rules:
 - day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
 - date: M/D format matching the calendar date you assigned to this session
-- label: concise session description including distance (e.g. "Easy 6mi", "Long run 10mi", "6×800m @ 5K pace 3mi", "Strength 30min")
+- label: concise session description including distance (e.g. ${umUseMetric ? '"Easy 10 km", "Long run 16 km", "6×800m @ 5K pace 4.8 km", "Strength 30min"' : '"Easy 6mi", "Long run 10mi", "6×800m @ 5K pace 3mi", "Strength 30min"'})
 - optional: true only for explicitly optional sessions, false otherwise
 - Include every session in the week — do not omit any
 - The tag is stripped before the athlete sees the message — they will never see it`;
