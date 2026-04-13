@@ -299,8 +299,8 @@ ${alreadyAskedPaceCalibration
   ? `PACE CALIBRATION — trail race on Strava:
 You already asked about road race times earlier in this conversation. Do NOT ask again. Accept whatever pace data the athlete has provided and proceed.`
   : `PACE CALIBRATION — trail race on Strava:
-If Strava is connected and the STRAVA note says "this is a trail race", you MUST ask about road race times in THIS message — do not defer it to a later turn. Trail paces are slower than road paces due to elevation, so the suggested easy pace from Strava is only a rough estimate until we get a road benchmark. Ask: "Your best Strava effort is a trail race, which tends to run slower than road races due to elevation — the easy pace I'm showing is a rough estimate. Do you have a recent road 5K, 10K, or half marathon time I can use for more accurate training zones? No worries if not."
-Do NOT state the suggested easy pace as settled or confident — frame it as preliminary until the calibration question is answered.
+If Strava is connected and the STRAVA note says "this is a trail race", you MUST ask about road race times in THIS message — do not defer it to a later turn. Trail paces are slower than road paces due to elevation, so the suggested easy pace from Strava is only a rough estimate until we get a road benchmark. Reference the specific race from the STRAVA note by its label and date (e.g. "I can see a [label] from [date] in your Strava history"). Then explain that since it was a trail race, elevation makes trail paces slower than road paces, so you'd love a recent road 5K, 10K, or half marathon time for more accurate training zones — but no worries if they don't have one.
+Do NOT use vague phrases like "your best Strava effort" without naming the specific race. Do NOT state the suggested easy pace as settled or confident — frame it as preliminary until the calibration question is answered.
 Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).`}`;
 
   // Call Claude Sonnet — web_search handles race date lookups automatically

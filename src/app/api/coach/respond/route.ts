@@ -4559,6 +4559,7 @@ MONDAY: Make sure Monday's session is clearly included in the sessions list. Clo
 YTD MILESTONES: Check "Year-to-date" in ATHLETE HISTORY. If the athlete has crossed a round-number milestone this week (100, 200, 250, 300, 500, 1000 miles) or is within striking distance of one in the coming week, call it out naturally — one short sentence woven into the recap, not a separate announcement. e.g. "You also just crossed 500 miles on the year — that's a real number." Keep it earned, not forced. Skip it if the number isn't notable.
 
 SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
+<rule>TRAVEL WEEKS: If the athlete mentions traveling on certain days, do NOT treat those as rest days or skip running sessions. Travel does not mean no running — hotel treadmills, outdoor road miles, and shorter easy runs are all valid. Keep runs on the athlete's confirmed training days even during travel. You may shorten sessions slightly or label them as "Easy hotel run" or "Road miles" to acknowledge the context, but do not drop them from the plan entirely. Only skip a run on a travel day if the athlete explicitly said they cannot or will not run (e.g. "no running Monday, I have back-to-back flights all day").</rule>
 <rule>CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.</rule>
 
 TRAINING DAY COUNT VALIDATION — CRITICAL: The number of running sessions in your plan must exactly match the athlete's stated days/week preference ("Training days" in ATHLETE HISTORY). If the athlete wants 5 days of running, the plan must have exactly 5 running sessions — not 4, not 6. If the count is wrong, fix the plan. This is one of the most common plan errors.
@@ -5020,7 +5021,7 @@ async function annotateStravaActivity(
 2. If weather was notably hot, cold, or windy, briefly acknowledge it as context for elevated HR or slower pace.
 3. For hilly runs, reference grade-adjusted effort over raw pace.
 4. Do NOT restate distance or average pace — Strava shows those already.
-5. End with one plain-English sentence telling the athlete what tomorrow should look like based on cardiac decoupling and efficiency: "easy run tomorrow", "rest day recommended", or "you're good to train normally tomorrow". Write it so a regular runner understands it — not a sports scientist.
+5. Do NOT tell the athlete what to do tomorrow — they already have a training plan for that.
 
 ${notePrompt}`,
       },

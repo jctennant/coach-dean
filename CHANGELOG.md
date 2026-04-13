@@ -4,6 +4,37 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Trail race calibration prompt now references the actual race instead of "your best Strava effort"
+
+**Type:** Bug Fix
+**Reported by:** Jake (Gwyneth's conversation)
+**User feedback:** "not sure why Dean is saying her recent best effort is on trail if he doesn't have a best effort he's looking at?"
+**Root cause:** The pace calibration prompt instruction told Claude to say "Your best Strava effort is a trail race..." — a vague, hardcoded phrase. The STRAVACONTEXT already contained the specific race label, date, and time, but the instruction didn't direct Claude to use those details. When Gwyneth asked "What race is my best Strava effort?", Dean correctly had no specific answer, exposing the contradiction.
+**Fix / Change:** Updated the PACE CALIBRATION prompt instruction to tell Claude to reference the specific race label and date from the STRAVACONTEXT (e.g. "I can see a [label] from [date] in your Strava history") instead of using the vague "your best Strava effort is a trail race" script. Added explicit instruction: "Do NOT use vague phrases like 'your best Strava effort' without naming the specific race."
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+## 2026-04-12 — Travel weeks no longer drop running sessions from the weekly plan
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal)
+**User feedback:** "why did I only get two days in my sunday recap schedule for the next week?"
+**Root cause:** The schedule constraint prompt treated travel days the same as explicit day conflicts (spin class, soccer, etc.), causing Dean to skip running sessions on Mon–Thu when the athlete mentioned traveling. Only Sat/Sun remained, resulting in a 16.5mi plan against a 30mi target.
+**Fix / Change:** Added a TRAVEL WEEKS rule to the weekly_recap prompt clarifying that travel ≠ rest day. Runs stay on confirmed training days during travel (framed as hotel/road miles). Only dropped if the athlete explicitly says they can't run (e.g. back-to-back flights).
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
+## 2026-04-12 — Removed "tomorrow" recommendation from Strava annotation
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** "his last line is about what you should do tomorrow; there's already a plan so it will be bad if these two are in conflict"
+**Root cause:** The Haiku prompt instructed Dean to end every annotation with a plain-English tomorrow recommendation based on cardiac decoupling/efficiency. This directly conflicts with the SMS training plan already sent to the athlete.
+**Fix / Change:** Replaced rule 5 in the annotation prompt from "tell the athlete what tomorrow should look like" to "do NOT tell the athlete what to do tomorrow — they already have a training plan for that."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-12 — Fixed Strava annotation showing same race twice instead of two different races
 
 **Type:** Bug Fix
