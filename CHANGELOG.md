@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Fix duplicate coach responses from Linq webhook race condition
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user 5e1535c3, also dc936de3)
+**User feedback:** N/A (detected by automated analysis — two near-identical responses sent to same athlete message)
+**Root cause:** When Linq delivers the same webhook twice in rapid succession (retry on timeout or network blip), both deliveries pass the pre-`after()` dedup check before either one has had a chance to insert its conversation row. After the 15-second debounce, both handlers see their own row as the "latest message" and both proceed to call coach/respond, generating two independent Claude responses.
+**Fix / Change:** Added a post-debounce guard that queries all conversation rows with the same `external_message_id` for that user. If more than one row exists (duplicate delivery), only the handler whose row has the lexicographically smallest id proceeds; all others return early. This is a deterministic tiebreak that both handlers resolve to the same winner without coordination.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/__tests__/api/linq-webhook.test.ts`
+
+---
+
+## 2026-04-13 — Past-race users no longer shown "Taper phase" in coaching context
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user b1b308cf — 50K race on 2026-03-28, still being coached as pre-race)
+**User feedback:** N/A (detected by automated analysis)
+**Root cause:** `computePhase` returns "taper" for any race date where `weeksUntil ≤ 2`, including negative values (past races). This caused `tsPhaseDisplay` in `buildSystemPrompt` to output "Training: Week 4 · Taper phase" even when the race had already happened. The post-race context block (lines 3249-3267) was correctly injecting "race is done, here's recovery guidance", but the contradictory "Taper phase" label in the FACTS block undermined it — the model saw conflicting signals and defaulted to treating the race as upcoming.
+**Fix / Change:** `tsPhaseDisplay` is now an IIFE that detects when the raw phase is "taper" AND `profileRaceDaysUntil ≤ 0` (race has passed), and returns "recovery" instead. The post-race context block is unchanged and continues to provide coaching instructions. `suggestedWeeklyMiles` stays null (the existing `buildPeriodization` taper logic returns null), so no spurious progression targets appear.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-12 — Fix timezone fallback + show Strava location in onboarding closing message
 
 **Type:** Bug Fix / Improvement

@@ -3397,7 +3397,17 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     return est.interval ? `${tsFormatPace(est.interval)} (estimated)` : "TBD";
   })();
   const tsEffectiveWeek = periodization?.effectiveWeek ?? (state?.current_week as number | null) ?? 1;
-  const tsPhaseDisplay = (periodization?.phase ?? (state?.current_phase as string | null) ?? "base");
+  const tsPhaseDisplay = (() => {
+    const rawPhase = periodization?.phase ?? (state?.current_phase as string | null) ?? "base";
+    // When the goal race has already passed, replace "taper" with "recovery" so the
+    // FACTS block doesn't signal an upcoming race to the model. The post-race context
+    // block (injected above in dateContext) already provides the correct coaching
+    // instructions; the contradictory "Taper phase" label was overriding them.
+    if (rawPhase === "taper" && profileRaceDaysUntil !== null && profileRaceDaysUntil <= 0) {
+      return "recovery";
+    }
+    return rawPhase;
+  })();
   const tsPhaseLabel = tsPhaseDisplay.charAt(0).toUpperCase() + tsPhaseDisplay.slice(1);
   const tsDeloadBlock = periodization?.isDeloadWeek
     ? `<rule>RECOVERY WEEK — MANDATORY: Week ${tsEffectiveWeek} is a scheduled recovery week (every 4th week). Reduce volume 25–30% from recent average.${periodization.suggestedWeeklyMiles != null ? ` Target: ~${tsMi(periodization.suggestedWeeklyMiles)} this week.` : ""} No new quality sessions — if there's a tempo or interval in the plan, shorten it or replace with an easy run. Same number of runs, shorter distances. Recovery weeks are when adaptation happens — do not skip this.</rule>\n` : "";
