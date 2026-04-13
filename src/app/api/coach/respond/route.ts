@@ -1781,6 +1781,48 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // Fire sync_sessions in a fresh invocation — saves ~3s vs inline Haiku calls.
     after(async () => {
       try {
+        // Sync B/C races from onboarding_data.other_races → races table.
+        // Every weekly_recap is a safe checkpoint: if a race was captured during onboarding
+        // but never inserted (or was mentioned post-onboarding before extraction existed),
+        // this self-heals the plan so it covers all the athlete's races by next Sunday.
+        const onboardingData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+        const rawOtherRaces = (onboardingData.other_races as Array<{
+          date: string;
+          name: string | null;
+          goal: string | null;
+          priority: "B" | "C";
+          goal_distance_miles?: number | null;
+        }> | null) ?? [];
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const existingDates = new Set(upcomingRaces.filter(r => r.priority === "B" || r.priority === "C").map(r => r.race_date as string));
+        const missingRaces = rawOtherRaces.filter(r => r.date && r.date > todayStr && !existingDates.has(r.date));
+        if (missingRaces.length > 0) {
+          console.log(`[weekly_recap] syncing ${missingRaces.length} missing B/C race(s) from onboarding_data to races table:`, missingRaces.map(r => r.date));
+          const aGoal = (profile?.goal as string | null) ?? "trail_race";
+          const { error: syncErr } = await supabase.from("races").insert(
+            missingRaces.map(r => ({
+              user_id: userId,
+              race_date: r.date,
+              race_name: r.name ?? null,
+              goal: r.goal ?? aGoal,
+              priority: r.priority,
+              goal_time_minutes: null,
+              goal_distance_miles: r.goal_distance_miles ?? null,
+            }))
+          );
+          if (syncErr) {
+            console.error("[weekly_recap] B/C race sync insert failed (non-fatal):", syncErr);
+          } else {
+            // Trigger a silent plan rebuild so the arc extends to cover the new race(s).
+            console.log("[weekly_recap] triggering silent rebuild_plan to extend arc for newly synced races");
+            await fetch(`${appUrl}/api/coach/respond`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, trigger: "rebuild_plan", silent: true }),
+            }).catch(err => console.error("[weekly_recap] rebuild_plan trigger failed (non-fatal):", err));
+          }
+        }
+
         // During injury hold: don't sync arc — the arc will be rebuilt when injury clears.
         // Store the cross-training sessions so reminders have something to reference.
         let sessionsWritten = false;

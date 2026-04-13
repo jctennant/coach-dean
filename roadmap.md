@@ -34,13 +34,5 @@ Issues discovered through onboarding simulation (10 athletes, 2026-03-12). See `
 
 ---
 
-## Plan integrity check in weekly_recap
-**Priority:** P2
-**Context:** If a user's B/C race is missing from the `races` table (and thus from the plan arc), they'll never know unless they look at the dashboard carefully or ask Dean to rebuild. The weekly_recap rebuilds the current week's sessions but doesn't check whether the arc still covers all the user's races.
-
-**What the fix looks like:**
-- At the start of `weekly_recap` processing, run the same B/C race sync that now exists in `handleRebuildPlan` (sync `onboarding_data.other_races` → `races`)
-- If any new races were inserted, trigger a silent full plan rebuild before generating the week's sessions
-- This means every Sunday the plan self-heals if a race was missing
-
-**Files:** `src/app/api/coach/respond/route.ts`
+## ~~Plan integrity check in weekly_recap~~ ✓ Shipped 2026-04-13
+Every Sunday `weekly_recap` now syncs `onboarding_data.other_races` → `races` table and triggers a silent `rebuild_plan` if any were missing. Arc self-heals weekly for all users.

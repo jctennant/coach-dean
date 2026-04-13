@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Weekly recap self-heals missing B/C races from onboarding_data
+
+**Type:** Bug Fix / Reliability
+**Reported by:** Jake (dashboard review)
+**User feedback:** "I'm wondering if we should consider giving users a command to rebuild plan... I'm just worried other users will get into this state as well."
+**Root cause:** The B/C race sync added to `handleRebuildPlan` only fires when a rebuild is explicitly triggered. Users whose plans were missing a B/C race had no automated recovery path unless they texted Dean to rebuild.
+**Fix / Change:** Added the same B/C race sync to the `weekly_recap` `after()` block. Every Sunday after generating the week's plan: reads `onboarding_data.other_races`, inserts any future-dated races missing from the `races` table, and silently triggers a `rebuild_plan` if any were added. All users self-heal automatically by the next weekly recap.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-13 — Sync B/C races from onboarding_data to races table during rebuild_plan
 
 **Type:** Bug Fix
