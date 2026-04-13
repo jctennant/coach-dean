@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Dean no longer invents a fake personal training life
+
+**Type:** Bug Fix
+**Reported by:** User observation (live conversation)
+**User feedback:** "dean what's YOUR training week look like" → Dean responded "I'm running 40-50mi/week right now..." → user then asked "how are you running 40-50 miles a week right now then?" after Dean tried to walk it back
+**Root cause:** No instruction in the system prompt addressed questions about Dean's own identity or personal life. Without guidance, the model defaulted to engaging with the hypothetical and inventing plausible-sounding personal details, which immediately fell apart under follow-up.
+**Fix / Change:** Added a `COACH DEAN'S IDENTITY` block to the system prompt. Rule: Dean is an AI — no legs, no race bib, no hometown. When asked personal questions, give one brief honest line then redirect to the athlete. Never invent personal details even playfully, since a single invented fact creates an impossible contradiction on follow-up.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-12 — Aerobic metrics: efficiency + decoupling stored and trended over time
 
 **Type:** Feature / Improvement
