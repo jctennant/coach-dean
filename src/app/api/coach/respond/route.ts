@@ -1228,7 +1228,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       });
 
       if (daysWithDates.length > 0) {
-        initialPlanDaysConstraint = `CONFIRMED TRAINING DAYS REMAINING THIS WEEK: ${daysWithDates.join(", ")} — exactly ${daysWithDates.length} session${daysWithDates.length !== 1 ? "s" : ""}. Schedule running sessions ONLY on these days. Do NOT put a run on any other day this week. Do NOT add a session for today (athlete needs time to prepare after onboarding).`;
+        // On Sunday the athlete is planning the upcoming Mon–Sun week — Monday is session 1
+        // and the "don't add a session for today" caveat does NOT apply (today = Sunday, a rest day).
+        // On mid-week onboards, today's window is closed and we skip it.
+        const noTodayClause = todayJsDow === 0
+          ? "" // Sunday: no such restriction — Monday starts tomorrow and is fully valid
+          : " Do NOT add a session for today (athlete needs time to prepare after onboarding).";
+        initialPlanDaysConstraint = `CONFIRMED TRAINING DAYS REMAINING THIS WEEK: ${daysWithDates.join(", ")} — exactly ${daysWithDates.length} session${daysWithDates.length !== 1 ? "s" : ""}. Schedule running sessions ONLY on these days. Do NOT put a run on any other day this week.${noTodayClause}`;
       } else {
         initialPlanDaysConstraint = `NO TRAINING DAYS REMAIN THIS WEEK after today. Do NOT schedule any sessions this week. Send a brief note telling the athlete their plan starts next week, then show their full week plan starting Monday.`;
       }
@@ -1369,7 +1375,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // but still correct "on track for X mi" using the system-computed projection —
   // Dean sometimes mentions only the next 1-2 sessions while citing the full-week
   // projected total, making the math look wrong to the user.
-  const mileageCorrected = trigger === "post_run"
+  const mileageCorrectedBase = trigger === "post_run"
     ? correctProjectedTotal(
         stripped,
         computeProjectedWeekMiles(
@@ -1378,6 +1384,22 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         )
       )
     : correctMileageTotal(stripped, alreadyCompletedMiles);
+
+  // For plan-generating triggers, apply a second pass using the structured SESSION_LIST
+  // data (when available) to catch cases where the text-regex approach missed an error.
+  // This is authoritative — SESSION_LIST is machine-generated alongside the plan, and
+  // summing its distances is more reliable than parsing free-form session line text.
+  const planTriggersForSessionListCorrection = new Set<TriggerType>(["initial_plan", "weekly_recap"]);
+  let mileageCorrected = mileageCorrectedBase;
+  if (planTriggersForSessionListCorrection.has(trigger) && rawSessionListJson) {
+    try {
+      const parsedSessions = JSON.parse(rawSessionListJson) as Array<{ label: string; optional?: boolean }>;
+      const umForCorrection = (profile?.preferred_units as string | undefined) === "metric";
+      mileageCorrected = correctTotalFromSessionList(mileageCorrectedBase, parsedSessions, umForCorrection);
+    } catch {
+      // parse failed — leave mileageCorrectedBase as-is
+    }
+  }
 
   // Enforce hard volume caps for plan-generating triggers when the athlete is
   // in the low-volume tier (< 10 mi/week). Prompt instructions alone are not
@@ -2075,6 +2097,45 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
   }
 
   return corrected;
+}
+
+/**
+ * After the SESSION_LIST tag is parsed into structured JSON, use it to compute the
+ * authoritative weekly total and correct any "Total: Xmi" (or km) line in the message.
+ * This is a more reliable fallback than correctMileageTotal's text-regex approach —
+ * it fires when Claude's stated total doesn't match the structured session data.
+ */
+function correctTotalFromSessionList(
+  message: string,
+  sessions: Array<{ label: string; optional?: boolean }>,
+  useMetric: boolean,
+): string {
+  const unit = useMetric ? "km" : "mi";
+  const unitRe = useMetric ? /(\d+(?:\.\d+)?)\s*km\b/i : /(\d+(?:\.\d+)?)\s*mi(?:les?)?\b/i;
+  const crossTrainingRe = /\b(bike|biking|cycling|swim|swimming|strength|mobility|stretch|yoga|elliptical|cross.train|spin|zwift|hike|hiking)\b/i;
+
+  let total = 0;
+  for (const s of sessions) {
+    if (s.optional) continue; // optional sessions don't count toward the weekly total
+    if (crossTrainingRe.test(s.label)) continue;
+    const match = s.label.match(unitRe);
+    if (match) total += parseFloat(match[1]);
+  }
+  if (total === 0) return message;
+
+  const roundedTotal = Math.round(total * 10) / 10;
+
+  // Replace any "Total: Xmi" or "Total: X mi" line — but only when Claude's number differs.
+  const totalLineRe = useMetric
+    ? /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*km(?:s)?)/gi
+    : /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi;
+
+  return message.replace(totalLineRe, (full, pre, num, post) => {
+    const stated = parseFloat(num);
+    if (Math.abs(stated - roundedTotal) <= 0.4) return full; // already correct
+    console.warn(`[correctTotalFromSessionList] stated ${stated}${unit}, SESSION_LIST sum is ${roundedTotal}${unit} — correcting`);
+    return `${pre}${roundedTotal}${post}`;
+  });
 }
 
 function stripMarkdown(text: string): string {
@@ -4617,7 +4678,9 @@ Rules:
         // Today IS Sunday — plan the full upcoming Mon–Sun week so they have something
         // to run on; the recap cron will have run (or is running) tonight and they'd
         // otherwise go a full week without a plan.
-        ? `WEEK TIMING: Today is Sunday. Plan the upcoming full week (Monday through next Sunday). Do NOT just plan today.`
+        ? `WEEK TIMING: Today is Sunday. Plan the upcoming full week (Monday through next Sunday). Do NOT just plan today.
+
+CRITICAL — FRAME THIS AS A FULL WEEK PLAN: This IS the athlete's first complete training week — it is NOT a partial week or a "rest of this week" plan. Do NOT use phrasing like "this covers the rest of this week", "just through Sunday", or "starter plan for the remaining days." Instead frame it as their first full week, e.g. "Here's your first week" or "Starting Monday, here's your week." The Sunday recap cron will build next week's plan from there.`
         // Mid-week onboard: plan today through this Sunday only. Sunday recap generates next week.
         : `WEEK BOUNDARY — IMPORTANT: This athlete just onboarded mid-week. Plan sessions from TODAY through this ${sundayStr} only (${daysRemainingInclToday} day${daysRemainingInclToday === 1 ? "" : "s"} remaining in this Mon-Sun week). Do NOT schedule sessions into next week (starting Monday). The Sunday recap will generate a full next-week plan automatically. If very few days remain (1-2), keep this initial plan brief — just get them started.
 

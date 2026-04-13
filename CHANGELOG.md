@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Fix Sunday initial plan framing + server-side mileage total from SESSION_LIST
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** "Dean says 'this just covers the rest of this week' but it's Sunday night and so it actually is a complete plan for next week" and "the mileage sum is off - shouldn't this be calculated server side and injected?"
+**Root cause:** Three issues: (1) The Sunday branch of `weekBoundaryNote` told Claude to plan a full week but didn't tell it to *frame* the message as a full week, so Claude still used partial-week language ("rest of this week"). (2) `correctMileageTotal` parses session lines via regex and can miss the stated total when the character encoding or format differs subtly; in this case Claude said "Total: 10mi" when sessions summed to 15mi. (3) The `initialPlanDaysConstraint` always appended "Do NOT add a session for today (athlete needs time to prepare after onboarding)" — on Sunday night that confused Claude into skipping Monday too, since the week starts immediately after a late-night onboard. The athlete had 5 training days but only got 4 sessions.
+**Fix / Change:** (1) Added a CRITICAL instruction to the Sunday `weekBoundaryNote` explicitly telling Claude not to say "rest of this week" and to frame the plan as their first full week. (2) Added `correctTotalFromSessionList()` — after the SESSION_LIST JSON is parsed, it sums miles from structured session labels and does a final pass to correct any wrong "Total:" line. This runs as a second pass after `correctMileageTotal` for `initial_plan` and `weekly_recap` triggers. (3) The "do not add a session for today" clause is now omitted from the Sunday path — on Sunday the athlete plans Monday onward and there's no window-closed restriction.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-12 — Trail race calibration prompt now references the actual race instead of "your best Strava effort"
 
 **Type:** Bug Fix
