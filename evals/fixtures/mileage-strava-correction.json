@@ -3,6 +3,7 @@
   "description": "Athlete corrected Dean's wrong mileage claim twice — Dean must re-anchor to Strava's 2.5mi, not repeat or rearrange the wrong 6.0mi narrative",
   "category": "mileage_accuracy",
   "trigger": "user_message",
+  "today": "2026-03-31",
   "user": {
     "name": "Jordan",
     "timezone": "America/Los_Angeles",

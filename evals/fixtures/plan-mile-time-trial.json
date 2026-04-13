@@ -3,7 +3,7 @@
   "description": "Track runner (30 mpw, 4 days) preparing for a 1-mile time trial in 8 weeks. Plan must be neuromuscular speed work — fast reps, strides, short intervals. No marathon-style long runs.",
   "category": "plan_quality",
   "trigger": "initial_plan",
-  "today": "2026-04-03",
+  "today": "2026-04-05",
   "user": {
     "name": "Tyler",
     "timezone": "America/Chicago",
@@ -38,9 +38,9 @@
   },
   "ground_truth": {
     "max_week1_miles": 34,
-    "min_week1_miles": 22,
+    "min_week1_miles": 27,
     "max_peak_weekly_miles": 40,
-    "min_peak_weekly_miles": 26,
+    "min_peak_weekly_miles": 30,
     "max_long_run_miles": 5,
     "min_long_run_miles": 3,
     "sessions_per_week": 4,

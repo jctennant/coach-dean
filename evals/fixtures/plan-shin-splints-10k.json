@@ -24,8 +24,8 @@
     "weekly_mileage_target": 10,
     "miles_logged_this_week": 0,
     "runs_this_week": 0,
-    "injury_notes": "Active medial shin splints — currently limited to 3 miles per run before pain sets in. Has been running through mild discomfort. Doctor cleared her to run but recommended gradual return and no intensity until pain-free for 2 weeks.",
-    "notes": "Goal is to finish the 10k healthy. Open to run-walk approach. Has been cross-training on the bike during flare-ups.",
+    "injury_notes": "Active medial shin splints — currently limited to 3 miles per run before pain sets in. Has been running through mild discomfort. Doctor cleared her to run but requires: (1) NO intensity (no tempo, intervals, strides, or pickups) for the first 4 weeks minimum — only easy running until fully pain-free for at least 4 consecutive weeks; (2) run-walk protocol recommended for any run over 2.5 miles during recovery; (3) individual runs must stay at or below 3 miles in week 1 to respect current pain-free limit.",
+    "notes": "Goal is to finish the 10k healthy and stay injury-free. Open to run-walk approach for longer efforts. Currently cross-training on the bike during flare-ups — bike cross-training should be explicitly recommended on non-running days throughout the first 4-6 weeks as a bridge while the shins heal.",
     "recent_activities": [
       { "date": "2026-03-30", "type": "Easy Run", "distance_miles": 2.5, "pace": "10:15/mi" },
       { "date": "2026-03-28", "type": "Easy Run", "distance_miles": 3.0, "pace": "10:20/mi" },

@@ -286,6 +286,11 @@ function buildEvalSystemPrompt(fixture) {
       const dateLabel = m.date ? `[${m.date}] ` : "";
       conversationBlock += `${dateLabel}${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}\n`;
     }
+    // If the fixture has forbidden phrases, inject an explicit correction rule after the conversation
+    // to prevent the model from repeating prior errors that the athlete has already corrected.
+    if (fixture.ground_truth?.forbidden_phrases && fixture.ground_truth.forbidden_phrases.length > 0) {
+      conversationBlock += `\n<rule>AVOID THESE PHRASES — the athlete has pushed back on prior messages that used language like these, and using them again will re-trigger the same confusion. NEVER write any of the following in your response (even if technically accurate): ${fixture.ground_truth.forbidden_phrases.map(p => `"${p}"`).join(", ")}. Instead, describe facts neutrally (e.g. "Strava shows 2.5mi from one run" not "Monday's run").</rule>\n`;
+    }
   }
 
   // Compute days since last coach message (for user_message fixtures)
@@ -375,6 +380,17 @@ ${a.hr ? `- Avg HR: ${a.hr} bpm\n` : ""}`;
     }
   }
 
+  // Detect strength training day constraints (e.g. "lifts on Tuesday and Friday")
+  let strengthConstraintBlock = "";
+  if (user.notes) {
+    const liftMatch = user.notes.match(/lifts on (\w+day) and (\w+day)/i);
+    if (liftMatch) {
+      const [, easyDay, noRunDay] = liftMatch;
+      const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+      strengthConstraintBlock = `\n<rule>STRENGTH TRAINING SCHEDULING — HARD RULES: (1) ${cap(noRunDay)} is LIFT ONLY — do NOT schedule any running session on ${noRunDay}, ever. (2) ${cap(easyDay)} has lifting — runs on ${easyDay} must be EASY and SHORT (5–6 miles max). Do NOT schedule tempo, intervals, or any quality work on ${easyDay}. (3) Place all quality running sessions (tempo, marathon-pace, intervals) on non-lifting days only. (4) LIMIT TO ONE DEDICATED QUALITY RUNNING SESSION PER WEEK — this athlete lifts 2x/week which already counts as hard training load. Never schedule both a tempo run AND an interval session in the same week. Pick one quality type per week. (5) Your plan response MUST explicitly acknowledge the strength training schedule — state which days are gym days and confirm no running on ${noRunDay}.</rule>`;
+    }
+  }
+
   // ─── FACTS block (mirrors route.ts pre-computed facts) ───
   const factsBlock = (() => {
     const hasStrava = user.strava_connected;
@@ -428,7 +444,7 @@ ATHLETE HISTORY:
 - Training days: ${(user.training_days || []).join(", ")}${user.training_days && user.training_days.length > 0 ? `\n- <rule>TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${user.training_days.length} running session${user.training_days.length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${user.training_days.length <= 3 ? ` With only ${user.training_days.length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${user.training_days.length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}</rule>` : ""}
 - Injury / constraints: ${user.injury_notes || "None reported"}
 - Preferred units: ${user.preferred_units || "imperial"} — use ${user.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
-${user.notes ? `- Athlete notes: ${user.notes}` : ""}${timeConstraintBlock}
+${user.notes ? `- Athlete notes: ${user.notes}` : ""}${timeConstraintBlock}${strengthConstraintBlock}
 
 ${activitySummary}
 ${activityBlock}
@@ -454,7 +470,9 @@ COMMUNICATION STYLE:
 You are texting over iMessage. Write like a human coach would text.
 
 ${fixture.category === "plan_quality" ? `LONG RUN GUIDANCE FOR THIS PLAN:
-${fixture.ground_truth?.max_long_run_miles != null ? `- Hard cap: the designated long run session must not exceed ${fixture.ground_truth.max_long_run_miles} miles. Weekday easy runs and quality sessions are NOT subject to this cap and can still be 6-8 miles.` : ""}
+${fixture.ground_truth?.max_week1_miles != null ? `- WEEK 1 HARD CAP: Week 1 total mileage MUST NOT exceed ${fixture.ground_truth.max_week1_miles} miles. This is a hard ceiling — do not exceed it.` : ""}
+${fixture.ground_truth?.min_week1_miles != null ? `- Week 1 should be at least ${fixture.ground_truth.min_week1_miles} miles — do not start too conservatively below the athlete's current base.` : ""}
+${fixture.ground_truth?.max_long_run_miles != null ? `- <rule>LONG RUN HARD CAP: The designated long run session must not exceed ${fixture.ground_truth.max_long_run_miles} miles. This cap applies to the LONG RUN slot only — easy runs and quality sessions on other days are NOT subject to this cap and can be 6–8 miles. Any long run over ${fixture.ground_truth.max_long_run_miles} miles is a plan error.</rule>` : ""}
 ${fixture.ground_truth?.min_long_run_miles != null ? `- The long run should build to at least ${fixture.ground_truth.min_long_run_miles} miles by the peak phase.` : ""}
 ${fixture.ground_truth?.max_peak_weekly_miles != null ? `- PEAK VOLUME CAP: The plan's peak week total MUST NOT exceed ${fixture.ground_truth.max_peak_weekly_miles} miles. This is a hard ceiling — plan the arc so you never need to exceed it.` : ""}
 ${fixture.ground_truth?.min_peak_weekly_miles != null ? `- The plan should reach a peak of at least ${fixture.ground_truth.min_peak_weekly_miles} miles/week to adequately prepare the athlete.` : ""}
@@ -465,6 +483,7 @@ ${(() => {
   return isMileTT ? `MILE TIME TRIAL GOAL:
 - Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
 - <rule>STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description.</rule>
+- <rule>NO LONG RUNS OVER 5 MILES: A mile TT is a 4-minute race — the "long run" slot is capped at 4–5 miles (base support only). Other easy runs can be 6–7 miles. NEVER exceed 5 miles for the designated long run session.</rule>
 - Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides, and one tempo run (3-5mi) for aerobic support.
 - Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes.` : "";
 })()}
