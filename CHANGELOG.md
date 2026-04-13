@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Fixed Strava annotation showing same race twice instead of two different races
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "right now for me it says 'Dipsea 62d out Dipsea 62d out' - so it is kind of repeating itself in the title instead of mentioning my other race"
+**Root cause:** `annotateStravaActivity` used `.slice(0, 2)` on `upcomingRaces` before deduplicating by name. If the same race was inserted twice (e.g. as both A and B priority entries, which can happen after the race date conflict-resolution logic), both slots were consumed by Dipsea and the second distinct race never appeared.
+**Fix / Change:** Added a `Set<string>` dedup filter by `race_name` before the `.slice(0, 2)`, so duplicate-named races are collapsed to one entry and the remaining slot is filled by the next distinct race.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-12 — Fixed Strava weekly mileage: analytics never saved + rolling window misalignment
 
 **Type:** Bug Fix

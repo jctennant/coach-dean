@@ -251,7 +251,7 @@ ${isFirstResponse
 
 STRAVA:
 Ask about Strava as your NEXT question once you have the athlete's name and goal — before asking for race times, pace, or weekly mileage. Strava can provide all of that automatically, so don't collect fitness data manually if Strava might have it. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-When you ask, briefly explain the value in one or two sentences: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention that after each run, you'll add a short training note directly to their Strava activity (so it shows up in their own log). If they don't want that, they can uncheck the "Update Activities" permission in Strava settings at any time.
+When you ask, briefly explain the value in one or two sentences: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention that after each run, you'll add a short coaching note directly to their Strava activity so it shows up in their own log.
 CRITICAL: Even if the athlete volunteers race history, fitness data, or pace information before you've asked about Strava — do NOT follow up on that data yet. Ask about Strava first. You can come back to those details after the Strava question is answered. The Strava question takes priority over any follow-up on volunteered fitness data.
 IMPORTANT: When you ask about Strava, make it a standalone turn — do not combine it with other questions (training days, pace, etc.) in the same message. Ask only the Strava question in that message. Ask other questions in your next turn after the user responds. This prevents you from re-asking questions the user already answered when they were bundled with the Strava link.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message — never embedded inline in a sentence (e.g. never "connect here: [STRAVA_LINK]."). End your question, then put [STRAVA_LINK] on a new line after.
@@ -382,7 +382,7 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
   // Inject actual Strava URL where placeholder was
   if (wantsStravaLink && !onboardingData.strava_connected && !onboardingData.strava_skipped) {
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    responseText = `${responseText}\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nNo Strava? Just reply "skip".`;
+    responseText = `${responseText}\n\n${stravaUrl}\n\nTo skip activity notes, uncheck "Upload activities" when authorizing.\n\nNo Strava? Just reply "skip".`;
   }
 
   // Extract structured fields from the full conversation using Haiku

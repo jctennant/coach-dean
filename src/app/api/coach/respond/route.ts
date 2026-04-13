@@ -4844,8 +4844,16 @@ async function annotateStravaActivity(
       : `${weekTarget} mi`
     : null;
 
-  // Race context — show up to 2 upcoming races
+  // Race context — show up to 2 upcoming races, deduped by name so a race that was
+  // inserted twice (e.g. A + B priority entries for the same event) doesn't consume both slots.
+  const seenRaceNames = new Set<string>();
   const raceData = upcomingRaces
+    .filter(race => {
+      const name = (race.race_name as string | null) ?? "Race";
+      if (seenRaceNames.has(name)) return false;
+      seenRaceNames.add(name);
+      return true;
+    })
     .slice(0, 2)
     .map(race => {
       if (!race.race_date) return null;

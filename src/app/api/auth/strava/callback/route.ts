@@ -53,7 +53,8 @@ export async function GET(request: Request) {
   // Fall back to the scope param Strava always includes in the redirect URL.
   const effectiveScope = scope ?? urlScope ?? "";
   const hasWriteScope = typeof effectiveScope === "string" && effectiveScope.includes("activity:write");
-  console.log("[strava-callback] scope returned:", scope, "urlScope:", urlScope, "hasWriteScope:", hasWriteScope);
+  const hasReadScope = typeof effectiveScope === "string" && effectiveScope.includes("activity:read_all");
+  console.log("[strava-callback] scope returned:", scope, "urlScope:", urlScope, "hasWriteScope:", hasWriteScope, "hasReadScope:", hasReadScope);
 
   // Derive timezone from athlete city/state — more reliable than athlete.timezone,
   // which reflects an account preference that users rarely update when they move.
@@ -167,9 +168,12 @@ export async function GET(request: Request) {
   // Synchronously import the last 8 weeks so current-week mileage AND the 6-week
   // average are accurate when initial_plan fires. The full 2-year history import
   // runs in the background for race history and deeper analytics.
-  await importRecentActivities(user.id, access_token).catch((err) =>
-    console.error("[strava-callback] recent activity import error:", err)
-  );
+  // Skip entirely if the user didn't grant activity:read_all — API calls would fail.
+  if (hasReadScope) {
+    await importRecentActivities(user.id, access_token).catch((err) =>
+      console.error("[strava-callback] recent activity import error:", err)
+    );
+  }
 
   // Query 8 weeks of activity data from the DB (just synced above) for rich analytics.
   const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
@@ -259,18 +263,21 @@ export async function GET(request: Request) {
 
   // Background imports run in after() so Vercel keeps the process alive after
   // the redirect response is sent. Plain fire-and-forget gets killed on response.
-  after(async () => {
-    try {
-      // ~6 months of general activity history (1 page × 200) — enough for weekly
-      // analytics (8-week lookback is the deepest we use).
-      await importStravaActivities(user.id, access_token);
-      // Races from the past 2 years — separate pass so Dean knows about older PRs
-      // and races even if they fall outside the 6-month general window.
-      await importRaceHistory(user.id, access_token);
-    } catch (err) {
-      console.error("[strava-callback] activity import error:", err);
-    }
-  });
+  // Skip if the user didn't grant activity:read_all — API calls would fail.
+  if (hasReadScope) {
+    after(async () => {
+      try {
+        // ~6 months of general activity history (1 page × 200) — enough for weekly
+        // analytics (8-week lookback is the deepest we use).
+        await importStravaActivities(user.id, access_token);
+        // Races from the past 2 years — separate pass so Dean knows about older PRs
+        // and races even if they fall outside the 6-month general window.
+        await importRaceHistory(user.id, access_token);
+      } catch (err) {
+        console.error("[strava-callback] activity import error:", err);
+      }
+    });
+  }
 
   const firstName = user.name ? ` ${user.name}` : "";
 
@@ -296,6 +303,22 @@ export async function GET(request: Request) {
       message_type: "coach_response",
     }),
   ]);
+
+  // If the user unchecked "View activity data", Dean can't see their runs.
+  // Send a follow-up explaining what's broken and how to fix it.
+  if (!hasReadScope) {
+    const reconnectUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+    const noReadMsg = `One thing — it looks like you unchecked "View activity data" when authorizing. Without that, I can't see your runs or calibrate your training zones. To fix it, reconnect here and make sure that box is checked:\n\n${reconnectUrl}`;
+    await Promise.all([
+      sendSMS(user.phone_number, noReadMsg),
+      supabase.from("conversations").insert({
+        user_id: user.id,
+        role: "assistant",
+        content: noReadMsg,
+        message_type: "coach_response",
+      }),
+    ]);
+  }
 
   // For mid-onboarding users, automatically continue the conversation after Strava connects
   // so Dean picks up where he left off without the user having to text first.
