@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Fix timezone fallback + show Strava location in onboarding closing message
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Internal observation (Gwyneth onboarding)
+**User feedback:** N/A
+**Root cause:** Two issues. (1) `userTimezone` fell back to `"America/New_York"` when `user.timezone` was null. For Mountain/Pacific users onboarding late at night, this rolled the local date forward to Monday, triggering mid-week plan logic instead of Sunday full-week logic — causing the wrong framing and dropping Monday from the plan. (2) The closing "how does this look?" message had no timezone confirmation, so if the timezone was wrong the user had no way to know or correct it.
+**Fix / Change:** (1) Timezone fallback now uses `inferTimezoneFromPhone()` instead of hardcoded `"America/New_York"`. (2) When Strava city/state is available, the closing message now reads "I've got your location as [City, State] so I have the right timezone for you. Let me know if that needs correcting." Falls back to the generic reminder phrasing when no Strava location is on file.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-12 — Fix Sunday initial plan framing + server-side mileage total from SESSION_LIST
 
 **Type:** Bug Fix

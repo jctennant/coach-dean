@@ -11,6 +11,7 @@ import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness }
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors } from "@/lib/plan-validation";
 import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
+import { inferTimezoneFromPhone } from "@/lib/timezone";
 
 export const maxDuration = 120;
 
@@ -804,7 +805,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
 
   // Build system prompt with activity trends
-  const userTimezone = (user.timezone as string) || "America/New_York";
+  const userTimezone = (user.timezone as string) || inferTimezoneFromPhone(user.phone_number as string);
   // For post_run, exclude the current activity from RECENT WORKOUTS — it's already shown
   // in the user message activity details, and duplicating it causes week-mileage double-counting.
   const excludeFromSummary = trigger === "post_run" && activityData?.start_date
@@ -1681,8 +1682,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       });
 
       // Third bubble: invite feedback and mention the default reminder cadence.
-      // No question — just let them know the default and how to change it.
-      const howDoesItLookMsg = "How does this look? Happy to adjust anything. I'll send you a reminder the evening before each session — text me if you'd prefer morning-of reminders or just a weekly Sunday plan.";
+      // Include location from Strava so the athlete can confirm the timezone is right.
+      const locationStr = stravaCity && stravaState
+        ? `${stravaCity}, ${stravaState}`
+        : stravaCity ?? null;
+      const howDoesItLookMsg = locationStr
+        ? `How does this look? Happy to adjust anything. I'll send you evening reminders before each session — I've got your location as ${locationStr} so I have the right timezone for you. Let me know if that needs correcting.`
+        : "How does this look? Happy to adjust anything. I'll send you a reminder the evening before each session — text me if you'd prefer morning-of reminders or just a weekly Sunday plan.";
       if (!dry_run) {
         if (chatId) await startTyping(chatId);
         await new Promise((r) => setTimeout(r, 1200));
