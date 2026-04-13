@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Aerobic metrics: efficiency + decoupling stored and trended over time
+
+**Type:** Feature / Improvement
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Efficiency was dropped in a previous simplification pass; no historical metric data existed for Dean to trend.
+**Fix / Change:** (1) Aerobic efficiency restored to annotation block alongside cardiac decoupling — both shown with plain-English interpretation guides so the LLM note can explain them accessibly. (2) `aerobic_efficiency` and `cardiac_decoupling_pct` now persisted to the activities table on every annotation (migration 029). (3) For `post_run` and `user_message` triggers, Dean's system prompt now includes a rolling table of the last 10 runs with both metrics, a computed trend direction (improving/declining/steady based on recent 3 vs prior 3), and explicit instructions to proactively flag improvement, flag sustained high decoupling as overreaching risk, and explain metrics in plain English when asked.
+**Files changed:** `supabase/migrations/029_aerobic_metrics.sql`, `src/app/api/coach/respond/route.ts`
+
+## 2026-04-12 — Strava annotation: default opt-in, simplified, weather-aware
+
+**Type:** Improvement
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Annotation opt-in was too buried (required separate `/auth/strava/write` re-auth); annotation block was verbose; no weather context to explain HR/pace anomalies.
+**Fix / Change:** (1) Main Strava OAuth now requests `activity:write` scope by default, so new users are opted into annotation without a second auth step. Onboarding mentions the note and how to uncheck it. (2) Annotation block simplified: removed divider, aerobic efficiency, and cardiac decoupling lines — kept header, week mileage, HR drift, best GAP, and 1–2 sentence Dean note (was 2–3). (3) Weather context added: Open-Meteo fetches conditions for the activity's date (using `past_days=2`) and passes temp/conditions/wind to the LLM so it can explain heat or wind effects on pace/HR.
+**Files changed:** `src/app/api/auth/strava/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/lib/weather.ts`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-12 — Analyst Mode: post-run insights without a training plan
 
 **Type:** Feature

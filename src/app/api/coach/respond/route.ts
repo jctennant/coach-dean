@@ -4,7 +4,7 @@ import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
-import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
+import { fetchWeekWeather, buildWeatherBlock, fetchActivityWeather } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness } from "@/lib/training-plan";
@@ -41,6 +41,8 @@ interface ActivityRow {
   average_cadence: number | null;
   gear_name: string | null;
   source: string | null;
+  aerobic_efficiency: number | null;
+  cardiac_decoupling_pct: number | null;
 }
 
 interface CoachingSignals {
@@ -816,7 +818,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     supabase
       .from("activities")
       .select(
-        "activity_type, distance_meters, moving_time_seconds, average_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source"
+        "activity_type, distance_meters, moving_time_seconds, average_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct"
       )
       .eq("user_id", userId)
       .order("start_date", { ascending: false })
@@ -961,6 +963,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         const storedSplits = Array.isArray(storedSummary?.splits)
           ? (storedSummary.splits as Array<Record<string, unknown>>)
           : [];
+        const onbData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+        const annotationLocation = onbData.strava_city && onbData.strava_state
+          ? { city: onbData.strava_city as string, state: onbData.strava_state as string, timezone: (user.timezone as string) || "America/New_York" }
+          : undefined;
         await annotateStravaActivity(userId, activityId, {
           activityData,
           weekMileageSoFar,
@@ -969,7 +975,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           upcomingRaces: upcomingRaces,
           preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
           splits: storedSplits,
-        }).catch((err) => console.error("[strava-annotation] failed:", err));
+          isAnalystMode: (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst',
+        }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
       }
       return NextResponse.json({ ok: true, skipped: "duplicate_post_run" });
     }
@@ -1204,6 +1211,57 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     periodizationMileage
   );
 
+  // Aerobic metrics trend block — last 10 runs with efficiency + decoupling.
+  // Included for post_run and user_message so Dean can spot improvements or overreaching.
+  let aerobicTrendBlock = "";
+  if (trigger === "post_run" || trigger === "user_message") {
+    const runTypes = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+    const runsWithMetrics = recentActivities
+      .filter(a => runTypes.has(a.activity_type) && (a.aerobic_efficiency !== null || a.cardiac_decoupling_pct !== null))
+      .slice(0, 10);
+    if (runsWithMetrics.length >= 2) {
+      const rows = runsWithMetrics.map(a => {
+        const date = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric", timeZone: userTimezone }).format(new Date(a.start_date));
+        const useMetric = profile?.preferred_units === "metric";
+        const dist = useMetric
+          ? `${(a.distance_meters / 1000).toFixed(1)} km`
+          : `${(a.distance_meters / 1609.34).toFixed(1)} mi`;
+        const eff = a.aerobic_efficiency !== null ? a.aerobic_efficiency.toFixed(2) : "—";
+        const dec = a.cardiac_decoupling_pct !== null ? `${a.cardiac_decoupling_pct.toFixed(1)}%` : "—";
+        return `${date}  ${dist}  eff ${eff} m/beat  decoupling ${dec}`;
+      }).join("\n");
+
+      // Trend direction for efficiency (last 3 vs prior 3, if enough data)
+      let trendNote = "";
+      if (runsWithMetrics.length >= 6) {
+        const recent3 = runsWithMetrics.slice(0, 3).map(a => a.aerobic_efficiency).filter((v): v is number => v !== null);
+        const older3 = runsWithMetrics.slice(3, 6).map(a => a.aerobic_efficiency).filter((v): v is number => v !== null);
+        if (recent3.length >= 2 && older3.length >= 2) {
+          const avgRecent = recent3.reduce((s, v) => s + v, 0) / recent3.length;
+          const avgOlder = older3.reduce((s, v) => s + v, 0) / older3.length;
+          const delta = avgRecent - avgOlder;
+          if (Math.abs(delta) > 0.02) {
+            trendNote = `\nEfficiency trend: ${delta > 0 ? "↑ improving" : "↓ declining"} (recent avg ${avgRecent.toFixed(2)} vs prior ${avgOlder.toFixed(2)} m/beat)`;
+          } else {
+            trendNote = `\nEfficiency trend: → steady (recent avg ${avgRecent.toFixed(2)} m/beat)`;
+          }
+        }
+      }
+
+      aerobicTrendBlock = `\nAEROBIC METRICS HISTORY (most recent runs first):
+Aerobic efficiency = grade-adjusted speed ÷ heart rate (m/beat) — higher = more economical; a rising trend over weeks signals improving fitness; a falling trend signals fatigue or overreaching.
+Cardiac decoupling = % drift in efficiency from first to second half of run — <5% = aerobic system held together; 5–10% = moderate drift; >10% = significant drift (consider an easier day next).
+
+${rows}${trendNote}
+
+Use this data to:
+- Proactively note when efficiency is trending up ("your aerobic economy has improved noticeably over the last few weeks")
+- Flag when decoupling has been consistently high across multiple runs (a sign of accumulated fatigue, not just one hard day)
+- Explain what these metrics mean in plain English when the athlete asks — no jargon
+- If efficiency is falling AND decoupling is rising across recent runs, suggest the athlete consider an easier week before adding more load`;
+    }
+  }
+
   const systemPrompt = buildSystemPrompt(
     user,
     profile,
@@ -1223,7 +1281,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     trigger,
     periodization,
     upcomingRaces
-  );
+  ) + aerobicTrendBlock;
 
   // For weekly_recap and user_message, fetch the stored training plan.
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
@@ -1550,6 +1608,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     const storedSplits = Array.isArray(storedSummary?.splits)
       ? (storedSummary.splits as Array<Record<string, unknown>>)
       : [];
+    const annotationLocation = stravaCity && stravaState
+      ? { city: stravaCity, state: stravaState, timezone: userTimezone }
+      : undefined;
     await annotateStravaActivity(userId, activityId, {
       activityData,
       weekMileageSoFar,
@@ -1558,7 +1619,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       upcomingRaces: upcomingRaces,
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
-    }).catch((err) => console.error("[strava-annotation] failed:", err));
+      isAnalystMode,
+    }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
   }
 
   // Claude signals "nothing to send" with [NO_REPLY] — skip all SMS and DB writes.
@@ -4876,19 +4938,31 @@ interface AnnotationContext {
   preferredUnits: "imperial" | "metric";
   // splits_standard from activityData.summary — already fetched by the webhook
   splits: Array<Record<string, unknown>>;
+  isAnalystMode?: boolean;
 }
 
 async function annotateStravaActivity(
   userId: string,
   stravaActivityId: number,
-  ctx: AnnotationContext
+  ctx: AnnotationContext,
+  userLocation?: { city: string; state: string; timezone: string }
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
 
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
   const accessToken = await getValidAccessToken(userId);
-  const stravaActivity = await getActivity(accessToken, stravaActivityId);
+  const [stravaActivity, activityWeather] = await Promise.all([
+    getActivity(accessToken, stravaActivityId),
+    userLocation
+      ? fetchActivityWeather(
+          userLocation.city,
+          userLocation.state,
+          userLocation.timezone,
+          ((activityData?.start_date as string | null) ?? new Date().toISOString()).slice(0, 10)
+        ).catch(() => null)
+      : Promise.resolve(null),
+  ]);
   const existingDescription = (stravaActivity.description as string) || "";
 
   // Activity stats
@@ -4978,14 +5052,14 @@ async function annotateStravaActivity(
 
   const gaSpeedMs = weightedGaTotal > 0 ? weightedGaSum / weightedGaTotal : null;
 
-  // Raw + grade-adjusted efficiency (m/beat) — show both when GAP data available
+  // Aerobic efficiency (m/beat): speed per heartbeat — higher = more economical.
+  // Prefer grade-adjusted speed (GAP) over raw speed on hilly runs.
   const rawEff = hr && avgSpeedMs ? avgSpeedMs / hr * 60 : null;
   const gaEff = hr && gaSpeedMs ? gaSpeedMs / hr * 60 : null;
+  const storedEff = gaEff ?? rawEff; // best available value to persist
   let efficiencyLine: string | null = null;
-  if (rawEff !== null && gaEff !== null) {
-    efficiencyLine = `Aerobic eff: ${rawEff.toFixed(2)} raw → ${gaEff.toFixed(2)} GA m/beat`;
-  } else if (gaEff !== null) {
-    efficiencyLine = `Grade-adj eff: ${gaEff.toFixed(2)} m/beat`;
+  if (gaEff !== null) {
+    efficiencyLine = `Aerobic eff: ${gaEff.toFixed(2)} m/beat (GA)`;
   } else if (rawEff !== null) {
     efficiencyLine = `Aerobic eff: ${rawEff.toFixed(2)} m/beat`;
   }
@@ -4999,37 +5073,37 @@ async function annotateStravaActivity(
     bestGapLine = `Best GAP: ${m}:${s.toString().padStart(2, "0")}${unitLabel} (${splitLabel} ${bestGapSplitNum})`;
   }
 
-  // Cardiac decoupling + HR drift — first-half vs second-half from per-split data
-  let hrDriftLine: string | null = null;
+  // Cardiac decoupling — first-half vs second-half GAP:HR efficiency factor drift.
+  // Strictly GAP-only: splits without grade-adjusted data are excluded.
   let decouplingLine: string | null = null;
+  let decouplingPct: number | null = null;
   if (validSplitMetrics.length >= 4) {
     const mid = Math.floor(validSplitMetrics.length / 2);
     const h1 = validSplitMetrics.slice(0, mid);
     const h2 = validSplitMetrics.slice(mid);
-
-    // HR drift
-    const h1HRs = h1.map(s => s.hr).filter((h): h is number => h !== null && h > 0);
-    const h2HRs = h2.map(s => s.hr).filter((h): h is number => h !== null && h > 0);
-    if (h1HRs.length > 0 && h2HRs.length > 0) {
-      const avgHR1 = Math.round(h1HRs.reduce((a, b) => a + b, 0) / h1HRs.length);
-      const avgHR2 = Math.round(h2HRs.reduce((a, b) => a + b, 0) / h2HRs.length);
-      const drift = avgHR2 - avgHR1;
-      hrDriftLine = `HR drift: ${avgHR1} → ${avgHR2} bpm (${drift >= 0 ? "+" : ""}${drift})`;
-
-      // Cardiac decoupling: GAP:HR efficiency factor drift — strictly GAP only.
-      // Splits without GAP data are excluded so raw-speed fallback can't skew the result.
-      const gapEf = (sm: SplitMetrics) =>
-        sm.gas && sm.gas > 0 && sm.hr && sm.hr > 0 ? sm.gas / sm.hr : null;
-      const h1EFs = h1.map(gapEf).filter((v): v is number => v !== null);
-      const h2EFs = h2.map(gapEf).filter((v): v is number => v !== null);
-      if (h1EFs.length > 0 && h2EFs.length > 0) {
-        const avgEF1 = h1EFs.reduce((a, b) => a + b, 0) / h1EFs.length;
-        const avgEF2 = h2EFs.reduce((a, b) => a + b, 0) / h2EFs.length;
-        const pct = Math.abs((avgEF1 - avgEF2) / avgEF1 * 100);
-        const quality = pct < 5 ? "aerobic system held together well" : pct < 10 ? "moderate aerobic drift" : "high aerobic drift";
-        decouplingLine = `Cardiac decoupling: ${pct.toFixed(1)}% — ${quality}`;
-      }
+    const gapEf = (sm: SplitMetrics) =>
+      sm.gas && sm.gas > 0 && sm.hr && sm.hr > 0 ? sm.gas / sm.hr : null;
+    const h1EFs = h1.map(gapEf).filter((v): v is number => v !== null);
+    const h2EFs = h2.map(gapEf).filter((v): v is number => v !== null);
+    if (h1EFs.length > 0 && h2EFs.length > 0) {
+      const avgEF1 = h1EFs.reduce((a, b) => a + b, 0) / h1EFs.length;
+      const avgEF2 = h2EFs.reduce((a, b) => a + b, 0) / h2EFs.length;
+      decouplingPct = Math.round(Math.abs((avgEF1 - avgEF2) / avgEF1 * 100) * 10) / 10;
+      const quality = decouplingPct < 5 ? "aerobic system held steady" : decouplingPct < 10 ? "moderate drift" : "high drift";
+      decouplingLine = `Cardiac decoupling: ${decouplingPct.toFixed(1)}% — ${quality}`;
     }
+  }
+
+  // Persist aerobic metrics to the activities table for trend analysis over time.
+  // Fire-and-forget — don't block annotation on this write.
+  // Cast required until types are regenerated after migration 029.
+  if (storedEff !== null || decouplingPct !== null) {
+    void supabase.from("activities")
+      .update({
+        ...({ aerobic_efficiency: storedEff !== null ? Math.round(storedEff * 1000) / 1000 : undefined } as Record<string, unknown>),
+        ...({ cardiac_decoupling_pct: decouplingPct ?? undefined } as Record<string, unknown>),
+      } as Record<string, unknown>)
+      .eq("strava_activity_id", stravaActivityId);
   }
 
   // Fetch total plan weeks for header
@@ -5055,32 +5129,46 @@ async function annotateStravaActivity(
   const gaAvgPaceStr = gaSpeedMs
     ? (() => { const sec = metersPerUnit / gaSpeedMs; return `${Math.floor(sec / 60)}:${Math.round(sec % 60).toString().padStart(2, "0")}${unitLabel}`; })()
     : null;
+  const weatherLine = activityWeather
+    ? `Weather: ${activityWeather.tempF}°F, ${activityWeather.conditions}${activityWeather.windMph >= 15 ? `, ${activityWeather.windMph}mph wind` : ""}`
+    : null;
+
+  // Metric interpretation guides passed to the LLM so it can write plain-English context
+  const decouplingContext = decouplingLine
+    ? `${decouplingLine} (guide: <5% = held steady, normal training tomorrow fine; 5–10% = moderate drift, easy day; >10% = significant drift, rest or very easy)`
+    : null;
+  const efficiencyContext = efficiencyLine
+    ? `${efficiencyLine} (guide: higher = more economical — rising trend over weeks = improving fitness; dropping trend = fatigue accumulating or overreaching)`
+    : null;
+
+  const weekContext = isAnalystMode
+    ? `This week's mileage: ${weekMilesDisplay} (no weekly target — Analyst Mode)`
+    : `Week so far: ${weekMilesDisplay}${weekTargetDisplay ? ` / ${weekTargetDisplay} target` : ""}`;
+
   const notePrompt = [
     `Activity: ${distanceDisplay}${pace ? ` @ ${pace}` : ""}${hr ? `, avg HR ${hr} bpm` : ""}${elevDisplay ? `, ${elevDisplay}` : ""}`,
-    gaAvgPaceStr ? `Overall grade-adjusted avg pace: ${gaAvgPaceStr}` : "",
-    efficiencyLine ?? "",
+    gaAvgPaceStr ? `Grade-adjusted avg pace: ${gaAvgPaceStr}` : "",
     bestGapLine ?? "",
-    hrDriftLine ?? "",
-    decouplingLine ?? "",
+    decouplingContext ?? "",
+    efficiencyContext ?? "",
     splitAnalysis ?? "",
-    `Week so far: ${weekMilesDisplay}${weekTargetDisplay ? ` / ${weekTargetDisplay} target` : ""}`,
-    raceLabels.length > 0 ? `Races: ${raceLabels.join(", ")}` : "",
+    weatherLine ?? "",
+    weekContext,
+    !isAnalystMode && raceLabels.length > 0 ? `Races: ${raceLabels.join(", ")}` : "",
   ].filter(Boolean).join("\n");
 
   const noteResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 200,
+    max_tokens: 150,
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write 2-3 sentences for this athlete's public Strava training log. Rules:
-1. Read the split data carefully before writing — only describe what the numbers actually show. If splits slow late, say so honestly but contextually (elevation? fatigue?).
-2. Be positive and supportive — this is public and visible to friends. Frame findings as insights, not criticism.
-3. For hilly splits, acknowledge elevation context — a slow mile with big climbing is impressive effort.
-4. Reference grade-adjusted pace/effort rather than raw pace on hilly runs.
-5. Do NOT restate distance or average pace — Strava shows those.
-6. No filler phrases like "running smart and strong" or generic encouragement. Specific observations only.
-7. Based on decoupling and HR drift, close with one sentence on recommended next-day intensity (easy, rest, or normal depending on the data).
+        content: `You are Coach Dean. Write exactly 1–2 sentences for this athlete's Strava training log. Rules:
+1. Be specific to the numbers — no filler like "running smart and strong". Reference what the data actually shows.
+2. If weather was notably hot, cold, or windy, briefly acknowledge it as context for elevated HR or slower pace.
+3. For hilly runs, reference grade-adjusted effort over raw pace.
+4. Do NOT restate distance or average pace — Strava shows those already.
+5. End with one plain-English sentence telling the athlete what tomorrow should look like based on cardiac decoupling and efficiency: "easy run tomorrow", "rest day recommended", or "you're good to train normally tomorrow". Write it so a regular runner understands it — not a sports scientist.
 
 ${notePrompt}`,
       },
@@ -5090,19 +5178,18 @@ ${notePrompt}`,
     ? stripMarkdown(noteResponse.content[0].text.trim())
     : "";
 
-  // Build the annotation block — coachdean.ai header at top
-  const divider = "────────────────────";
-  const weekLine = weekTargetDisplay
-    ? `Week: ${weekMilesDisplay} / ${weekTargetDisplay}`
-    : `Week: ${weekMilesDisplay}`;
+  // Build the annotation block — efficiency and decoupling shown with brief labels
+  const weekLine = isAnalystMode
+    ? `Week: ${weekMilesDisplay}`
+    : weekTargetDisplay
+      ? `Week: ${weekMilesDisplay} / ${weekTargetDisplay}`
+      : `Week: ${weekMilesDisplay}`;
   const block = [
     headerLine,
-    divider,
     weekLine,
-    bestGapLine,
-    hrDriftLine,
     decouplingLine,
     efficiencyLine,
+    bestGapLine,
     "",
     deanNote,
   ].filter((l): l is string => l !== null).join("\n");
