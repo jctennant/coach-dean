@@ -417,7 +417,7 @@ async function handleInboundMessage(
       await sendAndStore(user.id, senderPhone, "Your Strava is already connected — I'm syncing your activities automatically.", messageId);
     } else {
       const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-      await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start pulling in your activities:\n${stravaUrl}`, messageId);
+      await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start pulling in your activities:\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.`, messageId);
     }
     return;
   }

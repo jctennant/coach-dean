@@ -382,7 +382,7 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
   // Inject actual Strava URL where placeholder was
   if (wantsStravaLink && !onboardingData.strava_connected && !onboardingData.strava_skipped) {
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    responseText = `${responseText}\n\n${stravaUrl}\n\nNo Strava? Just reply "skip".`;
+    responseText = `${responseText}\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nNo Strava? Just reply "skip".`;
   }
 
   // Extract structured fields from the full conversation using Haiku
@@ -621,14 +621,14 @@ async function handleStrava(
   // If asking about Strava (with or without a question mark)
   const isAskingAboutStrava = !isSkip && /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
   if (isAskingAboutStrava || (!isSkip && /strava/i.test(message) && message.includes("?"))) {
-    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run you do and adjust your training plan based on real data. No need to report anything manually.\n\nDon't have it? No problem — you can skip and I'll ask you a few quick questions to set your paces instead.\n\n${stravaUrl}\n\nNo Strava? Just reply "skip".`;
+    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run you do and adjust your training plan based on real data. No need to report anything manually.\n\nDon't have it? No problem — you can skip and I'll ask you a few quick questions to set your paces instead.\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nNo Strava? Just reply "skip".`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
 
   if (!isSkip) {
     // Non-skip, non-question — just re-send the link
-    const reply = `Connect Strava for automatic run tracking:\n\n${stravaUrl}\n\nOr reply "skip" to continue without it.`;
+    const reply = `Connect Strava for automatic run tracking:\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nOr reply "skip" to continue without it.`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
