@@ -479,6 +479,27 @@ async function handleInboundMessage(
       return;
     }
 
+    // Guard against duplicate webhook deliveries (same external_message_id).
+    // If Linq delivered the same message twice and both slipped through the pre-after
+    // dedup check before either inserted a conversation row, two handlers race to respond.
+    // After the debounce wait, only the handler whose row has the lexicographically
+    // smallest id proceeds; the other skips. The smallest id wins deterministically.
+    if (messageId) {
+      const { data: sameExternalRows } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("external_message_id", messageId)
+        .eq("role", "user");
+      if (sameExternalRows && (sameExternalRows as Array<{ id: string }>).length > 1) {
+        const ids = (sameExternalRows as Array<{ id: string }>).map(r => r.id).sort();
+        if (ids[0] !== storedMsg.id) {
+          console.log("[linq-webhook] duplicate webhook delivery (post-debounce), skipping:", messageId);
+          return;
+        }
+      }
+    }
+
     // Also guard against double-responses when two messages arrived >15s apart (both pass
     // the newer-message check but fire coach/respond in rapid succession). If an assistant
     // reply was already sent within the last 45 seconds, the first message already triggered

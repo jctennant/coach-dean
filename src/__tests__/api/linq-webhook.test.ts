@@ -644,4 +644,91 @@ describe("POST /api/webhooks/linq — message routing", () => {
     expect(supabase.from).toHaveBeenCalledWith("conversations");
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it("post-debounce: skips duplicate webhook delivery (same external_message_id, race condition)", async () => {
+    // Simulates two Linq webhook deliveries for the same message slipping through
+    // the pre-after dedup check before either one inserts a conversation row.
+    // After the 15-second debounce, the handler whose row id is NOT the
+    // lexicographically smallest should skip to avoid a double response.
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        // conversations calls in order:
+        //   [0] pre-after dedup check → no existing row (both webhooks pass)
+        //   [1] insert storedMsg → returns "conv-zzz" (lexicographically larger id)
+        //   [2] debounce latest-msg check → same id → no newer message, proceed to dedup guard
+        //   [3] external_message_id check → two rows exist (duplicate delivery!) → "conv-aaa" < "conv-zzz"
+        conversations: [
+          { data: null, error: null },                                               // dedup check
+          { data: { id: "conv-zzz" }, error: null },                                 // insert storedMsg
+          { data: { id: "conv-zzz" }, error: null },                                 // debounce check
+          { data: [{ id: "conv-aaa" }, { id: "conv-zzz" }], error: null },           // duplicate guard
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null,
+            dashboard_token: null,
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", "great run today");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await flushPromise;
+
+      // This handler's row ("conv-zzz") is NOT the canonical one ("conv-aaa" sorts first)
+      // → should skip rather than send a duplicate response
+      expect(global.fetch).not.toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("post-debounce: proceeds normally when only one row exists for the external_message_id", async () => {
+    // Normal case: no duplicate delivery — only one row with this external_message_id.
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        // conversations: dedup → null, insert → conv-001, debounce → same id,
+        // duplicate guard → single row (no duplicate), 45s guard → null (no recent reply)
+        conversations: [
+          { data: null, error: null },                           // dedup check
+          { data: { id: "conv-001" }, error: null },             // insert storedMsg
+          { data: { id: "conv-001" }, error: null },             // debounce check
+          { data: [{ id: "conv-001" }], error: null },           // duplicate guard → only one row
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null,
+            dashboard_token: null,
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", "how am I doing?");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await flushPromise;
+
+      // Normal path: single row → no duplicate → should route to coach/respond
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.objectContaining({ method: "POST" })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
