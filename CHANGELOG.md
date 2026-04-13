@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-12 — Fixed Strava weekly mileage: analytics never saved + rolling window misalignment
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth
+**User feedback:** "How did you calculate the 17 average?" / "The last four weeks my mileage was 15.5, 14, 16, 10 (that week of 10 was when I was sick)"
+**Root cause:** Two bugs. (1) `strava_avg_weekly_miles` and related analytics were computed after the first `users` DB update, then mutated onto the in-memory `updatedOnboardingData` object but never written back — so the field was always `null` in the DB, and Claude hallucinated a mileage number instead of using real data. (2) The weekly bucketing used rolling 7-day windows anchored to "now" rather than calendar (Mon–Sun UTC) week boundaries. On a Sunday evening connect, an entire Mon–Sat training week fell in slot 0 (excluded as "partial current week"), pulling in an older higher-mileage week from slot 4 instead.
+**Fix / Change:** Added a second `supabase.from("users").update(...)` after analytics are computed so they're actually persisted. Replaced rolling-window bucketing with calendar-week boundaries (Monday midnight UTC): `ceil((currentWeekStartMs - runTime) / msPerWeek)` assigns each run to the correct complete calendar week slot.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`
+
+---
+
 ## 2026-04-12 — Metric units consistency + long run adaptation + week number context
 
 **Type:** Bug Fix (3 issues)

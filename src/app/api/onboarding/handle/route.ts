@@ -407,6 +407,17 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
     delete mergedData.goal;
   }
 
+  // Validate race_date — discard anything that isn't a real YYYY-MM-DD date
+  // (Claude sometimes returns "<UNKNOWN>" or other placeholder strings)
+  if (mergedData.race_date) {
+    const dateStr = mergedData.race_date as string;
+    const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(Date.parse(dateStr));
+    if (!isValidDate) {
+      console.warn(`[onboarding] discarding invalid race_date: "${dateStr}"`);
+      delete mergedData.race_date;
+    }
+  }
+
   // Calculate VDOT paces whenever race time data is present.
   // Always recalculate — race-derived paces are more reliable than a pace extracted
   // from conversation text (e.g. one mentioned in the Strava insight message).
@@ -535,7 +546,7 @@ Rules:
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
-- race_date: prefer the athlete's stated specific date over Dean's. If both differ by 1–2 days, use athlete's. Only use first-of-month if no specific date was given. Today is ${today}.
+- race_date: use whichever date is stated in the conversation — athlete's or Dean's. If both are stated and differ by 1–2 days, prefer the athlete's. Only use first-of-month if no specific date was given. Do NOT return null just because only Dean stated the date. Today is ${today}.
 - recent_race_distance_km: from athlete's messages only (not coach Strava summaries). Extract even if caveated ("net downhill", "a while ago").
 - recent_race_time_minutes: from athlete's messages only. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5.
 - easy_pace: "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile).

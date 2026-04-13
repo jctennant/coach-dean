@@ -186,23 +186,40 @@ export async function GET(request: Request) {
     (a) => (a.distance_meters ?? 0) > 400 && RUN_TYPES.has(a.activity_type ?? "")
   );
 
-  // --- Weekly breakdown ---
+  // --- Weekly breakdown (calendar-week aligned, Monday boundaries in UTC) ---
+  // Using calendar weeks avoids rolling-window misalignment: a Sunday evening connect
+  // with a full Mon–Sat training week would otherwise put that whole week in slot 0
+  // (excluded as "partial"), pulling in an older week instead.
+  // Week 0 = current (possibly partial) calendar week; weeks 1–4 = last 4 complete weeks.
   const now = Date.now();
-  // Bucket each run into one of 8 individual week slots (index 0 = most recent week)
+  const nowDate = new Date(now);
+  const dayOfWeekUTC = nowDate.getUTCDay(); // 0=Sun, 1=Mon...
+  const daysSinceMondayUTC = (dayOfWeekUTC + 6) % 7; // 0 on Mon, 6 on Sun
+  const currentWeekStartMs = Date.UTC(
+    nowDate.getUTCFullYear(),
+    nowDate.getUTCMonth(),
+    nowDate.getUTCDate() - daysSinceMondayUTC
+  );
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+
   const weeklyMilesArr: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
   for (const a of runs8w) {
-    const daysAgo = (now - new Date(a.start_date!).getTime()) / (1000 * 60 * 60 * 24);
-    const weekIdx = Math.min(7, Math.floor(daysAgo / 7));
+    const runTime = new Date(a.start_date!).getTime();
+    let weekIdx: number;
+    if (runTime >= currentWeekStartMs) {
+      weekIdx = 0; // Current (possibly partial) calendar week
+    } else {
+      // ceil maps: [Mon-1 to Mon) → 1, [Mon-2 to Mon-1) → 2, etc.
+      weekIdx = Math.min(7, Math.ceil((currentWeekStartMs - runTime) / msPerWeek));
+    }
     weeklyMilesArr[weekIdx] += (a.distance_meters ?? 0) / 1609.34;
   }
 
-  // Skip weekIdx 0 (current partial rolling window) — it may only contain a few days
-  // of runs depending on when the user connects, which would drag the average down.
-  // Use weeks 1–4 (four fully completed 7-day windows) for a stable baseline.
+  // Skip slot 0 (current partial calendar week). Use weeks 1–4 for a stable baseline.
   const recentWeeksMiles = weeklyMilesArr[1] + weeklyMilesArr[2]; // weeks 1–2 (completed)
   const priorWeeksMiles = weeklyMilesArr[3] + weeklyMilesArr[4];  // weeks 3–4 (completed)
 
-  // Use 4-week average over completed windows (weeks 1–4)
+  // Use 4-week average over completed calendar weeks 1–4
   const last4WeeksMiles = weeklyMilesArr.slice(1, 5).reduce((s, m) => s + m, 0);
   const avgWeeklyMiles = runs8w.length > 0
     ? Math.round(last4WeeksMiles / 4)
@@ -228,13 +245,17 @@ export async function GET(request: Request) {
   const totalElevFt = runs8w.reduce((s, a) => s + (a.elevation_gain ?? 0) * 3.28084, 0);
   const avgElevFtPerRun = runs8w.length > 0 ? Math.round(totalElevFt / runs8w.length) : 0;
 
-
-  // Persist weekly analytics into onboarding_data so onboarding/handle's stravaContext
-  // can surface them to Claude without re-querying activities.
+  // Write analytics into onboarding_data. This is a second DB update — analytics depend
+  // on importRecentActivities (line ~170), which runs after the first update at line ~136.
   if (avgWeeklyMiles != null) updatedOnboardingData.strava_avg_weekly_miles = avgWeeklyMiles;
   if (mileageTrend) updatedOnboardingData.strava_mileage_trend = mileageTrend;
   if (avgElevFtPerRun > 200) updatedOnboardingData.strava_avg_elev_ft_per_run = avgElevFtPerRun;
   if (longestRunMiles != null) updatedOnboardingData.strava_longest_run_miles = Math.round(longestRunMiles * 10) / 10;
+
+  await supabase
+    .from("users")
+    .update({ onboarding_data: updatedOnboardingData as unknown as Json })
+    .eq("id", user.id);
 
   // Background imports run in after() so Vercel keeps the process alive after
   // the redirect response is sent. Plain fire-and-forget gets killed on response.
