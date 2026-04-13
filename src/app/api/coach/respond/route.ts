@@ -128,6 +128,11 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   // No profile re-fetch needed — profile was already persisted by user_message before this fires.
   const now = new Date();
   const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Compute the plan's week-1 Monday. For mid-plan rebuilds, totalWeeks and aRaceWeekNum
+  // must be anchored to week 1 (not today) so that race week numbers align with the dashboard.
+  // Dashboard computes: week1Monday = thisMonday - (currentWeek - 1) * 7.
+  // We'll compute this after fetching currentWeek below, then pass it as anchorMonday.
   const [recentActsResult, { data: upcomingRaces }, { data: stateData }, { data: conversationsData }] = await Promise.all([
     hasStrava
       ? supabase.from("activities").select("distance_meters, start_date").eq("user_id", userId).gte("start_date", eightWeeksAgo).in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
@@ -148,6 +153,17 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   const typedStateData = stateData as { weekly_mileage_target: number | null; current_week: number | null; weekly_plan_sessions: unknown } | null;
   const existingTarget = typedStateData?.weekly_mileage_target ?? null;
   const currentWeek = typedStateData?.current_week ?? 1;
+
+  // Compute week-1 Monday (dashboard anchor) now that we have currentWeek.
+  // This is the same formula the dashboard uses: thisMonday - (currentWeek - 1) * 7.
+  const nowUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const nowDOW = nowUtc.getUTCDay();
+  const thisMonday = new Date(nowUtc);
+  if (nowDOW === 0) thisMonday.setUTCDate(nowUtc.getUTCDate() + 1);
+  else thisMonday.setUTCDate(nowUtc.getUTCDate() + (1 - nowDOW));
+  const week1Monday = new Date(thisMonday);
+  week1Monday.setUTCDate(thisMonday.getUTCDate() - (currentWeek - 1) * 7);
+  console.log(`[handleRebuildPlan] currentWeek=${currentWeek}, week1Monday=${week1Monday.toISOString()}`);
 
   // When rebuilding in week 1, we allow a full week 1 regeneration (update mileage target +
   // sessions) but preserve any sessions whose date has already passed — the athlete may have
@@ -274,6 +290,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
             prescribedWeek1Miles: rebuildBase,
             skipLinkSms: silent,
             otherNotes,
+            anchorMonday: isWeek1Rebuild ? undefined : week1Monday,
           }
         );
         void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });

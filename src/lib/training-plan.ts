@@ -170,7 +170,7 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, week1Reset = false, preservedSessions, planReadyNote, wantsSpeedWork = false, otherNotes = null }: {
+  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, week1Reset = false, preservedSessions, planReadyNote, wantsSpeedWork = false, otherNotes = null, anchorMonday }: {
     skipLinkSms?: boolean;
     prescribedWeek1Miles?: number;
     bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }>;
@@ -199,6 +199,13 @@ export async function generateAndSaveFullPlan(
     wantsSpeedWork?: boolean;
     /** Athlete preferences from onboarding_data.other_notes (hill repeats, cycling, etc.) */
     otherNotes?: string | null;
+    /**
+     * Override the Monday used to compute totalWeeks and aRaceWeekNum.
+     * For mid-plan rebuilds (resetToWeek1=false), pass the plan's week-1 Monday
+     * (= thisMonday - (currentWeek-1)*7) so that race week numbers align with the
+     * dashboard's anchor rather than the current Monday.
+     */
+    anchorMonday?: Date;
   } = {},
 ): Promise<string> {
   const raceDate = (profile?.race_date as string | null) ?? null;
@@ -214,14 +221,22 @@ export async function generateAndSaveFullPlan(
   // always falls within the last plan week rather than one week past it. Using "now" directly
   // is sensitive to the time of day — if the plan is generated after noon UTC, a race that's
   // exactly N weeks out can round down to N-1 weeks, leaving the race outside the plan.
+  //
+  // For mid-plan rebuilds (resetToWeek1=false), callers should pass anchorMonday set to the
+  // plan's week-1 Monday (= thisMonday - (currentWeek-1)*7). This ensures totalWeeks and
+  // aRaceWeekNum are computed relative to the plan's original start rather than today, so
+  // race week numbers stay in sync with the dashboard's calendar anchor.
   let totalWeeks = 12;
   const now = new Date();
   const monday = new Date(now);
   monday.setUTCDate(now.getUTCDate() - ((now.getUTCDay() + 6) % 7));
   monday.setUTCHours(0, 0, 0, 0);
+  // planMonday: the anchor used for totalWeeks / aRaceWeekNum / B-race week labels.
+  // Defaults to the current Monday; overridden by anchorMonday for mid-plan rebuilds.
+  const planMonday = anchorMonday ? new Date(anchorMonday) : monday;
   if (raceDate) {
     const race = new Date(raceDate + "T12:00:00Z");
-    const weeksUntil = Math.ceil((race.getTime() - monday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    const weeksUntil = Math.ceil((race.getTime() - planMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
     totalWeeks = Math.max(4, Math.min(52, weeksUntil));
   }
 
@@ -230,7 +245,7 @@ export async function generateAndSaveFullPlan(
   // single continuous plan rather than a plan that ends at Dipsea and leaves Snowbird
   // unplanned. The arc phases naturally taper to the last race; intermediate races are
   // labeled via bRaceWeekLabels so Haiku can annotate them as tune-up efforts.
-  console.log("[training-plan] generateAndSaveFullPlan: raceDate=", raceDate, "totalWeeks=", totalWeeks, "bRaces=", JSON.stringify(bRaces ?? []));
+  console.log("[training-plan] generateAndSaveFullPlan: raceDate=", raceDate, "totalWeeks=", totalWeeks, "bRaces=", JSON.stringify(bRaces ?? []), "anchorMonday=", planMonday.toISOString());
   if (bRaces?.length && raceDate) {
     const lastPostARace = bRaces
       .filter(r => r.race_date > raceDate)
@@ -238,7 +253,7 @@ export async function generateAndSaveFullPlan(
       .pop();
     if (lastPostARace) {
       const lastRaceMs = new Date(lastPostARace.race_date + "T12:00:00Z").getTime();
-      const weeksToLast = Math.ceil((lastRaceMs - monday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+      const weeksToLast = Math.ceil((lastRaceMs - planMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
       console.log("[training-plan] B/C race extension check: lastPostARace=", lastPostARace.race_date, "weeksToLast=", weeksToLast, "totalWeeks=", totalWeeks);
       if (weeksToLast > totalWeeks && weeksToLast <= totalWeeks + 8) {
         totalWeeks = Math.min(52, weeksToLast);
@@ -253,7 +268,7 @@ export async function generateAndSaveFullPlan(
   // of a taper (~15mi pre-race training only).
   const aRaceWeekNum: number | null = raceDate
     ? Math.max(1, Math.min(
-        Math.ceil((new Date(raceDate + "T12:00:00Z").getTime() - monday.getTime()) / (7 * 24 * 60 * 60 * 1000)),
+        Math.ceil((new Date(raceDate + "T12:00:00Z").getTime() - planMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)),
         totalWeeks,
       ))
     : null;
@@ -414,7 +429,7 @@ export async function generateAndSaveFullPlan(
   const bRaceWeekLabels: string[] = [];
   for (const r of bRaces ?? []) {
     const raceMs = new Date(r.race_date + "T12:00:00Z").getTime();
-    const weekNum = Math.round((raceMs - monday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    const weekNum = Math.round((raceMs - planMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
     if (weekNum >= 1 && weekNum <= totalWeeks) {
       const label = r.race_name ?? (r.priority === "B" ? "B race" : "C race");
       bRaceWeekLabels.push(`Week ${weekNum}: ${r.priority} race — ${label} on ${r.race_date}`);

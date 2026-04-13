@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Fixed mid-plan rebuild anchoring wrong taper weeks
+
+**Type:** Bug Fix
+**Reported by:** User (dashboard review)
+**User feedback:** "I'm wondering if my plan is still messed up somehow — it has me taper too early before my first race"
+**Root cause:** `generateAndSaveFullPlan` computed `totalWeeks` and `aRaceWeekNum` from the current Monday. For mid-plan rebuilds, the dashboard anchors to `week1Monday` (= currentMonday − (currentWeek−1)×7), which can be several weeks earlier. This caused the plan to have too few total weeks (race fell outside the plan), or race week numbers that didn't match the dashboard's calendar — resulting in the A-race taper appearing 2–3 weeks too early and the actual race week showing "peak" with full volume.
+**Fix / Change:** Added `anchorMonday` parameter to `generateAndSaveFullPlan`. `handleRebuildPlan` now computes `week1Monday` (using the same formula as the dashboard) from `currentWeek` and passes it as `anchorMonday`. This ensures `totalWeeks`, `aRaceWeekNum`, and B/C race week labels are all computed relative to the plan's original start, not today's date. Week-1 rebuilds (where both anchors are identical) are unaffected. Also rebuilt the affected user's plan after deploying the fix.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-13 — Fix recovery week over-resting when athlete mentions soreness
 
 **Type:** Bug Fix
