@@ -81,18 +81,29 @@ function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
     }
     return null;
   }
-  const parsedKeyMi = keyWorkoutDay && week.key_workout ? parseKeyWorkoutMiles(week.key_workout) : null;
-  const keyWorkoutMi = keyWorkoutDay
+  // "Easy X mi" key_workouts (base/deload weeks) are just easy running — not a distinct
+  // quality session. When key_workout starts with "Easy", treat that day as a regular easy
+  // run and distribute all non-long-run mileage evenly. This prevents the contradictory
+  // label "Easy 5.5mi" showing 1.5mi (the 20% fallback when the ^ anchor fails to parse).
+  const isEasyKeyWorkout = /^easy/i.test(week.key_workout || "");
+  const parsedKeyMi = keyWorkoutDay && week.key_workout && !isEasyKeyWorkout
+    ? parseKeyWorkoutMiles(week.key_workout) : null;
+  const keyWorkoutMi = keyWorkoutDay && !isEasyKeyWorkout
     ? (parsedKeyMi !== null ? parsedKeyMi : Math.round(week.mileage_target * 0.20 * 2) / 2)
     : 0;
   const totalEasy = Math.max(0, week.mileage_target - longRunMi - keyWorkoutMi);
-  const easyMi = easyDays.length > 0 ? Math.round((totalEasy / easyDays.length) * 10) / 10 : 0;
+  // Easy day count: when key_workout is an easy run, include that day in the even distribution.
+  const easyDayCount = isEasyKeyWorkout ? sorted.length - 1 : easyDays.length;
+  const easyMi = easyDayCount > 0 ? Math.round((totalEasy / easyDayCount) * 10) / 10 : 0;
 
   return DAY_ORDER.map(day => {
     const shortDay = DAY_SHORT[day]!;
     if (!sorted.includes(day)) return { day, shortDay, type: "rest", label: "Rest", miles: null };
     if (day === longRunDay) return { day, shortDay, type: "long", label: "Long run", miles: longRunMi };
-    if (day === keyWorkoutDay) return { day, shortDay, type: "key", label: week.key_workout || "Key workout", miles: keyWorkoutMi };
+    if (day === keyWorkoutDay) {
+      if (isEasyKeyWorkout) return { day, shortDay, type: "easy", label: "Easy run", miles: easyMi };
+      return { day, shortDay, type: "key", label: week.key_workout || "Key workout", miles: keyWorkoutMi };
+    }
     return { day, shortDay, type: "easy", label: "Easy run", miles: easyMi };
   });
 }

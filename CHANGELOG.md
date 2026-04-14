@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Fix "Easy 5.5mi" label showing wrong distance; fix duplicate A-race insertion
+
+**Type:** Bug Fix
+**Reported by:** User (ac0ab080) — dashboard "This Week" showed Wed as "Easy 5.5mi" with 1.5mi distance
+**User feedback:** "do you also see the wrong labels in this week"
+**Root cause:** Two bugs:
+1. `buildDailyPlanFromArc` in dashboard: `parseKeyWorkoutMiles` uses `^` (start-of-string anchor), so "Easy 5.5mi" → null → fell back to 20% of weekly mileage (1.5mi). The label showed the key_workout text ("Easy 5.5mi") while the distance showed the fallback (1.5mi) — contradictory.
+2. `handleRebuildPlan` B/C race sync: `existingDates` was built only from B/C races. If the A-race date appeared in `onboarding_data.other_races`, it wasn't in existingDates and would be re-inserted as a duplicate A race.
+**Fix / Change:**
+1. When `key_workout` starts with "Easy", treat that day as a regular easy run rather than a quality session — distribute all non-long-run mileage evenly across easy days (including the "key" day). This makes base weeks show consistent "Easy run" labels and correct per-session distances.
+2. In `handleRebuildPlan`, build `existingDates` from ALL races (not just B/C), and add an explicit filter excluding A-priority entries from the sync insert.
+**Files changed:** `src/app/dashboard/page.tsx`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-13 — Fix peak-phase mileage jump and B-race week label off-by-one
 
 **Type:** Bug Fix
