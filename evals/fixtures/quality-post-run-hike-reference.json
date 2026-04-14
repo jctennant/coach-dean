@@ -1,0 +1,50 @@
+{
+  "id": "quality-post-run-hike-reference",
+  "description": "Post-run feedback after a Tuesday run. Athlete hiked Sunday (2 days ago). Dean must NOT say 'yesterday' for the hike — it was 2 days ago, not yesterday.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-04-14",
+  "user": {
+    "name": "Jake",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Spring Marathon",
+    "goal_race_date": "2026-05-31",
+    "goal_time_minutes": null,
+    "current_week": 10,
+    "current_phase": "build",
+    "vdot": 52,
+    "easy_pace": "8:25/mi",
+    "tempo_pace": "6:45/mi",
+    "interval_pace": "6:03/mi",
+    "training_days": ["tuesday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 40,
+    "miles_logged_this_week": 7.3,
+    "runs_this_week": 1,
+    "injury_notes": "Left arch — monitoring",
+    "notes": null,
+    "recent_activities": [
+      { "date": "2026-04-14", "type": "Run", "distance_miles": 7.3, "pace": "8:39/mi" },
+      { "date": "2026-04-12", "type": "Hike", "distance_miles": 8.0, "duration_minutes": 210 },
+      { "date": "2026-04-09", "type": "Run", "distance_miles": 6.0, "pace": "8:30/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-04-14",
+    "type": "Run",
+    "distance_miles": 7.3,
+    "pace": "8:39/mi",
+    "duration_minutes": 63,
+    "elevation_gain_feet": 541
+  },
+  "ground_truth": {
+    "today_is": "Tuesday April 14",
+    "hike_was": "Sunday April 12 (2 days ago)",
+    "forbidden_phrases": ["yesterday's hike", "hike yesterday", "after yesterday", "from yesterday"],
+    "required_references": ["Sunday", "Sunday's hike", "two days ago"],
+    "notes": "Today is Tuesday 4/14. The hike was Sunday 4/12 — 2 days ago, NOT yesterday. Dean must not say 'yesterday' when referring to the hike. Must use 'Sunday' or 'Sunday's hike' or '2 days ago'. This fixture was added after a real incident where Dean said 'after the hike yesterday' for a Sunday hike when responding to a Tuesday run."
+  }
+}

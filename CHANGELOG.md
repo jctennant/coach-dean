@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-14 — Fix "yesterday" bug for cross-training activities in post_run feedback
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "my hike was sunday (two days ago) not yesterday! ... Coach Dean: ... That's good load after the hike yesterday."
+**Root cause:** Two issues: (1) The ACTIVITY RECENCY guard ("never say yesterday for activities 2+ days ago") only existed in the `user_message` prompt, not in `post_run`. (2) The rule text said "run" specifically, so cross-training activities like hikes were not explicitly covered even in `user_message`. Claude saw "(2 days ago)" for the hike in RECENT WORKOUTS but had no instruction preventing "yesterday" in post-run context.
+**Fix / Change:** Added ACTIVITY RECENCY guard to the `post_run` system prompt, explicitly covering all activity types (runs, hikes, rides, etc.). Updated the same rule in `user_message` to say "activity" instead of "run" for consistent coverage. Added eval fixture `quality-post-run-hike-reference` to catch regressions of this exact case.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/fixtures/quality-post-run-hike-reference.json`
+
 ## 2026-04-13 — Estimate distance for time-based interval sessions in dashboard
 
 **Type:** Improvement

@@ -4535,7 +4535,7 @@ function buildUserMessage(
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
     case "morning_plan":
-      return "Generate today's workout plan for this athlete. Consider their current training state, recent activity history and trends, and any adjustments needed. Be specific about distances, paces, and effort levels.";
+      return "Generate today's workout plan for this athlete. Consider their current training state, recent activity history and trends, and any adjustments needed. Be specific about distances, paces, and effort levels.\n\nACTIVITY RECENCY: When referencing past activities, use the \"(N days ago)\" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say \"yesterday\" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. \"Sunday's hike\", \"Monday's run\") for any activity more than 1 day ago.";
     case "post_run_onboarding":
       // Handled by early-exit in processCoachRequest; unreachable here.
       return "";
@@ -4666,7 +4666,9 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - Week-to-date mileage: use the WEEK-TO-DATE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
 - Upcoming sessions: if THIS WEEK'S PLANNED SESSIONS is present in CURRENT TRAINING STATE, use those exact sessions and distances. Do not recalculate, substitute, or invent different numbers. Only omit sessions that have already been completed (i.e. activity date falls on or before today's date).
 - Only reference THIS WEEK'S PLANNED SESSIONS when describing what's left to do. Do NOT mention NEXT WEEK'S PLANNED SESSIONS in post-run feedback — those belong in the Sunday recap.
-- If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.${injuryReminder}`;
+- If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.
+
+ACTIVITY RECENCY: When referencing past activities in RECENT WORKOUTS, use the "(N days ago)" label to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Monday's run") for any activity more than 1 day ago.${injuryReminder}`;
     }
     case "user_message": {
       const umIsMetric = preferredUnits === "metric";
@@ -4746,7 +4748,7 @@ FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
 - If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.
 
-${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each run was before using relative terms. Never say "yesterday" for a run that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
+${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Sunday's hike", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
 
 CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}${fullArcContext}`;
     }
@@ -4917,7 +4919,9 @@ Rules:
 - label: concise session description including distance (e.g. "Easy 6mi", "Long run 10mi", "6×800m @ 5K pace 3mi", "Strength 30min")
 - optional: true only for explicitly optional sessions, false otherwise
 - Include every session in the upcoming week — do not omit any
-- The tag is stripped before the athlete sees the message — they will never see it`;
+- The tag is stripped before the athlete sees the message — they will never see it
+
+ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Thursday's tempo run") for any activity more than 1 day ago.`;
     }
     case "workout_image":
       return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
