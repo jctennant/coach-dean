@@ -483,7 +483,7 @@ ULTRA-SPECIFIC REQUIREMENTS (mandatory):
   try {
     const enrichResponse = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: Math.min(8000, Math.max(2500, totalWeeks * 200)),
+      max_tokens: Math.min(8000, Math.max(4000, totalWeeks * 400)),
       system: `You are a running coach generating a structured training plan arc.
 For each week provide:
 - key_workout: the quality/speed session for that week (1 line). CRITICAL RULE: When a week includes BOTH a long run AND a quality session (tempo, intervals, strides, fartlek, hill repeats), set key_workout to the QUALITY session — NOT the long run. The long run is displayed separately in the dashboard. Only use the long run as key_workout for pure long-run-only weeks (recovery, low-volume deload). Examples: "6×800m @ 5K pace", "4${unitLabel} tempo @ threshold", "6×strides + easy 5${unitLabel}", "20min fartlek", "Race simulation 5${unitLabel} @ goal pace", "Hill repeats 6×90sec". Deload weeks: "Easy 30min + 4×strides" or similar. IMPORTANT: All distances in key_workout and notes must use ${unitLabel} (${useKm ? "kilometers" : "miles"}) — never mix units.
