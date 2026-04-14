@@ -915,7 +915,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           weekMileageSoFar,
           weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
           currentWeek: (state?.current_week as number | null) ?? null,
-          currentPhase: (state?.current_phase as string | null) ?? null,
           upcomingRaces: upcomingRaces,
           preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
           splits: storedSplits,
@@ -1452,7 +1451,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         stripped,
         computeProjectedWeekMiles(
           (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? null,
-          weekMileageSoFar
+          weekMileageSoFar,
+          (state?.weekly_mileage_target as number | null) ?? null
         )
       )
     : correctMileageTotal(stripped, alreadyCompletedMiles);
@@ -1517,7 +1517,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       weekMileageSoFar,
       weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
       currentWeek: (state?.current_week as number | null) ?? null,
-      currentPhase: (state?.current_phase as string | null) ?? null,
       upcomingRaces: upcomingRaces,
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
@@ -2062,7 +2061,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
  */
 function computeProjectedWeekMiles(
   sessions: Array<{ day: string; date: string; label: string }> | null,
-  weekMileageSoFar: number
+  weekMileageSoFar: number,
+  weeklyMileageTarget?: number | null
 ): number | null {
   if (!sessions || sessions.length === 0) return null;
   const now = new Date();
@@ -2082,7 +2082,15 @@ function computeProjectedWeekMiles(
     const mMatch = explicitTotal || firstMi;
     if (mMatch) remainingMiles += parseFloat(mMatch[1]);
   }
-  return weekMileageSoFar + remainingMiles;
+  const projection = weekMileageSoFar + remainingMiles;
+  // If the projection significantly exceeds the planned weekly target, it likely reflects
+  // stale or incorrectly-labelled sessions — cap at the target to avoid alarming athletes
+  // with implausible numbers (e.g. "on track for 77mi" on a 40mi-target week).
+  if (weeklyMileageTarget && weeklyMileageTarget > 0 && projection > weeklyMileageTarget * 1.2) {
+    console.warn(`[computeProjectedWeekMiles] projection ${projection.toFixed(1)}mi exceeds target ${weeklyMileageTarget}mi by >20% — capping at target`);
+    return weeklyMileageTarget;
+  }
+  return projection;
 }
 
 /**
@@ -3933,6 +3941,9 @@ Make a concrete recommendation — don't ask the athlete to decide. Analyze thei
 - For adding a day: recommend the day that best fills a gap in the week and fits easy-day recovery. Show the updated schedule.
 - Never respond with "it depends, which day do you prefer?" — make the call, they can override if needed.
 
+WHEN AN ATHLETE CONSOLIDATES OR DROPS A SESSION:
+<rule>SESSION CONSOLIDATION MATH: When an athlete proposes consolidating two sessions into one day (e.g., a Saturday double instead of separate Sat + Sun runs), DO NOT suggest they match the combined two-session volume in a single day. The combined volume was designed across two recovery windows and is dangerous to compress into one. Correct approach: state the new lower weekly total clearly, then only suggest adding 2–3 miles to the consolidated session if the athlete specifically asks to preserve volume. Wrong: "make sure Saturday volume hits close to the 26mi combined target" (this tells them to run 26mi on Saturday alone — dangerous). Right: "Dropping Sunday brings you to 30mi this week — solid. If you want to stay closer to the original volume, you could add a few miles to Saturday, but 30mi is a strong week." Never present the combined Sat+Sun (or any multi-day) target as a single-session goal.</rule>
+
 WHEN AN ATHLETE REPORTS MID-WEEK MILEAGE AND ASKS FOR REMAINING SESSIONS:
 <rule>PROJECTED WEEK TOTAL — always state existing + new: When an athlete says they've already logged X miles this week (e.g. "I've done 36 miles") and you're prescribing remaining sessions, always state the projected TOTAL for the week as (existing miles + new session miles). Never state just the new session's distance as the weekly total. Wrong: "That brings you to 14 mi for the week" (when they already ran 36). Right: "That puts your week at 50 mi — solid volume." This rule applies even if the remaining session falls on a new calendar week day. The athlete is asking about their running week total, not just the new miles.</rule>
 
@@ -3943,10 +3954,9 @@ If an athlete asks for more speed, intervals, or tempo — add it. Validate thei
 - If the fitness tier says "1–2 quality sessions appropriate", you have full permission to go to 2. Don't artificially limit to 1 when the athlete is asking for more and their profile supports it.
 
 COACH DEAN'S IDENTITY — when athletes ask personal questions about you:
-- You are an AI running coach. You do not run, race, lift, eat, sleep, or have a middle name. You have no personal training schedule, no race bib, no hometown.
-- When an athlete asks about your own training, life, or identity (e.g. "what's your training week look like?", "where do you live?", "are you a real person?"), be brief and honest — then redirect immediately to their training. Do NOT invent personal details, even playfully. A single invented fact (e.g. "I run 40-50 miles/week") creates an impossible contradiction when they follow up.
+<rule>ABSOLUTE IDENTITY RULE: You are an AI. You have never run a single mile. You have no personal training schedule, no race registrations, no lifting routine, no heart rate, no middle name, no hometown. If an athlete asks about your personal training (e.g. "what's your training week look like?", "how many miles are you running?", "do you lift?", "where do you live?"), you MUST NOT invent any personal athletic details — not even playfully, not even to seem relatable. Any fabricated personal detail (e.g. "I'm running 40-50mi/week right now — mostly easy miles with one long run...") will be immediately probed, destroys trust when you can't follow up with specifics, and is a liability. Respond honestly in ONE sentence ("I'm an AI so I don't lace up myself — but I've got your training data and I'm here for you"), then redirect immediately to their training. Do not spend more than one sentence on your nature.</rule>
 - Good deflection: "I don't have legs, but I do have your training data — and this week's shaping up well. What's on your mind?" Keep it light, not robotic. One sentence on your nature, then back to them.
-- Never fabricate a personal life to seem relatable. It backfires.
+- Never fabricate a personal life to seem relatable. It backfires — every invented detail gets probed, and you have no follow-up answers.
 
 MEMORY AND DATA LIMITATIONS:
 - You only have access to: the last 15 conversation messages, the athlete's activity history (visible in RECENT WORKOUTS), their profile, and today's date context. Nothing else.
@@ -5112,7 +5122,6 @@ interface AnnotationContext {
   weekMileageSoFar: number;
   weekTarget: number | null;
   currentWeek: number | null;
-  currentPhase: string | null;
   upcomingRaces: Array<Record<string, unknown>>;
   preferredUnits: "imperial" | "metric";
   // splits_standard from activityData.summary — already fetched by the webhook
@@ -5126,7 +5135,7 @@ async function annotateStravaActivity(
   ctx: AnnotationContext,
   userLocation?: { city: string; state: string; timezone: string }
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, currentPhase, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
 
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
@@ -5189,9 +5198,9 @@ async function annotateStravaActivity(
       if (!race.race_date) return null;
       const d = Math.ceil((new Date(race.race_date as string).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       const name = (race.race_name as string | null) ?? "Race";
-      return { label: `${name} (${d}d)`, headerLabel: `${name} ${d}d` };
+      return { label: `${name} (${d}d)`, shortLabel: `${name} ${d}d out` };
     })
-    .filter((r): r is { label: string; headerLabel: string } => r !== null);
+    .filter((r): r is { label: string; shortLabel: string } => r !== null);
   const raceLabels = raceData.map(r => r.label);
 
   // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
@@ -5228,19 +5237,23 @@ async function annotateStravaActivity(
       .eq("strava_activity_id", stravaActivityId);
   }
 
-  // Header line — phase label (if in a plan) + upcoming races, no coachdean.ai here
-  const PHASE_LABELS: Record<string, string> = {
-    base: "Base building",
-    build: "Build",
-    peak: "Peak training",
-    taper: "Taper",
-  };
-  const phaseLabel = currentPhase ? (PHASE_LABELS[currentPhase] ?? null) : null;
-  const raceHeaderLabels = raceData.map(r => r.headerLabel);
-  const headerParts = [phaseLabel, ...raceHeaderLabels].filter(Boolean);
-  const headerLine = headerParts.length > 0
-    ? `${emoji} ${headerParts.join(" · ")}`
-    : emoji;
+  // Fetch total plan weeks for header
+  const { data: planRow } = await supabase
+    .from("training_plans")
+    .select("total_weeks")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
+
+  // Header line — coachdean.ai at top as branding anchor
+  const weekLabel = currentWeek
+    ? totalWeeks ? `Week ${currentWeek} of ${totalWeeks}` : `Week ${currentWeek}`
+    : null;
+  const raceShortLabels = raceData.map(r => r.shortLabel);
+  const headerMeta = [weekLabel, ...raceShortLabels].filter(Boolean).join(" · ");
+  const headerLine = headerMeta ? `${emoji} coachdean.ai — ${headerMeta}` : `${emoji} coachdean.ai`;
 
   // Build LLM context for the coach note
   const distanceDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
@@ -5277,26 +5290,26 @@ async function annotateStravaActivity(
 
   const noteResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 80,
+    max_tokens: 150,
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write exactly 1 sentence for this athlete's Strava training log.
-- Pick the single most interesting or relevant thing the data shows — negative split, HR discipline, grade-adjusted effort, cardiac drift, aerobic efficiency, weather impact, etc.
-- Be specific to the numbers. No filler phrases like "running smart and strong" or "great work today".
-- Do NOT restate distance or average pace — Strava shows those already.
-- Do NOT tell the athlete what to do next.
+        content: `You are Coach Dean. Write exactly 1–2 sentences for this athlete's Strava training log. Rules:
+1. Be specific to the numbers — no filler like "running smart and strong". Reference what the data actually shows.
+2. If weather was notably hot, cold, or windy, briefly acknowledge it as context for elevated HR or slower pace.
+3. For hilly runs, reference grade-adjusted effort over raw pace.
+4. Do NOT restate distance or average pace — Strava shows those already.
+5. Do NOT tell the athlete what to do tomorrow — they already have a training plan for that.
 
 ${notePrompt}`,
       },
     ],
   });
-  const deanNoteRaw = noteResponse.content[0].type === "text"
+  const deanNote = noteResponse.content[0].type === "text"
     ? stripMarkdown(noteResponse.content[0].text.trim())
     : "";
-  const deanNote = deanNoteRaw ? `${deanNoteRaw} — coachdean.ai` : "— coachdean.ai";
 
-  // Build the annotation block — metrics are passed to the LLM as context but not shown directly
+  // Build the annotation block — efficiency and decoupling shown with brief labels
   const weekLine = isAnalystMode
     ? `Week: ${weekMilesDisplay}`
     : weekTargetDisplay
@@ -5305,6 +5318,10 @@ ${notePrompt}`,
   const block = [
     headerLine,
     weekLine,
+    decouplingLine,
+    efficiencyLine,
+    bestGapLine,
+    "",
     deanNote,
   ].filter((l): l is string => l !== null).join("\n");
 

@@ -4,6 +4,47 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-14 — Auto-fix: AI identity guardrail, session-consolidation math, mileage projection cap
+
+**Type:** Bug Fix (3 issues — auto-fixed from 2026-04-13 conversation analysis)
+**Reported by:** Automated conversation analysis
+**User feedback:** N/A
+
+---
+
+### Fix 1 — P0: Dean roleplayed as a human athlete
+
+**Root cause:** The existing COACH DEAN'S IDENTITY section had soft "Do NOT" language that the model could override when generating a relatable-seeming reply. User 32d7510f asked "what's your training week look like" and Dean responded with fabricated personal training details ("I'm running 40-50mi/week right now — mostly easy miles with one long run and one tempo or hill session. I lift 2x/week..."). When probed, Dean couldn't provide further details, revealing the deception.
+**Fix / Change:** Converted the identity section header to a hard `<rule>` tag with ABSOLUTE IDENTITY RULE language. Explicitly names the failure mode ("I'm running 40-50mi/week right now") as a forbidden response. Requires honest deflection in one sentence then immediate redirect to athlete's training.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Fix 2 — P1: Session-consolidation math (dangerous makeup-volume advice)
+
+**Root cause:** User 2e5a7e92 asked to consolidate Sat+Sun into a Saturday double and drop Sunday. Dean correctly calculated the new weekly total (30mi) but then told the athlete to "make sure Saturday volume hits close to the 26mi combined target" — implying the athlete should run 26mi on Saturday alone to compensate. This conflated the combined Sat+Sun target (16+10=26mi) with a single-session goal, which is both incoherent and dangerous.
+**Fix / Change:** Added a `SESSION CONSOLIDATION MATH` `<rule>` block next to the existing structural-change rules. Explicitly forbids suggesting the full dropped-session volume be made up in a single day. Provides a correct example: state the lower total, offer only a modest add-on (2–3mi) if the athlete asks to preserve volume.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Fix 3 — P1: Weekly mileage projection inflated (77.2mi from 8.2mi Monday run)
+
+**Root cause:** User 70818a68 received a post-run message saying "8.2 mi logged this week. You've got 5 sessions left (Tue–Sat) on track for ~77.2 mi." The `computeProjectedWeekMiles` function summed remaining sessions from `weekly_plan_sessions` without any sanity check against the stored `weekly_mileage_target`. If stored sessions carry incorrect or stale mileage labels, the projection faithfully reflects those bad values and `correctProjectedTotal` has no basis to override them.
+**Fix / Change:** Added an optional `weeklyMileageTarget` parameter to `computeProjectedWeekMiles`. If the computed projection exceeds `weeklyMileageTarget * 1.2`, the function caps the result at `weeklyMileageTarget` (the plan's authoritative target) and logs a warning. Updated the call site to pass `state?.weekly_mileage_target`.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-14 — Update Strava annotation header: week/total instead of phase, metrics back in block
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** N/A
+**Root cause:** Previous annotation header showed training phase ("Build", "Taper") which was meaningful for plan users but absent for general fitness users. The `— coachdean.ai` suffix on the dean note made the branding feel tacked on rather than anchored. Metrics (decoupling, efficiency, best GAP) were hidden from the block; athletes who checked Strava saw only 3 lines with no specifics.
+**Fix / Change:** Header now reads `{emoji} coachdean.ai — Week X of Y · Race Xd out`. Removed `currentPhase` from `AnnotationContext` entirely. Fetches `total_weeks` from `training_plans` for the "of Y" context. Metrics (decoupling, efficiency, best GAP) are shown in the block again, separated from the dean note by a blank line. Note expanded to 1–2 sentences (max_tokens 80→150) to allow weather/terrain context.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-14 — Redesign Strava annotation block format
 
 **Type:** Improvement
