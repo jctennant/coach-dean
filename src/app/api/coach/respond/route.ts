@@ -175,9 +175,8 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
       ...bCRaces.map(r => r.race_date),
       ...((allExistingRaces ?? []) as Array<{ race_date: string }>).map(r => r.race_date),
     ]);
-    // Only insert B/C priority races — never re-create an A race from other_races
     const missingRaces = rawOtherRaces.filter(
-      r => r.date && r.date > todayStr && !existingDates.has(r.date) && r.priority !== "A"
+      r => r.date && r.date > todayStr && !existingDates.has(r.date)
     );
     if (missingRaces.length > 0) {
       console.log(`[handleRebuildPlan] syncing ${missingRaces.length} missing B/C race(s) from onboarding_data to races table:`, missingRaces.map(r => r.date));
