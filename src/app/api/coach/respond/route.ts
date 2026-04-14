@@ -5277,16 +5277,15 @@ async function annotateStravaActivity(
 
   const noteResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 150,
+    max_tokens: 80,
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write exactly 1–2 sentences for this athlete's Strava training log. Rules:
-1. Be specific to the numbers — no filler like "running smart and strong". Reference what the data actually shows.
-2. If weather was notably hot, cold, or windy, briefly acknowledge it as context for elevated HR or slower pace.
-3. For hilly runs, reference grade-adjusted effort over raw pace.
-4. Do NOT restate distance or average pace — Strava shows those already.
-5. Do NOT tell the athlete what to do tomorrow — they already have a training plan for that.
+        content: `You are Coach Dean. Write exactly 1 sentence for this athlete's Strava training log.
+- Pick the single most interesting or relevant thing the data shows — negative split, HR discipline, grade-adjusted effort, cardiac drift, aerobic efficiency, weather impact, etc.
+- Be specific to the numbers. No filler phrases like "running smart and strong" or "great work today".
+- Do NOT restate distance or average pace — Strava shows those already.
+- Do NOT tell the athlete what to do next.
 
 ${notePrompt}`,
       },
