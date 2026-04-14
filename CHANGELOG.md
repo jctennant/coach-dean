@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-14 — Redesign Strava annotation block format
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** "trim it down more — weave a human readable insight into the 1 line analysis. If the user is in a phase of a plan, label the phase. Remove other obscure metrics."
+**Root cause:** Annotation block surfaced raw metrics (cardiac decoupling, aerobic efficiency, best GAP) as standalone lines, making it feel like a data dump rather than a coaching note.
+**Fix / Change:** Redesigned the block to 3 lines: `{emoji} {Phase} · {Race Xd}` header, `Week: X / Ytmi` mileage line, and the dean note ending with ` — coachdean.ai`. Decoupling, efficiency, and best GAP are now passed to the LLM as context only (woven into the insight) rather than shown as separate lines. Phase label is omitted for general fitness users without a plan.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-14 — Fix "yesterday" bug for cross-training activities in post_run feedback
 
 **Type:** Bug Fix

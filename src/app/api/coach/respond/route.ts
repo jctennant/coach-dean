@@ -915,6 +915,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           weekMileageSoFar,
           weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
           currentWeek: (state?.current_week as number | null) ?? null,
+          currentPhase: (state?.current_phase as string | null) ?? null,
           upcomingRaces: upcomingRaces,
           preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
           splits: storedSplits,
@@ -1516,6 +1517,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       weekMileageSoFar,
       weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
       currentWeek: (state?.current_week as number | null) ?? null,
+      currentPhase: (state?.current_phase as string | null) ?? null,
       upcomingRaces: upcomingRaces,
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
@@ -5110,6 +5112,7 @@ interface AnnotationContext {
   weekMileageSoFar: number;
   weekTarget: number | null;
   currentWeek: number | null;
+  currentPhase: string | null;
   upcomingRaces: Array<Record<string, unknown>>;
   preferredUnits: "imperial" | "metric";
   // splits_standard from activityData.summary — already fetched by the webhook
@@ -5123,7 +5126,7 @@ async function annotateStravaActivity(
   ctx: AnnotationContext,
   userLocation?: { city: string; state: string; timezone: string }
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, currentPhase, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
 
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
@@ -5186,9 +5189,9 @@ async function annotateStravaActivity(
       if (!race.race_date) return null;
       const d = Math.ceil((new Date(race.race_date as string).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       const name = (race.race_name as string | null) ?? "Race";
-      return { label: `${name} (${d}d)`, shortLabel: `${name} ${d}d out` };
+      return { label: `${name} (${d}d)`, headerLabel: `${name} ${d}d` };
     })
-    .filter((r): r is { label: string; shortLabel: string } => r !== null);
+    .filter((r): r is { label: string; headerLabel: string } => r !== null);
   const raceLabels = raceData.map(r => r.label);
 
   // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
@@ -5225,23 +5228,19 @@ async function annotateStravaActivity(
       .eq("strava_activity_id", stravaActivityId);
   }
 
-  // Fetch total plan weeks for header
-  const { data: planRow } = await supabase
-    .from("training_plans")
-    .select("total_weeks")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-  const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
-
-  // Header line — coachdean.ai at top as branding anchor
-  const weekLabel = currentWeek
-    ? totalWeeks ? `Week ${currentWeek} of ${totalWeeks}` : `Week ${currentWeek}`
-    : null;
-  const raceShortLabels = raceData.map(r => r.shortLabel);
-  const headerMeta = [weekLabel, ...raceShortLabels].filter(Boolean).join(" · ");
-  const headerLine = headerMeta ? `${emoji} coachdean.ai — ${headerMeta}` : `${emoji} coachdean.ai`;
+  // Header line — phase label (if in a plan) + upcoming races, no coachdean.ai here
+  const PHASE_LABELS: Record<string, string> = {
+    base: "Base building",
+    build: "Build",
+    peak: "Peak training",
+    taper: "Taper",
+  };
+  const phaseLabel = currentPhase ? (PHASE_LABELS[currentPhase] ?? null) : null;
+  const raceHeaderLabels = raceData.map(r => r.headerLabel);
+  const headerParts = [phaseLabel, ...raceHeaderLabels].filter(Boolean);
+  const headerLine = headerParts.length > 0
+    ? `${emoji} ${headerParts.join(" · ")}`
+    : emoji;
 
   // Build LLM context for the coach note
   const distanceDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
@@ -5293,11 +5292,12 @@ ${notePrompt}`,
       },
     ],
   });
-  const deanNote = noteResponse.content[0].type === "text"
+  const deanNoteRaw = noteResponse.content[0].type === "text"
     ? stripMarkdown(noteResponse.content[0].text.trim())
     : "";
+  const deanNote = deanNoteRaw ? `${deanNoteRaw} — coachdean.ai` : "— coachdean.ai";
 
-  // Build the annotation block — efficiency and decoupling shown with brief labels
+  // Build the annotation block — metrics are passed to the LLM as context but not shown directly
   const weekLine = isAnalystMode
     ? `Week: ${weekMilesDisplay}`
     : weekTargetDisplay
@@ -5306,10 +5306,6 @@ ${notePrompt}`,
   const block = [
     headerLine,
     weekLine,
-    decouplingLine,
-    efficiencyLine,
-    bestGapLine,
-    "",
     deanNote,
   ].filter((l): l is string => l !== null).join("\n");
 
