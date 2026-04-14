@@ -208,10 +208,13 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     await POST(makeRequest({ userId: "user-001", message: "I run marathons" }));
 
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
-    expect(textSent).not.toContain("[STRAVA_LINK]");
-    expect(textSent).toContain("https://coachdean.ai/api/auth/strava");
-    expect(textSent).toContain('reply "skip"');
+    // Standalone Strava turn: pitch + URL in one message (no pre-Strava context to split out)
+    const stravaMsg = smsCalls[0]?.[1] as string;
+    expect(stravaMsg).not.toContain("[STRAVA_LINK]");
+    expect(stravaMsg).toContain("https://coachdean.ai/api/auth/strava");
+    expect(stravaMsg).toContain('reply "skip"');
+    // Only one SMS sent (no separate pre-Strava response)
+    expect(smsCalls.length).toBe(1);
 
     // Step should be set to awaiting_strava
     const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;

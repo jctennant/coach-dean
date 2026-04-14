@@ -208,8 +208,18 @@ export async function generateAndSaveFullPlan(
     anchorMonday?: Date;
   } = {},
 ): Promise<string> {
-  const raceDate = (profile?.race_date as string | null) ?? null;
-  const goal = (profile?.goal as string | null) ?? null;
+  // Fetch A race from the races table as the authoritative source.
+  // Falls back to profile.race_date / profile.goal for backward compatibility
+  // (e.g. legacy users who have no races row yet, or test environments).
+  const { data: aRaceRow } = await supabase
+    .from("races")
+    .select("race_date, goal")
+    .eq("user_id", userId)
+    .eq("priority", "A")
+    .single();
+
+  const raceDate = (aRaceRow?.race_date as string | null) ?? (profile?.race_date as string | null) ?? null;
+  const goal = (aRaceRow?.goal as string | null) ?? (profile?.goal as string | null) ?? null;
   const easyPace = (profile?.current_easy_pace as string | null) ?? null;
   const tempoPace = (profile?.current_tempo_pace as string | null) ?? null;
   const intervalPace = (profile?.current_interval_pace as string | null) ?? null;
@@ -487,7 +497,7 @@ Return ONLY a valid JSON array:
 No other text.`,
       messages: [{
         role: "user",
-        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileageDisplay}/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\nPreferred units: ${unitLabel}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${!easyPace && !tempoPace && !intervalPace ? "\n\nNO PACE DATA: This athlete has not yet established pace baselines. In key_workout and notes, use effort-based language only: 'easy effort', 'comfortably hard', 'hard/near-maximal effort'. Do NOT invent or estimate specific minute/mile or minute/km pace targets — the athlete has no race time or VDOT on file yet." : ""}${injuryNotes ? `\n\nINJURY/PHYSICAL LIMITATIONS: ${injuryNotes}. Avoid exercises that could aggravate this; suggest lower-impact alternatives where relevant.` : ""}${otherNotes ? `\n\nATHLETE PREFERENCES: ${otherNotes}. Incorporate these into key_workout and notes where appropriate — spread across multiple weeks (e.g. if hill repeats requested, designate 2-3 build/peak weeks with hill repeats as key_workout; if cycling requested, mention optional bike sessions in notes for rest/recovery days, not as the key_workout).` : ""}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
+        content: `Goal: ${goal ?? "general running fitness"}\nRace date: ${raceDate ?? "none"}\nCurrent fitness: ~${baseMileageDisplay}/week${easyPace ? `, easy pace ${easyPace}` : ""}${tempoPace ? `, tempo pace ${tempoPace}` : ""}${intervalPace ? `, interval/5K pace ${intervalPace}` : ""}\nDays/week: ${daysPerWeek}\nPreferred units: ${unitLabel}\n\n${basePhaseGuidance}${ultraGuidance}${bRaceContext}${!easyPace && !tempoPace && !intervalPace ? "\n\nNO PACE DATA: This athlete has not yet established pace baselines. In key_workout and notes, use effort-based language only: 'easy effort', 'comfortably hard', 'hard/near-maximal effort'. Do NOT invent or estimate specific minute/mile or minute/km pace targets — the athlete has no race time or VDOT on file yet." : ""}${injuryNotes ? `\n\nINJURY/PHYSICAL LIMITATIONS: ${injuryNotes}. Avoid exercises that could aggravate this. If you suggest lower-impact alternatives (cycling, pool running), make clear in the notes that these REPLACE a run session for that day — not supplement it.` : ""}${otherNotes ? `\n\nATHLETE PREFERENCES: ${otherNotes}. Incorporate these into key_workout and notes where appropriate — spread across multiple weeks (e.g. if hill repeats requested, designate 2-3 build/peak weeks with hill repeats as key_workout; if cycling requested, mention optional bike sessions in notes for rest/recovery days, not as the key_workout).` : ""}${wantsSpeedWork ? "\n\n⚠️ SPEED WORK PRIORITY: This athlete explicitly requested speed work. Include a dedicated quality session (intervals, tempo, strides, or fartlek) as key_workout starting from week 1. Do NOT delay speed work to week 7+ — introduce it immediately and increase intensity as the plan progresses." : ""}\n\nWeeks:\n${arcSummary}`,
       }],
     });
 

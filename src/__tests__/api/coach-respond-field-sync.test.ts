@@ -309,6 +309,23 @@ describe("persistProfileUpdates — goal time change", () => {
     const timeUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.goal_time_minutes != null);
     expect(timeUpdate?.[0]).toMatchObject({ goal_time_minutes: 55 });
   });
+
+  it("syncs goal_time_minutes to the A race row in the races table", async () => {
+    mockExtractionThenCoach({ goal_time_minutes: 115 });
+    const { racesChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: baseConversations("I want to run sub-1:55"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (racesChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const timeUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.goal_time_minutes != null);
+    expect(timeUpdate?.[0]).toMatchObject({ goal_time_minutes: 115 });
+  });
 });
 
 describe("persistProfileUpdates — standing schedule change", () => {

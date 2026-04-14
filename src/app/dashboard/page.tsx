@@ -320,7 +320,10 @@ export default async function DashboardPage({
       actualMilesByWeek[weekNum] = (actualMilesByWeek[weekNum] ?? 0) + (activity.distance_meters as number) / 1609.34;
     }
   }
-  const raceDate = profileData?.race_date ?? planData.race_date;
+  // Use the races table (priority=A) as the authoritative source for raceDate and goalBucket.
+  // Falls back to training_profiles / training_plans for legacy users with no A race row.
+  const aRaceEntry = upcomingRaces.find(r => r.priority === "A") ?? null;
+  const raceDate = (aRaceEntry?.race_date as string | null) ?? profileData?.race_date ?? planData.race_date;
 
   // Which plan weeks have a race (A, B, or C) — for "Race day" badge.
   const raceWeekNum = (raceDate as string | null)
@@ -341,7 +344,7 @@ export default async function DashboardPage({
   // distance (e.g. 7.4 mi for Dipsea). training_profiles.goal_distance_miles is backfilled
   // with the standard bucket distance (e.g. 6.214 for 10k) — don't use that for display.
   const specificDistanceMiles = (onboardingData.goal_distance_miles as number | null) ?? null;
-  const goalBucket = profileData?.goal ?? planData.goal;
+  const goalBucket = (aRaceEntry?.goal as string | null) ?? profileData?.goal ?? planData.goal;
   const GOAL_LABELS: Record<string, string> = {
     mile: "Mile", "5k": "5K", "10k": "10K", half_marathon: "Half Marathon",
     marathon: "Marathon", "30k": "30K", "50k": "50K", "50mi": "50 Miles",
@@ -358,9 +361,7 @@ export default async function DashboardPage({
   // onboarding_data.goal_distance_miles. onboarding_data can be stale when the user has
   // multiple races — e.g. the parser captured Broken Arrow 46K (28.5 mi) but the A race
   // is Kodiak 100K, so the header was showing "Kodiak 100K · 28.5 mi".
-  const aRaceEntry = upcomingRaces.find(r => r.race_date === (raceDate as string))
-    ?? upcomingRaces.find(r => r.priority === "A")
-    ?? null;
+  // aRaceEntry is already defined above (priority=A from races table).
   let distanceSuffix: string | null;
   if (raceName) {
     if (aRaceEntry) {

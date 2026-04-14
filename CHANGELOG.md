@@ -4,6 +4,37 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Strava onboarding message split; cross-training note clarity
+
+**Type:** Improvement
+**Reported by:** Jake (internal review)
+**User feedback:** "Can we make this two messages? Feels like we should generally not send super long texts like this" / "Should that be something like 'so you get instant feedback and metrics to improve on'?" / "Does Dean mean that I should cycle or pool run instead of regular run? it wasn't clear to me if this is a good replacement or not"
+**Root cause:** (1) The Strava onboarding message was one long SMS combining Claude's pitch + the URL + instructions. (2) The Strava value prop used the low-impact phrase "so it shows up in your log." (3) When Haiku generates injury-aware cross-training suggestions in the coach's note, it didn't specify whether they replace or supplement a run session, leaving athletes confused.
+**Fix / Change:** (1) Split the Strava message into two SMS: message 1 is Claude's explanation, message 2 is the URL + "No Strava? Just reply skip." (2) Updated the Strava prompt instruction to use "instant coaching feedback on their effort, pacing, and what to focus on next." (3) Updated the Haiku enrichment injury prompt to explicitly state that cross-training alternatives REPLACE a run session for that day.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/lib/training-plan.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+## 2026-04-13 — Eliminate remaining dual-state between `races` table and `training_profiles`
+
+**Type:** Refactor / Bug Fix
+**Reported by:** Internal (architecture cleanup)
+**User feedback:** N/A
+**Root cause:** Three residual drift points remained after making `races` the SoT for plan generation: (1) `buildSystemPrompt` read `goal_time_minutes` from `onboarding_data` (only set at onboarding, never updated) instead of `training_profiles` (kept in sync by `persistProfileUpdates`) — meaning mid-coaching goal-time updates didn't affect Dean's pacing advice; (2) `persistProfileUpdates` updated `training_profiles.goal_time_minutes` but never synced it to `races(A).goal_time_minutes`, so the dashboard's race card could show a stale time; (3) the dashboard derived `raceDate` and `goalBucket` from `training_profiles` first instead of the `races` table.
+**Fix / Change:** (1) `buildSystemPrompt` now prefers `profile.goal_time_minutes ?? onboarding_data.goal_time_minutes` so post-onboarding goal updates flow through to pacing advice immediately. (2) `persistProfileUpdates` now syncs `goal_time_minutes` to `races(A)` alongside the profile update. (3) Dashboard derives `raceDate` and `goalBucket` from `upcomingRaces.find(priority=A)` first, falling back to `training_profiles` / `training_plans` for legacy users with no A race row. Added a test asserting the races sync for `goal_time_minutes`.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`, `src/__tests__/api/coach-respond-field-sync.test.ts`
+
+---
+
+## 2026-04-13 — `races` table is now the single source of truth for the A race
+
+**Type:** Refactor
+**Reported by:** Internal (architecture cleanup, P1 roadmap item)
+**User feedback:** N/A
+**Root cause:** The A race date and goal lived in two places: `training_profiles.race_date`/`training_profiles.goal` and `races` (priority=A). `generateAndSaveFullPlan` read only from `training_profiles`, so any drift between the two tables caused the plan to use the wrong race date. This contributed to plan-length bugs in the prior session.
+**Fix / Change:** `generateAndSaveFullPlan` now queries `races` (priority=A) first for `race_date` and `goal`. Falls back to `profile.race_date`/`profile.goal` only if no A race row exists (backward compat for legacy users with no races row). All mutation paths already write to `races` as part of `persistProfileUpdates` — no other changes needed. The fallback ensures 268 tests remain green without modification.
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
 ## 2026-04-13 — Post-onboarding B/C race extraction and auto-rebuild
 
 **Type:** Feature

@@ -3415,7 +3415,10 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   // If the athlete's goal was a non-standard distance (e.g. "25K Marin Headlands"),
   // race_name holds the exact description so we display it instead of the mapped bucket label.
   const raceName = onboardingData.race_name as string | null;
-  const goalTimeMinutes = onboardingData.goal_time_minutes as number | null | undefined;
+  // Prefer profile.goal_time_minutes (kept in sync by persistProfileUpdates) over
+  // onboarding_data.goal_time_minutes (only set at onboarding, never updated after).
+  const goalTimeMinutes = (profile?.goal_time_minutes as number | null | undefined)
+    ?? (onboardingData.goal_time_minutes as number | null | undefined);
   const isTri = ["sprint_tri", "olympic_tri", "70.3", "ironman"].includes(profile?.goal as string || "");
 
   // Pre-compute goal pace so Claude never has to do the arithmetic (it gets it wrong).
@@ -4324,6 +4327,16 @@ async function persistProfileUpdates(
           }).eq("id", userId)
         : Promise.resolve(),
     ]);
+
+    // When goal time changed, sync it to the A race row so the dashboard and system prompt
+    // both show the same number (system prompt now reads from profile, but races table is
+    // what the dashboard's upcoming-races card displays).
+    if (hasGoalTime) {
+      await supabase.from("races")
+        .update({ goal_time_minutes: extracted.goal_time_minutes })
+        .eq("user_id", userId)
+        .eq("priority", "A");
+    }
 
     // When goal race type changed, sync the A race row so the dashboard shows consistent info.
     if (hasGoalRaceType) {

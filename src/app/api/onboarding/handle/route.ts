@@ -251,7 +251,7 @@ ${isFirstResponse
 
 STRAVA:
 Ask about Strava as your NEXT question once you have the athlete's name and goal — before asking for race times, pace, or weekly mileage. Strava can provide all of that automatically, so don't collect fitness data manually if Strava might have it. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-When you ask, briefly explain the value in one or two sentences: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention that after each run, you'll add a short coaching note directly to their Strava activity so it shows up in their own log.
+When you ask, briefly explain the value in one or two sentences: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention that after each run, you'll send them instant coaching feedback on their effort, pacing, and what to focus on next.
 CRITICAL: Even if the athlete volunteers race history, fitness data, or pace information before you've asked about Strava — do NOT follow up on that data yet. Ask about Strava first. You can come back to those details after the Strava question is answered. The Strava question takes priority over any follow-up on volunteered fitness data.
 IMPORTANT: When you ask about Strava, make it a standalone turn — do not combine it with other questions (training days, pace, etc.) in the same message. Ask only the Strava question in that message. Ask other questions in your next turn after the user responds. This prevents you from re-asking questions the user already answered when they were bundled with the Strava link.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message — never embedded inline in a sentence (e.g. never "connect here: [STRAVA_LINK]."). End your question, then put [STRAVA_LINK] on a new line after.
@@ -358,11 +358,34 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
   const isReady = /\[READY\]/i.test(rawText);
   const wantsStravaLink = /\[STRAVA_LINK\]/i.test(rawText);
 
-  // Clean signals from displayed text
-  let responseText = rawText
-    .replace(/\[READY\]/gi, "")
-    .replace(/\[STRAVA_LINK\]/gi, "")
-    .trim();
+  // Build responseText and (when Strava is requested) a separate stravaMsg.
+  // Split at the paragraph containing [STRAVA_LINK] so:
+  //   responseText = whatever Claude said before the Strava ask (may be empty)
+  //   stravaMsg    = the Strava pitch + URL (always one coherent message)
+  let responseText: string;
+  let stravaMsg: string | null = null;
+
+  if (wantsStravaLink && !onboardingData.strava_connected && !onboardingData.strava_skipped) {
+    const paragraphs = rawText.split(/\n{2,}/);
+    const stravaParaIdx = paragraphs.findIndex(p => /\[STRAVA_LINK\]/i.test(p));
+    const beforeStrava = paragraphs
+      .slice(0, stravaParaIdx)
+      .join("\n\n")
+      .replace(/\[READY\]/gi, "")
+      .trim();
+    const stravaParagraph = paragraphs[stravaParaIdx]
+      .replace(/\[STRAVA_LINK\]/gi, "")
+      .replace(/\[READY\]/gi, "")
+      .trim();
+    responseText = beforeStrava;
+    const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\nNo Strava? Just reply "skip".`;
+  } else {
+    responseText = rawText
+      .replace(/\[READY\]/gi, "")
+      .replace(/\[STRAVA_LINK\]/gi, "")
+      .trim();
+  }
 
   // Strip any ⚠️-prefixed reasoning preamble Claude may have output (e.g. "⚠️ CRITICAL …\n\n")
   // and "RESPONSE:" label separators — these are internal directives that must never reach the athlete.
@@ -377,12 +400,6 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
     let firstOk = 0;
     while (firstOk < paras.length - 1 && /^⚠️/.test(paras[firstOk].trim())) firstOk++;
     if (firstOk > 0) responseText = paras.slice(firstOk).join("\n\n").trim();
-  }
-
-  // Inject actual Strava URL where placeholder was
-  if (wantsStravaLink && !onboardingData.strava_connected && !onboardingData.strava_skipped) {
-    const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    responseText = `${responseText}\n\n${stravaUrl}\n\nTo skip activity notes, uncheck "Upload activities" when authorizing.\n\nNo Strava? Just reply "skip".`;
   }
 
   // Extract structured fields from the full conversation using Haiku
@@ -459,7 +476,8 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
         onboarding_data: mergedData as unknown as Json,
       })
       .eq("id", user.id);
-    await sendAndStore(user.id, user.phone_number, responseText, "awaiting_strava");
+    if (responseText) await sendAndStore(user.id, user.phone_number, responseText, "awaiting_strava");
+    if (stravaMsg) await sendAndStore(user.id, user.phone_number, stravaMsg, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
 
