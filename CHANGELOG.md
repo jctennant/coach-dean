@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Fix peak-phase mileage jump and B-race week label off-by-one
+
+**Type:** Bug Fix
+**Reported by:** User (ac0ab080) — plan dashboard showed weeks 12–13 at 45mi/19mi long run after building to only ~10mi/week from a 5mi/week base
+**User feedback:** "Bad plan generation is looks like."
+**Root cause:** Two bugs in `training-plan.ts`:
+1. Peak phase forced `buildMileage = targetPeak` — this assumed the runner had already ramped to `targetPeak`, but the marathon floor is 45mi and a 10%/week cap from 5mi/week can only reach ~12mi in 15 weeks. The result was a hard jump from 10.5mi to 45mi in week 12.
+2. B-race week label used `Math.round(...) + 1` while totalWeeks and aRaceWeekNum use `Math.ceil(...)`. For Bay to Breakers (4.857 weeks out), this produced Week 6 instead of the correct Week 5.
+**Fix / Change:**
+1. Replaced `buildMileage = targetPeak` in peak phase with the same `Math.min(buildMileage * weeklyBuildFactor, targetPeak)` formula used in build weeks — this naturally plateaus when targetPeak is reached, and ramps safely when it isn't.
+2. Changed B-race week label formula to `Math.ceil(...)` to match the rest of the arc.
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
 ## 2026-04-13 — Fix week 1→2 arc mismatch; tighten moderate-volume week 1 cap
 
 **Type:** Bug Fix + Improvement

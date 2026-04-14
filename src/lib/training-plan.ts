@@ -385,17 +385,15 @@ export async function generateAndSaveFullPlan(
       // Week 1 IS the base — don't apply buildFactor so the arc starts at exactly
       // prescribedWeek1Miles (or baseMileage). Build begins from week 2 onward.
       if (week > 1) {
-        if (phase === "peak") {
-          // Peak phase: plateau at targetPeak. The build factor was calibrated to reach
-          // targetPeak by the start of peak, so we just lock in the max here rather than
-          // continuing to ramp through all 5 peak weeks.
-          buildMileage = targetPeak;
-        } else {
-          buildMileage = Math.min(
-            Math.round(buildMileage * weeklyBuildFactor * 2) / 2,
-            targetPeak,
-          );
-        }
+        // Build toward targetPeak each week, capped at targetPeak.
+        // In peak phase this naturally plateaus once targetPeak is reached — the min() prevents
+        // exceeding it. We no longer force `buildMileage = targetPeak` because that created a
+        // hard jump for low-mileage runners whose floor (e.g. 45mi marathon) is unreachable
+        // in the available weeks (e.g. 5mi/week × 10% growth only reaches ~12mi in 15 weeks).
+        buildMileage = Math.min(
+          Math.round(buildMileage * weeklyBuildFactor * 2) / 2,
+          targetPeak,
+        );
       }
       weekMileage = buildMileage;
       if (phase === "peak") peakMileage = buildMileage;
@@ -439,7 +437,9 @@ export async function generateAndSaveFullPlan(
   const bRaceWeekLabels: string[] = [];
   for (const r of bRaces ?? []) {
     const raceMs = new Date(r.race_date + "T12:00:00Z").getTime();
-    const weekNum = Math.round((raceMs - planMonday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    // Use Math.ceil to match how totalWeeks and aRaceWeekNum are computed above.
+    // Math.round(...) + 1 was off by one for races that fall early in a week.
+    const weekNum = Math.ceil((raceMs - planMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
     if (weekNum >= 1 && weekNum <= totalWeeks) {
       const label = r.race_name ?? (r.priority === "B" ? "B race" : "C race");
       bRaceWeekLabels.push(`Week ${weekNum}: ${r.priority} race — ${label} on ${r.race_date}`);
