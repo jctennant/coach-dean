@@ -4,6 +4,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Fix week 1→2 arc mismatch; tighten moderate-volume week 1 cap
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Jake (dashboard review — wife's plan showed week 1=18mi, week 2=15.5mi)
+**User feedback:** N/A
+**Root cause (arc mismatch):** The training arc is built from `avgWeeklyMileage` (e.g. 14mi). `syncArcCurrentWeek` then patches arc week 1 to reflect what Dean actually prescribed (e.g. 18mi). But weeks 2+ remained calibrated from the original 14mi base, causing a visible drop (week 1=18 → week 2=15.5) on the dashboard.
+**Root cause (volume cap):** The moderate-volume (10–30mi/week) week 1 cap was labeled "GUIDELINE", making it easy for Dean to ignore. Dean composed reasonable-looking individual sessions (5mi tempo + 4mi easy + 3mi easy + 6mi long) that summed to 18mi — 28% above a 14mi base.
+**Fix / Change:** (1) `syncArcCurrentWeek` now proportionally rescales all future weeks when patching week 1 — scale factor = actualMiles/originalWeek1. E.g. scale 1.286× turns week 2=15.5 into 20, week 3=17 into 22, etc., preserving arc shape. Only fires when the difference is >5%. (2) Moderate-volume prompt cap changed from "GUIDELINE" to "LIMIT" with an explicit ceiling action: "if sessions sum above [avg×1.2], reduce at least one easy run."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-13 — Onboarding asks about injuries and training preferences for all goals
+
+**Type:** Improvement
+**Reported by:** Jake (internal review)
+**User feedback:** N/A
+**Root cause:** The onboarding prompt only required injury/limitation notes for ultra goals and injury_recovery goals. Standard trail race, half marathon, and marathon athletes were never asked about injury history or training preferences, so this context was missing from their plans.
+**Fix / Change:** Added a catch-all "anything I should know" question to the onboarding prompt for all goal types — framed around injury history and training preferences (e.g. loves hills, hates treadmills). Added `other_notes` to the extraction schema so preferences beyond `injury_notes` get stored in `onboarding_data` and automatically passed to plan generation.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-13 — Strava onboarding message split; cross-training note clarity
 
 **Type:** Improvement

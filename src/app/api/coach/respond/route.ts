@@ -2986,17 +2986,42 @@ Do not use the athlete's name. Be direct and practical. No filler. Return ONLY t
     if (!planRow) return;
 
     const planWeeks = (planRow.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>) ?? [];
-    const updatedWeeks = planWeeks.map(w =>
-      w.week_number === currentWeekNum
-        ? {
-            ...w,
-            ...(actualMiles > 0 ? { mileage_target: actualMiles } : {}),
-            ...(longRunMiles > 0 ? { long_run_target: longRunMiles } : {}),
-            ...(derivedKeyWorkout ? { key_workout: derivedKeyWorkout } : {}),
-            ...(derivedNotes ? { notes: derivedNotes } : {}),
-          }
-        : w
-    );
+
+    // When patching week 1, rebase all future weeks proportionally so the arc
+    // progression starts from what Dean actually prescribed rather than the Strava
+    // avg the arc generator used. E.g. if arc was built from 14mi avg but Dean
+    // prescribed 18mi in the initial plan, week 2 would show 15.5 (drop from 18) —
+    // rebasing scales week 2 to ~20, week 3 to ~22, etc., preserving arc shape.
+    const originalWeek1Miles = currentWeekNum === 1
+      ? (planWeeks.find(w => w.week_number === 1)?.mileage_target ?? actualMiles)
+      : null;
+    const scaleFactor = originalWeek1Miles && actualMiles > 0 && originalWeek1Miles > 0
+      ? actualMiles / originalWeek1Miles
+      : 1.0;
+    const shouldRebase = currentWeekNum === 1 && Math.abs(scaleFactor - 1.0) > 0.05;
+    if (shouldRebase) {
+      console.log(`[syncArcCurrentWeek] rebasing arc weeks 2+ — week 1 patched from ${originalWeek1Miles}mi to ${actualMiles}mi (scale ×${scaleFactor.toFixed(3)})`);
+    }
+
+    const updatedWeeks = planWeeks.map(w => {
+      if (w.week_number === currentWeekNum) {
+        return {
+          ...w,
+          ...(actualMiles > 0 ? { mileage_target: actualMiles } : {}),
+          ...(longRunMiles > 0 ? { long_run_target: longRunMiles } : {}),
+          ...(derivedKeyWorkout ? { key_workout: derivedKeyWorkout } : {}),
+          ...(derivedNotes ? { notes: derivedNotes } : {}),
+        };
+      }
+      if (shouldRebase && w.week_number > currentWeekNum) {
+        return {
+          ...w,
+          mileage_target: Math.round(w.mileage_target * scaleFactor * 2) / 2,
+          long_run_target: Math.round(w.long_run_target * scaleFactor * 2) / 2,
+        };
+      }
+      return w;
+    });
 
     await supabase
       .from("training_plans")
@@ -3746,7 +3771,7 @@ ${
 <rule>LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3))} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`
     : avgWeeklyMileage < 30
     ? `FITNESS TIER: MODERATE VOLUME (avg ${spMi(avgWeeklyMileage)}). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
-<rule>WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${spMi(avgWeeklyMileage)}. Week 1 should not jump more than 15% above that — target ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.15))}. A first-week spike above ${spMi(Math.round(avgWeeklyMileage * 1.2))} risks overuse injury at the start of the plan.</rule>`
+<rule>WEEK 1 VOLUME CAP — LIMIT: Current avg is ${spMi(avgWeeklyMileage)}. Week 1 should target ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.15))}. Do not exceed ${spMi(Math.round(avgWeeklyMileage * 1.2))} — if your sessions sum above this ceiling, reduce at least one easy run until the total is under it. A first-week spike risks overuse injury at the start of the plan.</rule>`
     : `FITNESS TIER: HIGH VOLUME (avg ${spMi(avgWeeklyMileage)}). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
 <rule>WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${spMi(avgWeeklyMileage)} → Week 1 target: ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.12))}. Don't jump to peak volume on Day 1.</rule>`
 }

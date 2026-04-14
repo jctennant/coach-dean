@@ -226,6 +226,9 @@ Required ONLY for return_to_running or injury_recovery goals — must collect be
 Required for short races (mile, 5k, 10k) — pacing depends entirely on goal time:
 - Goal finish time or pace (e.g. "sub 5 minute mile", "under 22 minutes for 5K"). Ask directly after you have their goal type confirmed. This is essential for calibrating interval and tempo paces.
 
+Ask before signaling [READY] for any goal (work it in naturally, not as a separate interrogation):
+- "Anything I should know before I build your plan — like injuries to work around or training preferences?" Examples to surface if not mentioned: injury history, areas to protect, surface/terrain preferences, things they hate (e.g. treadmills, track), or anything else relevant to the plan. Keep it open-ended. One short question.
+
 Optional (only collect if it comes up naturally):
 - Goal finish time for longer races (half marathon, marathon, trail)
 - Other races this season (B/C tune-up races)
@@ -572,7 +575,8 @@ Rules:
 - other_races: B/C secondary races only, not the main A race.
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
 - strava_skipped: true if athlete says they don't have or won't use Strava. Null otherwise.
-- wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.`,
+- wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.
+- other_notes: any training preferences, dislikes, or context not captured elsewhere (e.g. "loves hills", "hates treadmills", "prefers morning runs", "wants more cross-training"). Do not duplicate what's in injury_notes.`,
     messages: [{ role: "user", content: transcript }],
     tools: [{
       name: "save_training_fields",
@@ -619,6 +623,7 @@ Rules:
           timezone: { type: ["string", "null"] },
           strava_skipped: { type: ["boolean", "null"] },
           wants_speed_work: { type: ["boolean", "null"] },
+          other_notes: { type: ["string", "null"] },
         },
         required: [],
       },
