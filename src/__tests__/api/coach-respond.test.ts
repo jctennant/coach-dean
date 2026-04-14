@@ -619,11 +619,11 @@ describe("coach/respond — initial_plan closing message", () => {
     });
   });
 
-  it("calls generateAndSaveFullPlan with skipLinkSms=true and mentions default reminder cadence (no question)", async () => {
+  it("calls generateAndSaveFullPlan with skipLinkSms=true and asks for city when no strava_city", async () => {
     // The dashboard link is now included in our own closing message (not sent from
     // generateAndSaveFullPlan), so skipLinkSms must be true to avoid a duplicate link SMS.
-    // Cadence defaults to nightly_reminders at plan generation — the closing "How does this
-    // look?" message mentions the default but does NOT ask a question about it.
+    // When no strava_city is available, the closing message asks for the user's city
+    // so reminders fire at the right local time.
     const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
     const { sendSMS } = await import("@/lib/linq");
 
@@ -643,14 +643,13 @@ describe("coach/respond — initial_plan closing message", () => {
     const opts = gpCalls[0][4] as Record<string, unknown>;
     expect(opts.skipLinkSms).toBe(true);
 
-    // The closing message mentions the default reminder cadence (evening before) but
-    // does NOT ask a question — it states the default and invites them to change it.
+    // Without a city from Strava, the closing message asks what city they're in
+    // so reminders can fire at the right local time.
     const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
       (c: unknown[]) => c[1] as string
     );
     const combined = allTexts.join("\n");
-    expect(combined).toMatch(/evening before each session/i);
-    expect(combined).not.toMatch(/would you like|morning of, or the evening before/i);
+    expect(combined).toMatch(/what city are you in/i);
   });
 });
 

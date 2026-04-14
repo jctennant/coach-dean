@@ -1181,7 +1181,7 @@ Use this data to:
 
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
-  const timezoneConfirmed = !!(onboardingData.timezone_confirmed) || !!(user.strava_athlete_id); // Strava users get TZ from athlete profile
+  const timezoneConfirmed = !!(onboardingData.timezone_confirmed) || !!(onboardingData.strava_city); // confirmed if manually entered or Strava had a city
 
   // For initial_plan: compute whether the athlete can reach an adequate long run in their
   // remaining weeks. If not, Dean needs to acknowledge this and set realistic expectations.
@@ -1746,12 +1746,18 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
       // Third bubble: invite feedback and mention the default reminder cadence.
       // Include location from Strava so the athlete can confirm the timezone is right.
+      // If no city was available from Strava, ask for it and park on awaiting_timezone
+      // so their reply gets routed to handleTimezone in onboarding/handle.
       const locationStr = stravaCity && stravaState
         ? `${stravaCity}, ${stravaState}`
         : stravaCity ?? null;
       const howDoesItLookMsg = locationStr
         ? `How does this look? Happy to adjust anything. I'll send you evening reminders before each session — I've got your location as ${locationStr} so I have the right timezone for you. Let me know if that needs correcting.`
-        : "How does this look? Happy to adjust anything. I'll send you a reminder the evening before each session — text me if you'd prefer morning-of reminders or just a weekly Sunday plan.";
+        : "How does this look? Happy to adjust anything. One quick thing — what city are you in? I want to make sure your reminders go out at the right time for you.";
+      if (!locationStr) {
+        // Park user on awaiting_timezone so their next reply is handled by handleTimezone
+        await supabase.from("users").update({ onboarding_step: "awaiting_timezone" }).eq("id", userId);
+      }
       if (!dry_run) {
         if (chatId) await startTyping(chatId);
         await new Promise((r) => setTimeout(r, 1200));
