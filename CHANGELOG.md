@@ -4,6 +4,37 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-13 — Estimate distance for time-based interval sessions in dashboard
+
+**Type:** Improvement
+**Reported by:** Internal observation (dashboard showing 0mi for "4×3min @ 8:30/mi" sessions)
+**User feedback:** "looks like the labels in 'this week' are still off - I'm seeing a 0 mi label for the quality session!"
+**Root cause:** `parseKeyWorkoutMiles` had no logic for time-based intervals (e.g. "4×3min @ 8:30/mi"). It returned `null`, causing the dashboard to display 0mi. Also, the regex `(mi|km|m)` matched "m" from "min", and `^(\d+)\s*mi` matched the "mi" in "min" (e.g. "20min fartlek" → 20).
+**Fix / Change:** Extracted `parseKeyWorkoutMiles` to `src/lib/parse-key-workout-miles.ts`. Added time-based rep estimation: `work = (reps × workMin) / paceMinPerMi`, `recovery = ((reps-1) × recoveryMin) / (paceMinPerMi + 2)`. Fixed regex lookaheads: `mi(?!\w)` prevents matching "min"; `(mi|km|m)(?!\w)` prevents "m" matching inside "min"/"mi". Added WU/CD summing for all resolution paths. Added Haiku prompt rule requiring `1mi WU + 1mi CD` on all interval/tempo sessions.
+**Files changed:** `src/lib/parse-key-workout-miles.ts` (new), `src/__tests__/lib/parse-key-workout-miles.test.ts` (new, 21 tests), `src/app/dashboard/page.tsx`, `src/lib/training-plan.ts`
+
+---
+
+## 2026-04-13 — Dashboard: fix Sunday dimming, timezone-aware day highlighting, stride classification, zero-target crash
+
+**Type:** Bug Fix (4 issues)
+**Reported by:** Internal proactive audit
+**User feedback:** N/A
+**Root cause:**
+1. **Sunday dimming**: On Sunday after the weekly recap cron advances `current_week`, the dashboard showed next week's Mon–Sat sessions all dimmed as "past" because `todayDayIdx = DAY_ORDER.indexOf("Sunday") = 6`, making `isPastDay = dayIdx < 6` true for every day of the new week.
+2. **Server UTC for day highlighting**: `todayDayName` used `new Date().toLocaleDateString(...)` which runs server-side on Vercel in UTC. A Pacific user at 11pm Monday would see Monday dimmed as "past" (it's already Tuesday UTC). The user's `timezone` column was not fetched or used anywhere in the dashboard.
+3. **"Easy with strides" misclassified as key workout**: `classifySession` checked `l.includes("stride")` before checking if the label started with "easy", so "Easy 6mi with strides" was rendered bold as a quality session.
+4. **Progress bar division by zero**: When `displayMileageTarget = 0`, the width style computed `NaN%` (Infinity clamped to 100), showing a full green bar even when no target was set.
+**Fix / Change:**
+1. Fetch `timezone` from the `users` table in the dashboard query.
+2. Derive `userDayName` and `userDOW` via `Intl.DateTimeFormat` with the user's stored timezone. Use these for `todayDayIdx` (day dimming) and `todayStr` (override expiry check).
+3. `todayDayIdx = userDOW === 0 ? -1 : DAY_ORDER.indexOf(userDayName)` — -1 on Sunday so no days in the upcoming week appear past.
+4. Added `if (l.startsWith("easy")) return "easy"` before quality keyword checks in `classifySession`.
+5. Added `&& displayMileageTarget > 0` guard on the progress bar render condition.
+**Files changed:** `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-13 — Fix "Easy 5.5mi" label showing wrong distance; fix duplicate A-race insertion
 
 **Type:** Bug Fix

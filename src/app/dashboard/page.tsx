@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { supabase } from "@/lib/supabase";
+import { parseKeyWorkoutMiles } from "@/lib/parse-key-workout-miles";
 import RequestLinkForm from "./request-link-form";
 import { TokenPersist, LocalTokenRedirect } from "./token-manager";
 
@@ -63,24 +64,6 @@ function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
   const easyDays = sorted.filter(d => d !== longRunDay && d !== keyWorkoutDay);
 
   const longRunMi = week.long_run_target;
-  // Parse miles from key_workout text. Handles:
-  //   "4mi tempo" → 4
-  //   "4x800m" → 4 × 0.5mi = 2mi
-  //   "6x1mi repeats" → 6mi
-  //   "5x1000m" → 5 × 0.621mi ≈ 3.1mi
-  function parseKeyWorkoutMiles(text: string): number | null {
-    const direct = text.match(/^(\d+(?:\.\d+)?)\s*mi/i);
-    if (direct) return parseFloat(direct[1]!);
-    const interval = text.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(m|km|mi)/i);
-    if (interval) {
-      const reps = parseInt(interval[1]!);
-      const dist = parseFloat(interval[2]!);
-      const unit = interval[3]!.toLowerCase();
-      const distMi = unit === "mi" ? dist : unit === "km" ? dist * 0.621371 : dist / 1609.34;
-      return Math.round(reps * distMi * 10) / 10;
-    }
-    return null;
-  }
   // "Easy X mi" key_workouts (base/deload weeks) are just easy running — not a distinct
   // quality session. When key_workout starts with "Easy", treat that day as a regular easy
   // run and distribute all non-long-run mileage evenly. This prevents the contradictory
@@ -119,6 +102,8 @@ function buildDailyPlanFromSessions(sessions: PlanSession[]): DayWorkout[] {
   function classifySession(label: string): "long" | "key" | "easy" | "rest" {
     const l = label.toLowerCase();
     if (l.includes("long run")) return "long";
+    // Easy prefix wins — "Easy 6mi with strides" is still an easy run, not a key session.
+    if (l.startsWith("easy")) return "easy";
     if (l.includes("tempo") || l.includes("interval") || l.includes("repeat") ||
         l.includes("stride") || l.includes("threshold") || l.includes("fartlek") ||
         l.includes("vo2") || l.includes("hills")) return "key";
@@ -216,7 +201,7 @@ export default async function DashboardPage({
   // Look up user by dashboard token
   const { data: user } = await supabase
     .from("users")
-    .select("id, name, onboarding_data")
+    .select("id, name, onboarding_data, timezone")
     .eq("dashboard_token", token)
     .single();
 
@@ -276,7 +261,16 @@ export default async function DashboardPage({
   const trainingDays = (profileData?.training_days as string[] | null) ?? null;
   const overrideDays = (profileData?.this_week_override_days as string[] | null) ?? null;
   const overrideExpires = (profileData?.this_week_override_expires as string | null) ?? null;
-  const todayStr = new Date().toISOString().split("T")[0]!;
+  const userTimezone = (user.timezone as string | null) ?? "UTC";
+  // Use the user's local timezone for all "today" logic — server runs UTC on Vercel, which
+  // would dim the wrong day for US users checking the dashboard late at night.
+  const userDayName = new Intl.DateTimeFormat("en-US", { timeZone: userTimezone, weekday: "long" }).format(new Date());
+  const USER_DAY_TO_DOW: Record<string, number> = {
+    Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
+  };
+  const userDOW = USER_DAY_TO_DOW[userDayName] ?? 1;
+  // "today" as a YYYY-MM-DD string in the user's local timezone (for override expiry check)
+  const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date()); // en-CA gives YYYY-MM-DD
   const isOverrideActive = overrideDays !== null && overrideExpires !== null && overrideExpires >= todayStr;
   const effectiveTrainingDays = isOverrideActive ? overrideDays : trainingDays;
   const useMetric = (profileData?.preferred_units as string | null) === "metric";
@@ -294,10 +288,12 @@ export default async function DashboardPage({
       ? buildDailyPlan(currentWeek, effectiveTrainingDays)
       : null);
 
-  const todayDayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
-  const todayDayIdx = DAY_ORDER.indexOf(todayDayName);
+  // todayDayIdx: which DAY_ORDER index is "today" in the user's timezone.
+  // -1 on Sunday so that none of next week's days (Mon–Sat) appear dimmed as "past"
+  // after the weekly recap cron advances current_week.
+  const todayDayIdx = userDOW === 0 ? -1 : DAY_ORDER.indexOf(userDayName);
 
-  // Week 1 anchor: backcompute from current_week + today's date.
+  // Week 1 anchor: backcompute from current_week + today's date (UTC).
   //
   // Previously we used planData.created_at as the anchor, but rebuild_plan creates a new
   // plan row with a fresh created_at, shifting week boundaries and misattributing past
@@ -310,7 +306,7 @@ export default async function DashboardPage({
   // so the anchor is Monday, not the Sunday that belongs to the previous week.
   const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
   const todayUTC = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
-  const todayDOW = todayUTC.getUTCDay(); // 0=Sun, 1=Mon, ...
+  const todayDOW = todayUTC.getUTCDay(); // 0=Sun, 1=Mon, ... (kept UTC to match backend activity attribution)
   // For Sunday: treat as if it's already Monday (the new week starts tomorrow).
   // For Mon–Sat: find the Monday of the current calendar week.
   const thisMonday = new Date(todayUTC);
@@ -497,7 +493,7 @@ export default async function DashboardPage({
               </div>
             </div>
             {/* Progress bar for miles logged this week */}
-            {currentWeekActualMiles !== null && currentWeekActualMiles > 0 && (
+            {currentWeekActualMiles !== null && currentWeekActualMiles > 0 && displayMileageTarget > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-gray-400">Done this week</span>
