@@ -15,7 +15,7 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 
-export const maxDuration = 60;
+export const maxDuration = 120; // PDF path: fetch + Sonnet doc API + Haiku structure = ~90s for large files
 
 interface UploadRequest {
   userId: string;

@@ -632,7 +632,15 @@ async function handlePDFPlan(
       }),
     });
 
-    const result = await resp.json() as { ok?: boolean; sessionCount?: number; weeks?: number; error?: string };
+    let result: { ok?: boolean; sessionCount?: number; weeks?: number; error?: string };
+    try {
+      result = await resp.json() as typeof result;
+    } catch {
+      // Vercel timeout or non-JSON error page — surface a useful message
+      console.error("[linq-webhook] PDF plan upload non-JSON response, status:", resp.status);
+      await sendAndStore(userId, phone, "That one timed out — the PDF might be too large. Try uploading it at coachdean.ai/dashboard instead, or paste the plan as text.", messageId);
+      return;
+    }
 
     if (!resp.ok || !result.ok) {
       console.error("[linq-webhook] PDF plan upload failed:", result.error);

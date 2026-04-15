@@ -4,6 +4,9 @@
  * parent server component (page.tsx), which fetches the extra fields.
  */
 
+"use client";
+
+import { useState } from "react";
 import { parseKeyWorkoutMiles } from "@/lib/parse-key-workout-miles";
 import { PlanImportForm } from "./plan-import-form";
 
@@ -510,7 +513,31 @@ export function PlanTab({
         </div>
       </div>
 
-      <p className="text-center text-xs text-gray-400 pb-4">Text Dean anytime to discuss your plan.</p>
+      <ReplacePlanSection userId={userId} />
+    </div>
+  );
+}
+
+function ReplacePlanSection({ userId }: { userId: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="pb-4">
+      {open ? (
+        <div className="rounded-xl border border-gray-100 bg-white p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-600">Replace plan</p>
+            <button onClick={() => setOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+          </div>
+          <PlanImportForm userId={userId} />
+        </div>
+      ) : (
+        <p className="text-center text-xs text-gray-400">
+          Text Dean anytime to discuss your plan.{" "}
+          <button onClick={() => setOpen(true)} className="underline underline-offset-2 hover:text-gray-600">
+            Replace plan
+          </button>
+        </p>
+      )}
     </div>
   );
 }
