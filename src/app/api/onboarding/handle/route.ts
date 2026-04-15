@@ -589,6 +589,7 @@ async function extractFields(
 Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess. Use null for anything not mentioned.
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
+- has_existing_plan / external_plan_description: ALWAYS extract these when the athlete mentions a training plan. Examples that must set has_existing_plan=true: "I'm already on a Runna plan", "I follow a TrainingPeaks plan", "my coach gave me a plan", "I'm using a Hal Higdon program". For any of these, also capture external_plan_description as a brief factual summary: plan source/name, current week if mentioned, weekly mileage if mentioned. E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Set has_existing_plan=false only if the athlete explicitly says they have no plan or are self-directed without one.
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
 - race_date: use whichever date is stated in the conversation — athlete's or Dean's. If both are stated and differ by 1–2 days, prefer the athlete's. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if the athlete explicitly said "the 1st" or "June 1st". Today is ${today}.
@@ -602,8 +603,6 @@ Rules:
 - wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.
 - training_tools: array of tools mentioned (lowercase: 'runna', 'trainingpeaks', 'garmin', 'self_directed', 'other'). Null if not mentioned.
 - terrain_type: 'road', 'trail', or 'mixed' based on what athlete says. Null if not mentioned.
-- has_existing_plan: true if athlete says they currently follow a training plan (Runna, TP, coach-written, etc.). False if they say they don't have one or are self-directed without a plan. Null if not mentioned.
-- external_plan_description: if athlete has an existing plan, capture a brief factual summary (plan name/source, current week, weekly mileage). Example: "Runna 16-week half marathon plan, week 8, ~40mi/week". Null if no plan.
 - wants_weekly_recap: true if athlete says yes to weekly recap texts. False if they decline. Null if not asked yet.
 - other_notes: any training preferences, dislikes, or context not captured elsewhere (e.g. "loves hills", "hates treadmills", "prefers morning runs", "wants more cross-training"). Do not duplicate what's in injury_notes.
 - race_elevation_gain_feet: if Dean's message mentions total elevation gain for the goal race (e.g. "33,000ft of gain", "8,500 feet of climbing"), extract that number in feet. Null if not mentioned.

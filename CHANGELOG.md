@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Haiku extraction: has_existing_plan / external_plan_description reliability
+
+**Type:** Bug Fix
+**Reported by:** Internal (sim-runna-user-uploads-plan eval warnings)
+**User feedback:** N/A
+**Root cause:** `has_existing_plan` and `external_plan_description` were defined in the Haiku extraction rules but buried near the bottom of a long list. Haiku was skipping them even when clearly stated in the transcript (e.g. "I'm already on a Runna plan, week 6, ~35mi/week").
+**Fix / Change:** Moved both fields to the top of the extraction rules (right after `goal`), added concrete examples of athlete phrases that must trigger extraction ("I'm already on a Runna plan", "my coach gave me a plan", etc.), and consolidated `wants_weekly_recap` alongside them. Same change mirrored in `run-simulation-evals.mjs`. `sim-runna-user-uploads-plan` improved from 7/10 to 9/10.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`
+
+---
+
 ## 2026-04-15 — Onboarding evals: existing plan support, first-of-month date guard, extraction tests
 
 **Type:** Improvement / Bug Fix
