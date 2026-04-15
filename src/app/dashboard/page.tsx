@@ -1711,9 +1711,6 @@ export default async function DashboardPage({
                         <p className="text-[10px] text-gray-400 mt-0.5">
                           {formatDate(run.start_date)} · <span className="font-medium">{zoneLabel}</span>
                         </p>
-                        {run.deansNote && (
-                          <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">{run.deansNote}</p>
-                        )}
                       </div>
                     </div>
                   );
