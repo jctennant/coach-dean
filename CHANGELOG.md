@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Fix "Failed to save plan" — training_plans has no unique constraint on user_id
+
+**Type:** Bug Fix
+**Reported by:** Jake (logs showing "PDF plan upload failed: Failed to save plan")
+**User feedback:** Logs from live send: `[linq-webhook] PDF plan upload failed: Failed to save plan`
+**Root cause:** `plan/upload` used `supabase.upsert(..., { onConflict: "user_id" })`, but `training_plans.user_id` has no unique DB constraint. Postgres rejects the upsert with an error.
+**Fix / Change:** Replaced the upsert with the same select → update/insert pattern used by `training-plan.ts`: fetch the existing plan row by `user_id`, update if found, insert if not.
+**Files changed:** `src/app/api/plan/upload/route.ts`
+
+---
+
 ## 2026-04-15 — Fix PDF plan extraction timeout (single Sonnet call with tool use)
 
 **Type:** Bug Fix

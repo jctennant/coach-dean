@@ -111,22 +111,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, sessions, weeks, sessionCount: sessions.length });
     }
 
-    // Store in training_plans
-    const { error: planError } = await supabase.from("training_plans").upsert(
-      {
-        user_id: userId,
-        plan_source: "uploaded",
-        raw_plan_text: content.slice(0, 10000), // cap stored text at 10KB
-        total_weeks: weeks.length,
-        // Store sessions in the weeks JSON array — each week has sessions array
-        weeks: weeks as unknown as import("@/lib/database.types").Json,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
+    // Store in training_plans — no unique constraint on user_id, so select+update/insert
+    const { data: existingPlan } = await supabase
+      .from("training_plans")
+      .select("id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const planPayload = {
+      plan_source: "uploaded" as const,
+      raw_plan_text: content.slice(0, 10000), // cap stored text at 10KB (URL for pdf_url)
+      total_weeks: weeks.length,
+      weeks: weeks as unknown as import("@/lib/database.types").Json,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error: planError } = existingPlan
+      ? await supabase.from("training_plans").update(planPayload).eq("id", existingPlan.id)
+      : await supabase.from("training_plans").insert({ user_id: userId, ...planPayload });
 
     if (planError) {
-      console.error("[plan/upload] training_plans upsert failed:", planError);
+      console.error("[plan/upload] training_plans save failed:", planError);
       return NextResponse.json({ error: "Failed to save plan" }, { status: 500 });
     }
 
