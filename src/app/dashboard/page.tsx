@@ -1530,13 +1530,8 @@ export default async function DashboardPage({
               return (
                 <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
                   {/* Headline: trajectory first */}
-                  <div className="mb-1 flex items-start justify-between gap-3">
+                  <div className="mb-1">
                     <p className="text-sm font-semibold text-gray-800 leading-snug">{effHeadline}</p>
-                    {vdotResult.vdot != null && (
-                      <span className="text-[10px] text-gray-400 tabular-nums shrink-0 pt-0.5">
-                        VDOT <span className="font-semibold text-gray-600">{Math.round(vdotResult.vdot)}</span>
-                      </span>
-                    )}
                   </div>
                   {/* Chart */}
                   <div className="mt-3">
@@ -1651,15 +1646,44 @@ export default async function DashboardPage({
                 )}
               </div>
               <div className="rounded-xl border border-gray-100 bg-white shadow-sm divide-y divide-gray-50">
-                {/* Pacing zones — always first, single structured row */}
-                {paceZones && (
-                  <div className="px-4 py-3.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
-                      Pacing zones
-                    </p>
-                    <p className="text-sm font-mono text-gray-700">{paceZones}</p>
-                  </div>
-                )}
+                {/* Pacing zones — always first, structured grid */}
+                {paceZones && (() => {
+                  const rawEasy = (profileData?.current_easy_pace as string | null) ?? null;
+                  const rawTempo = (profileData?.current_tempo_pace as string | null) ?? null;
+                  const rawInterval = (profileData?.current_interval_pace as string | null) ?? null;
+                  // Build easy pace range (e.g. 9:30–10:00/mi)
+                  const easyRange = rawEasy ? (() => {
+                    const parts = rawEasy.replace("/mi", "").split(":");
+                    if (parts.length === 2) {
+                      const base = parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
+                      const ceilSec = base + 30;
+                      const ceil = `${Math.floor(ceilSec / 60)}:${String(ceilSec % 60).padStart(2, "0")}`;
+                      return `${rawEasy.replace("/mi", "")}–${ceil}/mi`;
+                    }
+                    return rawEasy;
+                  })() : null;
+                  const zones: { label: string; pace: string; color: string }[] = [];
+                  if (easyRange) zones.push({ label: "Easy", pace: easyRange, color: "bg-green-400" });
+                  if (rawTempo) zones.push({ label: "Tempo", pace: rawTempo, color: "bg-amber-400" });
+                  if (rawInterval) zones.push({ label: "Intervals", pace: rawInterval, color: "bg-red-400" });
+                  return (
+                    <div className="px-4 py-3.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2.5">
+                        Pacing zones
+                      </p>
+                      <div className="space-y-1.5">
+                        {zones.map(z => (
+                          <div key={z.label} className="flex items-center gap-3">
+                            <div className={`h-2 w-2 shrink-0 rounded-full ${z.color}`} />
+                            <span className="text-[11px] font-medium text-gray-500 w-16 shrink-0">{z.label}</span>
+                            <span className="text-sm font-mono text-gray-800">{z.pace}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[10px] text-gray-400">Pace targets from Dean · not directly linked to HR zones</p>
+                    </div>
+                  );
+                })()}
                 {/* Extracted coaching notes */}
                 {keyNotes.map((note, i) => (
                   <div key={i} className="flex items-baseline gap-3 px-4 py-3.5">
