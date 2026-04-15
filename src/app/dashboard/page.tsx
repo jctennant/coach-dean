@@ -930,7 +930,7 @@ export default async function DashboardPage({
 
   const { data: user } = await supabase
     .from("users")
-    .select("id, name, timezone, onboarding_data")
+    .select("id, name, timezone, onboarding_data, strava_athlete_id")
     .eq("dashboard_token", token)
     .single();
 
@@ -1724,12 +1724,30 @@ export default async function DashboardPage({
 
           {/* Empty state */}
           {activities.length === 0 && (
-            <div className="rounded-xl border border-dashed border-gray-200 bg-white p-8 text-center">
-              <p className="text-sm font-medium text-gray-600">No activities yet</p>
-              <p className="mt-1 text-xs text-gray-400">
-                Connect Strava and log some runs — your dashboard will fill in automatically.
-              </p>
-            </div>
+            !user.strava_athlete_id ? (
+              <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-orange-100">
+                  <span className="text-base font-bold text-[#FC4C02]">S</span>
+                </div>
+                <p className="text-sm font-semibold text-gray-800">Connect Strava to unlock your overview</p>
+                <p className="mt-1 text-xs text-gray-400 max-w-xs mx-auto">
+                  Dean analyzes your runs automatically. Connect Strava and your training insights will appear here.
+                </p>
+                <a
+                  href={`/api/auth/strava?userId=${user.id}`}
+                  className="mt-4 inline-block rounded-lg bg-[#FC4C02] px-5 py-2 text-sm font-semibold text-white hover:bg-orange-600 transition-colors"
+                >
+                  Connect Strava
+                </a>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-white p-8 text-center">
+                <p className="text-sm font-medium text-gray-600">No runs logged yet</p>
+                <p className="mt-1 text-xs text-gray-400">
+                  Complete a run and sync it to Strava — your insights will appear here automatically.
+                </p>
+              </div>
+            )
           )}
 
           <p className="pb-4 text-center text-[10px] text-gray-300">Coach Dean · Reply to any text to chat</p>
