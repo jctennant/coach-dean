@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Plan import: conversational week sync after PDF/image upload
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** After importing a plan, Dean sent a canned "Got it, X sessions extracted" message with no follow-up. The uploaded plan was stored in `training_plans` but `training_state.current_week` and `weekly_plan_sessions` were never updated, so coaching context was unaffected.
+**Fix / Change:** Added `plan_import` trigger to `coach/respond` — after a plan is stored, Dean (Haiku) sends a contextual message asking which week the athlete is on, acknowledging the caption if one was included. The reply is intercepted in the Linq webhook (checks `message_type === "plan_import_week_ask"` on the last assistant message) and handled by a new `handlePlanWeekSync` function: extracts the week number via Haiku, loads the uploaded plan week, converts sessions to the `{ day, date, label }` format, and updates `training_state` (current_week, weekly_mileage_target, weekly_plan_sessions). Dean confirms with a brief week summary. Handles "I don't know / just start from the beginning" → week 1.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/webhooks/linq/route.ts`, `src/__tests__/api/linq-webhook.test.ts`
+
+---
+
 ## 2026-04-15 — PDF plan import via iMessage
 
 **Type:** Feature

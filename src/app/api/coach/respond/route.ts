@@ -18,7 +18,7 @@ import type { ActivityWeatherData } from "@/lib/weather";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions" | "injury_hold" | "injury_clear" | "lighter_week";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions" | "injury_hold" | "injury_clear" | "lighter_week" | "plan_import";
 
 interface CoachRequest {
   userId: string;
@@ -32,6 +32,13 @@ interface CoachRequest {
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
   missedRunCheckin?: boolean; // True when Strava user had a scheduled workout but no run came through — check if they got it in
+  planMeta?: { // For plan_import trigger: metadata about the just-imported plan
+    weeks: number;
+    sessionCount: number;
+    filename?: string;
+    caption?: string;
+    hadExistingPlan: boolean;
+  };
 }
 
 interface ActivityRow {
@@ -555,6 +562,65 @@ async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextR
 }
 
 /**
+ * Handles a just-imported training plan (PDF or image upload).
+ * Sends a short acknowledgement via Haiku and asks which week the athlete is on.
+ * The reply is handled by handlePlanWeekSync in the Linq webhook.
+ */
+async function handlePlanImport(
+  userId: string,
+  planMeta: { weeks: number; sessionCount: number; filename?: string; caption?: string; hadExistingPlan: boolean },
+  requestChatId: string | null,
+  dryRun: boolean
+): Promise<NextResponse> {
+  const { data: user } = await supabase
+    .from("users")
+    .select("id, phone_number, linq_chat_id")
+    .eq("id", userId)
+    .single();
+
+  if (!user?.phone_number) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+  const { weeks, sessionCount, filename, caption, hadExistingPlan } = planMeta;
+  const planLabel = filename ? filename.replace(/\.pdf$/i, "") : null;
+
+  const captionCtx = caption ? `\n\nThe user said when sending it: "${caption}"` : "";
+  const context = hadExistingPlan
+    ? `The user replaced their existing training plan with "${planLabel ?? "a new plan"}" — ${sessionCount} sessions across ${weeks} weeks.${captionCtx}`
+    : `The user imported their first training plan: "${planLabel ?? "a plan"}" — ${sessionCount} sessions across ${weeks} weeks.${captionCtx}`;
+
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 120,
+    system: `You are Coach Dean, a running coach. ${context}
+
+Write 1-2 sentences: briefly acknowledge you have the plan (you can mention the plan name if provided), then ask which week they're currently on. If the user said they're "thinking of doing" the plan rather than actively following it, acknowledge that and ask if they want to start it. Be warm and brief.`,
+    messages: [{ role: "user", content: "go" }],
+  });
+
+  const msg = response.content.find(b => b.type === "text")?.text
+    ?? `Got it${planLabel ? ` — ${planLabel}` : ""} (${weeks} weeks). Which week are you currently on?`;
+
+  if (dryRun) {
+    return NextResponse.json({ ok: true, message: msg });
+  }
+
+  if (chatId) await startTyping(chatId);
+  await sendSMS(user.phone_number as string, msg);
+  await supabase.from("conversations").insert({
+    user_id: userId,
+    role: "assistant",
+    content: msg,
+    message_type: "plan_import_week_ask",
+  });
+
+  void trackEvent(userId, "plan_import_asked", { weeks, sessionCount, hadExistingPlan });
+  return NextResponse.json({ ok: true, message: msg });
+}
+
+/**
  * Runs extractAndStorePlanSessions + syncArcCurrentWeek in a fresh invocation
  * so initial_plan and weekly_recap stay within the 10s Hobby budget.
  *
@@ -748,6 +814,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "lighter_week") {
     return await handleLighterWeek(userId, dry_run ?? false);
+  }
+
+  if (trigger === "plan_import") {
+    return await handlePlanImport(userId, body.planMeta!, requestChatId ?? null, dry_run ?? false);
   }
 
   // Fetch user context in parallel

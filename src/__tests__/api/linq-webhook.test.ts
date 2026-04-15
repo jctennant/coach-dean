@@ -697,10 +697,11 @@ describe("POST /api/webhooks/linq — message routing", () => {
     vi.useFakeTimers();
     try {
       mockTables({
-        // conversations: dedup → null, insert → conv-001, debounce → same id,
-        // duplicate guard → single row (no duplicate), 45s guard → null (no recent reply)
+        // conversations: dedup → null, plan_import_week_ask check → null, insert → conv-001,
+        // debounce → same id, duplicate guard → single row (no duplicate)
         conversations: [
           { data: null, error: null },                           // dedup check
+          { data: null, error: null },                           // plan_import_week_ask check → no pending import
           { data: { id: "conv-001" }, error: null },             // insert storedMsg
           { data: { id: "conv-001" }, error: null },             // debounce check
           { data: [{ id: "conv-001" }], error: null },           // duplicate guard → only one row
