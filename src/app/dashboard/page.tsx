@@ -984,7 +984,7 @@ export default async function DashboardPage({
       .single(),
     supabase
       .from("training_plans")
-      .select("weeks, total_weeks, created_at, race_date, goal")
+      .select("weeks, total_weeks, created_at, race_date, goal, plan_source")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -1243,7 +1243,35 @@ export default async function DashboardPage({
   });
 
   // ── Plan tab props ──────────────────────────────────────────────────────────
-  const planWeeks = (planData?.weeks as PlanWeek[] | null) ?? [];
+  const isUploadedPlan = planData?.plan_source === "uploaded";
+  const rawPlanWeeks = (planData?.weeks as PlanWeek[] | null) ?? [];
+
+  // For uploaded plans, derive dashboard-displayable week format from the sessions array.
+  // AI-generated plans already have the correct shape; uploaded plans need conversion.
+  type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null };
+  type UploadedPlanWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
+  const planWeeks: PlanWeek[] = isUploadedPlan
+    ? (rawPlanWeeks as unknown as UploadedPlanWeek[]).map((w, i, arr) => {
+        const progress = (i + 1) / arr.length;
+        const phase = progress < 0.25 ? "base" : progress < 0.70 ? "build" : progress < 0.88 ? "peak" : "taper";
+        const runningSessions = w.sessions.filter(s => s.type !== "off" && s.type !== "cross" && s.targetDistanceMiles);
+        const sortedByDist = [...runningSessions].sort((a, b) => (b.targetDistanceMilesMax ?? b.targetDistanceMiles ?? 0) - (a.targetDistanceMilesMax ?? a.targetDistanceMiles ?? 0));
+        const longRunSession = sortedByDist[0];
+        const longRunTarget = longRunSession ? (longRunSession.targetDistanceMilesMax ?? longRunSession.targetDistanceMiles ?? 0) : 0;
+        const keySession = w.sessions.find(s => s.type === "tempo" || s.type === "interval" || /tempo|interval|repeat|fartlek|threshold|vo2|800|400|1[km]/i.test(s.description));
+        return {
+          week_number: w.week_number,
+          phase,
+          mileage_target: w.total_miles,
+          mileage_target_min: w.total_miles_min,
+          mileage_target_max: w.total_miles_max,
+          long_run_target: Math.round(longRunTarget * 10) / 10,
+          key_workout: keySession?.description ?? "",
+          notes: "",
+        };
+      })
+    : rawPlanWeeks;
+
   const totalWeeks = (planData?.total_weeks as number | null) ?? planWeeks.length;
   const currentWeekNum = (stateData?.current_week as number | null) ?? 1;
   const weeklyMileageTarget = (stateData?.weekly_mileage_target as number | null) ?? 0;

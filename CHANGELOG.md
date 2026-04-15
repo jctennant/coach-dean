@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Uploaded plan integration: ranges, dashboard arc, weekly recap, week advancement
+
+**Type:** Feature / Bug Fix
+**Reported by:** Internal (SWAP Sub-Ultra plan with range-based workouts e.g. "4–8mi easy")
+**User feedback:** N/A
+**Root cause:** Three gaps after plan import: (1) Range-based sessions (e.g. "4–8mi easy", "6–10×800m") were being collapsed to a single midpoint number, losing range info. (2) The dashboard's full training arc showed blank/zero data for uploaded plans because the arc expects `{phase, mileage_target, long_run_target, key_workout}` but uploaded plans store `{sessions, total_miles}`. (3) Sunday weekly recap used the periodization engine's inferred values instead of the uploaded plan's sessions, meaning Dean would generate new sessions rather than reference the actual plan.
+**Fix / Change:**
+- **Range extraction**: `plan/upload` Haiku schema now captures `targetDistanceMilesMin`/`Max` alongside the midpoint. `description` preserves range text verbatim ("Easy 4–8mi"). `PlanWeek` stores `total_miles_min`/`max` (sum of range bounds).
+- **Dashboard arc**: `page.tsx` detects `plan_source === "uploaded"` and converts uploaded weeks to arc format — derives `phase` from position in plan, `long_run_target` from longest session, `key_workout` from tempo/interval sessions. `WeekCard` and the weekly target stat show "35–45mi" range when min/max are present.
+- **Weekly recap**: injects uploaded plan's next-week sessions as `<uploaded_plan_next_week>` context; uses plan's `total_miles` as mileage target instead of periodization engine; directly loads next week's sessions into `training_state.weekly_plan_sessions` from the stored plan data (bypasses sync_sessions text extraction for reliability).
+**Files changed:** `src/app/api/plan/upload/route.ts`, `src/app/dashboard/page.tsx`, `src/app/dashboard/plan-tab.tsx`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-15 — Plan import: conversational week sync after PDF/image upload
 
 **Type:** Feature

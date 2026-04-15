@@ -28,18 +28,22 @@ interface UploadRequest {
 }
 
 interface ExtractedSession {
-  dayOfWeek: string;       // "Monday"
-  weekNumber: number;      // 1-indexed
-  type: string;            // "easy" | "tempo" | "long" | "interval" | "recovery" | "off" | "cross"
-  targetDistanceMiles?: number | null;
-  targetPace?: string | null;     // "9:30/mi" or "4:30/km"
-  description: string;     // "Easy aerobic run" | "6×800m intervals" etc.
+  dayOfWeek: string;                          // "Monday"
+  weekNumber: number;                         // 1-indexed
+  type: string;                               // "easy" | "tempo" | "long" | "interval" | "recovery" | "off" | "cross"
+  targetDistanceMiles?: number | null;        // midpoint — used for calculations
+  targetDistanceMilesMin?: number | null;     // low end of range (null if no range given)
+  targetDistanceMilesMax?: number | null;     // high end of range (null if no range given)
+  targetPace?: string | null;                 // "9:30/mi" or "4:30/km"
+  description: string;                        // preserves range language: "Easy 4–8mi" | "6–10×800m at 5k pace"
 }
 
 interface PlanWeek {
   week_number: number;
   sessions: ExtractedSession[];
-  total_miles: number;
+  total_miles: number;       // midpoint sum — used for calculations and progress bars
+  total_miles_min?: number;  // sum of session minimums — shown in dashboard range display
+  total_miles_max?: number;  // sum of session maximums — shown in dashboard range display
 }
 
 export async function POST(request: Request) {
@@ -87,11 +91,21 @@ export async function POST(request: Request) {
 
     const weeks: PlanWeek[] = Object.entries(weekMap)
       .sort(([a], [b]) => parseInt(a) - parseInt(b))
-      .map(([weekNum, weekSessions]) => ({
-        week_number: parseInt(weekNum),
-        sessions: weekSessions,
-        total_miles: weekSessions.reduce((sum, s) => sum + (s.targetDistanceMiles ?? 0), 0),
-      }));
+      .map(([weekNum, weekSessions]) => {
+        const midpointMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMiles ?? 0), 0);
+        const minMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMilesMin ?? s.targetDistanceMiles ?? 0), 0);
+        const maxMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMilesMax ?? s.targetDistanceMiles ?? 0), 0);
+        const hasRange = Math.abs(maxMiles - minMiles) > 0.5;
+        return {
+          week_number: parseInt(weekNum),
+          sessions: weekSessions,
+          total_miles: Math.round(midpointMiles * 10) / 10,
+          ...(hasRange ? {
+            total_miles_min: Math.round(minMiles * 10) / 10,
+            total_miles_max: Math.round(maxMiles * 10) / 10,
+          } : {}),
+        };
+      });
 
     if (dry_run) {
       return NextResponse.json({ ok: true, sessions, weeks, sessionCount: sessions.length });
@@ -147,9 +161,14 @@ Rules:
 - weekNumber: 1-indexed. If the plan doesn't explicitly number weeks, infer from context (e.g., "Week 1", "Mon Jan 6 - Sun Jan 12").
 - dayOfWeek: full name (Monday, Tuesday, etc.)
 - type: "easy" | "tempo" | "long" | "interval" | "recovery" | "off" | "cross"
-- targetDistanceMiles: convert km to miles if needed (1 km = 0.621 mi). Null for cross-training and off days.
+- Distance ranges (e.g. "4-8 miles", "6–10 km"):
+  - targetDistanceMilesMin: the low end, converted to miles
+  - targetDistanceMilesMax: the high end, converted to miles
+  - targetDistanceMiles: the midpoint ((min+max)/2), rounded to 1 decimal
+  - If a single distance is given (no range), set all three to the same value
+  - Null for cross-training and off days
 - targetPace: extract if specified (e.g. "9:30/mi", "4:30/km"). Null if not specified.
-- description: concise session description preserving the key details (pace targets, interval structure, etc.)
+- description: preserve range language exactly as written (e.g. "Easy 4–8mi" not "Easy 6mi"). For intervals, preserve the rep range (e.g. "6–10×800m at 5k pace").
 - Extract ALL sessions including rest days (type: "off") and cross-training.
 - If a session has a total distance AND individual segments, use the total.`,
     messages: [{ role: "user", content: `Training plan:\n\n${planText}` }],
@@ -168,6 +187,8 @@ Rules:
                 dayOfWeek: { type: "string" },
                 type: { type: "string", enum: ["easy", "tempo", "long", "interval", "recovery", "off", "cross"] },
                 targetDistanceMiles: { type: ["number", "null"] },
+                targetDistanceMilesMin: { type: ["number", "null"] },
+                targetDistanceMilesMax: { type: ["number", "null"] },
                 targetPace: { type: ["string", "null"] },
                 description: { type: "string" },
               },

@@ -13,6 +13,8 @@ export type PlanWeek = {
   week_number: number;
   phase: string;
   mileage_target: number;
+  mileage_target_min?: number; // set when plan has mileage ranges (uploaded plans)
+  mileage_target_max?: number;
   long_run_target: number;
   key_workout: string;
   notes: string;
@@ -229,11 +231,17 @@ function WeekCard({
               <span className={`text-sm font-semibold ${completed ? "text-green-700" : "text-yellow-700"}`}>
                 {fmtDist(Math.round(actualMiles * 10) / 10, !!useMetric)}
               </span>
-              <span className="text-xs text-gray-400">/ {fmtDist(week.mileage_target, !!useMetric)}</span>
+              <span className="text-xs text-gray-400">
+                / {week.mileage_target_min != null && week.mileage_target_max != null
+                  ? `${fmtDist(week.mileage_target_min, !!useMetric)}–${fmtDist(week.mileage_target_max, !!useMetric)}`
+                  : fmtDist(week.mileage_target, !!useMetric)}
+              </span>
             </div>
           ) : (
             <span className={`text-sm font-semibold ${isPast ? "text-gray-400" : "text-gray-900"}`}>
-              {fmtDist(week.mileage_target, !!useMetric)}
+              {week.mileage_target_min != null && week.mileage_target_max != null
+                ? `${fmtDist(week.mileage_target_min, !!useMetric)}–${fmtDist(week.mileage_target_max, !!useMetric)}`
+                : fmtDist(week.mileage_target, !!useMetric)}
             </span>
           )}
         </div>
@@ -395,10 +403,18 @@ export function PlanTab({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="text-xs text-gray-400 mb-0.5">Weekly target</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {useMetric ? Math.round(weeklyMileageTarget * 1.60934 * 10) / 10 : weeklyMileageTarget}
-                {" "}<span className="text-sm font-normal text-gray-500">{distUnit}</span>
-              </p>
+              {currentWeek.mileage_target_min != null && currentWeek.mileage_target_max != null ? (
+                <p className="text-2xl font-bold text-gray-900">
+                  {fmtDist(currentWeek.mileage_target_min, useMetric)}
+                  <span className="text-lg font-normal text-gray-400">–</span>
+                  {fmtDist(currentWeek.mileage_target_max, useMetric)}
+                </p>
+              ) : (
+                <p className="text-2xl font-bold text-gray-900">
+                  {useMetric ? Math.round(weeklyMileageTarget * 1.60934 * 10) / 10 : weeklyMileageTarget}
+                  {" "}<span className="text-sm font-normal text-gray-500">{distUnit}</span>
+                </p>
+              )}
             </div>
             <div>
               <p className="text-xs text-gray-400 mb-0.5">Long run</p>

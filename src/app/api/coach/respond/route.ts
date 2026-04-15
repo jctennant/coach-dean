@@ -1302,24 +1302,35 @@ Use this data to:
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
   // user_message: injects the next-week plan so Dean can propose and commit to adjustments.
   type StoredPlanWeek = { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string };
+  type UploadedPlanSession = { dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null; targetPace?: string | null };
+  type UploadedPlanWeek = { week_number: number; sessions: UploadedPlanSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
   let storedPlanWeek: StoredPlanWeek | null = null;
   let storedNextPlanWeek: StoredPlanWeek | null = null;
   let storedPlanAllWeeks: StoredPlanWeek[] = [];
+  let uploadedPlanAllWeeks: UploadedPlanWeek[] = [];
+  let uploadedNextWeek: UploadedPlanWeek | null = null;
+  let isUploadedPlan = false;
   let storedPlanId: string | null = null;
   if (trigger === "weekly_recap" || trigger === "user_message") {
     const { data: planData } = await supabase
       .from("training_plans")
-      .select("id, weeks, total_weeks")
+      .select("id, weeks, total_weeks, plan_source")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
     if (planData?.weeks && Array.isArray(planData.weeks)) {
       const currentWeekNum = periodization.effectiveWeek;
-      storedPlanAllWeeks = planData.weeks as StoredPlanWeek[];
+      isUploadedPlan = planData.plan_source === "uploaded";
       storedPlanId = planData.id as string;
-      storedPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
-      storedNextPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
+      if (isUploadedPlan) {
+        uploadedPlanAllWeeks = planData.weeks as UploadedPlanWeek[];
+        uploadedNextWeek = uploadedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
+      } else {
+        storedPlanAllWeeks = planData.weeks as StoredPlanWeek[];
+        storedPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
+        storedNextPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
+      }
     }
   }
 
@@ -1450,6 +1461,32 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   }
 
   let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null);
+
+  // For uploaded plans in weekly_recap and user_message: inject next week's sessions directly
+  // from the stored plan rather than relying on the periodization engine's inferred values.
+  if (isUploadedPlan && uploadedNextWeek && (trigger === "weekly_recap" || trigger === "user_message")) {
+    const nextWeekNum = uploadedNextWeek.week_number;
+    const totalWeekCount = uploadedPlanAllWeeks.length;
+    const mileageRange = uploadedNextWeek.total_miles_min != null && uploadedNextWeek.total_miles_max != null
+      ? `${uploadedNextWeek.total_miles_min}–${uploadedNextWeek.total_miles_max}mi`
+      : `~${uploadedNextWeek.total_miles}mi`;
+    const sessionLines = uploadedNextWeek.sessions
+      .filter(s => s.type !== "off")
+      .map(s => {
+        const distPart = s.targetDistanceMilesMin != null && s.targetDistanceMilesMax != null
+          ? ` (${s.targetDistanceMilesMin}–${s.targetDistanceMilesMax}mi)`
+          : s.targetDistanceMiles ? ` (${s.targetDistanceMiles}mi)` : "";
+        const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
+        return `  - ${s.dayOfWeek}: ${s.description}${distPart}${pacePart}`;
+      })
+      .join("\n");
+    userMessage += `\n\n<uploaded_plan_next_week>
+UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount}:
+The athlete is following an external training plan. These are the prescribed sessions for next week. Use these as the plan — don't replace them with different sessions. You may suggest working within the low end of any ranges if the athlete had a hard week, or the high end if they're feeling strong.
+${sessionLines}
+Weekly total: ${mileageRange}
+</uploaded_plan_next_week>`;
+  }
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -1953,10 +1990,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // During injury hold: advance the clock (calendar keeps moving) but do NOT update
     // the mileage target — it stays at 0 until injury_clear triggers a plan rebuild.
     const isOnInjuryHold = !!(state?.injury_hold_since as string | null);
+    // For uploaded plans, use the plan's prescribed mileage instead of the periodization engine.
+    const uploadedNextWeekMiles = isUploadedPlan && uploadedNextWeek ? uploadedNextWeek.total_miles : null;
     await supabase.from("training_state").update({
       current_week: periodization.effectiveWeek,
       current_phase: periodization.phase,
-      ...(!isOnInjuryHold && periodization.suggestedWeeklyMiles != null ? { weekly_mileage_target: periodization.suggestedWeeklyMiles } : {}),
+      ...(!isOnInjuryHold ? {
+        weekly_mileage_target: uploadedNextWeekMiles ?? periodization.suggestedWeeklyMiles ?? undefined,
+      } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
     // Fire sync_sessions in a fresh invocation — saves ~3s vs inline Haiku calls.
@@ -2007,29 +2048,74 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         // During injury hold: don't sync arc — the arc will be rebuilt when injury clears.
         // Store the cross-training sessions so reminders have something to reference.
         let sessionsWritten = false;
-        if (rawSessionListJson) {
-          try {
-            const sessions = JSON.parse(rawSessionListJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
-            if (Array.isArray(sessions) && sessions.length > 0) {
-              await supabase.from("training_state")
-                .update({ weekly_plan_sessions: sessions as unknown as Json })
-                .eq("user_id", userId);
-              if (!isOnInjuryHold) {
-                await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
-              }
-              sessionsWritten = true;
-              console.log(`[weekly_recap] [SESSION_LIST] tag: wrote ${sessions.length} sessions${isOnInjuryHold ? " (injury hold — arc sync skipped)" : ""}`);
-            }
-          } catch (parseErr) {
-            console.error("[weekly_recap] [SESSION_LIST] parse failed, falling back to sync_sessions:", parseErr);
+
+        // For uploaded plans: directly load next week's sessions from the stored plan data.
+        // This is more reliable than extracting from Dean's free-form recap text.
+        if (isUploadedPlan && uploadedNextWeek && !isOnInjuryHold) {
+          const DAY_OFFSETS_REC: Record<string, number> = {
+            monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
+          };
+          const DAY_SHORT_REC = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+          // Compute next week's Monday
+          const nowRec = new Date();
+          const daysFromMonRec = nowRec.getDay() === 0 ? 6 : nowRec.getDay() - 1;
+          const thisMonday = new Date(nowRec);
+          thisMonday.setDate(nowRec.getDate() - daysFromMonRec);
+          const nextMonday = new Date(thisMonday);
+          nextMonday.setDate(thisMonday.getDate() + 7);
+
+          const uploadedSessions = uploadedNextWeek.sessions
+            .filter(s => s.type !== "off")
+            .map(s => {
+              const offset = DAY_OFFSETS_REC[s.dayOfWeek.toLowerCase()] ?? 0;
+              const d = new Date(nextMonday);
+              d.setDate(nextMonday.getDate() + offset);
+              const distPart = s.targetDistanceMilesMin != null && s.targetDistanceMilesMax != null
+                ? ` ${s.targetDistanceMilesMin}–${s.targetDistanceMilesMax}mi`
+                : s.targetDistanceMiles ? ` ${s.targetDistanceMiles}mi` : "";
+              const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
+              return {
+                day: DAY_SHORT_REC[offset]!,
+                date: `${d.getMonth() + 1}/${d.getDate()}`,
+                label: `${s.description}${distPart}${pacePart}`,
+                optional: false,
+              };
+            });
+
+          if (uploadedSessions.length > 0) {
+            await supabase.from("training_state")
+              .update({ weekly_plan_sessions: uploadedSessions as unknown as Json })
+              .eq("user_id", userId);
+            sessionsWritten = true;
+            console.log(`[weekly_recap] uploaded plan: wrote ${uploadedSessions.length} sessions for week ${uploadedNextWeek.week_number}`);
           }
         }
-        if (!sessionsWritten && !isOnInjuryHold) {
-          await fetch(`${appUrl}/api/coach/respond`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId, trigger: "sync_sessions" }),
-          });
+
+        if (!sessionsWritten) {
+          if (rawSessionListJson) {
+            try {
+              const sessions = JSON.parse(rawSessionListJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
+              if (Array.isArray(sessions) && sessions.length > 0) {
+                await supabase.from("training_state")
+                  .update({ weekly_plan_sessions: sessions as unknown as Json })
+                  .eq("user_id", userId);
+                if (!isOnInjuryHold) {
+                  await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
+                }
+                sessionsWritten = true;
+                console.log(`[weekly_recap] [SESSION_LIST] tag: wrote ${sessions.length} sessions${isOnInjuryHold ? " (injury hold — arc sync skipped)" : ""}`);
+              }
+            } catch (parseErr) {
+              console.error("[weekly_recap] [SESSION_LIST] parse failed, falling back to sync_sessions:", parseErr);
+            }
+          }
+          if (!sessionsWritten && !isOnInjuryHold) {
+            await fetch(`${appUrl}/api/coach/respond`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId, trigger: "sync_sessions" }),
+            });
+          }
         }
       } catch (err) {
         console.error("[coach/respond] sync_sessions trigger failed (weekly_recap):", err);
