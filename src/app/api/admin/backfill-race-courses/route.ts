@@ -209,12 +209,16 @@ export async function POST(request: Request) {
     (profiles ?? []).map(p => [p.user_id as string, p.terrain_type as string | null])
   );
 
-  // Filter to trail/mixed terrain only (unless a specific race_id was requested)
+  // Qualify if: (a) user's terrain_type is trail/mixed, OR (b) the race goal is trail_race.
+  // Many users were onboarded before terrain_type existed so their profile still says road/null
+  // even though they're training for trail races — the race goal is the more reliable signal.
   const qualifying = race_id
     ? races
     : races.filter(r => {
         const terrain = terrainByUser.get(r.user_id as string) ?? null;
-        return terrain === "trail" || terrain === "mixed";
+        const isTrailTerrain = terrain === "trail" || terrain === "mixed";
+        const isTrailGoal = (r.goal as string | null) === "trail_race";
+        return isTrailTerrain || isTrailGoal;
       });
 
   console.log(`[backfill-race-courses] ${dry_run ? "DRY RUN — " : ""}${qualifying.length} races to process`);
