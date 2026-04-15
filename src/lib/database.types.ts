@@ -16,11 +16,15 @@ export type Database = {
     Tables: {
       activities: {
         Row: {
+          activity_name: string | null
           activity_type: string | null
+          aerobic_efficiency: number | null
           average_cadence: number | null
           average_heartrate: number | null
           average_pace: string | null
           average_watts: number | null
+          best_efforts: Json | null
+          cardiac_decoupling_pct: number | null
           created_at: string | null
           distance_meters: number | null
           elapsed_time_seconds: number | null
@@ -32,18 +36,26 @@ export type Database = {
           moving_time_seconds: number | null
           source: string
           start_date: string | null
+          start_lat: number | null
+          start_lng: number | null
           strava_activity_id: number | null
           suffer_score: number | null
           summary: Json | null
           user_id: string
+          weather_data: Json | null
+          weather_fetched_at: string | null
           workout_type: number | null
         }
         Insert: {
+          activity_name?: string | null
           activity_type?: string | null
+          aerobic_efficiency?: number | null
           average_cadence?: number | null
           average_heartrate?: number | null
           average_pace?: string | null
           average_watts?: number | null
+          best_efforts?: Json | null
+          cardiac_decoupling_pct?: number | null
           created_at?: string | null
           distance_meters?: number | null
           elapsed_time_seconds?: number | null
@@ -55,18 +67,26 @@ export type Database = {
           moving_time_seconds?: number | null
           source?: string
           start_date?: string | null
+          start_lat?: number | null
+          start_lng?: number | null
           strava_activity_id?: number | null
           suffer_score?: number | null
           summary?: Json | null
           user_id: string
+          weather_data?: Json | null
+          weather_fetched_at?: string | null
           workout_type?: number | null
         }
         Update: {
+          activity_name?: string | null
           activity_type?: string | null
+          aerobic_efficiency?: number | null
           average_cadence?: number | null
           average_heartrate?: number | null
           average_pace?: string | null
           average_watts?: number | null
+          best_efforts?: Json | null
+          cardiac_decoupling_pct?: number | null
           created_at?: string | null
           distance_meters?: number | null
           elapsed_time_seconds?: number | null
@@ -78,10 +98,14 @@ export type Database = {
           moving_time_seconds?: number | null
           source?: string
           start_date?: string | null
+          start_lat?: number | null
+          start_lng?: number | null
           strava_activity_id?: number | null
           suffer_score?: number | null
           summary?: Json | null
           user_id?: string
+          weather_data?: Json | null
+          weather_fetched_at?: string | null
           workout_type?: number | null
         }
         Relationships: [
@@ -244,7 +268,9 @@ export type Database = {
           created_at: string | null
           goal: string | null
           id: string
+          plan_source: string
           race_date: string | null
+          raw_plan_text: string | null
           total_weeks: number
           updated_at: string | null
           user_id: string | null
@@ -254,7 +280,9 @@ export type Database = {
           created_at?: string | null
           goal?: string | null
           id?: string
+          plan_source?: string
           race_date?: string | null
+          raw_plan_text?: string | null
           total_weeks: number
           updated_at?: string | null
           user_id?: string | null
@@ -264,7 +292,9 @@ export type Database = {
           created_at?: string | null
           goal?: string | null
           id?: string
+          plan_source?: string
           race_date?: string | null
+          raw_plan_text?: string | null
           total_weeks?: number
           updated_at?: string | null
           user_id?: string | null
@@ -282,6 +312,7 @@ export type Database = {
       }
       training_profiles: {
         Row: {
+          coaching_mode: string
           constraints: string | null
           crosstraining_tools: string[] | null
           current_easy_pace: string | null
@@ -298,17 +329,21 @@ export type Database = {
           injury_notes: string | null
           last_morning_reminder_date: string | null
           last_nightly_reminder_date: string | null
+          manual_prs: Json | null
           preferred_units: string
           proactive_cadence: string | null
           race_date: string | null
           skip_dates: string[] | null
+          terrain_type: string | null
           this_week_override_days: string[] | null
           this_week_override_expires: string | null
           training_days: string[] | null
+          training_tools: string[] | null
           updated_at: string | null
           user_id: string
         }
         Insert: {
+          coaching_mode?: string
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null
@@ -325,17 +360,21 @@ export type Database = {
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          manual_prs?: Json | null
           preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
+          terrain_type?: string | null
           this_week_override_days?: string[] | null
           this_week_override_expires?: string | null
           training_days?: string[] | null
+          training_tools?: string[] | null
           updated_at?: string | null
           user_id: string
         }
         Update: {
+          coaching_mode?: string
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null
@@ -352,13 +391,16 @@ export type Database = {
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          manual_prs?: Json | null
           preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
+          terrain_type?: string | null
           this_week_override_days?: string[] | null
           this_week_override_expires?: string | null
           training_days?: string[] | null
+          training_tools?: string[] | null
           updated_at?: string | null
           user_id?: string
         }
@@ -450,6 +492,7 @@ export type Database = {
           payment_link_sent_at: string | null
           phone_number: string
           reengagement_sent_at: string | null
+          v2_migration_sent_at: string | null
           strava_access_token: string | null
           strava_athlete_id: number | null
           strava_refresh_token: string | null
@@ -476,6 +519,7 @@ export type Database = {
           payment_link_sent_at?: string | null
           phone_number: string
           reengagement_sent_at?: string | null
+          v2_migration_sent_at?: string | null
           strava_access_token?: string | null
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null
@@ -502,6 +546,7 @@ export type Database = {
           payment_link_sent_at?: string | null
           phone_number?: string
           reengagement_sent_at?: string | null
+          v2_migration_sent_at?: string | null
           strava_access_token?: string | null
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null

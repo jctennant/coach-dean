@@ -1,10 +1,21 @@
 /**
  * Weather utilities for Coach Dean.
- * Uses Open-Meteo (free, no API key) for geocoding and 7-day forecasts.
+ * Uses Open-Meteo (free, no API key) for geocoding and 7-day forecasts,
+ * and the Open-Meteo archive for historical activity-time conditions.
  */
 
 const GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
+const ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive";
+
+/** Weather conditions captured at the exact time a run started. */
+export interface ActivityWeatherData {
+  temp_c: number;       // temperature at run time (°C)
+  feels_like_c: number; // apparent temperature — accounts for humidity/wind
+  humidity_pct: number; // relative humidity (%)
+  wind_kph: number;     // wind speed (km/h)
+  condition: string;    // human label: "clear", "partly cloudy", etc.
+}
 
 export interface DayWeather {
   date: string;        // YYYY-MM-DD
@@ -89,6 +100,109 @@ async function fetchForecast(lat: number, lon: number, timezone: string, pastDay
     weatherCode: d.weathercode[i],
     maxWindMph: Math.round(d.windspeed_10m_max[i]),
   }));
+}
+
+/**
+ * Fetch hourly weather conditions at the exact time and location of an activity.
+ * Uses the Open-Meteo archive API for activities older than 5 days, and the
+ * forecast API (past_days=6) for recent activities.
+ *
+ * @param lat - Latitude of the activity start
+ * @param lng - Longitude of the activity start
+ * @param startDate - ISO timestamp of when the activity started (e.g. "2024-04-10T07:30:00Z")
+ * @returns Structured weather data or null if unavailable
+ */
+export async function fetchActivityWeatherByCoords(
+  lat: number,
+  lng: number,
+  startDate: string
+): Promise<ActivityWeatherData | null> {
+  try {
+    const activityTime = new Date(startDate);
+    const dateStr = activityTime.toISOString().slice(0, 10); // YYYY-MM-DD
+    const hourUTC = activityTime.getUTCHours();
+
+    // Use archive API for activities older than 5 days; forecast API for recent ones.
+    const daysDiff = (Date.now() - activityTime.getTime()) / (1000 * 60 * 60 * 24);
+    const useArchive = daysDiff > 5;
+
+    const hourlyParams = [
+      "temperature_2m",
+      "apparent_temperature",
+      "relativehumidity_2m",
+      "windspeed_10m",
+      "weathercode",
+    ].join(",");
+
+    let url: string;
+    if (useArchive) {
+      const params = new URLSearchParams({
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+        start_date: dateStr,
+        end_date: dateStr,
+        hourly: hourlyParams,
+        timezone: "UTC",
+      });
+      url = `${ARCHIVE_URL}?${params}`;
+    } else {
+      const params = new URLSearchParams({
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+        hourly: hourlyParams,
+        timezone: "UTC",
+        forecast_days: "1",
+        past_days: "6",
+      });
+      url = `${FORECAST_URL}?${params}`;
+    }
+
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+
+    const data = await res.json() as {
+      hourly?: {
+        time: string[];
+        temperature_2m: number[];
+        apparent_temperature: number[];
+        relativehumidity_2m: number[];
+        windspeed_10m: number[];
+        weathercode: number[];
+      };
+    };
+
+    const h = data.hourly;
+    if (!h) return null;
+
+    // Find the index whose time is closest to the activity start hour.
+    // Times from Open-Meteo are "YYYY-MM-DDTHH:00" in UTC.
+    const targetPrefix = `${dateStr}T${hourUTC.toString().padStart(2, "0")}:00`;
+    let idx = h.time.findIndex(t => t === targetPrefix);
+    if (idx === -1) {
+      // Fallback: find closest available time on that date
+      const dateIndices = h.time.reduce<number[]>((acc, t, i) => {
+        if (t.startsWith(dateStr)) acc.push(i);
+        return acc;
+      }, []);
+      if (dateIndices.length === 0) return null;
+      // Pick the hour closest to the activity start
+      idx = dateIndices.reduce((best, i) => {
+        const bestHour = parseInt(h.time[best].slice(11, 13));
+        const thisHour = parseInt(h.time[i].slice(11, 13));
+        return Math.abs(thisHour - hourUTC) < Math.abs(bestHour - hourUTC) ? i : best;
+      }, dateIndices[0]);
+    }
+
+    return {
+      temp_c: Math.round(h.temperature_2m[idx] * 10) / 10,
+      feels_like_c: Math.round(h.apparent_temperature[idx] * 10) / 10,
+      humidity_pct: Math.round(h.relativehumidity_2m[idx]),
+      wind_kph: Math.round(h.windspeed_10m[idx] * 10) / 10,
+      condition: weatherLabel(h.weathercode[idx]),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

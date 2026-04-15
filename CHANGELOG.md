@@ -4,6 +4,140 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-14 — v2.0 migration: disable morning/nightly crons + user transition message
+
+**Type:** Feature / Infra
+**Reported by:** Internal — product shift to reactive analysis model
+**User feedback:** N/A — proactive decision
+**Root cause:** v2.0 repositions Dean as a reactive analysis layer (post-run debrief + Sunday recap). Morning and nightly reminder crons were plan-driven proactive messages that no longer fit the product model. Existing users needed a graceful transition message.
+**Fix / Change:**
+- Disabled `morning-reminder` and `nightly-reminder` crons with `if (true as boolean) return` pattern (cast prevents TypeScript dead-code errors while preserving full implementation for potential reactivation)
+- Added `supabase/migrations/033_v2_migration.sql`: `v2_migration_sent_at timestamptz` column on `users` table — idempotency guard for the migration message
+- Added `POST /api/admin/v2-migration`: targets users who completed onboarding + have Strava + haven't received the message yet. Sends a plain-language transition message explaining the shift, stores to conversations, marks `v2_migration_sent_at`. Supports `dry_run` for preview and `userId` for single-user testing. 2-second spacing between sends to avoid rate limits.
+
+**Dry-run curl:**
+```bash
+curl -X POST https://coachdean.ai/api/admin/v2-migration -H "Content-Type: application/json" -d '{"secret":"<ADMIN_SECRET>","dry_run":true}'
+```
+**Live run:**
+```bash
+curl -X POST https://coachdean.ai/api/admin/v2-migration -H "Content-Type: application/json" -d '{"secret":"<ADMIN_SECRET>"}'
+```
+**Files changed:** `src/app/api/cron/morning-reminder/route.ts`, `src/app/api/cron/nightly-reminder/route.ts`, `src/app/api/admin/v2-migration/route.ts` (new), `supabase/migrations/033_v2_migration.sql` (new), `src/lib/database.types.ts`
+
+---
+
+## 2026-04-14 — Tests: race predictor test suite (50 tests)
+
+**Type:** Infra / Testing
+**Reported by:** Internal — identified as highest-risk untested code
+**Root cause:** The race predictor was fully rewritten in the previous session with no corresponding tests. Grade-dependent elevation, 4-level trail subtypes, scaled Riegel exponents, tiered heat/humidity, and altitude adjustments all had zero coverage.
+**Fix / Change:** Added `src/__tests__/lib/race-predictor.test.ts` with 50 tests across 11 describe blocks:
+- VDOT derivation priority (race → best_effort → easy pace → long run → null)
+- Riegel exponent scaling across marathon/50K/50mi/100K+
+- Elevation: road 1.0 min/1000ft, trail <10% grade 1.5 min/1000ft, trail >10% grade 2.0 min/1000ft
+- Steep descent penalty threshold (>12% avg grade)
+- All 4 trail subtypes + inferTrailSubtype thresholds (gain/mile)
+- Heat tier 1 (2%/5°F), tier 2 (3.5%/5°F), humidity modifier (>70% → +1.5%), 15% cap
+- Altitude penalty (2%/1000ft above 5000ft, 10% cap), altitude caveat flag
+- Distance mismatch range widening
+- Source labels and caveats for all paths
+- Edge cases (no data → null, low/predicted/high ordering)
+**Files changed:** `src/__tests__/lib/race-predictor.test.ts` (new)
+
+---
+
+## 2026-04-14 — Dashboard: "Training Plan" tab added alongside Overview
+
+**Type:** Feature
+**Reported by:** User request
+**User feedback:** "is it possible to easily keep the plan on a separate tab if the user wants? That way it's very little disruption for now"
+**Root cause:** N/A — additive feature request
+**Fix / Change:** Added a two-tab toggle ("Overview" / "Training Plan") to the dashboard. The tab switcher is a lightweight client component (`tab-container.tsx`) that hides/shows pre-rendered server content — no extra data fetches on switch. The Training Plan tab surfaces the full plan calendar (this week's daily breakdown, full arc with phase badges and actual-vs-target mileage) ported from the legacy `_legacy/page.tsx` into a new `plan-tab.tsx` component. Users with no Dean-generated plan see a prompt to text Dean. The page also now fetches `training_plans`, `weekly_plan_sessions`, `training_days`, and override columns that the plan tab needs.
+**Files changed:** `src/app/dashboard/tab-container.tsx` (new), `src/app/dashboard/plan-tab.tsx` (new), `src/app/dashboard/page.tsx`
+
+---
+
+## 2026-04-14 — Race predictor: new label framework + major prediction model improvements
+
+**Type:** Feature / Improvement
+**Reported by:** User feedback
+**User feedback:** "and what about the labeling? Replace the binary High/Medium/Low with a two-part label: source quality + a plain-language caveat when warranted ... The range should probably be labeled too — right now it just floats there. Something like 'likely finish window' underneath it in muted text makes it feel like a real coaching tool"
+**Root cause:** Old "High/Medium/Low confidence" with "Race data/Training data/Estimated" subtext was binary and opaque. Elevation and trail penalties were oversimplified. Riegel exponent didn't scale for ultra distances.
+**Fix / Change:**
+- Replaced confidence display with `sourceLabel` ("Based on recent race" / "Based on training data" / "Estimated from easy pace" / "Estimated from long runs") and optional `caveat` for edge cases (trail races, ultras, altitude mismatch)
+- Added "Likely finish window" label above the range in the race card
+- Grade-dependent elevation penalties: 1.5 min/1000ft (trail, <10% avg grade), 2.0 min/1000ft (trail, >10% grade), 1.0 min/1000ft (road); descent penalty 0.5 min/1000ft when avg grade >12%
+- 4-level trail subtype system: groomed (10%), mixed (17%), technical (26%), highly_technical (35%) pace penalty; `inferTrailSubtype` auto-infers from gain/mile
+- Riegel exponent scales with ultra distance: 1.06 (marathon), 1.10 (50K), 1.12 (50mi), 1.15 (100K+)
+- Distance-mismatch guard: when goal race >2× VDOT source distance, range widens ±4% and caveat is added
+- Tiered heat penalty: 2%/5°F (75–85°F), 3.5%/5°F (85–95°F), +1.5% humidity modifier when >70% humidity
+- Altitude adjustment: +2%/1000ft above 5000ft; altitude caveat when training altitude >3000ft below race
+**Files changed:** `src/lib/race-predictor.ts`, `src/app/dashboard/page.tsx`
+
+---
+
+## 2026-04-14 — Race predictor now uses best_efforts PRs for VDOT derivation
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Internal observation (user noted predicted VDOT appeared too low)
+**User feedback:** "I think my VDOT is like 57 based on my 17:23 (maybe a bit slower) 5k" — implying the displayed value was lower than expected
+**Root cause:** `deriveVDOT` only considered whole Strava activities with `workout_type=1` (race). A 5K PR set during a regular training run (workout_type=0) was never reaching the VDOT derivation path — it fell through to the less-accurate easy pace estimation.
+**Fix / Change:** Added a new step 3 in `deriveVDOT` that scans `best_efforts` across all activities for any effort ≥ 5K. Picks the effort that yields the highest VDOT (most accurate fitness signal). Updated `RacePredictionInput` type to accept `best_efforts`. Updated dashboard to pass `best_efforts` into both `estimateVDOT` and `predictRaceTime` calls. A 17:23 5K best effort now correctly yields VDOT ~62–63, with corresponding race predictions: half ~1:22, marathon ~2:52.
+**Files changed:** `src/lib/race-predictor.ts`, `src/app/dashboard/page.tsx`
+
+---
+
+## 2026-04-14 — v2 dashboard revamp: insights, race readiness, efficiency trends
+
+**Type:** Feature
+**Reported by:** Internal (v2 product spec)
+**User feedback:** N/A
+**Root cause:** Existing dashboard showed only the plan calendar (generated plan arc), which is irrelevant for users with external plans (Runna, Garmin). No training trend visualisation or race prediction panel.
+**Fix / Change:** Replaced plan-calendar dashboard with a data-driven v2 layout: quick-stats row (current week mileage, race countdown, load trend, aerobic fitness), race readiness panel with predicted finish time and goal comparison, weekly mileage bar chart (last 12 weeks with 10% threshold line), aerobic efficiency trend line chart, recent post-run/weekly-recap insight feed (last 10), personal records by distance. Old plan-calendar page preserved at `src/app/dashboard/_legacy/page.tsx`. Dashboard is fully server-rendered — no client-side charting dependency added.
+**Files changed:** `src/app/dashboard/page.tsx`, `src/app/dashboard/_legacy/page.tsx`
+
+## 2026-04-14 — Auto-fix: AI identity guardrail, session-consolidation math, mileage projection cap
+
+**Type:** Bug Fix (3 issues — auto-fixed from 2026-04-13 conversation analysis)
+**Reported by:** Automated conversation analysis
+**User feedback:** N/A
+
+---
+
+### Fix 1 — P0: Dean roleplayed as a human athlete
+
+**Root cause:** The existing COACH DEAN'S IDENTITY section had soft "Do NOT" language that the model could override when generating a relatable-seeming reply. User 32d7510f asked "what's your training week look like" and Dean responded with fabricated personal training details ("I'm running 40-50mi/week right now — mostly easy miles with one long run and one tempo or hill session. I lift 2x/week..."). When probed, Dean couldn't provide further details, revealing the deception.
+**Fix / Change:** Converted the identity section header to a hard `<rule>` tag with ABSOLUTE IDENTITY RULE language. Explicitly names the failure mode ("I'm running 40-50mi/week right now") as a forbidden response. Requires honest deflection in one sentence then immediate redirect to athlete's training.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Fix 2 — P1: Session-consolidation math (dangerous makeup-volume advice)
+
+**Root cause:** User 2e5a7e92 asked to consolidate Sat+Sun into a Saturday double and drop Sunday. Dean correctly calculated the new weekly total (30mi) but then told the athlete to "make sure Saturday volume hits close to the 26mi combined target" — implying the athlete should run 26mi on Saturday alone to compensate. This conflated the combined Sat+Sun target (16+10=26mi) with a single-session goal, which is both incoherent and dangerous.
+**Fix / Change:** Added a `SESSION CONSOLIDATION MATH` `<rule>` block next to the existing structural-change rules. Explicitly forbids suggesting the full dropped-session volume be made up in a single day. Provides a correct example: state the lower total, offer only a modest add-on (2–3mi) if the athlete asks to preserve volume.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+### Fix 3 — P1: Weekly mileage projection inflated (77.2mi from 8.2mi Monday run)
+
+**Root cause:** User 70818a68 received a post-run message saying "8.2 mi logged this week. You've got 5 sessions left (Tue–Sat) on track for ~77.2 mi." The `computeProjectedWeekMiles` function summed remaining sessions from `weekly_plan_sessions` without any sanity check against the stored `weekly_mileage_target`. If stored sessions carry incorrect or stale mileage labels, the projection faithfully reflects those bad values and `correctProjectedTotal` has no basis to override them.
+**Fix / Change:** Added an optional `weeklyMileageTarget` parameter to `computeProjectedWeekMiles`. If the computed projection exceeds `weeklyMileageTarget * 1.2`, the function caps the result at `weeklyMileageTarget` (the plan's authoritative target) and logs a warning. Updated the call site to pass `state?.weekly_mileage_target`.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-14 — Update Strava annotation header: week/total instead of phase, metrics back in block
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** N/A
+**Root cause:** Previous annotation header showed training phase ("Build", "Taper") which was meaningful for plan users but absent for general fitness users. The `— coachdean.ai` suffix on the dean note made the branding feel tacked on rather than anchored. Metrics (decoupling, efficiency, best GAP) were hidden from the block; athletes who checked Strava saw only 3 lines with no specifics.
+**Fix / Change:** Header now reads `{emoji} coachdean.ai — Week X of Y · Race Xd out`. Removed `currentPhase` from `AnnotationContext` entirely. Fetches `total_weeks` from `training_plans` for the "of Y" context. Metrics (decoupling, efficiency, best GAP) are shown in the block again, separated from the dean note by a blank line. Note expanded to 1–2 sentences (max_tokens 80→150) to allow weather/terrain context.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-14 — Redesign Strava annotation block format
 
 **Type:** Improvement

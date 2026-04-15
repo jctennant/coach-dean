@@ -188,3 +188,65 @@ export async function getAthleteStats(accessToken: string, athleteId: number) {
 
   return response.json();
 }
+
+/**
+ * Fetch and store best_efforts + activity_name for all stored activities for a user.
+ *
+ * Strava's list endpoint returns summary objects without best_efforts. This function
+ * fetches the detail view (GET /activities/{id}) for each stored activity and updates
+ * best_efforts and activity_name in the DB.
+ *
+ * Designed to run in after() on initial Strava connect and on-demand via the admin
+ * backfill endpoint. Skips activities that already have both fields populated.
+ *
+ * Strava rate limit: 600 req/15min. At 120ms/request this processes ~500 activities
+ * before approaching the limit — more than enough for typical users.
+ */
+export async function fetchAndStoreBestEfforts(
+  userId: string,
+  accessToken: string,
+  options?: { limit?: number; forceRefresh?: boolean }
+): Promise<{ updated: number; skipped: number; errors: number }> {
+  const { limit = 500, forceRefresh = false } = options ?? {};
+
+  const query = supabase
+    .from("activities")
+    .select("id, strava_activity_id, best_efforts, activity_name")
+    .eq("user_id", userId)
+    .not("strava_activity_id", "is", null)
+    .order("start_date", { ascending: false })
+    .limit(limit);
+
+  const { data: activities } = await query;
+  if (!activities?.length) return { updated: 0, skipped: 0, errors: 0 };
+
+  let updated = 0, skipped = 0, errors = 0;
+
+  for (const activity of activities) {
+    if (!activity.strava_activity_id) { skipped++; continue; }
+
+    // Skip if already populated (unless forceRefresh)
+    if (!forceRefresh && activity.best_efforts != null && activity.activity_name != null) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const detail = await getActivity(accessToken, activity.strava_activity_id);
+      await supabase.from("activities").update({
+        activity_name: (detail.name as string | null) ?? null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        best_efforts: ((detail.best_efforts as unknown[])?.length ? detail.best_efforts : null) as any,
+      }).eq("id", activity.id);
+      updated++;
+    } catch {
+      errors++;
+    }
+
+    // ~120ms between requests — polite to Strava's rate limit
+    await new Promise(r => setTimeout(r, 120));
+  }
+
+  console.log(`[fetchAndStoreBestEfforts] user=${userId} updated=${updated} skipped=${skipped} errors=${errors}`);
+  return { updated, skipped, errors };
+}

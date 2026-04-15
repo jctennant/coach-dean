@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
-import { getAllActivities, getAthleteStats } from "@/lib/strava";
+import { getAllActivities, getAthleteStats, fetchAndStoreBestEfforts } from "@/lib/strava";
 import { trackEvent } from "@/lib/track";
 import type { Json } from "@/lib/database.types";
 import { parseTimezoneFromLocation } from "@/lib/timezone";
@@ -273,6 +273,10 @@ export async function GET(request: Request) {
         // Races from the past 2 years — separate pass so Dean knows about older PRs
         // and races even if they fall outside the 6-month general window.
         await importRaceHistory(user.id, access_token);
+        // Fetch best_efforts + activity_name for all imported activities by calling
+        // the detail endpoint for each. This is the only way to get Strava's lifetime
+        // best-effort data — it's not included in list responses.
+        await fetchAndStoreBestEfforts(user.id, access_token);
       } catch (err) {
         console.error("[strava-callback] activity import error:", err);
       }
@@ -414,16 +418,17 @@ async function importStravaActivities(userId: string, accessToken: string) {
 }
 
 /**
- * Import races (workout_type === 1) from the past 2 years.
- * Fetches up to 3 pages but only saves race-flagged activities, so DB impact
- * is minimal (most athletes race 4–12 times/year → ~8–24 rows).
+ * Import all races (workout_type === 1) from the athlete's full Strava history.
+ * No time limit — races are the most valuable source of best_efforts and VDOT data.
+ * Fetches up to 50 pages (10,000 activities) which covers any realistic history.
+ * Only race-flagged activities are saved, so DB impact is minimal
+ * (most athletes race 4–12 times/year → well under 200 rows total).
  */
 async function importRaceHistory(userId: string, accessToken: string) {
-  const twoYearsAgo = Math.floor(Date.now() / 1000) - 2 * 365 * 24 * 60 * 60;
-  const activities = await getAllActivities(accessToken, { after: twoYearsAgo, maxPages: 3 });
+  const activities = await getAllActivities(accessToken, { maxPages: 50 });
   const races = (activities as Array<Record<string, unknown>>).filter(
     (a) => (a.workout_type as number | null) === 1
   );
   const count = await upsertActivities(userId, races);
-  console.log(`[strava-callback] imported ${count} races for user ${userId}`);
+  console.log(`[strava-callback] imported ${count} all-time races for user ${userId}`);
 }

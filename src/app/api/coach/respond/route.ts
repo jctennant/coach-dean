@@ -12,6 +12,9 @@ import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors } 
 import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
+import { buildLongitudinalBlock } from "@/lib/training-analytics";
+import type { ActivityForAnalytics } from "@/lib/training-analytics";
+import type { ActivityWeatherData } from "@/lib/weather";
 
 export const maxDuration = 120;
 
@@ -915,7 +918,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           weekMileageSoFar,
           weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
           currentWeek: (state?.current_week as number | null) ?? null,
-          currentPhase: (state?.current_phase as string | null) ?? null,
           upcomingRaces: upcomingRaces,
           preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
           splits: storedSplits,
@@ -932,6 +934,11 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const weeklyMilesBaseline = ((user.onboarding_data as Record<string, unknown> | null)?.weekly_miles as number | null) ?? null;
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone) ?? weeklyMilesBaseline;
   const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null, weekMileageSoFar);
+
+  // Build longitudinal analysis block for post_run and weekly_recap
+  const longitudinalBlock = (trigger === "post_run" || trigger === "weekly_recap")
+    ? buildLongitudinalBlock(recentActivities as ActivityForAnalytics[], userTimezone)
+    : "";
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
@@ -1005,6 +1012,56 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         void trackEvent(userId, "plan_link_sent", { source: "my_plan_keyword" });
       }
       return NextResponse.json({ ok: true, message: linkMsg });
+    }
+  }
+
+  // Race predictor: detect "what would I run X in?" intent and inject prediction context.
+  // This adds structured prediction data to the system prompt for user_message handling.
+  let racePredictorBlock = "";
+  if (trigger === "user_message") {
+    const latestUserMsgForPredict = [...recentMessages].reverse().find(m => m.role === "user");
+    const isRacePredictRequest = latestUserMsgForPredict && (
+      /\bwhat\s+(would|will|could|can)\s+i\s+(run|finish|complete|do)\b/i.test(latestUserMsgForPredict.content) ||
+      /\b(predict|estimate|projection|project)\s+(my\s+)?(race|finish|time)\b/i.test(latestUserMsgForPredict.content) ||
+      /\bhow\s+(fast|long)\s+(would|will|could|can)\s+i\s+(run|finish|do)\b/i.test(latestUserMsgForPredict.content) ||
+      /\bcan\s+i\s+(finish|run|do|complete)\s+.{0,30}\b(race|marathon|half|10k|5k|ultra)\b/i.test(latestUserMsgForPredict.content)
+    );
+    if (isRacePredictRequest) {
+      try {
+        const { predictRaceTime } = await import("@/lib/race-predictor");
+        const onbData = (user.onboarding_data as Record<string, unknown>) ?? {};
+        const activitiesForPredict = recentActivities.map(a => ({
+          activity_type: a.activity_type as string | null,
+          distance_meters: a.distance_meters as number | null,
+          moving_time_seconds: a.moving_time_seconds as number | null,
+          average_heartrate: a.average_heartrate as number | null,
+          start_date: a.start_date as string,
+          workout_type: null,
+        }));
+        // Try to predict for the goal race distance if available
+        const goalDistMiles = (profile?.goal_distance_miles as number | null) ?? null;
+        if (goalDistMiles && goalDistMiles > 0) {
+          const prediction = predictRaceTime({
+            activities: activitiesForPredict,
+            goalDistanceMiles: goalDistMiles,
+            terrainType: (profile as Record<string, unknown> | null)?.terrain_type as "road" | "trail" | "mixed" | undefined ?? "road",
+            storedEasyPace: (profile?.current_easy_pace as string | null) ?? undefined,
+            recentRaceDistKm: (onbData.recent_race_distance_km as number | null) ?? undefined,
+            recentRaceTimeMinutes: (onbData.recent_race_time_minutes as number | null) ?? undefined,
+          });
+          if (prediction) {
+            racePredictorBlock = `\nRACE PREDICTOR DATA (pre-computed — use this to answer the athlete's race time question):
+Predicted finish: ${prediction.predictedFormatted} (range: ${prediction.rangeFormatted})
+Confidence: ${prediction.confidence}
+Factors: ${prediction.factors.join("; ")}
+Narrative: ${prediction.narrative}
+Use this prediction as the foundation of your answer. Acknowledge the confidence level honestly. If they asked about a specific race different from the goal race, adjust the prediction accordingly using the VDOT from the factors above. If they provided new course data (elevation, terrain), factor that in.
+`;
+          }
+        }
+      } catch (predictErr) {
+        console.warn("[coach/respond] race predictor failed (non-fatal):", predictErr);
+      }
     }
   }
 
@@ -1313,7 +1370,34 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
   }
 
-  const userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null);
+
+  // Append longitudinal analysis block to post_run and weekly_recap prompts.
+  if (longitudinalBlock) {
+    userMessage = userMessage + "\n\n" + longitudinalBlock;
+  }
+
+  // Append race predictor context to user_message prompts.
+  if (racePredictorBlock) {
+    userMessage = userMessage + "\n" + racePredictorBlock;
+  }
+
+  // Append weather-at-activity-time block to post_run prompts.
+  if (trigger === "post_run" && activityData?.weather_data) {
+    const wd = activityData.weather_data as unknown as ActivityWeatherData;
+    const tempF = Math.round(wd.temp_c * 9 / 5 + 32);
+    const feelsF = Math.round(wd.feels_like_c * 9 / 5 + 32);
+    const humidStr = wd.humidity_pct ? `, ${wd.humidity_pct}% humidity` : "";
+    const windStr = wd.wind_kph ? `, wind ${Math.round(wd.wind_kph * 0.621371)}mph` : "";
+    // Estimate cardiovascular load penalty: ACSM guidelines suggest ~4-8% per 5°C above 20°C (68°F)
+    const heatPenaltyNote = tempF >= 80
+      ? ` Estimated cardiovascular load penalty: ~${tempF >= 90 ? "6-10" : "3-6"}% above cooler conditions — effort was physiologically harder than pace alone suggests.`
+      : feelsF >= 75
+      ? " Conditions were warm enough to add modest cardiovascular load above what pace suggests."
+      : "";
+    const weatherContextBlock = `\nWEATHER AT RUN TIME: ${tempF}°F (feels like ${feelsF}°F)${humidStr}${windStr} — ${wd.condition}.${heatPenaltyNote}\nUse this to contextualize effort: if conditions were hot or humid, validate that slower paces or higher HR were appropriate, not a performance failure. If conditions were ideal, you can hold the athlete to pace targets.`;
+    userMessage = userMessage + "\n" + weatherContextBlock;
+  }
 
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
@@ -1452,7 +1536,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         stripped,
         computeProjectedWeekMiles(
           (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? null,
-          weekMileageSoFar
+          weekMileageSoFar,
+          (state?.weekly_mileage_target as number | null) ?? null
         )
       )
     : correctMileageTotal(stripped, alreadyCompletedMiles);
@@ -1517,7 +1602,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       weekMileageSoFar,
       weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
       currentWeek: (state?.current_week as number | null) ?? null,
-      currentPhase: (state?.current_phase as string | null) ?? null,
       upcomingRaces: upcomingRaces,
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
@@ -2062,7 +2146,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
  */
 function computeProjectedWeekMiles(
   sessions: Array<{ day: string; date: string; label: string }> | null,
-  weekMileageSoFar: number
+  weekMileageSoFar: number,
+  weeklyMileageTarget?: number | null
 ): number | null {
   if (!sessions || sessions.length === 0) return null;
   const now = new Date();
@@ -2082,7 +2167,15 @@ function computeProjectedWeekMiles(
     const mMatch = explicitTotal || firstMi;
     if (mMatch) remainingMiles += parseFloat(mMatch[1]);
   }
-  return weekMileageSoFar + remainingMiles;
+  const projection = weekMileageSoFar + remainingMiles;
+  // If the projection significantly exceeds the planned weekly target, it likely reflects
+  // stale or incorrectly-labelled sessions — cap at the target to avoid alarming athletes
+  // with implausible numbers (e.g. "on track for 77mi" on a 40mi-target week).
+  if (weeklyMileageTarget && weeklyMileageTarget > 0 && projection > weeklyMileageTarget * 1.2) {
+    console.warn(`[computeProjectedWeekMiles] projection ${projection.toFixed(1)}mi exceeds target ${weeklyMileageTarget}mi by >20% — capping at target`);
+    return weeklyMileageTarget;
+  }
+  return projection;
 }
 
 /**
@@ -3933,6 +4026,9 @@ Make a concrete recommendation — don't ask the athlete to decide. Analyze thei
 - For adding a day: recommend the day that best fills a gap in the week and fits easy-day recovery. Show the updated schedule.
 - Never respond with "it depends, which day do you prefer?" — make the call, they can override if needed.
 
+WHEN AN ATHLETE CONSOLIDATES OR DROPS A SESSION:
+<rule>SESSION CONSOLIDATION MATH: When an athlete proposes consolidating two sessions into one day (e.g., a Saturday double instead of separate Sat + Sun runs), DO NOT suggest they match the combined two-session volume in a single day. The combined volume was designed across two recovery windows and is dangerous to compress into one. Correct approach: state the new lower weekly total clearly, then only suggest adding 2–3 miles to the consolidated session if the athlete specifically asks to preserve volume. Wrong: "make sure Saturday volume hits close to the 26mi combined target" (this tells them to run 26mi on Saturday alone — dangerous). Right: "Dropping Sunday brings you to 30mi this week — solid. If you want to stay closer to the original volume, you could add a few miles to Saturday, but 30mi is a strong week." Never present the combined Sat+Sun (or any multi-day) target as a single-session goal.</rule>
+
 WHEN AN ATHLETE REPORTS MID-WEEK MILEAGE AND ASKS FOR REMAINING SESSIONS:
 <rule>PROJECTED WEEK TOTAL — always state existing + new: When an athlete says they've already logged X miles this week (e.g. "I've done 36 miles") and you're prescribing remaining sessions, always state the projected TOTAL for the week as (existing miles + new session miles). Never state just the new session's distance as the weekly total. Wrong: "That brings you to 14 mi for the week" (when they already ran 36). Right: "That puts your week at 50 mi — solid volume." This rule applies even if the remaining session falls on a new calendar week day. The athlete is asking about their running week total, not just the new miles.</rule>
 
@@ -3943,10 +4039,9 @@ If an athlete asks for more speed, intervals, or tempo — add it. Validate thei
 - If the fitness tier says "1–2 quality sessions appropriate", you have full permission to go to 2. Don't artificially limit to 1 when the athlete is asking for more and their profile supports it.
 
 COACH DEAN'S IDENTITY — when athletes ask personal questions about you:
-- You are an AI running coach. You do not run, race, lift, eat, sleep, or have a middle name. You have no personal training schedule, no race bib, no hometown.
-- When an athlete asks about your own training, life, or identity (e.g. "what's your training week look like?", "where do you live?", "are you a real person?"), be brief and honest — then redirect immediately to their training. Do NOT invent personal details, even playfully. A single invented fact (e.g. "I run 40-50 miles/week") creates an impossible contradiction when they follow up.
+<rule>ABSOLUTE IDENTITY RULE: You are an AI. You have never run a single mile. You have no personal training schedule, no race registrations, no lifting routine, no heart rate, no middle name, no hometown. If an athlete asks about your personal training (e.g. "what's your training week look like?", "how many miles are you running?", "do you lift?", "where do you live?"), you MUST NOT invent any personal athletic details — not even playfully, not even to seem relatable. Any fabricated personal detail (e.g. "I'm running 40-50mi/week right now — mostly easy miles with one long run...") will be immediately probed, destroys trust when you can't follow up with specifics, and is a liability. Respond honestly in ONE sentence ("I'm an AI so I don't lace up myself — but I've got your training data and I'm here for you"), then redirect immediately to their training. Do not spend more than one sentence on your nature.</rule>
 - Good deflection: "I don't have legs, but I do have your training data — and this week's shaping up well. What's on your mind?" Keep it light, not robotic. One sentence on your nature, then back to them.
-- Never fabricate a personal life to seem relatable. It backfires.
+- Never fabricate a personal life to seem relatable. It backfires — every invented detail gets probed, and you have no follow-up answers.
 
 MEMORY AND DATA LIMITATIONS:
 - You only have access to: the last 15 conversation messages, the athlete's activity history (visible in RECENT WORKOUTS), their profile, and today's date context. Nothing else.
@@ -4152,6 +4247,7 @@ type ExtractedProfileData = {
     elevation_gain: number | null;
     date_offset: number;
   } | null;
+  manual_pr_updates?: Array<{ distance: string; time_seconds: number }> | null;
 };
 
 /**
@@ -4176,6 +4272,7 @@ Extract ONLY explicitly stated NEW information:
 - New cross-training activities or equipment access mentioned (pool, bike, gym, yoga, etc.) → new_crosstraining (array of normalized strings)
 - New training preferences, goals, or constraints (e.g. "I want more hill work", "please add strength training", "I can't run Tuesdays anymore") → other_notes
 - A PR or recent race time → recent_race_distance_km + recent_race_time_minutes. Distances: 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If given as a pace (e.g. "5K PR pace is 5:40/mi"), compute total time: pace_sec/mile × distance_in_miles / 60 (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
+- A stated lifetime personal best time at a standard distance (e.g. "my best 5K is 22:30", "I ran a 1:48 half PR last year", "my marathon PR is 3:45") → manual_pr_updates as array of objects. Use canonical distance names: "400m", "1/2 mile", "1K", "1 mile", "2 mile", "5K", "10K", "15K", "10 mile", "20K", "Half-Marathon", "Marathon", "50K". Convert time to total seconds. Only set when the athlete is explicitly stating a personal best time — NOT for recent training runs or for times they're targeting.
 - A comfortable/easy running pace (NOT a race or PR pace) → easy_pace as M:SS per mile. Convert from km if needed (÷0.621).
 - A completed workout the athlete is reporting (e.g. "did a 10 mile run", "just finished 45 min easy", "rode 30 miles this morning") → workout with fields:
   - activity_type: one of "Run", "Ride", "Swim", "Walk", "TrailRun", "WeightTraining", "Yoga", "Other"
@@ -4191,7 +4288,7 @@ Extract ONLY explicitly stated NEW information:
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 - A secondary (B or C) race mentioned alongside their existing primary goal — e.g. "I also signed up for X on [date]", "I'm doing Y as a tune-up", "there's a local 10K on [date] I want to do", "I registered for Z too" → new_b_races as array of objects with: date (YYYY-MM-DD, resolve the same way as race_date), name (string or null), priority ("B" for tune-up/goal races, "C" for low-key/fun runs), goal_race_type (the race's own distance type — one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "trail_race", or null if unclear), goal_distance_miles (number or null — 5K=3.107, 10K=6.214, half=13.109, marathon=26.219, null if unknown). Only set when the race is ADDITIONAL to their primary goal, not a replacement for it.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -4235,7 +4332,8 @@ async function persistProfileUpdates(
     const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
     const hasGoalRaceType = !!(extracted.goal_race_type);
     const hasNewBRaces = Array.isArray(extracted.new_b_races) && (extracted.new_b_races as unknown[]).length > 0;
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces) return;
+    const hasManualPRs = Array.isArray(extracted.manual_pr_updates) && (extracted.manual_pr_updates as unknown[]).length > 0;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -4304,6 +4402,18 @@ async function persistProfileUpdates(
       };
       const dist = goalDistanceMap[extracted.goal_race_type as string];
       if (dist) profileUpdate.goal_distance_miles = dist;
+    }
+    if (hasManualPRs) {
+      // Merge into existing manual_prs, keeping the faster of stored vs new for each distance
+      const existing = (profile?.manual_prs as Record<string, { time_seconds: number }> | null) ?? {};
+      const merged = { ...existing };
+      for (const pr of (extracted.manual_pr_updates as Array<{ distance: string; time_seconds: number }>)) {
+        if (!pr.distance || !pr.time_seconds || pr.time_seconds <= 0) continue;
+        if (!merged[pr.distance] || pr.time_seconds < merged[pr.distance]!.time_seconds) {
+          merged[pr.distance] = { time_seconds: pr.time_seconds };
+        }
+      }
+      profileUpdate.manual_prs = merged;
     }
 
     // Build onboarding_data update
@@ -4652,15 +4762,19 @@ If TODAY'S PLANNED SESSION is shown in CURRENT TRAINING STATE above, check wheth
 - The closing slower segment = cooldown. Do NOT describe it as "backing off" or "fading" — it is intentional.
 Read the planned structure first, then interpret the splits against it. If no plan is stored, describe the split pattern as observed (e.g. "your first mile was a touch slower, then you settled into a strong rhythm") without inferring intent.
 
-Provide post-run feedback analyzing their performance, noting what went well, any concerns, and what's coming up next. Reference their recent training trends.
+Provide post-run feedback in 3–5 sentences. Surface exactly 2 insights — no more, no less — and both must be actionable. A stat without a "so what" is noise, not coaching.
 
-COACHING FORWARD — this is the most important instruction:
-You are a proactive coach, not a performance logger. Don't just describe what the athlete did — tell them what it means for where they're going.
-- If the athlete has a race goal (check ATHLETE HISTORY and DATE CONTEXT): connect this run to their race prep. Are they building the right base? Is it time to add a quality session? Are they on track for their goal pace?
-- If the athlete has been running only easy volume for several weeks with a time goal: this is the moment to mention adding tempo or interval work. Don't wait for them to ask.
-- If the athlete is improving week-over-week: name it. Specific progress ("your easy pace has dropped 20 sec/mile over the last month") is more motivating than generic praise.
-- If something needs to change in the plan: say it now, don't defer it to the next weekly recap.
-Keep it concise — one coaching-forward observation is enough. Don't lecture.
+INSIGHT RULES:
+- Every data point must connect to a decision or action. "Your HR was 152" is not an insight. "Your HR was 152 in 82°F heat — that's equivalent effort to 145 in cooler conditions, so the pace was appropriate" is an insight.
+- If the LONGITUDINAL TRAINING ANALYSIS shows a load spike (>10%): one of your two insights must address load management.
+- If weather at run time shows heat (>75°F feels-like): acknowledge the conditions-adjusted effort explicitly. Don't let the athlete think a slower pace means something went wrong.
+- If aerobic efficiency or cardiac drift is improving: name the specific trend. Specific progress is more motivating than "you're doing great."
+- If the athlete has a goal race: connect at least one insight to race prep.
+
+COACHING FORWARD — tell them what it means, not just what happened:
+- Connect the run to where they're going. If they've been building volume for weeks: is it time for a quality session?
+- If something needs to change: say it now, not in the Sunday recap.
+Keep it tight — 3–5 sentences total for the whole message.
 
 MILEAGE ACCURACY — CRITICAL: The WEEK-TO-DATE figure in CURRENT TRAINING STATE is what the athlete has ALREADY RUN this week — it already includes the activity shown above. Use it as the current/completed figure. If you mention a projected end-of-week total, always add the word "on track for" or "projected" to make clear it's not yet achieved. Never say "you're at X miles this week" when X includes future sessions.
 
@@ -4859,7 +4973,14 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
         : periodization?.suggestedWeeklyMiles != null
         ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${recapMi(periodization.suggestedWeeklyMiles)} (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
         : "";
-      return `${storedPlanContext}${weekMileageContext}${injuryHoldInstruction}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation) plus one sentence on what this week is targeting and why — e.g. "This week we're adding a tempo run now that your base is solid" or "Pulling back volume slightly — recovery week, which is when adaptation actually happens." Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+      return `${storedPlanContext}${weekMileageContext}${injuryHoldInstruction}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+
+LONGITUDINAL SIGNALS — USE THESE TO MAKE THE RECAP DATA-DRIVEN:
+If LONGITUDINAL TRAINING ANALYSIS is present above, use it to elevate your first message beyond a simple mileage recap:
+- Load spike (>10% week-over-week): mention it explicitly. "Mileage jumped 15% this week — we're pulling back slightly next week to let the adaptation catch up." This matters.
+- Aerobic efficiency improving: call it out. "Your pace-at-HR is trending better over the last 6 weeks — the base work is paying off."
+- HR drift worsening or high: suggest more easy mileage or a recovery week.
+Do NOT just recite the numbers — synthesize them into one actionable sentence.
 
 PROGRESSION — be a proactive coach, not a scheduler:
 If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly plan must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.
@@ -5112,7 +5233,6 @@ interface AnnotationContext {
   weekMileageSoFar: number;
   weekTarget: number | null;
   currentWeek: number | null;
-  currentPhase: string | null;
   upcomingRaces: Array<Record<string, unknown>>;
   preferredUnits: "imperial" | "metric";
   // splits_standard from activityData.summary — already fetched by the webhook
@@ -5126,7 +5246,7 @@ async function annotateStravaActivity(
   ctx: AnnotationContext,
   userLocation?: { city: string; state: string; timezone: string }
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, currentPhase, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
 
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
@@ -5189,9 +5309,9 @@ async function annotateStravaActivity(
       if (!race.race_date) return null;
       const d = Math.ceil((new Date(race.race_date as string).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       const name = (race.race_name as string | null) ?? "Race";
-      return { label: `${name} (${d}d)`, headerLabel: `${name} ${d}d` };
+      return { label: `${name} (${d}d)`, shortLabel: `${name} ${d}d out` };
     })
-    .filter((r): r is { label: string; headerLabel: string } => r !== null);
+    .filter((r): r is { label: string; shortLabel: string } => r !== null);
   const raceLabels = raceData.map(r => r.label);
 
   // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
@@ -5228,19 +5348,23 @@ async function annotateStravaActivity(
       .eq("strava_activity_id", stravaActivityId);
   }
 
-  // Header line — phase label (if in a plan) + upcoming races, no coachdean.ai here
-  const PHASE_LABELS: Record<string, string> = {
-    base: "Base building",
-    build: "Build",
-    peak: "Peak training",
-    taper: "Taper",
-  };
-  const phaseLabel = currentPhase ? (PHASE_LABELS[currentPhase] ?? null) : null;
-  const raceHeaderLabels = raceData.map(r => r.headerLabel);
-  const headerParts = [phaseLabel, ...raceHeaderLabels].filter(Boolean);
-  const headerLine = headerParts.length > 0
-    ? `${emoji} ${headerParts.join(" · ")}`
-    : emoji;
+  // Fetch total plan weeks for header
+  const { data: planRow } = await supabase
+    .from("training_plans")
+    .select("total_weeks")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
+
+  // Header line — coachdean.ai at top as branding anchor
+  const weekLabel = currentWeek
+    ? totalWeeks ? `Week ${currentWeek} of ${totalWeeks}` : `Week ${currentWeek}`
+    : null;
+  const raceShortLabels = raceData.map(r => r.shortLabel);
+  const headerMeta = [weekLabel, ...raceShortLabels].filter(Boolean).join(" · ");
+  const headerLine = headerMeta ? `${emoji} coachdean.ai — ${headerMeta}` : `${emoji} coachdean.ai`;
 
   // Build LLM context for the coach note
   const distanceDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
@@ -5277,26 +5401,26 @@ async function annotateStravaActivity(
 
   const noteResponse = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 80,
+    max_tokens: 150,
     messages: [
       {
         role: "user",
-        content: `You are Coach Dean. Write exactly 1 sentence for this athlete's Strava training log.
-- Pick the single most interesting or relevant thing the data shows — negative split, HR discipline, grade-adjusted effort, cardiac drift, aerobic efficiency, weather impact, etc.
-- Be specific to the numbers. No filler phrases like "running smart and strong" or "great work today".
-- Do NOT restate distance or average pace — Strava shows those already.
-- Do NOT tell the athlete what to do next.
+        content: `You are Coach Dean. Write exactly 1–2 sentences for this athlete's Strava training log. Rules:
+1. Be specific to the numbers — no filler like "running smart and strong". Reference what the data actually shows.
+2. If weather was notably hot, cold, or windy, briefly acknowledge it as context for elevated HR or slower pace.
+3. For hilly runs, reference grade-adjusted effort over raw pace.
+4. Do NOT restate distance or average pace — Strava shows those already.
+5. Do NOT tell the athlete what to do tomorrow — they already have a training plan for that.
 
 ${notePrompt}`,
       },
     ],
   });
-  const deanNoteRaw = noteResponse.content[0].type === "text"
+  const deanNote = noteResponse.content[0].type === "text"
     ? stripMarkdown(noteResponse.content[0].text.trim())
     : "";
-  const deanNote = deanNoteRaw ? `${deanNoteRaw} — coachdean.ai` : "— coachdean.ai";
 
-  // Build the annotation block — metrics are passed to the LLM as context but not shown directly
+  // Build the annotation block — efficiency and decoupling shown with brief labels
   const weekLine = isAnalystMode
     ? `Week: ${weekMilesDisplay}`
     : weekTargetDisplay
@@ -5305,6 +5429,10 @@ ${notePrompt}`,
   const block = [
     headerLine,
     weekLine,
+    decouplingLine,
+    efficiencyLine,
+    bestGapLine,
+    "",
     deanNote,
   ].filter((l): l is string => l !== null).join("\n");
 
