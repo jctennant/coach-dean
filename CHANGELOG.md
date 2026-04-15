@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Reset training_state to week 1 on plan upload
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (dashboard showing "Week 3 of 8" after uploading a new 8-week plan)
+**User feedback:** "I thought I deployed — but I think we just aren't clear with everything on the dashboard and how they should update when a new plan comes in"
+**Root cause:** Uploading a new plan updated `training_plans` (correct `total_weeks = 8`) but left `training_state.current_week` at its old value (3). The dashboard then showed "Week 3 of 8" — wrong plan total, wrong current week. The "which week?" SMS was the only way to update training_state, meaning the web dashboard "Replace plan" path had no fix at all.
+**Fix / Change:** `plan/upload` now resets `training_state` to week 1 (current_week=1, current_phase=base, taper_peak_miles=null, weekly_mileage_target and weekly_plan_sessions from week 1 of the new plan) immediately after saving the plan. For SMS uploads, the "which week?" follow-up adjusts if the user isn't on week 1. For web dashboard uploads, the dashboard shows the correct state immediately on reload.
+**Files changed:** `src/app/api/plan/upload/route.ts`
+
+---
+
+## 2026-04-15 — Fix "next week" date anchoring for plan week sync
+
+**Type:** Bug Fix
+**Reported by:** Jake (dashboard showing Week 3 after user said "start week 1 next week")
+**User feedback:** "it's weird that I'm on week 3 of 8 now (total week count was reset but not current count - I did say I'm moving to the new plan next week, but need to be ultra clear about what this means for the dash)"
+**Root cause:** When a user says "start week 1 next week", both handlePlanWeekSync (webhook) and the coach/respond fallback were anchoring weekly_plan_sessions dates to the CURRENT Monday instead of NEXT Monday. Also, the training_state sync wasn't deployed yet (all fixes in this session were local).
+**Fix / Change:** Both handlePlanWeekSync and the coach/respond fallback now detect "next week" in the user's message and shift the date anchor by +7 days. The <uploaded_plan_next_week> prompt label also distinguishes "starting next week" vs "starting now" so Dean mentions the correct Monday start date.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-15 — Fix "I don't have week 1 specifically" — plan import week sync fallback in coach/respond
 
 **Type:** Bug Fix

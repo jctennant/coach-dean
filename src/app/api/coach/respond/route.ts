@@ -1338,11 +1338,13 @@ Use this data to:
   // the user's reply (last assistant msg is still "plan_import_week_ask"), detect the
   // requested week here and override uploadedNextWeek so Dean sees the right sessions.
   let planWeekSyncNum: number | null = null;
+  let planWeekSyncNextWeek = false; // user said "next week" — shift date anchor by +7
   if (isUploadedPlan && trigger === "user_message" && uploadedPlanAllWeeks.length > 0) {
     const lastAssistantMsg = [...recentMessages].reverse().find(m => m.role === "assistant");
     if (lastAssistantMsg?.message_type === "plan_import_week_ask") {
       const latestUserContent = [...recentMessages].reverse().find(m => m.role === "user")?.content ?? "";
       planWeekSyncNum = extractPlanWeekNumber(latestUserContent, uploadedPlanAllWeeks.length);
+      planWeekSyncNextWeek = /\bnext week\b/i.test(latestUserContent);
       if (planWeekSyncNum !== null) {
         uploadedNextWeek = uploadedPlanAllWeeks.find(w => w.week_number === planWeekSyncNum) ?? null;
       }
@@ -1496,7 +1498,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       })
       .join("\n");
     const weekLabel = planWeekSyncNum !== null
-      ? `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount} (athlete is starting this week now):\nThe athlete just confirmed they are starting week ${nextWeekNum}. Acknowledge you have the plan and these sessions, and briefly describe what week ${nextWeekNum} looks like.`
+      ? `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount} (athlete is starting ${planWeekSyncNextWeek ? "next week" : "now"}):\nThe athlete just confirmed they are starting week ${nextWeekNum}${planWeekSyncNextWeek ? " next week" : ""}. Acknowledge you have the plan and these sessions, and briefly describe what week ${nextWeekNum} looks like. ${planWeekSyncNextWeek ? "Mention the start date (next Monday)." : ""}`
       : `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount}:\nThe athlete is following an external training plan. These are the prescribed sessions for next week. Use these as the plan — don't replace them with different sessions. You may suggest working within the low end of any ranges if the athlete had a hard week, or the high end if they're feeling strong.`;
     userMessage += `\n\n<uploaded_plan_next_week>
 ${weekLabel}
@@ -1833,7 +1835,7 @@ Weekly total: ${mileageRange}
     const syncNow = new Date();
     const daysFromMonday = syncNow.getDay() === 0 ? 6 : syncNow.getDay() - 1;
     const syncMonday = new Date(syncNow);
-    syncMonday.setDate(syncNow.getDate() - daysFromMonday);
+    syncMonday.setDate(syncNow.getDate() - daysFromMonday + (planWeekSyncNextWeek ? 7 : 0));
 
     const syncSessions = uploadedNextWeek.sessions
       .filter(s => s.type !== "off")

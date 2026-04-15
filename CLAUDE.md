@@ -19,7 +19,7 @@ Crons → POST /api/coach/respond (various triggers)
 | File | Purpose |
 |---|---|
 | `src/app/api/coach/respond/route.ts` | Core coaching engine — all triggers, Claude calls, SMS send |
-| `src/app/api/onboarding/handle/route.ts` | Multi-step onboarding flow with Claude extractions |
+| `src/app/api/onboarding/handle/route.ts` | Unified onboarding conversation — Sonnet drives dialogue, Haiku extracts fields, [READY] completes |
 | `src/app/api/webhooks/strava/route.ts` | Strava activity events → stores activity → fires coach/respond |
 | `src/app/api/webhooks/linq/route.ts` | Inbound SMS routing |
 | `src/app/api/auth/strava/callback/route.ts` | Strava OAuth, activity import, welcome SMS |
@@ -56,11 +56,36 @@ Crons → POST /api/coach/respond (various triggers)
 | `user_message` | Inbound SMS from onboarded user |
 | `workout_image` | Image upload path |
 
-## Onboarding steps (onboarding_step column)
+## Onboarding states (onboarding_step column)
 
-`awaiting_goal` → `awaiting_race_date` → `awaiting_schedule` → [`awaiting_ultra_background`] → [`awaiting_injury_background`] → `awaiting_anything_else` → `awaiting_cadence` → `null` (complete)
+The old discrete step flow is gone. Onboarding is now a **unified conversation** driven by a single Claude (Sonnet) call per message.
 
-`awaiting_strava` is a separate step handled by the Strava connect button, not by onboarding/handle. The OAuth callback advances the user from `awaiting_strava` → `awaiting_schedule`.
+| State | What it does |
+|---|---|
+| `"onboarding"` | Main state — Claude conversation collects everything naturally, signals [READY] when done |
+| `"awaiting_strava"` | Pause state — conversation halts while user connects Strava or replies "skip" |
+| `"awaiting_timezone"` | Post-plan — non-Strava users asked for city/state so reminders fire at correct local time |
+| `"awaiting_payment"` | Billing gate — user receives trial checkout link; plan accessible after signup |
+| `"awaiting_cadence"` | **Legacy** — immediately graduates user to `null` with `nightly_reminders` default |
+| `null` | Onboarding complete |
+
+**What Dean collects in the unified conversation (rough order):**
+1. Name
+2. Goal (specific race/event or general fitness)
+3. Strava (asked after name + goal — before any manual fitness data)
+4. Training tools currently in use (Runna, TrainingPeaks, Garmin, self-directed, etc.)
+5. Road / trail / mixed terrain
+6. Existing training plan (yes/no — if yes, Dean works alongside it)
+7. Training days (specific days of week, not just count)
+8. Race date (web_search required for any named race — never state from memory)
+9. Fitness baseline: recent race PR, easy pace, or Strava covers it automatically
+10. Current weekly mileage (only if Strava not connected)
+11. Weekly recap preference (asked naturally before signaling [READY])
+12. *(Ultra goals only)* Ultra/trail race background + injuries
+13. *(return_to_running / injury_recovery only)* Injury details + current status
+14. *(Short races: mile / 5k / 10k only)* Goal finish time
+
+When all required fields are collected, Claude appends `[READY]` to its final message. The system strips the tag, stores the data, and fires the `initial_plan` trigger (or sends a complement-mode welcome for users with existing plans).
 
 ## Patterns to know
 

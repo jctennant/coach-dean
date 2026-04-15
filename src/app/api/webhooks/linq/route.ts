@@ -735,10 +735,13 @@ async function handlePlanWeekSync(
   };
   const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+  // Detect "next week" intent — shift date anchor to next Monday so session dates are correct
+  const isNextWeek = /\bnext week\b/i.test(message);
+
   const now = new Date();
   const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
   const monday = new Date(now);
-  monday.setDate(now.getDate() - daysFromMonday);
+  monday.setDate(now.getDate() - daysFromMonday + (isNextWeek ? 7 : 0));
 
   const weekSessions = targetWeek.sessions
     .filter(s => s.type !== "off")

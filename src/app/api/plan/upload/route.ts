@@ -137,6 +137,47 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Failed to save plan" }, { status: 500 });
     }
 
+    // Reset training_state to week 1 so the dashboard immediately reflects the new plan.
+    // For SMS uploads: the "which week?" follow-up will adjust if the user isn't on week 1.
+    // For web dashboard uploads: this gives correct state without a follow-up question.
+    const week1 = weeks.find(w => w.week_number === 1);
+    if (week1) {
+      const DAY_OFFSETS: Record<string, number> = {
+        monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
+      };
+      const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      const now = new Date();
+      const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
+      const thisMonday = new Date(now);
+      thisMonday.setDate(now.getDate() - daysFromMonday);
+
+      const week1Sessions = week1.sessions
+        .filter(s => s.type !== "off")
+        .map(s => {
+          const offset = DAY_OFFSETS[s.dayOfWeek.toLowerCase()] ?? 0;
+          const d = new Date(thisMonday);
+          d.setDate(thisMonday.getDate() + offset);
+          const distPart = s.targetDistanceMiles ? ` ${s.targetDistanceMiles}mi` : "";
+          const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
+          return {
+            day: DAY_SHORT[offset],
+            date: `${d.getMonth() + 1}/${d.getDate()}`,
+            label: `${s.description}${distPart}${pacePart}`,
+            optional: false,
+          };
+        });
+
+      await supabase.from("training_state").upsert({
+        user_id: userId,
+        current_week: 1,
+        current_phase: "base",
+        taper_peak_miles: null,
+        weekly_mileage_target: week1.total_miles || null,
+        weekly_plan_sessions: week1Sessions as unknown as import("@/lib/database.types").Json,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+    }
+
     // Update training_profiles to reflect that user has an existing plan
     await supabase.from("training_profiles")
       .update({ updated_at: new Date().toISOString() })
