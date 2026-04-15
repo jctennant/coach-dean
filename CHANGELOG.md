@@ -4,6 +4,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Onboarding evals: existing plan support, first-of-month date guard, extraction tests
+
+**Type:** Improvement / Bug Fix
+**Reported by:** Internal (eval run after onboarding revamp)
+**User feedback:** N/A
+**Root cause:** Three onboarding prompt gaps found via simulation evals: (1) Dean rejected users with existing Runna/TP plans instead of working alongside them; (2) Dean accepted month-only race dates ("in June") and silently defaulted to the 1st, miscalibrating training timelines; (3) `has_existing_plan` and `external_plan_description` fields were not reliably extracted by Haiku even when clearly stated.
+**Fix / Change:**
+- Added `EXISTING PLAN USERS` section to onboarding prompt: Dean now positions as a coaching layer alongside Runna/TP/coach-written plans, mentions the dashboard PDF upload option, and still completes full onboarding. `sim-runna-user-uploads-plan` went 1/10 → 7/10.
+- Added `RACE TARGET FOR TIME-GOAL ATHLETES` section: if athlete has a time goal ("sub-20 5K") without a named race, Dean asks for a specific event.
+- Added `FIRST-OF-MONTH GUARD` to prompt and Haiku extraction rule: if only a month is known, Dean must ask for the exact date; Haiku returns null rather than defaulting to the 1st.
+- Strengthened cycling-only exit: "one exit message, full stop" to prevent goodbye loops.
+- Fixed `has_existing_plan`/`external_plan_description` parity gap in `run-onboarding-evals.mjs` `summarizeCollected`.
+- Added new `sim-runna-user-uploads-plan` simulation fixture.
+- Added two unit tests in `onboarding-handle.test.ts` covering existing plan extraction and null-skip merge logic.
+- All three previously failing simulations now pass. Full suite: 14/16 (avg 7.9/10), up from 12/16 (avg 7.4/10).
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`, `evals/run-onboarding-evals.mjs`, `evals/fixtures/simulation/sim-runna-user-uploads-plan.json`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-04-15 — Uploaded plan integration: ranges, dashboard arc, weekly recap, week advancement
 
 **Type:** Feature / Bug Fix

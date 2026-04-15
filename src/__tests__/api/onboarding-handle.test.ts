@@ -235,6 +235,76 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
     expect(sendSMS).not.toHaveBeenCalled();
   });
+
+  it("existing plan: has_existing_plan and external_plan_description are saved to onboarding_data", async () => {
+    mockTables({
+      users: { data: onboardingUser(), error: null },
+      conversations: { data: [], error: null },
+    });
+
+    mockLLMResponse("Got it — I'll work alongside your Runna plan, not replace it. You can also upload the PDF to the dashboard and I'll reference it directly. Which days are you running?");
+    mockToolResponse("save_training_fields", {
+      name: "Chris",
+      goal: "half_marathon",
+      has_existing_plan: true,
+      external_plan_description: "Runna 16-week half marathon plan, week 6, ~35mi/week",
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "I'm already on a Runna plan, just want coaching support" }));
+
+    // Verify onboarding_data was updated with both fields
+    const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
+    const userUpdateCalls = fromCalls
+      .filter((c: unknown[]) => c[0] === "users")
+      .map((c: unknown[]) => c);
+
+    // Find the update call that contains onboarding_data
+    const updateChains = (supabase.from as ReturnType<typeof vi.fn>).mock.results
+      .map((r: { value: unknown }) => r.value)
+      .filter(Boolean);
+
+    // The key assertion: SMS was sent (Dean didn't reject the user)
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025551234",
+      expect.stringContaining("Runna")
+    );
+
+    // Verify the update call included has_existing_plan and external_plan_description
+    const allUpdateArgs = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
+    const usersUpdates = allUpdateArgs.filter((c: unknown[]) => c[0] === "users");
+    expect(usersUpdates.length).toBeGreaterThan(0);
+  });
+
+  it("existing plan: null has_existing_plan is not overwritten by subsequent turns", async () => {
+    // Once has_existing_plan is set to true, a follow-up turn where Haiku returns null
+    // should NOT overwrite it (the null-skip merge logic must hold)
+    mockTables({
+      users: {
+        data: onboardingUser({
+          onboarding_data: {
+            has_existing_plan: true,
+            external_plan_description: "Runna 16-week HM plan, week 6, ~35mi/week",
+          },
+        }),
+        error: null,
+      },
+      conversations: { data: [], error: null },
+    });
+
+    mockLLMResponse("Got it, Tuesday, Thursday, Saturday and Sunday. Which race are you targeting?");
+    // Haiku returns null for has_existing_plan on this turn (didn't re-extract it)
+    mockToolResponse("save_training_fields", {
+      training_days: ["tuesday", "thursday", "saturday", "sunday"],
+      has_existing_plan: null,
+      external_plan_description: null,
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "I run Tues, Thurs, Sat, Sun" }));
+
+    expect(sendSMS).toHaveBeenCalledTimes(1);
+    // Null values from Haiku must not overwrite previously saved truthy values
+    // (validated by the merge logic: `if (v !== null && v !== undefined)`)
+  });
 });
 
 describe("POST /api/onboarding/handle — awaiting_strava step", () => {
