@@ -205,16 +205,24 @@ async function handleConversation(
 
 ` : ""}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
 
+Your positioning: "Runna plans your runs. Garmin tracks them. Dean explains them — and tells you what to do next." You are the connective tissue between their existing training setup and real insight. You are NOT replacing their plan — you're the intelligence layer on top of it.
+
 Your job: collect the information below through natural conversation, then signal you're ready with [READY].
 
 WHAT TO COLLECT:
 Required before signaling [READY]:
 - Athlete's name (ask in your first message if not already known)
+- What training tools they currently use: Runna, TrainingPeaks, Garmin, self-directed, other. Ask naturally: "What are you using to plan your training right now?" This shapes how Dean positions his value — a Runna user gets complement messaging, a self-directed user may want plan help.
+- Do they primarily run road, trail, or mixed terrain? This affects pace interpretation throughout coaching.
 - Training goal (specific race/event name and type, or general fitness). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
+- Do they have an existing training plan they're following? (yes/no). If yes: ask if they want to share it (text description or upload to the dashboard later). If no: offer to build one if they're self-directed.
 - Training schedule (which days of the week work best)
 - Race date (if they have a named race — MANDATORY: always web_search the exact date, never state one from memory)
 - Fitness baseline: a recent race PR, current easy pace, OR Strava is connected
 - Current weekly mileage — REQUIRED if Strava is not connected AND not already shown in the STRAVA context above. If Strava is connected and shows "Recent avg: ~X mi/week", that IS the mileage baseline — do NOT ask "are you currently running" or "how many miles per week." That data is already known. Only ask if Strava is not connected or shows no weekly mileage. Ask directly: "How many miles are you running per week right now?" or "Are you currently running, and if so, about how many miles per week?" If they say they're not running yet or just starting out, that is also useful — record as 0. Do not skip this even if you have their pace — mileage and pace are independent.
+
+Ask before signaling [READY] (work it in naturally):
+- Do they want a weekly recap text? One question: "Want me to send you a weekly recap on Sundays — mileage, what went well, what to watch for next week?" Keep it brief.
 
 Required ONLY for ultra goals (30k, 50k, 50mi, 100k, 100mi) — must collect before [READY]:
 - Ultra and trail race background: how many ultras have they done? Any trail races? This is essential for planning.
@@ -227,7 +235,7 @@ Required for short races (mile, 5k, 10k) — pacing depends entirely on goal tim
 - Goal finish time or pace (e.g. "sub 5 minute mile", "under 22 minutes for 5K"). Ask directly after you have their goal type confirmed. This is essential for calibrating interval and tempo paces.
 
 Ask before signaling [READY] for any goal (work it in naturally, not as a separate interrogation):
-- "Anything I should know before I build your plan — like injuries to work around or training preferences?" Examples to surface if not mentioned: injury history, areas to protect, surface/terrain preferences, things they hate (e.g. treadmills, track), or anything else relevant to the plan. Keep it open-ended. One short question.
+- "Anything I should know — like injuries to work around or training preferences?" Examples to surface if not mentioned: injury history, areas to protect, things they hate (e.g. treadmills, track), or anything else relevant. Keep it open-ended. One short question.
 
 Optional (only collect if it comes up naturally):
 - Goal finish time for longer races (half marathon, marathon, trail)
@@ -249,7 +257,7 @@ INSTRUCTIONS:
 - Day ranges: if the athlete says "X through Y" or "X-Y" (e.g. "Tues-Thursday", "Mon to Wed"), interpret this as ALL days in that range, inclusive. "Tues-Thursday" means Tuesday, Wednesday, AND Thursday — not just Tuesday and Thursday.
 
 ${isFirstResponse
-  ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences (AI running coach, builds personalized plans, tracks runs via Strava, checks in over text), then ask for their name. Keep it punchy, not salesy."
+  ? "- This is your FIRST message to this athlete. Introduce yourself in 1–2 sentences — something like: \"I'm Coach Dean, your AI running coach. Runna plans your runs, Garmin tracks them — I explain them and tell you what to do next. I check in over SMS after every run.\" Then ask for their name. Keep it punchy, not salesy. Do NOT say you build training plans by default — your value is analysis and insight on top of their existing setup."
   : ""}
 
 STRAVA:
@@ -518,6 +526,12 @@ function summarizeCollected(data: Record<string, unknown>): string {
     lines.push(`Training days: ${(data.training_days as string[]).join(", ")}`);
   }
   if (data.days_per_week) lines.push(`Days per week: ${data.days_per_week}`);
+  if (Array.isArray(data.training_tools) && (data.training_tools as string[]).length > 0) {
+    lines.push(`Training tools: ${(data.training_tools as string[]).join(", ")}`);
+  }
+  if (data.terrain_type) lines.push(`Terrain: ${data.terrain_type}`);
+  if (data.has_existing_plan != null) lines.push(`Has existing plan: ${data.has_existing_plan ? "yes" : "no"}`);
+  if (data.wants_weekly_recap != null) lines.push(`Wants weekly recap: ${data.wants_weekly_recap ? "yes" : "no"}`);
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
   if (data.easy_pace) {
     const range = easyPaceRange(data.easy_pace as string);
@@ -576,6 +590,10 @@ Rules:
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
 - strava_skipped: true if athlete says they don't have or won't use Strava. Null otherwise.
 - wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.
+- training_tools: array of tools mentioned (lowercase: 'runna', 'trainingpeaks', 'garmin', 'self_directed', 'other'). Null if not mentioned.
+- terrain_type: 'road', 'trail', or 'mixed' based on what athlete says. Null if not mentioned.
+- has_existing_plan: true if athlete says they currently follow a training plan (Runna, TP, coach-written, etc.). False if they say they don't have one or are self-directed without a plan. Null if not mentioned.
+- wants_weekly_recap: true if athlete says yes to weekly recap texts. False if they decline. Null if not asked yet.
 - other_notes: any training preferences, dislikes, or context not captured elsewhere (e.g. "loves hills", "hates treadmills", "prefers morning runs", "wants more cross-training"). Do not duplicate what's in injury_notes.`,
     messages: [{ role: "user", content: transcript }],
     tools: [{
@@ -623,6 +641,16 @@ Rules:
           timezone: { type: ["string", "null"] },
           strava_skipped: { type: ["boolean", "null"] },
           wants_speed_work: { type: ["boolean", "null"] },
+          training_tools: {
+            oneOf: [
+              { type: "array", items: { type: "string" } },
+              { type: "null" },
+            ],
+            description: "Tools the athlete uses: 'runna', 'trainingpeaks', 'garmin', 'self_directed', 'other', etc."
+          },
+          terrain_type: { type: ["string", "null"], enum: ["road", "trail", "mixed", null], description: "Primary running terrain" },
+          has_existing_plan: { type: ["boolean", "null"], description: "True if athlete currently follows a training plan (Runna, TP, etc.)" },
+          wants_weekly_recap: { type: ["boolean", "null"], description: "True if athlete wants weekly recap SMS" },
           other_notes: { type: ["string", "null"] },
         },
         required: [],
@@ -1004,6 +1032,11 @@ async function completeOnboarding(
   const longRun =
     currentLongRunMiles ?? (isUltra ? Math.max(longRunRaw, 10) : longRunRaw);
 
+  const trainingTools = (data.training_tools as string[] | null) || [];
+  const terrainType = (data.terrain_type as string | null) || null;
+  const hasExistingPlan = (data.has_existing_plan as boolean | null) ?? null;
+  const wantsWeeklyRecap = (data.wants_weekly_recap as boolean | null) ?? true; // default on
+
   const [profileResult, stateResult] = await Promise.all([
     supabase.from("training_profiles").upsert(
       {
@@ -1017,7 +1050,9 @@ async function completeOnboarding(
         current_tempo_pace: tempoPace,
         current_interval_pace: intervalPace,
         crosstraining_tools: crosstrain,
-        proactive_cadence: "weekly_only",
+        training_tools: trainingTools,
+        terrain_type: terrainType,
+        proactive_cadence: wantsWeeklyRecap ? "weekly_only" : "none",
         injury_notes: injuryNotes,
         goal_distance_miles: goalDistanceMiles,
         updated_at: new Date().toISOString(),
@@ -1145,6 +1180,25 @@ async function completeOnboarding(
 
   if (opts?.skipInitialPlan) {
     void trackEvent(user.id, "onboarding_completed", { goal, plan_skipped: true });
+    return;
+  }
+
+  // For users with an existing plan (Runna, TP, etc.), skip Dean's plan generation.
+  // Instead, send a welcome message explaining what Dean will now do for them.
+  if (hasExistingPlan === true) {
+    void trackEvent(user.id, "onboarding_completed", { goal, mode: "complement" });
+    const firstName = (name ?? "").split(" ")[0] || "Hey";
+    const { data: billingUserPhone } = await supabase
+      .from("users")
+      .select("phone_number")
+      .eq("id", user.id)
+      .single();
+    const phone = billingUserPhone?.phone_number as string;
+    const raceCtx = data.race_name
+      ? ` I can see you're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every analysis.`
+      : "";
+    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a detailed debrief — how the effort compares to what you planned, what the conditions added, and what it means for the week ahead. Text me anytime with questions. Let's go.`;
+    await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
     return;
   }
 

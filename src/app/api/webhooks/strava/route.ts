@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getActivity } from "@/lib/strava";
+import { fetchActivityWeatherByCoords } from "@/lib/weather";
 
 /**
  * GET /api/webhooks/strava
@@ -103,6 +104,14 @@ async function processStravaEvent(body: {
       const paceSec = totalPaceSec % 60;
       const averagePace = `${paceMin}:${paceSec.toString().padStart(2, "0")}/mi`;
 
+      // Extract GPS coordinates from Strava if available (used for historical weather fetch).
+      const startLat: number | null = Array.isArray(activity.start_latlng) && activity.start_latlng.length >= 2
+        ? activity.start_latlng[0]
+        : null;
+      const startLng: number | null = Array.isArray(activity.start_latlng) && activity.start_latlng.length >= 2
+        ? activity.start_latlng[1]
+        : null;
+
       // Store (or update) the activity
       await supabase.from("activities").upsert(
         {
@@ -121,7 +130,12 @@ async function processStravaEvent(body: {
           suffer_score: activity.suffer_score || null,
           gear_id: activity.gear?.id || null,
           gear_name: activity.gear?.name || null,
+          activity_name: activity.name || null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          best_efforts: (activity.best_efforts?.length ? activity.best_efforts : null) as any,
           start_date: activity.start_date,
+          start_lat: startLat,
+          start_lng: startLng,
           summary: {
             // Use splits_standard (per-mile splits). Both splits_standard and splits_metric
             // return elevation_difference in meters and average_speed in m/s — the units are
@@ -133,6 +147,29 @@ async function processStravaEvent(body: {
         },
         { onConflict: "strava_activity_id" }
       );
+
+      // Fetch and store historical weather for this activity.
+      // Done before firing the coaching trigger so the coach prompt can include
+      // weather-adjusted effort context in the post_run debrief.
+      if (isNew && startLat !== null && startLng !== null) {
+        try {
+          const weatherData = await fetchActivityWeatherByCoords(startLat, startLng, activity.start_date);
+          if (weatherData) {
+            await supabase
+              .from("activities")
+              .update({
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              weather_data: weatherData as any,
+                weather_fetched_at: new Date().toISOString(),
+              })
+              .eq("strava_activity_id", activity.id);
+            console.log(`[strava-webhook] weather stored for activity ${activity.id}: ${weatherData.temp_c}°C, ${weatherData.condition}`);
+          }
+        } catch (weatherErr) {
+          // Weather is best-effort — never block coaching on a weather API failure
+          console.warn("[strava-webhook] weather fetch failed (non-fatal):", weatherErr);
+        }
+      }
 
       // Remove any manual/conversation activity for the same user, date, and
       // similar distance — the Strava record is richer and should take precedence.

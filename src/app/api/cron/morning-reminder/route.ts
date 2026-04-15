@@ -26,6 +26,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Disabled in v2.0 — morning reminders replaced by reactive post-run analysis.
+  // Preserved for potential reactivation. Remove this block to re-enable.
+  // Cast to boolean so TypeScript doesn't treat the rest of the function as dead code.
+  if (true as boolean) return NextResponse.json({ ok: true, sent: 0, disabled: true });
+
   const { data: profiles, error } = await supabase
     .from("training_profiles")
     .select("user_id, training_days, this_week_override_days, this_week_override_expires, last_morning_reminder_date, skip_dates, users!inner(timezone, onboarding_step, messaging_opted_out, strava_access_token)")
