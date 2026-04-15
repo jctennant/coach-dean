@@ -484,3 +484,138 @@ describe("predictRaceTime — edge cases", () => {
     expect(pred.predictedMinutes).toBeLessThanOrEqual(pred.highMinutes);
   });
 });
+
+// ─── Mountain subtype (no course record) ─────────────────────────────────────
+
+describe("predictRaceTime — mountain subtype (VDOT fallback)", () => {
+  it("mountain subtype adds ~65% penalty to base time", () => {
+    const road     = predictRaceTime(makeInput({ goalDistanceMiles: 5.5, terrainType: "road" }))!;
+    const mountain = predictRaceTime(makeInput({ goalDistanceMiles: 5.5, terrainType: "trail", trailSubtype: "mountain" }))!;
+    // Mountain penalty is ~65% of base. Both predictedMinutes are Math.round'd, so allow ±2 min tolerance.
+    const expected = road.predictedMinutes * 0.65;
+    const actual   = mountain.predictedMinutes - road.predictedMinutes;
+    expect(actual).toBeGreaterThanOrEqual(expected - 2);
+    expect(actual).toBeLessThanOrEqual(expected + 2);
+  });
+
+  it("mountain is slower than highly_technical (65% vs 35% penalty)", () => {
+    const ht       = predictRaceTime(makeInput({ goalDistanceMiles: 5.5, terrainType: "trail", trailSubtype: "highly_technical" }))!;
+    const mountain = predictRaceTime(makeInput({ goalDistanceMiles: 5.5, terrainType: "trail", trailSubtype: "mountain" }))!;
+    expect(mountain.predictedMinutes).toBeGreaterThan(ht.predictedMinutes);
+  });
+
+  it("caveat mentions 'no course record' for mountain without course record", () => {
+    const pred = predictRaceTime(makeInput({ goalDistanceMiles: 5.5, terrainType: "trail", trailSubtype: "mountain" }))!;
+    expect(pred.caveat).toContain("No course record");
+  });
+
+  it("low <= predicted <= high for mountain VDOT path", () => {
+    const pred = predictRaceTime(makeInput({
+      goalDistanceMiles: 5.5,
+      terrainType: "trail",
+      trailSubtype: "mountain",
+      elevationGainFeet: 3000,
+      raceAltitudeFt: 9000,
+    }))!;
+    expect(pred.lowMinutes).toBeLessThanOrEqual(pred.predictedMinutes);
+    expect(pred.predictedMinutes).toBeLessThanOrEqual(pred.highMinutes);
+  });
+});
+
+// ─── Course record projection ─────────────────────────────────────────────────
+
+describe("predictRaceTime — course record projection", () => {
+  // Cirque Snowbird-style: ~5.5mi mountain race, course record 82min
+  const crInput = (vdotActivities: typeof race5K[] = [race5K]) =>
+    makeInput({ goalDistanceMiles: 5.5, terrainType: "trail", trailSubtype: "mountain", courseRecordMinutes: 82 }, vdotActivities);
+
+  it("uses course record path and labels sourceLabel as 'Based on course record'", () => {
+    const pred = predictRaceTime(crInput())!;
+    expect(pred.sourceLabel).toBe("Based on course record");
+  });
+
+  it("projected time is substantially slower than course record", () => {
+    // VDOT ~62 (from race5K 17:30) → multiplier ~1.22 → ~100 min
+    const pred = predictRaceTime(crInput())!;
+    expect(pred.predictedMinutes).toBeGreaterThan(82); // always slower than CR
+    expect(pred.predictedMinutes).toBeGreaterThan(90); // significantly slower
+  });
+
+  it("course record projection does NOT add separate terrain penalty factor", () => {
+    const pred = predictRaceTime(crInput())!;
+    // Terrain penalty is baked into the CR multiplier — no "+X% trail penalty" factor
+    expect(pred.factors.every(f => !f.includes("trail penalty"))).toBe(true);
+  });
+
+  it("factors include '% back from course record' narrative", () => {
+    const pred = predictRaceTime(crInput())!;
+    expect(pred.factors.some(f => f.includes("% back"))).toBe(true);
+    expect(pred.factors.some(f => f.includes("Course record"))).toBe(true);
+  });
+
+  it("lower VDOT gives larger multiplier (slower projected time)", () => {
+    // race5K VDOT ~62 vs longRun VDOT ~low 40s (rough estimate from long run)
+    const highVdotPred = predictRaceTime(crInput([race5K]))!;
+    const lowVdotPred  = predictRaceTime(crInput([longRun]))!;
+    expect(lowVdotPred.predictedMinutes).toBeGreaterThan(highVdotPred.predictedMinutes);
+  });
+
+  it("heat penalty still applies on top of course record projection", () => {
+    const cool = predictRaceTime(crInput())!;
+    const hot  = predictRaceTime({
+      activities: [race5K],
+      goalDistanceMiles: 5.5,
+      terrainType: "trail",
+      trailSubtype: "mountain",
+      courseRecordMinutes: 82,
+      expectedTempF: 90,
+    })!;
+    expect(hot.predictedMinutes).toBeGreaterThan(cool.predictedMinutes);
+  });
+
+  it("altitude penalty still applies on top of course record projection", () => {
+    const lowAlt  = predictRaceTime(crInput())!;
+    const highAlt = predictRaceTime({
+      activities: [race5K],
+      goalDistanceMiles: 5.5,
+      terrainType: "trail",
+      trailSubtype: "mountain",
+      courseRecordMinutes: 82,
+      raceAltitudeFt: 9000,
+    })!;
+    expect(highAlt.predictedMinutes).toBeGreaterThan(lowAlt.predictedMinutes);
+  });
+
+  it("course record path works for highly_technical subtype", () => {
+    const pred = predictRaceTime(makeInput({
+      goalDistanceMiles: 13.1,
+      terrainType: "trail",
+      trailSubtype: "highly_technical",
+      courseRecordMinutes: 150,
+    }))!;
+    expect(pred.sourceLabel).toBe("Based on course record");
+    expect(pred.predictedMinutes).toBeGreaterThan(150);
+  });
+
+  it("low <= predicted <= high for course record path", () => {
+    const pred = predictRaceTime(crInput())!;
+    expect(pred.lowMinutes).toBeLessThanOrEqual(pred.predictedMinutes);
+    expect(pred.predictedMinutes).toBeLessThanOrEqual(pred.highMinutes);
+  });
+
+  it("does NOT use course record projection for road terrain", () => {
+    // Course record provided but terrain is road — should use VDOT path
+    const pred = predictRaceTime(makeInput({
+      goalDistanceMiles: 13.1,
+      terrainType: "road",
+      courseRecordMinutes: 60,
+    }))!;
+    expect(pred.sourceLabel).not.toBe("Based on course record");
+  });
+
+  it("narrative references the course record time and % back", () => {
+    const pred = predictRaceTime(crInput())!;
+    expect(pred.narrative).toContain("Course record");
+    expect(pred.narrative).toContain("% back");
+  });
+});

@@ -5,6 +5,7 @@
  */
 
 import { parseKeyWorkoutMiles } from "@/lib/parse-key-workout-miles";
+import { PlanImportForm } from "./plan-import-form";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ export type PlanTabProps = {
   raceDate: string | null;
   raceDays: number | null;
   hasPlan: boolean;
+  userId: string;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -301,18 +303,19 @@ export function PlanTab({
   weeklyPlanSessions, planCreatedDateStr, trainingDays, overrideDays,
   isOverrideActive, actualMilesByWeek, week1Monday: week1MondayStr,
   allRaceWeekNums, todayDayIdx, upcomingRaces, useMetric, goalLabel,
-  raceDate, raceDays, hasPlan,
+  raceDate, raceDays, hasPlan, userId,
 }: PlanTabProps) {
   const distUnit = useMetric ? "km" : "mi";
   const week1Monday = new Date(week1MondayStr + "T00:00:00Z");
 
   if (!hasPlan) {
     return (
-      <div className="rounded-xl border border-gray-100 bg-white p-8 text-center shadow-sm">
+      <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
         <p className="text-sm font-semibold text-gray-700">No training plan yet</p>
         <p className="mt-1 text-xs text-gray-400">
-          Text Dean to get a personalized plan, or describe your current plan and he&apos;ll track it.
+          Text Dean to get a personalized plan, or import your current plan below.
         </p>
+        <PlanImportForm userId={userId} />
       </div>
     );
   }

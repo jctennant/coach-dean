@@ -52,6 +52,7 @@ type Race = {
   elevation_loss_feet: number | null;
   race_altitude_ft: number | null;
   trail_subtype: string | null;
+  course_record_minutes: number | null;
 };
 
 type ConversationRow = {
@@ -971,7 +972,7 @@ export default async function DashboardPage({
       .limit(12),
     supabase
       .from("races")
-      .select("id, race_name, race_date, priority, goal_distance_miles, goal_time_minutes, goal, elevation_gain_feet, elevation_loss_feet, race_altitude_ft, trail_subtype")
+      .select("id, race_name, race_date, priority, goal_distance_miles, goal_time_minutes, goal, elevation_gain_feet, elevation_loss_feet, race_altitude_ft, trail_subtype, course_record_minutes")
       .eq("user_id", user.id)
       .gte("race_date", new Date().toISOString().split("T")[0]!)
       .order("race_date", { ascending: true })
@@ -1146,7 +1147,8 @@ export default async function DashboardPage({
       elevationGainFeet: race.elevation_gain_feet ?? undefined,
       elevationLossFeet: race.elevation_loss_feet ?? undefined,
       raceAltitudeFt: race.race_altitude_ft ?? undefined,
-      trailSubtype: (race.trail_subtype as "groomed" | "mixed" | "technical" | "highly_technical" | null) ?? undefined,
+      trailSubtype: (race.trail_subtype as "groomed" | "mixed" | "technical" | "highly_technical" | "mountain" | null) ?? undefined,
+      courseRecordMinutes: race.course_record_minutes ?? undefined,
     });
   });
 
@@ -1361,6 +1363,7 @@ export default async function DashboardPage({
                 raceDate={planRaceDate}
                 raceDays={planRaceDays}
                 hasPlan={planWeeks.length > 0}
+                userId={user.id}
               />
             }
             overview={<div className="space-y-4">
@@ -1485,6 +1488,9 @@ export default async function DashboardPage({
                               {pred.predictedFormatted}
                             </p>
                             <p className="text-[10px] text-gray-400">{pred.rangeLabel ?? "Likely finish window"}: {pred.rangeFormatted}</p>
+                            {race.course_record_minutes && (
+                              <p className="text-[10px] text-gray-400 mt-0.5">CR: {formatTime(race.course_record_minutes)}</p>
+                            )}
                           </div>
                           <div>
                             <p className="text-[10px] uppercase tracking-wide text-gray-400">Based on</p>

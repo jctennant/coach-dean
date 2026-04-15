@@ -64,6 +64,13 @@ function summarizeCollected(data) {
     lines.push(`Training days: ${data.training_days.join(", ")}`);
   }
   if (data.days_per_week) lines.push(`Days per week: ${data.days_per_week}`);
+  if (Array.isArray(data.training_tools) && data.training_tools.length > 0) {
+    lines.push(`Training tools: ${data.training_tools.join(", ")}`);
+  }
+  if (data.terrain_type) lines.push(`Terrain: ${data.terrain_type}`);
+  if (data.has_existing_plan != null) lines.push(`Has existing plan: ${data.has_existing_plan ? "yes" : "no"}`);
+  if (data.external_plan_description) lines.push(`Current plan: ${data.external_plan_description}`);
+  if (data.wants_weekly_recap != null) lines.push(`Wants weekly recap: ${data.wants_weekly_recap ? "yes" : "no"}`);
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
   if (data.easy_pace) lines.push(`Easy pace: ${data.easy_pace}/mi`);
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);

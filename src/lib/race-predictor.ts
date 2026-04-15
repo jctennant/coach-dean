@@ -7,14 +7,16 @@
  *
  * Algorithm:
  * 1.  Derive VDOT from recent race performance, best efforts, or training paces
- * 2.  Compute flat-road equivalent finish time using VDOT table + Riegel's formula
+ * 2.  If a course record is provided for a trail/mountain race → use percentile-based
+ *     projection (more accurate than VDOT for terrain-limited races)
+ * 3.  Otherwise: flat-road VDOT → Riegel → terrain/elevation/heat/altitude penalties
  *     — Riegel exponent scales with distance (1.06 → 1.15) to capture ultra fatigue
- * 3.  Elevation: total gain penalty (grade-dependent) + steep descent penalty
- * 4.  Trail terrain penalty: 4-level subtype system (groomed → highly technical)
- * 5.  Heat penalty: tiered by temperature band + humidity modifier
- * 6.  Altitude penalty: aerobic degradation above 5,000ft for unacclimatized runners
- * 7.  VDOT distance-mismatch flag: widened range when predicting much longer races
- * 8.  Return source label, confidence range, plain-language caveat
+ *     — Elevation: grade-dependent total-gain penalty + steep descent penalty
+ *     — Trail terrain: 4-level subtype + mountain for VK/sky races
+ *     — Heat: tiered by temperature band + humidity modifier
+ *     — Altitude: aerobic degradation above 5,000ft for unacclimatized runners
+ * 4.  VDOT distance-mismatch flag: widened range when predicting much longer races
+ * 5.  Return source label, confidence range, plain-language caveat
  */
 
 import { calculateVDOTPaces } from "@/lib/paces";
@@ -23,24 +25,27 @@ import { calculateVDOTPaces } from "@/lib/paces";
 
 /**
  * Trail terrain subtype — drives the terrain penalty %.
- * If not specified, inferred from elevation gain per mile.
  *
  * groomed          8–12%  fire road, groomed XC, hard-packed dirt
  * mixed           15–20%  mix of singletrack and fireroad
  * technical       22–30%  rocky singletrack, roots, significant technical sections
  * highly_technical 30–40%  stairs, scrambling, route-finding (Dipsea, Hardrock-style)
+ * mountain        55–75%  VK / sky / Skyrunner-style — primarily steep hiking,
+ *                         VDOT alone unreliable; use course record if available
  */
 export type TrailSubtype =
   | "groomed"
   | "mixed"
   | "technical"
-  | "highly_technical";
+  | "highly_technical"
+  | "mountain";
 
 const TRAIL_PENALTY_PCT: Record<TrailSubtype, number> = {
   groomed:          0.10,
   mixed:            0.17,
   technical:        0.26,
   highly_technical: 0.35,
+  mountain:         0.65, // fallback when no course record is provided
 };
 
 // ─── Input / output types ─────────────────────────────────────────────────────
@@ -77,6 +82,14 @@ export interface RacePredictionInput {
    * If terrainType = "trail" and this is omitted, inferred from gain per mile.
    */
   trailSubtype?: TrailSubtype;
+
+  /**
+   * Known course record (fastest finish) in minutes.
+   * When provided for trail or mixed terrain, enables percentile-based projection
+   * instead of pure VDOT extrapolation — much more accurate for mountain/sky races
+   * where terrain limits performance regardless of aerobic capacity.
+   */
+  courseRecordMinutes?: number;
 
   /** Expected race temperature in °F */
   expectedTempF?: number;
@@ -158,6 +171,40 @@ function inferTrailSubtype(gainFt: number, distanceMiles: number): TrailSubtype 
   if (gainPerMile > 500) return "technical";
   if (gainPerMile > 250) return "mixed";
   return "groomed";
+}
+
+// ─── Course record projection ─────────────────────────────────────────────────
+
+/**
+ * Estimate how many times slower than the course record this athlete will run,
+ * based on their VDOT. Mountain/trail races have compressed field spreads
+ * vs. road because steep terrain limits performance regardless of aerobic capacity.
+ *
+ * Table entries: [minimum VDOT for this tier, multiplier from course record]
+ * Tiers ordered highest → lowest VDOT.
+ */
+function courseRecordMultiplier(vdot: number, subtype: TrailSubtype): number {
+  // Mountain races: tightest spread (sustained hiking compresses the field heavily)
+  const mountainTable: [number, number][] = [
+    [68, 1.10], [62, 1.22], [56, 1.35], [50, 1.52], [44, 1.72], [0, 1.95],
+  ];
+  // Highly technical: moderate compression (scrambling narrows the gap too)
+  const highlyTechnicalTable: [number, number][] = [
+    [68, 1.15], [62, 1.30], [56, 1.48], [50, 1.70], [44, 1.95], [0, 2.25],
+  ];
+  // Standard trail: spread closer to road — aerobic capacity still dominant
+  const trailTable: [number, number][] = [
+    [68, 1.20], [62, 1.40], [56, 1.62], [50, 1.88], [44, 2.15], [0, 2.50],
+  ];
+
+  const table = subtype === "mountain"          ? mountainTable
+    : subtype === "highly_technical" ? highlyTechnicalTable
+    : trailTable;
+
+  for (const [minVdot, mult] of table) {
+    if (vdot >= minVdot) return mult;
+  }
+  return table[table.length - 1]![1];
 }
 
 // ─── VDOT derivation ──────────────────────────────────────────────────────────
@@ -299,7 +346,8 @@ function predictFromVDOT(vdot: number, distanceMiles: number): number | null {
 
 // ─── Source labels ─────────────────────────────────────────────────────────────
 
-function buildSourceLabel(vdotSource: string): string {
+function buildSourceLabel(vdotSource: string, usedCourseRecord: boolean): string {
+  if (usedCourseRecord) return "Based on course record";
   if (vdotSource.includes("race") && !vdotSource.includes("estimated")) return "Based on recent race";
   if (vdotSource.includes("best effort")) return "Based on training data";
   if (vdotSource.includes("easy pace")) return "Estimated from easy pace";
@@ -313,20 +361,26 @@ function buildCaveat(params: {
   sourceDistKm: number | null;
   altitudeFlagged: boolean;
   vdotSource: string;
+  usedCourseRecord: boolean;
 }): string | null {
-  const { terrainType, trailSubtype, goalDistanceMiles, sourceDistKm, altitudeFlagged, vdotSource } = params;
+  const { terrainType, trailSubtype, goalDistanceMiles, sourceDistKm, altitudeFlagged, vdotSource, usedCourseRecord } = params;
   const caveats: string[] = [];
 
   const isUltra = goalDistanceMiles >= 31;
   const isTrail = terrainType === "trail" || terrainType === "mixed";
+  const isMountain = trailSubtype === "mountain";
   const isHighlyTechnical = trailSubtype === "highly_technical";
   const sourceDistMiles = sourceDistKm ? sourceDistKm * 0.621 : null;
   const hasDistanceMismatch = sourceDistMiles != null && goalDistanceMiles > sourceDistMiles * 2;
   const isEstimated = vdotSource.includes("estimated") || vdotSource.includes("long run");
 
-  if (isHighlyTechnical) {
+  if (isMountain) {
+    caveats.push(usedCourseRecord
+      ? "Mountain race estimates are wider than standard — course conditions vary significantly"
+      : "No course record provided — using VDOT estimate for mountain terrain (less accurate)");
+  } else if (isHighlyTechnical) {
     caveats.push("Course terrain adds meaningful uncertainty");
-  } else if (isTrail) {
+  } else if (isTrail && !usedCourseRecord) {
     caveats.push("Trail factors may shift this significantly");
   }
   if (isUltra && (hasDistanceMismatch || isEstimated)) {
@@ -345,75 +399,97 @@ export function predictRaceTime(input: RacePredictionInput): RacePrediction | nu
   const { vdot, source: vdotSource, sourceDistKm } = deriveVDOT(input);
   if (vdot === null || vdot < 20) return null;
 
-  const baseMinutes = predictFromVDOT(vdot, input.goalDistanceMiles);
-  if (!baseMinutes) return null;
-
   const factors: string[] = [];
-  let adjustedMinutes = baseMinutes;
+  let adjustedMinutes: number;
+  let usedCourseRecord = false;
 
-  const gainFt   = input.elevationGainFeet ?? 0;
-  const lossFt   = input.elevationLossFeet ?? 0;
+  const gainFt    = input.elevationGainFeet ?? 0;
+  const lossFt    = input.elevationLossFeet ?? 0;
   const distMiles = input.goalDistanceMiles;
   const distFt    = distMiles * 5280;
   const isTrail   = input.terrainType === "trail";
   const isMixed   = input.terrainType === "mixed";
 
-  // ── Elevation gain penalty ────────────────────────────────────────────────
-  // Use total gain (not net). Penalty rate is grade-dependent for trail.
-  if (gainFt > 100) {
-    const avgGainGradePct = distFt > 0 ? (gainFt / distFt) * 100 : 0;
-    let gainPenaltyPer1000ft: number;
-    if (isTrail || isMixed) {
-      gainPenaltyPer1000ft = avgGainGradePct > 10 ? 2.0 : 1.5;
-    } else {
-      gainPenaltyPer1000ft = 1.0; // road
+  const resolvedSubtype: TrailSubtype | null = isTrail
+    ? (input.trailSubtype ?? inferTrailSubtype(gainFt, distMiles))
+    : (isMixed ? (input.trailSubtype ?? null) : null);
+
+  // ── Path A: course record projection ─────────────────────────────────────
+  // Used when a course record is provided for trail/mixed terrain.
+  // More accurate than VDOT for mountain/technical races where terrain limits
+  // performance independently of aerobic capacity.
+  if (input.courseRecordMinutes && (isTrail || isMixed)) {
+    usedCourseRecord = true;
+    const subtype = resolvedSubtype ?? "groomed";
+    const mult = courseRecordMultiplier(vdot, subtype);
+    adjustedMinutes = input.courseRecordMinutes * mult;
+
+    const pctBack = Math.round((mult - 1) * 100);
+    factors.push(`Fitness baseline: VDOT ${Math.round(vdot)} (${vdotSource})`);
+    factors.push(`Course record: ${formatTime(input.courseRecordMinutes)} — estimated ~${pctBack}% back`);
+
+  } else {
+    // ── Path B: VDOT-based prediction ──────────────────────────────────────
+    const baseMinutes = predictFromVDOT(vdot, distMiles);
+    if (!baseMinutes) return null;
+
+    adjustedMinutes = baseMinutes;
+    factors.push(`Fitness baseline: VDOT ${Math.round(vdot)} (${vdotSource})`);
+
+    // Elevation gain penalty
+    if (gainFt > 100) {
+      const avgGainGradePct = distFt > 0 ? (gainFt / distFt) * 100 : 0;
+      let gainPenaltyPer1000ft: number;
+      if (isTrail || isMixed) {
+        gainPenaltyPer1000ft = avgGainGradePct > 10 ? 2.0 : 1.5;
+      } else {
+        gainPenaltyPer1000ft = 1.0; // road
+      }
+      const gainPenaltyMin = (gainFt / 1000) * gainPenaltyPer1000ft;
+      adjustedMinutes += gainPenaltyMin;
+      factors.push(
+        `+${gainPenaltyMin.toFixed(1)} min — ${Math.round(gainFt).toLocaleString()}ft gain` +
+        (isTrail ? ` (avg ${avgGainGradePct.toFixed(0)}% grade, ${gainPenaltyPer1000ft.toFixed(1)} min/1000ft)` : "")
+      );
     }
-    const gainPenaltyMin = (gainFt / 1000) * gainPenaltyPer1000ft;
-    adjustedMinutes += gainPenaltyMin;
-    factors.push(
-      `+${gainPenaltyMin.toFixed(1)} min — ${Math.round(gainFt).toLocaleString()}ft gain` +
-      (isTrail ? ` (avg ${avgGainGradePct.toFixed(0)}% grade, ${gainPenaltyPer1000ft.toFixed(1)} min/1000ft)` : "")
-    );
-  }
 
-  // ── Descent penalty for steep courses ────────────────────────────────────
-  // Steep technical descents are slow and quad-destroying (Dipsea etc.)
-  if (lossFt > 0) {
-    const avgDescentGradePct = distFt > 0 ? (lossFt / distFt) * 100 : 0;
-    if (avgDescentGradePct > 12) {
-      const descentPenaltyMin = (lossFt / 1000) * 0.5;
-      adjustedMinutes += descentPenaltyMin;
-      factors.push(`+${descentPenaltyMin.toFixed(1)} min — steep descent penalty (${avgDescentGradePct.toFixed(0)}% avg grade)`);
+    // Descent penalty for steep courses
+    if (lossFt > 0) {
+      const avgDescentGradePct = distFt > 0 ? (lossFt / distFt) * 100 : 0;
+      if (avgDescentGradePct > 12) {
+        const descentPenaltyMin = (lossFt / 1000) * 0.5;
+        adjustedMinutes += descentPenaltyMin;
+        factors.push(`+${descentPenaltyMin.toFixed(1)} min — steep descent penalty (${avgDescentGradePct.toFixed(0)}% avg grade)`);
+      }
+    }
+
+    // Trail terrain penalty
+    if (isTrail) {
+      const subtype = resolvedSubtype ?? inferTrailSubtype(gainFt, distMiles);
+      const penaltyPct = TRAIL_PENALTY_PCT[subtype];
+      const trailPenaltyMin = baseMinutes * penaltyPct;
+      adjustedMinutes += trailPenaltyMin;
+      const subtypeLabel: Record<TrailSubtype, string> = {
+        groomed:          "groomed/fire road",
+        mixed:            "mixed singletrack",
+        technical:        "technical singletrack",
+        highly_technical: "highly technical terrain",
+        mountain:         "mountain/sky race",
+      };
+      factors.push(`+${Math.round(penaltyPct * 100)}% trail penalty (${subtypeLabel[subtype]})`);
+    } else if (isMixed) {
+      adjustedMinutes += baseMinutes * 0.08;
+      factors.push("+8% mixed terrain adjustment");
     }
   }
 
-  // ── Trail terrain penalty ─────────────────────────────────────────────────
-  if (isTrail) {
-    const subtype = input.trailSubtype ?? inferTrailSubtype(gainFt, distMiles);
-    const penaltyPct = TRAIL_PENALTY_PCT[subtype];
-    const trailPenaltyMin = baseMinutes * penaltyPct;
-    adjustedMinutes += trailPenaltyMin;
-    const subtypeLabel: Record<TrailSubtype, string> = {
-      groomed:          "groomed/fire road",
-      mixed:            "mixed singletrack",
-      technical:        "technical singletrack",
-      highly_technical: "highly technical terrain",
-    };
-    factors.push(`+${Math.round(penaltyPct * 100)}% trail penalty (${subtypeLabel[subtype]})`);
-  } else if (isMixed) {
-    adjustedMinutes += baseMinutes * 0.08;
-    factors.push("+8% mixed terrain adjustment");
-  }
-
-  // ── Heat penalty ──────────────────────────────────────────────────────────
+  // ── Heat penalty (applied in both paths) ─────────────────────────────────
   const tempF = input.expectedTempF;
   if (tempF !== undefined && tempF > 75) {
     let heatPct = 0;
-    // Tiered by temperature band
-    const tier1 = Math.min(tempF, 85) - 75; // 75–85°F: 2% per 5°F
-    const tier2 = Math.max(0, Math.min(tempF, 95) - 85); // 85–95°F: 3.5% per 5°F
+    const tier1 = Math.min(tempF, 85) - 75;
+    const tier2 = Math.max(0, Math.min(tempF, 95) - 85);
     heatPct += (tier1 / 5) * 0.02 + (tier2 / 5) * 0.035;
-    // Humidity modifier: >70% adds 1.5%
     const humidityPct = input.expectedHumidityPct ?? 0;
     if (humidityPct > 70) {
       heatPct += 0.015;
@@ -422,58 +498,62 @@ export function predictRaceTime(input: RacePredictionInput): RacePrediction | nu
       factors.push(`+${Math.round(heatPct * 100)}% heat penalty (${tempF}°F)`);
     }
     heatPct = Math.min(heatPct, 0.15);
-    adjustedMinutes += baseMinutes * heatPct;
+    adjustedMinutes += adjustedMinutes * heatPct;
   }
 
-  // ── Altitude penalty ──────────────────────────────────────────────────────
-  // ~2% per 1,000ft above 5,000ft for unacclimatized runners
+  // ── Altitude penalty (applied in both paths) ──────────────────────────────
   const raceAlt = input.raceAltitudeFt ?? 0;
   const trainingAlt = input.trainingAltitudeFt ?? 0;
   let altitudeFlagged = false;
   if (raceAlt > 5000) {
     const altPenaltyPct = Math.min(((raceAlt - 5000) / 1000) * 0.02, 0.10);
-    adjustedMinutes += baseMinutes * altPenaltyPct;
+    adjustedMinutes += adjustedMinutes * altPenaltyPct;
     factors.push(`+${Math.round(altPenaltyPct * 100)}% altitude penalty (${Math.round(raceAlt).toLocaleString()}ft)`);
     if (raceAlt - trainingAlt > 3000) {
       altitudeFlagged = true;
     }
   }
 
-  // ── VDOT distance mismatch ────────────────────────────────────────────────
-  // If predicting a race much longer than the VDOT source effort, widen range.
+  // ── VDOT distance mismatch (path B only) ──────────────────────────────────
   const sourceDistMiles = sourceDistKm ? sourceDistKm * 0.621 : null;
-  const distanceMismatch = sourceDistMiles != null && distMiles > sourceDistMiles * 2;
+  const distanceMismatch = !usedCourseRecord && sourceDistMiles != null && distMiles > sourceDistMiles * 2;
 
   // ── Confidence / range ────────────────────────────────────────────────────
   const baseConfidence: RacePrediction["confidence"] =
     vdotSource.includes("race") && !vdotSource.includes("estimated") ? "high" :
     vdotSource.includes("estimated from easy pace") ? "low" : "medium";
 
-  let rangePct = baseConfidence === "high" ? 0.04 : baseConfidence === "medium" ? 0.06 : 0.10;
-  // Wider range for highly technical or ultra courses
-  if (input.trailSubtype === "highly_technical" || distanceMismatch) rangePct += 0.04;
-  if (distMiles >= 50) rangePct += 0.02; // 50+ mile races are inherently unpredictable
+  let rangePct: number;
+  if (usedCourseRecord) {
+    // Course record predictions: tighter for mountain (compressed field), wider for standard trail
+    rangePct = resolvedSubtype === "mountain" ? 0.07 : 0.06;
+    rangePct += baseConfidence === "low" ? 0.03 : 0;
+  } else {
+    rangePct = baseConfidence === "high" ? 0.04 : baseConfidence === "medium" ? 0.06 : 0.10;
+    if (input.trailSubtype === "highly_technical" || distanceMismatch) rangePct += 0.04;
+    if (input.trailSubtype === "mountain") rangePct += 0.05; // no course record + mountain = wide
+    if (distMiles >= 50) rangePct += 0.02;
+  }
 
   const lowMinutes  = Math.round(adjustedMinutes * (1 - rangePct) * 10) / 10;
   const highMinutes = Math.round(adjustedMinutes * (1 + rangePct) * 10) / 10;
 
-  factors.unshift(`Fitness baseline: VDOT ${Math.round(vdot)} (${vdotSource})`);
-
   // ── Labels ────────────────────────────────────────────────────────────────
-  const sourceLabel = buildSourceLabel(vdotSource);
-  const trailSubtypeForCaveat = isTrail ? (input.trailSubtype ?? inferTrailSubtype(gainFt, distMiles)) : null;
+  const sourceLabel = buildSourceLabel(vdotSource, usedCourseRecord);
   const caveat = buildCaveat({
-    terrainType: input.terrainType ?? "road",
-    trailSubtype: trailSubtypeForCaveat,
+    terrainType:      input.terrainType ?? "road",
+    trailSubtype:     resolvedSubtype,
     goalDistanceMiles: distMiles,
     sourceDistKm,
     altitudeFlagged,
     vdotSource,
+    usedCourseRecord,
   });
 
   const narrative = buildNarrative(
     distMiles, adjustedMinutes, lowMinutes, highMinutes,
-    factors, baseConfidence, vdotSource, caveat
+    factors, baseConfidence, vdotSource, caveat, usedCourseRecord,
+    input.courseRecordMinutes
   );
 
   return {
@@ -502,6 +582,8 @@ function buildNarrative(
   confidence: RacePrediction["confidence"],
   vdotSource: string,
   caveat: string | null,
+  usedCourseRecord: boolean,
+  courseRecordMinutes?: number,
 ): string {
   const distLabel =
     distanceMiles >= 60 ? "100K"
@@ -515,19 +597,30 @@ function buildNarrative(
 
   const range   = `${formatTime(lowMin)}–${formatTime(highMin)}`;
   const midpoint = formatTime(predictedMin);
-  const adjustments = factors.slice(1).join("; ").trim();
-  const sourceNote =
-    confidence === "high"
-      ? "Based on solid race data."
-      : confidence === "medium"
-      ? "Based on training data — a recent race result would sharpen this."
-      : "Rough estimate from pace data — a 5K or 10K result would sharpen this significantly.";
+  const adjustments = factors.slice(usedCourseRecord ? 2 : 1).join("; ").trim();
   const caveatNote = caveat ? ` Note: ${caveat}.` : "";
 
-  let text = `Based on your current fitness (${vdotSource}), I'd project a ${range} finish for the ${distLabel}`;
-  if (midpoint && midpoint !== range) text += ` — around ${midpoint} in the middle`;
-  text += `. ${sourceNote}`;
-  if (adjustments) text += ` Key adjustments: ${adjustments}.`;
+  let text: string;
+  if (usedCourseRecord && courseRecordMinutes) {
+    const crStr = formatTime(courseRecordMinutes);
+    const pctFactorEntry = factors.find(f => f.includes("% back"));
+    const pctBack = pctFactorEntry?.match(/~(\d+)%/)?.[1] ?? "?";
+    text = `Course record is ${crStr}. Based on your fitness (${vdotSource}), I'd project you finishing about ${pctBack}% back — around ${range}`;
+    if (midpoint && midpoint !== range) text += `, with ${midpoint} as the midpoint`;
+    text += ".";
+    text += " Mountain race estimates are wider than road — conditions and course-specific demands matter a lot.";
+  } else {
+    const sourceNote =
+      confidence === "high"
+        ? "Based on solid race data."
+        : confidence === "medium"
+        ? "Based on training data — a recent race result would sharpen this."
+        : "Rough estimate from pace data — a 5K or 10K result would sharpen this significantly.";
+    text = `Based on your current fitness (${vdotSource}), I'd project a ${range} finish for the ${distLabel}`;
+    if (midpoint && midpoint !== range) text += ` — around ${midpoint} in the middle`;
+    text += `. ${sourceNote}`;
+    if (adjustments) text += ` Key adjustments: ${adjustments}.`;
+  }
   text += caveatNote;
 
   return text;

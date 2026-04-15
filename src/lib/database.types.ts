@@ -229,11 +229,13 @@ export type Database = {
           race_altitude_ft: number | null
           race_date: string
           race_name: string | null
-          trail_subtype: "groomed" | "mixed" | "technical" | "highly_technical" | null
+          course_record_minutes: number | null
+          trail_subtype: "groomed" | "mixed" | "technical" | "highly_technical" | "mountain" | null
           updated_at: string | null
           user_id: string | null
         }
         Insert: {
+          course_record_minutes?: number | null
           created_at?: string | null
           elevation_gain_feet?: number | null
           elevation_loss_feet?: number | null
@@ -250,6 +252,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          course_record_minutes?: number | null
           created_at?: string | null
           elevation_gain_feet?: number | null
           elevation_loss_feet?: number | null
@@ -346,6 +349,7 @@ export type Database = {
           proactive_cadence: string | null
           race_date: string | null
           skip_dates: string[] | null
+          external_plan_notes: string | null
           terrain_type: string | null
           this_week_override_days: string[] | null
           this_week_override_expires: string | null
@@ -377,6 +381,7 @@ export type Database = {
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
+          external_plan_notes?: string | null
           terrain_type?: string | null
           this_week_override_days?: string[] | null
           this_week_override_expires?: string | null
@@ -406,6 +411,7 @@ export type Database = {
           manual_prs?: Json | null
           preferred_units?: string
           proactive_cadence?: string | null
+          external_plan_notes?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
           terrain_type?: string | null
@@ -504,6 +510,7 @@ export type Database = {
           payment_link_sent_at: string | null
           phone_number: string
           reengagement_sent_at: string | null
+          dashboard_announcement_sent_at: string | null
           v2_migration_sent_at: string | null
           strava_access_token: string | null
           strava_athlete_id: number | null
@@ -530,6 +537,7 @@ export type Database = {
           onboarding_step?: string | null
           payment_link_sent_at?: string | null
           phone_number: string
+          dashboard_announcement_sent_at?: string | null
           reengagement_sent_at?: string | null
           v2_migration_sent_at?: string | null
           strava_access_token?: string | null
@@ -556,6 +564,7 @@ export type Database = {
           onboarding_data?: Json | null
           onboarding_step?: string | null
           payment_link_sent_at?: string | null
+          dashboard_announcement_sent_at?: string | null
           phone_number?: string
           reengagement_sent_at?: string | null
           v2_migration_sent_at?: string | null

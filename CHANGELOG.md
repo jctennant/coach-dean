@@ -4,6 +4,78 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Mountain race predictor, plan import, dashboard announcement, eval parity
+
+**Type:** Feature (3) / Improvement (1)
+**Reported by:** Jake (user feedback)
+**User feedback:** "I noticed when I look at the pace projections on the new overview part of the dashboard that the projections for mountain races can be really far off from the actual results. I looked at their actual results for the Cirque Series Snowboard Race last year, and I think the fastest time for pros was 1:22. My projection is 1:23, and I'm kind of an intermediate amateur. I think that is off a little bit."
+
+---
+
+### Fix 1 — Mountain race prediction: `mountain` subtype + course record projection
+
+**Root cause:** The `highly_technical` trail subtype (35% penalty) was the worst-case in the predictor, but sky/VK/mountain races like Cirque Snowbird are in a completely different category. VDOT stops being meaningful for these events — everyone hikes the steep sections, compressing the field. A VDOT 62 runner was getting a 1:23 projection for a race where the course record is 1:22.
+
+**Fix / Change:**
+- Added `mountain` to `TrailSubtype` union with a 65% VDOT-fallback penalty (the previous max was 35% for `highly_technical`)
+- Added `courseRecordMinutes?: number` to `RacePredictionInput` — when provided for trail/mixed terrain, activates a percentile-based projection path instead of pure VDOT extrapolation
+- New `courseRecordMultiplier(vdot, subtype)` function: estimates how far behind the course record the athlete will finish based on their VDOT and terrain type. Mountain races use the tightest spread table (everyone hiking compresses the field). Highly technical uses a moderate table. Standard trail uses a wider table closer to road spreads.
+- `predictRaceTime` now has two paths: (A) course record projection for trail/mixed when CR is provided (skips terrain penalty, which is baked into the multiplier; heat/altitude still apply), (B) original VDOT path for road or when no CR is provided
+- Caveats updated: mountain without CR gets "No course record provided — using VDOT estimate for mountain terrain (less accurate)"; mountain with CR gets the standard mountain estimate caveat
+- Added `course_record_minutes` column to `races` table (migration 035), updated DB types, updated races SELECT in dashboard, passed to predictor, show CR in race card
+- Updated constraint to allow `trail_subtype = 'mountain'`
+- 16 new tests added to `race-predictor.test.ts` (mountain penalty, course record projection, heat/altitude apply on top of CR, road terrain ignores CR path, narrative format)
+**Files changed:** `src/lib/race-predictor.ts`, `src/__tests__/lib/race-predictor.test.ts`, `src/app/dashboard/page.tsx`, `src/lib/database.types.ts`, `supabase/migrations/035_plan_import_mountain.sql`
+
+---
+
+### Fix 2 — Plan import: Option A (text description) + Option B (dashboard image upload)
+
+**Root cause:** Onboarding already asked "do you have an existing training plan?" and promised "text description or upload to the dashboard later" — neither was wired up.
+
+**Fix / Change (Option A — text description):**
+- Added `external_plan_description` to Haiku extraction schema: captures a brief factual summary when athlete has an existing plan ("Runna 16-week HM plan, week 8, ~40mi/week")
+- Added to `summarizeCollected` so Dean sees it under "WHAT YOU ALREADY KNOW" during onboarding
+- Stored in new `training_profiles.external_plan_notes` column (migration 035)
+- Injected into coaching system prompt under preferred_units: Dean uses it as context for post-run coaching without trying to replace the plan
+
+**Fix / Change (Option B — dashboard image upload):**
+- Surfaced the existing `POST /api/plan/upload` route (image_base64 path) from the dashboard
+- New `src/app/dashboard/plan-import-form.tsx` client component: upload button (PNG/JPG/WebP), base64 encode, dry-run preview showing week count + session count + avg mi/week, "Save to Dean" confirm, success/error states
+- Added to `!hasPlan` section of `plan-tab.tsx`; `userId` prop threaded through `PlanTabProps`
+
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/plan-import-form.tsx` (new), `src/app/dashboard/plan-tab.tsx`, `src/app/dashboard/page.tsx`, `src/lib/database.types.ts`, `supabase/migrations/035_plan_import_mountain.sql`
+
+---
+
+### Fix 3 — Dashboard announcement: POST /api/admin/dashboard-announcement
+
+**Root cause:** Need to notify active users of the new dashboard features and plan import capability.
+
+**Fix / Change:**
+- New `POST /api/admin/dashboard-announcement` endpoint (mirrors v2-migration pattern)
+- Targets: `onboarding_step IS NULL` + `messaging_opted_out = false` + active in last 14 days (conversation row within cutoff) + `dashboard_announcement_sent_at IS NULL`
+- Unlike v2-migration, does NOT require Strava — targets all active users
+- Message announces dashboard URL, race readiness/training load/fitness projections, and plan import (text summary or dashboard upload)
+- `dashboard_announcement_sent_at` column added to `users` table (migration 035)
+
+**Dry-run curl:** `curl -X POST https://coachdean.ai/api/admin/dashboard-announcement -H "Content-Type: application/json" -d '{"secret":"<ADMIN_SECRET>","dry_run":true}'`
+**Live curl:** `curl -X POST https://coachdean.ai/api/admin/dashboard-announcement -H "Content-Type: application/json" -d '{"secret":"<ADMIN_SECRET>"}'`
+
+**Files changed:** `src/app/api/admin/dashboard-announcement/route.ts` (new), `supabase/migrations/035_plan_import_mountain.sql`, `src/lib/database.types.ts`
+
+---
+
+### Fix 4 — Simulation eval runner: summarizeCollected parity
+
+**Root cause:** `summarizeCollected` in `run-simulation-evals.mjs` was missing four fields added in the v2 onboarding revamp: `training_tools`, `terrain_type`, `has_existing_plan`, `wants_weekly_recap`, and the new `external_plan_description`. The simulation runner's "WHAT YOU ALREADY KNOW" block was therefore showing incomplete data to Dean, potentially causing re-asking of already-collected fields.
+
+**Fix / Change:** Patched `summarizeCollected` in `evals/run-simulation-evals.mjs` to mirror the current `route.ts` version exactly.
+
+**Files changed:** `evals/run-simulation-evals.mjs`
+
+---
+
 ## 2026-04-14 — Mountain race prediction: course data support
 
 **Type:** Feature
