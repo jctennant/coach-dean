@@ -5599,12 +5599,14 @@ FOCUSED WORKOUT FORMAT — use this instead of a day-by-day schedule when the at
 - Be specific about paces. For goal-pace-based training: threshold ~10-15 sec/mi faster than goal pace, interval ~25-35 sec/mi faster than goal pace. Cross-check against observed Strava paces — if their fast efforts already exceed goal pace, note that and calibrate accordingly.
 
 MILE TIME TRIAL GOAL:
-- Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
+- Training for a mile PR is speed and neuromuscular work, not endurance volume. The *long run slot* is capped short — but the other sessions stay full-length.
 - <rule>STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description, e.g., "Easy 5mi + 6×20sec strides".</rule>
 - <rule>SHORT FAST INTERVALS: The mile is a ~4 minute anaerobic/lactate effort — the primary quality sessions MUST be short and fast: 200m–400m repeats at goal pace or faster (NOT 800m repeats, which target a different energy system). 800m repeats are too long for mile prep and train the wrong physiological pathway. Use 6-12x200m or 6-10x400m at goal-mile pace or 3-5 sec/lap faster.</rule>
-- Key quality sessions: 400m repeats (6-10x) at goal-mile pace, 200m repeats (8-12x) at faster than goal pace for neuromuscular development, and strides (see above). One short tempo run (2-3mi) per week maximum for aerobic support — this is secondary, not the focus.
+- <rule>LONG RUN CAP (long run slot only): Cap the designated long run at 4–5mi — the mile is a 4-minute race so no 10-12mi long runs. However, this cap ONLY applies to the long run slot — all other sessions (quality runs, easy runs) should be full-length at 6–8mi each. Do NOT shrink other sessions just because the long run is short.</rule>
+- <rule>SESSION VOLUME MATH: With a 4-5mi long run cap, other sessions MUST compensate to reach the weekly floor. Example: 4 sessions with a 5mi long run → the other 3 sessions must average ~7-8mi each (7+8+7 = 22mi + 5mi = 27mi). Sessions of 5-6mi across all 4 days will fall below the current base — that is a training regression, not an appropriate plan start.</rule>
+- Key quality sessions: 400m repeats (6-10x) at goal-mile pace, 200m repeats (8-12x) at faster than goal pace for neuromuscular development, and strides (see above). One short tempo run (2-3mi quality portion, 6-8mi total with warmup/cooldown) per week maximum for aerobic support.
 - If they have a goal time, compute goal pace (e.g., 5:45 mile = 1:26 per 400m) and calibrate: 400m reps at or 3-5 sec faster per rep, 200m reps at 5-8 sec faster per rep than goal-pace equivalent.
-- Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes. More is not better here.
+- Total weekly volume: 27–35mi/week — close to current base, with the quality mix shifted toward speed. Volume does not drop from current training level; only the session type changes.
 - Intensity distribution flips compared to longer events: 60-70% of sessions are genuinely easy, but the quality sessions are sharper and shorter than anything needed for a 5K or 10K.
 - No traditional taper — the final 7 days before the time trial, reduce total volume ~30% and do one short sharpening session (4-6x400m at goal pace).
 

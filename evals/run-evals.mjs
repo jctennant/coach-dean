@@ -484,11 +484,12 @@ ${(() => {
   const goalLower = (fixture.user?.goal_race_distance || fixture.user?.goal || "").toLowerCase();
   const isMileTT = goalLower.includes("mile") && (goalLower.includes("time trial") || goalLower.includes("tt") || goalLower.includes("1 mile") || goalLower.includes("1-mile"));
   return isMileTT ? `MILE TIME TRIAL GOAL:
-- Training for a mile PR is speed and neuromuscular work, not endurance volume. Don't pad the week with junk mileage.
+- Training for a mile PR is speed and neuromuscular work, not endurance volume. The *long run slot* is capped short — but the other sessions stay full-length.
 - <rule>STRIDES REQUIRED: Every week of a mile TT plan MUST include strides (6-10x 20-second pickups at the end of an easy run). Strides are the single most important neuromuscular stimulus for mile performance — omitting them is a plan error. Tag them explicitly in the session description.</rule>
-- <rule>NO LONG RUNS OVER 5 MILES: A mile TT is a 4-minute race — the "long run" slot is capped at 4–5 miles (base support only). Other easy runs can be 6–7 miles. NEVER exceed 5 miles for the designated long run session.</rule>
-- Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides, and one tempo run (3-5mi) for aerobic support.
-- Easy mileage fills the rest but total volume stays modest — 25-35mi/week is plenty for most mile-focused athletes.` : "";
+- <rule>NO LONG RUNS OVER 5 MILES: A mile TT is a 4-minute race — the "long run" slot is capped at 4–5 miles (base support only). NEVER exceed 5 miles for the designated long run session. However, the long run cap ONLY applies to the long run slot — all other sessions (quality, easy, tempo) can and should be 6–8 miles each. Do NOT shrink other sessions just because the long run is short.</rule>
+- <rule>SESSION LENGTH MATH: With a 5mi long run and 3 other sessions, to reach the 27mi weekly floor those 3 sessions must average ~7.3mi each (e.g., 7+8+7 = 22mi + 5mi long run = 27mi). Sessions of 5–6mi each will fall below the floor. Fill the non-long-run days with full-length easy and quality runs.</rule>
+- Key sessions: 800m repeats (4-8x) at mile effort or slightly faster, 400m repeats (6-10x) at mile effort, strides, and one tempo run (3-5mi for the quality portion, but the full session with warmup/cooldown is 6-8mi total).
+- Total weekly volume: 27–34mi/week across 4 sessions. Volume stays close to current base — only the session type mix changes (more speed, less long-run endurance).` : "";
 })()}
 
 LENGTH:
