@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Fix PDF plan extraction timeout (single Sonnet call with tool use)
+
+**Type:** Bug Fix
+**Reported by:** Jake (logs showing ECONNRESET at 46s and plan/upload 422 after 88s)
+**User feedback:** "2026-04-15 20:30:49... [logs showing ECONNRESET, plan/upload 422 after 88s with two Claude calls 24333-63891ms]. Anything to fix here?"
+**Root cause:** `extractFromPDF` used two sequential Claude calls: Sonnet (~24s) to dump the PDF as text, then Haiku (~64s) to structure that text into sessions. Total ~88s exceeded Vercel Hobby's `after()` budget (~46s effective), causing ECONNRESET in the webhook. The intermediate text dump also overwhelmed Haiku's context, causing it to return 0 sessions (422).
+**Fix / Change:** Replaced the two-step approach with a single Sonnet call that reads the PDF via the document API and extracts structured sessions directly via tool use. This eliminates the intermediate text step, reduces extraction time to ~30-40s, and fits within the Vercel after() budget.
+**Files changed:** `src/app/api/plan/upload/route.ts`
+
+---
+
 ## 2026-04-15 — Haiku extraction: has_existing_plan / external_plan_description reliability
 
 **Type:** Bug Fix

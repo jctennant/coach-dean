@@ -211,8 +211,9 @@ Rules:
 }
 
 /**
- * Extract structured sessions from a PDF URL using Claude's document API.
- * Fetches the PDF, converts to base64, passes to Claude as a document block.
+ * Extract structured sessions from a PDF URL using Claude's document API + tool use.
+ * Single Sonnet call — avoids the two-step approach (Sonnet text → Haiku structure)
+ * that was ~88s total and often returned 0 sessions due to intermediate text bloat.
  */
 async function extractFromPDF(pdfUrl: string): Promise<ExtractedSession[]> {
   const resp = await fetch(pdfUrl);
@@ -220,9 +221,25 @@ async function extractFromPDF(pdfUrl: string): Promise<ExtractedSession[]> {
   const buffer = await resp.arrayBuffer();
   const base64 = Buffer.from(buffer).toString("base64");
 
-  const docResponse = await anthropic.messages.create({
+  const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 4000,
+    max_tokens: 8192,
+    system: `Extract structured training sessions from the training plan PDF. Call extract_sessions with every session you find.
+
+Rules:
+- weekNumber: 1-indexed. If the plan doesn't explicitly number weeks, infer from context (e.g., "Week 1", "Mon Jan 6 - Sun Jan 12").
+- dayOfWeek: full name (Monday, Tuesday, etc.)
+- type: "easy" | "tempo" | "long" | "interval" | "recovery" | "off" | "cross"
+- Distance ranges (e.g. "4-8 miles", "6–10 km"):
+  - targetDistanceMilesMin: the low end, converted to miles
+  - targetDistanceMilesMax: the high end, converted to miles
+  - targetDistanceMiles: the midpoint ((min+max)/2), rounded to 1 decimal
+  - If a single distance is given (no range), set all three to the same value
+  - Null for cross-training and off days
+- targetPace: extract if specified (e.g. "9:30/mi", "4:30/km"). Null if not specified.
+- description: preserve range language exactly as written (e.g. "Easy 4–8mi" not "Easy 6mi"). For intervals, preserve the rep range (e.g. "6–10×800m at 5k pace").
+- Extract ALL sessions including rest days (type: "off") and cross-training.
+- If a session has a total distance AND individual segments, use the total.`,
     messages: [{
       role: "user",
       content: [
@@ -236,18 +253,45 @@ async function extractFromPDF(pdfUrl: string): Promise<ExtractedSession[]> {
         } as unknown as { type: "text"; text: string },
         {
           type: "text",
-          text: "Extract all training sessions from this training plan PDF. List every session with its week number, day, workout type, distance, pace targets, and description. Format as structured text.",
+          text: "Extract all training sessions from this plan.",
         },
       ],
     }],
+    tools: [{
+      name: "extract_sessions",
+      description: "Save the extracted training sessions",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          sessions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                weekNumber: { type: "number" },
+                dayOfWeek: { type: "string" },
+                type: { type: "string", enum: ["easy", "tempo", "long", "interval", "recovery", "off", "cross"] },
+                targetDistanceMiles: { type: ["number", "null"] },
+                targetDistanceMilesMin: { type: ["number", "null"] },
+                targetDistanceMilesMax: { type: ["number", "null"] },
+                targetPace: { type: ["string", "null"] },
+                description: { type: "string" },
+              },
+              required: ["weekNumber", "dayOfWeek", "type", "description"],
+            },
+          },
+        },
+        required: ["sessions"],
+      },
+    }],
+    tool_choice: { type: "tool" as const, name: "extract_sessions" },
   });
 
-  const extractedText = docResponse.content
-    .filter(b => b.type === "text")
-    .map(b => (b as { type: "text"; text: string }).text)
-    .join("\n");
-
-  return extractFromText(extractedText);
+  const toolBlock = response.content.find(b => b.type === "tool_use" && b.name === "extract_sessions");
+  if (toolBlock?.type === "tool_use") {
+    return (toolBlock.input as { sessions: ExtractedSession[] }).sessions ?? [];
+  }
+  return [];
 }
 
 /**
