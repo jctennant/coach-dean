@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — PDF plan import via iMessage
+
+**Type:** Feature
+**Reported by:** Internal (user test: sent PDF via iMessage to Coach Dean number)
+**User feedback:** N/A
+**Root cause:** Linq webhook received PDF attachments with `mime_type: "application/pdf"` but the code only detected image MMS parts (no mime_type check), passing the PDF URL to Claude's vision API which returned a 400 error. The PDF was then silently dropped.
+**Fix / Change:** Added PDF detection by `mime_type === "application/pdf"` in the webhook parts parsing, routing PDF attachments to a new `handlePDFPlan` function. Added `pdf_url` content type to `/api/plan/upload` with `extractFromPDF` that fetches the PDF, base64-encodes it, and passes it to Claude's document API. Dean replies with a session/week count confirmation via SMS.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/app/api/plan/upload/route.ts`
+
+---
+
 ## 2026-04-15 — Mountain race predictor, plan import, dashboard announcement, eval parity
 
 **Type:** Feature (3) / Improvement (1)

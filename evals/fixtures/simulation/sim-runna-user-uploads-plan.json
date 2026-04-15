@@ -1,0 +1,31 @@
+{
+  "id": "sim-runna-user-uploads-plan",
+  "description": "Athlete is mid-Runna plan and doesn't want Dean to build one — wants to upload via dashboard. Tests that Dean acknowledges the existing plan, mentions the upload option, does NOT offer to rebuild, and still reaches [READY].",
+  "category": "simulation",
+  "persona": {
+    "name": "Chris",
+    "opening_message": "Hey, I heard about you from a friend. I'm already on a Runna plan for a half marathon but wanted some extra coaching support.",
+    "user_agent_prompt": "You are Chris, texting a running coach. Background (reveal naturally):\n- Name: Chris\n- Training for the Portland Half Marathon on October 19, 2026\n- Currently on a Runna 16-week half marathon plan, week 6, running ~35 miles/week\n- You do NOT want Dean to replace your Runna plan. You like Runna's structure. You want Dean for accountability, questions, and post-run feedback.\n- You run Tuesday, Thursday, Saturday, Sunday\n- You're in Portland, OR\n- Easy pace around 9:30/mile\n- No significant injuries\n- No Strava — you'll skip it\n- You'd be happy to upload your Runna PDF to the dashboard if asked\n\nBehavior: Be direct and a bit protective of your Runna plan — if Dean tries to build you a new plan or asks lots of questions that feel like plan-building, gently clarify you want to keep Runna. If Dean mentions uploading the plan, say 'oh yeah that would be great, I can do that.' You text casually but clearly.",
+    "strava_connected": false,
+    "ground_truth": {
+      "name": "Chris",
+      "goal": "half_marathon",
+      "race_name": "Portland Half Marathon",
+      "race_date": "2026-10-19",
+      "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+      "timezone": "America/Los_Angeles",
+      "has_existing_plan": true,
+      "external_plan_description": "Runna 16-week half marathon plan, week 6, ~35mi/week",
+      "strava_connected": false,
+      "easy_pace": "9:30"
+    }
+  },
+  "today": "2026-04-15",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone", "has_existing_plan"],
+    "goal_should_be": "half_marathon",
+    "target_turns": 8,
+    "notes": "Chris has an existing Runna plan and does NOT want it replaced. Dean must: (1) acknowledge the existing plan and NOT try to build a new one, (2) mention that Chris can upload the plan PDF via the dashboard, (3) still collect race name, race date, training days, fitness baseline, timezone before [READY]. Dean should NOT interrogate Chris as if building a plan from scratch — the tone should be 'I'll work alongside your Runna plan'. has_existing_plan must be true in extracted fields. external_plan_description should capture the Runna plan details."
+  }
+}

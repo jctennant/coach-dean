@@ -72,6 +72,8 @@ function summarizeCollected(data) {
       .map((r) => `${r.name ?? "unnamed"} (${r.priority}, ${r.date ?? "no date"})`).join("; ");
     lines.push(`Other races: ${raceList}`);
   }
+  if (data.has_existing_plan != null) lines.push(`Has existing plan: ${data.has_existing_plan ? "yes" : "no"}`);
+  if (data.external_plan_description) lines.push(`Current plan: ${data.external_plan_description}`);
   return lines.join("\n");
 }
 

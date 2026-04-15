@@ -19,8 +19,9 @@ export const maxDuration = 60;
 
 interface UploadRequest {
   userId: string;
+  /** Text content, base64-encoded image, or a URL (for pdf_url) */
   content: string;
-  contentType: "text" | "image_base64";
+  contentType: "text" | "image_base64" | "pdf_url";
   filename?: string;
   /** Dry run — extract and return plan without saving */
   dry_run?: boolean;
@@ -69,6 +70,8 @@ export async function POST(request: Request) {
   try {
     const sessions = contentType === "image_base64"
       ? await extractFromImage(content)
+      : contentType === "pdf_url"
+      ? await extractFromPDF(content)
       : await extractFromText(content);
 
     if (sessions.length === 0) {
@@ -184,6 +187,46 @@ Rules:
     return input.sessions ?? [];
   }
   return [];
+}
+
+/**
+ * Extract structured sessions from a PDF URL using Claude's document API.
+ * Fetches the PDF, converts to base64, passes to Claude as a document block.
+ */
+async function extractFromPDF(pdfUrl: string): Promise<ExtractedSession[]> {
+  const resp = await fetch(pdfUrl);
+  if (!resp.ok) throw new Error(`PDF fetch failed: ${resp.status}`);
+  const buffer = await resp.arrayBuffer();
+  const base64 = Buffer.from(buffer).toString("base64");
+
+  const docResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 4000,
+    messages: [{
+      role: "user",
+      content: [
+        {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: base64,
+          },
+        } as unknown as { type: "text"; text: string },
+        {
+          type: "text",
+          text: "Extract all training sessions from this training plan PDF. List every session with its week number, day, workout type, distance, pace targets, and description. Format as structured text.",
+        },
+      ],
+    }],
+  });
+
+  const extractedText = docResponse.content
+    .filter(b => b.type === "text")
+    .map(b => (b as { type: "text"; text: string }).text)
+    .join("\n");
+
+  return extractFromText(extractedText);
 }
 
 /**

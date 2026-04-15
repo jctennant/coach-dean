@@ -88,10 +88,20 @@ export async function POST(request: Request) {
     body = rawBodyText; // malformed percent-sequence — use as-is
   }
 
-  // Detect image/media parts. Linq may use type "image", "media", or "mms".
+  // Detect PDF parts first — Linq delivers these as type "media" with mime_type "application/pdf".
+  const pdfPart = parts.find(
+    (p: { type: string; mime_type?: string }) =>
+      (p.type === "media" || p.type === "file") && p.mime_type === "application/pdf"
+  );
+  const pdfUrl: string | null = pdfPart ? (pdfPart.url || pdfPart.value || null) : null;
+  const pdfFilename: string | null = pdfPart ? (pdfPart.filename || null) : null;
+
+  // Detect image/media parts — excluding PDFs handled above.
+  // Linq may use type "image", "media", or "mms".
   // Value may be in p.value, p.url, or p.media_url — try all three.
   const imagePart = parts.find(
-    (p: { type: string }) => p.type === "image" || p.type === "media" || p.type === "mms"
+    (p: { type: string; mime_type?: string }) =>
+      (p.type === "image" || p.type === "media" || p.type === "mms") && p.mime_type !== "application/pdf"
   );
   const imageUrl: string | null = imagePart
     ? (imagePart.value || imagePart.url || imagePart.media_url || null)
@@ -99,7 +109,7 @@ export async function POST(request: Request) {
 
   // Log the full parts array whenever a non-text part is present so we can
   // verify the field names against real Linq MMS payloads.
-  if (imagePart || (!body && parts.length > 0)) {
+  if (imagePart || pdfPart || (!body && parts.length > 0)) {
     console.log("[linq-webhook] non-text parts detected:", JSON.stringify(parts));
   }
 
@@ -108,6 +118,7 @@ export async function POST(request: Request) {
     body: body.slice(0, 50),
     messageId,
     hasImage: !!imageUrl,
+    hasPdf: !!pdfUrl,
   });
 
   if (!senderPhone) {
@@ -127,8 +138,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  if (!body && !imageUrl) {
-    console.warn("[linq-webhook] no text or image found in message, skipping");
+  if (!body && !imageUrl && !pdfUrl) {
+    console.warn("[linq-webhook] no text, image, or PDF found in message, skipping");
     return NextResponse.json({ ok: true });
   }
 
@@ -153,7 +164,7 @@ export async function POST(request: Request) {
   // Return 200 immediately, process in background
   after(async () => {
     try {
-      await handleInboundMessage(senderPhone, body, imageUrl, messageId, payloadChatId);
+      await handleInboundMessage(senderPhone, body, imageUrl, pdfUrl, pdfFilename, messageId, payloadChatId);
     } catch (err) {
       console.error("[linq-webhook] async processing error:", err);
     }
@@ -166,6 +177,8 @@ async function handleInboundMessage(
   senderPhone: string,
   body: string,
   imageUrl: string | null,
+  pdfUrl: string | null,
+  pdfFilename: string | null,
   messageId: string | null,
   payloadChatId: string | null
 ) {
@@ -326,6 +339,13 @@ async function handleInboundMessage(
   // Clear any pending re-engagement state — they're back.
   if ((user as Record<string, unknown>).reengagement_sent_at) {
     void supabase.from("users").update({ reengagement_sent_at: null }).eq("id", user.id);
+  }
+
+  // PDF from an onboarded user: import as training plan.
+  // PDFs during onboarding are unexpected — fall through to text path.
+  if (pdfUrl && !user.onboarding_step) {
+    await handlePDFPlan(user.id, senderPhone, pdfUrl, pdfFilename, body || null, messageId, resolvedChatId);
+    return;
   }
 
   // Image message from an onboarded user: extract workout and generate feedback.
@@ -549,6 +569,59 @@ interface WorkoutExtracted {
   splits: Array<{ mile?: number; km?: number; pace: string }> | null;
   calories: number | null;
   is_workout_image: boolean;
+}
+
+async function handlePDFPlan(
+  userId: string,
+  phone: string,
+  pdfUrl: string,
+  filename: string | null,
+  caption: string | null,
+  messageId: string | null,
+  chatId: string | null
+) {
+  console.log("[linq-webhook] processing PDF plan for user:", userId, "filename:", filename);
+
+  // Store the incoming message
+  await supabase.from("conversations").insert({
+    user_id: userId,
+    role: "user",
+    content: caption
+      ? `[PDF: ${filename || "training plan"}] ${caption}`
+      : `[PDF: ${filename || "training plan"}]`,
+    message_type: "plan_upload",
+  });
+
+  try {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    const resp = await fetch(`${appUrl}/api/plan/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        content: pdfUrl,
+        contentType: "pdf_url",
+        filename: filename || undefined,
+      }),
+    });
+
+    const result = await resp.json() as { ok?: boolean; sessionCount?: number; weeks?: number; error?: string };
+
+    if (!resp.ok || !result.ok) {
+      console.error("[linq-webhook] PDF plan upload failed:", result.error);
+      await sendAndStore(userId, phone, "I couldn't read that PDF — make sure it's a training plan document and try again, or upload it at coachdean.ai/dashboard.", messageId);
+      return;
+    }
+
+    const { sessionCount, weeks } = result;
+    const planLabel = filename ? ` (${filename.replace(/\.pdf$/i, "")})` : "";
+    const msg = `Got it${planLabel}. I extracted ${sessionCount} session${sessionCount !== 1 ? "s" : ""} across ${weeks} week${weeks !== 1 ? "s" : ""}. I'll factor this into my coaching going forward.\n\nYou can also view it at coachdean.ai/dashboard.`;
+    await sendAndStore(userId, phone, msg, messageId);
+    void trackEvent(userId, "plan_uploaded", { source: "sms_pdf", weeks, sessionCount });
+  } catch (err) {
+    console.error("[linq-webhook] PDF plan processing failed:", err);
+    await sendAndStore(userId, phone, "Something went wrong reading that PDF. Try again or upload it at coachdean.ai/dashboard.", messageId);
+  }
 }
 
 async function handleImageWorkout(
