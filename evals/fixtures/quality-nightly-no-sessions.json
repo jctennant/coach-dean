@@ -1,0 +1,49 @@
+{
+  "id": "quality-nightly-no-sessions",
+  "description": "Nightly reminder fires Sunday evening after week 1 is complete but before weekly_recap runs — all stored sessions are past, so Claude must NOT invent tomorrow's workout",
+  "category": "response_quality",
+  "trigger": "nightly_reminder",
+  "today": "2026-04-12",
+  "user": {
+    "name": "Weston",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "50_miler",
+    "goal_race": "Solo 50-mile route",
+    "goal_race_date": "2026-06-06",
+    "goal_time_minutes": null,
+    "current_week": 1,
+    "current_phase": "base",
+    "vdot": 52,
+    "easy_pace": "8:43/mi",
+    "tempo_pace": "7:00/mi",
+    "interval_pace": "6:18/mi",
+    "training_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 36,
+    "miles_logged_this_week": 36.5,
+    "runs_this_week": 4,
+    "plan_sessions_remaining": [
+      { "day": "Fri", "date": "4/10", "label": "Easy 6mi @ 8:30-9:00/mi" },
+      { "day": "Sat", "date": "4/11", "label": "Long run 14mi easy effort" }
+    ],
+    "recent_activities": [
+      { "date": "2026-04-11", "type": "TrailRun", "distance_miles": 17.1, "pace": "9:00/mi", "elevation_feet": 1778 },
+      { "date": "2026-04-10", "type": "Run", "distance_miles": 10.5, "pace": "8:12/mi" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "content": "Saw it come through — 17.1 mi at 9:00/mi avg, 1778ft of vert. That's a solid long effort. How'd the Achilles hold up? 36.5 mi this week — nice work."
+      }
+    ]
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "must_not_contain_workout": true,
+    "must_acknowledge_week_complete": true,
+    "must_mention_plan_coming": true,
+    "forbidden_phrases": ["tomorrow's workout", "long run tomorrow", "easy run tomorrow", "14 mi", "6 mi", "8:30", "9:00/mi"],
+    "notes": "All stored sessions (4/10 and 4/11) are before today (4/12 Sunday). weekly_recap hasn't fired yet. Claude must NOT invent or guess tomorrow's workout — it should acknowledge the week is done and that the plan is coming shortly. Any specific workout or distance mentioned is a hallucination and a failure."
+  }
+}

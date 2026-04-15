@@ -97,6 +97,11 @@ EVALUATION CRITERIA:
    - false = response says an activity happened on the wrong day (e.g. "from Monday" when the run was Wednesday/yesterday), or uses a forbidden phrase listed in ground truth
    - null = no temporal references to past activities
 
+8. quality_constraints_met: Does the response satisfy all quality constraints from ground truth?
+   - true = all quality constraints passed (must_not_contain_workout, must_acknowledge_week_complete, must_mention_plan_coming, max_stated_projection_miles) — or none were specified
+   - false = at least one quality constraint was violated (invented workout when none should exist, missed required acknowledgement, projection exceeded cap)
+   - null = no quality constraints were specified for this fixture
+
 SCORE RUBRIC:
 - 10: All facts correct, response is natural, on-brand, appropriately brief
 - 7-9: Minor issues (slightly off wording, not optimally brief) but no factual errors
@@ -115,6 +120,7 @@ Return exactly this JSON structure:
   "format_correct": true | false | null,
   "no_internal_labels": true | false,
   "temporal_reference_correct": true | false | null,
+  "quality_constraints_met": true | false | null,
   "flags": ["list any specific factual errors — be precise, cite the exact wrong value"],
   "score": 0,
   "score_rationale": "one sentence explaining the score"
@@ -187,6 +193,10 @@ function buildGroundTruthBlock(gt) {
   if (gt.range_language_required) lines.push(`- RANGE LANGUAGE: Response must preserve range language from the plan (e.g. "8–12mi", "4–6×800m"). Collapsing a range to its midpoint (e.g. "10mi" for an 8–12mi session, "5×800m" for 4–6×800m) is a factual error.`);
   if (gt.forbidden_collapses) lines.push(`- FORBIDDEN COLLAPSES (these represent collapsed ranges — must NOT appear): ${gt.forbidden_collapses.join(", ")}`);
   if (gt.must_reference_plan_sessions) lines.push(`- REQUIRED: Response must reference the actual sessions from the uploaded plan, not invent different sessions.`);
+  if (gt.must_not_contain_workout) lines.push(`- STRICT: Response MUST NOT mention any specific workout, session, distance, or pace for an upcoming training day. The coach does not have session data and must not invent or guess. If any specific workout, distance, or pace for a future session appears: score 0.`);
+  if (gt.must_acknowledge_week_complete) lines.push(`- REQUIRED: Response must acknowledge that the athlete's current training week is complete or finished.`);
+  if (gt.must_mention_plan_coming) lines.push(`- REQUIRED: Response must indicate that the new plan or next week's schedule will be available soon (e.g. "plan coming", "check back tomorrow", "schedule on the way").`);
+  if (gt.max_stated_projection_miles != null) lines.push(`- MAX PROJECTION CAP: If the response states a weekly mileage projection (e.g. "on track for X mi" or "projecting X mi"), X must not exceed ${gt.max_stated_projection_miles} mi. The weekly target is ${gt.weekly_mileage_target ?? "unknown"} mi. Any projection exceeding ${gt.max_stated_projection_miles} mi is a hallucination: score 0.`);
   if (gt.notes) lines.push(`- Evaluator note: ${gt.notes}`);
   return lines.join("\n");
 }

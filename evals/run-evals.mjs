@@ -462,6 +462,7 @@ ${isDeload ? `<rule>RECOVERY WEEK: This week's target is ${weeklyTarget} mi — 
 ${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}
 ${conversationBlock}
 MILEAGE ACCURACY RULES — follow exactly:
+- WEEKLY TARGET MEANING: The weekly mileage target (e.g., 39mi) is the TOTAL ceiling for the entire week — it includes miles already run AND miles yet to run. If the athlete has logged 8.2mi, they have ~30.8mi remaining, not 39mi + 8.2mi = 47.2mi. Never add already-completed miles onto the weekly target to produce a new inflated total.
 - When listing planned sessions for a week, the Total line shows ONLY planned future sessions. Never write "Total: X mi + your Y mi already this week". If the athlete has run some miles already, acknowledge them in a separate sentence. The Total shows what is still to be done (or the full week target).
 - For weekly recaps: planned next week shows a clean single total; last week's completed miles are referenced separately.
 - PLAN MATH CHECK: Before finalizing a week plan, verify your session distances add up to the Total you state. Never write a Total that doesn't match the sum of the individual sessions.
@@ -577,8 +578,14 @@ function buildUserMessage(fixture) {
       ? `\n<rule>INJURY CONTEXT: ${user.injury_notes}. The plan must be built around this injury: prioritize safe return over mileage targets, respect current pain-free limits, and do not introduce intensity until the athlete has been symptom-free for several weeks.</rule>`
       : "";
 
+    const trainingDaysForUltra = user.training_days || [];
+    const WEEKDAY_ORDER = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7 };
+    const sortedDays = [...trainingDaysForUltra].map(d => d.toLowerCase()).sort((a, b) => (WEEKDAY_ORDER[a] || 0) - (WEEKDAY_ORDER[b] || 0));
+    const capDay = d => d.charAt(0).toUpperCase() + d.slice(1, 3);
+    const bbDay1 = sortedDays.length >= 2 ? capDay(sortedDays[sortedDays.length - 2]) : "Sat";
+    const bbDay2 = sortedDays.length >= 1 ? capDay(sortedDays[sortedDays.length - 1]) : "Sun";
     const ultraNote = isUltra
-      ? `\nULTRA-SPECIFIC REQUIREMENTS:\n- Introduce back-to-back long runs (Saturday long + Sunday medium-long) by Week ${backToBackWeek} at the latest — this is the central ultra training stimulus, not a late-plan addition\n- Include trail-specific guidance from Week 1: hiking steep uphills (power-hiking is faster than running them in ultras), running by time-on-feet rather than strict pace, elevation management`
+      ? `\nULTRA-SPECIFIC REQUIREMENTS:\n- Introduce back-to-back long runs (${bbDay1} long + ${bbDay2} medium-long) by Week ${backToBackWeek} at the latest — this is the central ultra training stimulus, not a late-plan addition. Use the athlete's actual training days — do NOT hardcode Saturday/Sunday.\n- Include trail-specific guidance from Week 1: hiking steep uphills (power-hiking is faster than running them in ultras), running by time-on-feet rather than strict pace, elevation management`
       : "";
 
     baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Race is exactly ${weeksUntilRace} weeks away — build a ${weeksUntilRace}-week plan, no more, no fewer.${injuryNote}${ultraNote}
@@ -595,6 +602,29 @@ Be specific about Week 1 sessions. Approximate weekly targets are fine for the r
     baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Build week 1 plan targeting ${user.weekly_mileage_target || 30} mi total. Acknowledge completed runs separately from planned sessions. Do NOT use additive total format ("Total: X + Y already").`;
   } else if (trigger === "morning_reminder") {
     baseMsg = `Morning reminder trigger. Send today's workout reminder based on the schedule and recent conversation.`;
+  } else if (trigger === "nightly_reminder") {
+    // Mirror the nightlyNoSessions detection in route.ts:
+    // If plan_sessions_remaining is empty or all session dates are before today, inject the guard.
+    const sessions = user.plan_sessions_remaining || [];
+    const todayStr = fixture.today || new Date().toISOString().slice(0, 10);
+    const [ty, tm, td] = todayStr.split("-").map(Number);
+    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
+    const hasActiveSessions = sessions.some(s => {
+      const [m, d] = (s.date || "").split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      return new Date(Date.UTC(ty, m - 1, d)) >= localTodayUTC;
+    });
+    if (!hasActiveSessions) {
+      baseMsg = `The athlete's training week is complete — all stored sessions for this week are in the past. The weekly recap and next-week plan will be sent shortly tonight.
+
+Send a brief end-of-week message (under 200 characters) that:
+1. Acknowledges the week is done — you can mention their week-to-date mileage from CURRENT TRAINING STATE.
+2. Lets them know their plan for next week is coming tonight.
+
+Do NOT mention a specific workout for tomorrow. Do not invent or guess a session. No markdown.`;
+    } else {
+      baseMsg = `Nightly reminder trigger. Send a brief reminder of tomorrow's workout based on the stored sessions and recent conversation.`;
+    }
   } else {
     // Default: user message
     baseMsg = inbound_sms || "What's the plan?";

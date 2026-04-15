@@ -917,3 +917,196 @@ describe("coach/respond — lighter_week trigger", () => {
     expect((result as { data: unknown }).data).toMatchObject({ ok: true, previous_target: 35, new_target: 26.5 });
   });
 });
+
+// ---------- helpers for date-sensitive tests ----------
+
+/** Returns a session date string in M/D format for a given offset from today (0 = today, -1 = yesterday). */
+function sessionDateOffset(offsetDays: number): string {
+  const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+describe("coach/respond — nightly_reminder end-of-week guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Great week — plan coming tonight!" }],
+    });
+  });
+
+  it("sends no-guess guard to Claude when all stored sessions are in the past", async () => {
+    // All sessions have dates that are before today — week is over, recap hasn't fired yet.
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Fri", date: sessionDateOffset(-5), label: "Easy 6mi" },
+          { day: "Sat", date: sessionDateOffset(-4), label: "Long run 14mi" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "nightly_reminder" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const userMsg = calls[0][0].messages[0].content as string;
+
+    // Guard must be present — Claude must not guess tomorrow's workout
+    expect(userMsg).toContain("Do NOT mention a specific workout");
+    // Normal "use THIS WEEK'S PLANNED SESSIONS" instruction must NOT be the active branch
+    expect(userMsg).not.toContain("Tomorrow's workout:");
+  });
+
+  it("does NOT activate the guard when future sessions still exist", async () => {
+    // One session is tomorrow — week is still in progress, normal reminder path.
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Sat", date: sessionDateOffset(-1), label: "Long run 14mi" },
+          { day: "Sun", date: sessionDateOffset(1), label: "Easy 5mi" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "nightly_reminder" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const userMsg = calls[0][0].messages[0].content as string;
+
+    // Should use the normal reminder path, NOT the guard
+    expect(userMsg).not.toContain("Do NOT mention a specific workout");
+  });
+});
+
+describe("coach/respond — projected mileage cap when sessions are null", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("replaces wildly over-target projection when weekly_plan_sessions is null", async () => {
+    // Claude returns "on track for ~77.2 mi" but the weekly target is 40mi
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Nice run! 8.2 mi logged this week. You've got sessions left — on track for ~77.2 mi this week." }],
+    });
+
+    setupSupabase({
+      user: baseUser({ strava_athlete_id: 12345 }),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_mileage_target: 40,
+        weekly_plan_sessions: null, // no session data — the triggering condition
+      }),
+    });
+
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => c[1] as string)
+      .join("\n");
+
+    // The hallucinated 77.2 should be replaced with the 40mi target
+    expect(sentText).not.toContain("77.2");
+    expect(sentText).toContain("40");
+  });
+
+  it("leaves projections alone when they are within 30% of the target", async () => {
+    // 42mi on a 40mi target = 5% over — should not be corrected
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Good work — on track for ~42 mi this week." }],
+    });
+
+    setupSupabase({
+      user: baseUser({ strava_athlete_id: 12345 }),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_mileage_target: 40,
+        weekly_plan_sessions: null,
+      }),
+    });
+
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => c[1] as string)
+      .join("\n");
+
+    expect(sentText).toContain("42");
+  });
+});
+
+describe("coach/respond — skipped non-run session detection on post_run", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Great run!" }],
+    });
+  });
+
+  it("injects PLAN DEVIATION guard when athlete runs on a strength day", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Tue", date: sessionDateOffset(0), label: "Strength + mobility 30min" },
+          { day: "Thu", date: sessionDateOffset(2), label: "Easy 4mi" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    // post_run with no conversations = 1 Claude call
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const coachingCall = calls[calls.length - 1];
+    const userMsg = coachingCall[0].messages[0].content as string;
+
+    expect(userMsg).toContain("PLAN DEVIATION — NON-RUN DAY");
+    expect(userMsg).toContain("Strength + mobility 30min");
+  });
+
+  it("does NOT inject the guard when athlete runs on a planned run day", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Tue", date: sessionDateOffset(0), label: "Easy 6mi @ 9:00/mi" },
+          { day: "Thu", date: sessionDateOffset(2), label: "Tempo 5mi" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const coachingCall = calls[calls.length - 1];
+    const userMsg = coachingCall[0].messages[0].content as string;
+
+    expect(userMsg).not.toContain("PLAN DEVIATION — NON-RUN DAY");
+  });
+});

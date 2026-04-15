@@ -4,6 +4,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Five coaching quality fixes from Weston's first week
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Weston
+**User feedback:** "Original plan had runs on Sunday. I had to ask 4 times for Sunday to be the rest day before it was respected. On Sunday CoachDean sent me a reminder saying to gear up for my long run in the morning — my long run was the day before. Every day I ran longer than prescribed and a real coach would give critical feedback. The positivity and me always being right feels good but it likely isn't what I need in a coach."
+**Root cause (5 issues):**
+1. Ultra plan template hardcoded `Sat+Sun` as the back-to-back days, overriding any athlete-specific rest day preference.
+2. On Sunday evenings, `weekly_plan_sessions` is exhausted (week 1 past) but `weekly_recap` hasn't fired yet — `nightly_reminder` had no session data and Claude hallucinated "tomorrow: Long run 14mi."
+3. `computeProjectedWeekMiles` returns `null` when sessions are empty, disabling `correctProjectedTotal` and allowing Claude's wild "on track for 77mi" projection to stand uncorrected.
+4. When an athlete runs on a planned strength/mobility day, post-run feedback praised the run with no mention of the skipped session.
+5. No pattern detection: Dean celebrated each over-plan run individually but never noticed or commented on the consistent pattern of running significantly more than prescribed.
+**Fix / Change:**
+1. Ultra template in `training-plan.ts` now derives back-to-back days from `profile.training_days` (last two training days in weekday order) instead of hardcoding Sat+Sun.
+2. Added `nightlyNoSessions` guard: detects end-of-week empty session state and sends a brief "week complete, plan coming tonight" message instead of guessing.
+3. `correctProjectedTotal` now accepts a `weeklyMileageTarget` fallback — when sessions are null, caps Claude's projection at 130% of target.
+4. Added `skippedNonRunSession` detection: when today's planned session was strength/mobility and athlete ran instead, Dean briefly mentions the skipped session and offers to reschedule.
+5. Added `planDeviationFlag`: when athlete has run ≥30% over plan-to-date across ≥3 runs in a week, Dean asks directly what's driving it and offers to recalibrate the plan.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-15 — Onboarding reframe: persona-aware flow and concrete first message
 
 **Type:** Improvement

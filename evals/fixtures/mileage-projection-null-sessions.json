@@ -1,0 +1,46 @@
+{
+  "id": "mileage-projection-null-sessions",
+  "description": "Post-run Monday of week 2, no stored sessions yet (weekly_recap may not have extracted them) — Claude must not hallucinate an 'on track for X mi' projection that wildly exceeds the 39mi weekly target",
+  "category": "mileage_accuracy",
+  "trigger": "post_run",
+  "today": "2026-04-13",
+  "user": {
+    "name": "Weston",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "50_miler",
+    "goal_race": "Solo 50-mile route",
+    "goal_race_date": "2026-06-06",
+    "goal_time_minutes": null,
+    "current_week": 2,
+    "current_phase": "build",
+    "vdot": 52,
+    "easy_pace": "8:43/mi",
+    "tempo_pace": "7:00/mi",
+    "interval_pace": "6:18/mi",
+    "training_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 39,
+    "miles_logged_this_week": 8.2,
+    "runs_this_week": 1,
+    "plan_sessions_remaining": null,
+    "recent_activities": [
+      { "date": "2026-04-13", "type": "TrailRun", "distance_miles": 8.2, "pace": "9:01/mi", "elevation_feet": 693 },
+      { "date": "2026-04-11", "type": "TrailRun", "distance_miles": 17.1, "pace": "9:00/mi", "elevation_feet": 1778 },
+      { "date": "2026-04-10", "type": "Run", "distance_miles": 10.5, "pace": "8:12/mi" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "content": "Last week: 36.5 mi across 4 runs. Solid opening week with 17mi long run. This week targeting ~39mi. Easy 6mi Monday, strength Tuesday, fartlek Wednesday, easy Thursday and Friday, long run Saturday."
+      }
+    ]
+  },
+  "inbound_sms": null,
+  "ground_truth": {
+    "weekly_mileage_target": 39,
+    "miles_logged_this_week": 8.2,
+    "max_stated_projection_miles": 55,
+    "notes": "No session data is stored (plan_sessions_remaining: null). Claude has a 39mi weekly target and 8.2mi logged. Any stated projection for the week must be at most ~55mi (39 * 1.4). A response stating 'on track for 77mi' or any number wildly over target is a hallucination and a failure. Claude should either skip the projection entirely or use the target as the reference point."
+  }
+}

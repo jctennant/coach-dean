@@ -472,12 +472,32 @@ export async function generateAndSaveFullPlan(
   // for ultra preparation and must be introduced early — not saved for late in the plan.
   const isUltraEnrich = ["50k","50 k","100k","100 k","50mi","50 m","100mi","100 m","ultra"]
     .some(u => (goal ?? "").toLowerCase().includes(u));
+
+  // Determine the athlete's actual back-to-back days from their training schedule.
+  // Use the last two training days of the week (by weekday order) so we don't hardcode Sat+Sun.
+  // For athletes who prefer Fri+Sat or Thu+Sat, this produces the correct day names.
+  const WEEKDAY_ORDER: Record<string, number> = {
+    monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7,
+  };
+  const rawTrainingDays = (profile?.training_days as string[] | null) ?? [];
+  const sortedTrainingDays = [...rawTrainingDays]
+    .map(d => d.toLowerCase())
+    .sort((a, b) => (WEEKDAY_ORDER[a] ?? 0) - (WEEKDAY_ORDER[b] ?? 0));
+  const capDay = (d: string) => d.charAt(0).toUpperCase() + d.slice(1, 3);
+  // Back-to-back = the two highest-order training days (end of the athlete's week)
+  const bbDay1 = sortedTrainingDays.length >= 2
+    ? capDay(sortedTrainingDays[sortedTrainingDays.length - 2])
+    : "Sat";
+  const bbDay2 = sortedTrainingDays.length >= 1
+    ? capDay(sortedTrainingDays[sortedTrainingDays.length - 1])
+    : "Sun";
+
   const ultraGuidance = isUltraEnrich ? `
 
 ULTRA-SPECIFIC REQUIREMENTS (mandatory):
-- Introduce back-to-back long run weekends (e.g. "Sat ${miToDisplay(18)}${unitLabel} + Sun ${miToDisplay(12)}${unitLabel} easy") no later than week ${Math.max(3, Math.round(totalWeeks * 0.25))} of ${totalWeeks}. This is the key ultra stimulus — do NOT delay it to the second half of the plan.
+- Introduce back-to-back long run weekends (e.g. "${bbDay1} ${miToDisplay(18)}${unitLabel} + ${bbDay2} ${miToDisplay(12)}${unitLabel} easy") no later than week ${Math.max(3, Math.round(totalWeeks * 0.25))} of ${totalWeeks}. This is the key ultra stimulus — do NOT delay it to the second half of the plan.
 - Include trail-specific context from week 1: hiking steep uphills (power-hiking is faster than running them in a 50k/100k), running by time-on-feet rather than strict pace, and managing elevation.
-- key_workout for back-to-back weekends should specify both Saturday and Sunday, e.g. "Sat ${miToDisplay(20)}${unitLabel} trail + Sun ${miToDisplay(14)}${unitLabel} easy (back-to-back)".
+- key_workout for back-to-back weekends should specify both days, e.g. "${bbDay1} ${miToDisplay(20)}${unitLabel} trail + ${bbDay2} ${miToDisplay(14)}${unitLabel} easy (back-to-back)". Do NOT schedule the second back-to-back day on a day the athlete doesn't train — use the athlete's actual training days above.
 - Notes should reference the back-to-back adaptation, hiking uphills, and time-on-feet philosophy when applicable.` : "";
 
   try {

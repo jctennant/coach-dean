@@ -1477,7 +1477,93 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
   }
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null);
+  // Detect a consistent over-plan pattern: athlete running significantly more than prescribed
+  // across multiple sessions this week. If present, Dean should ask about it directly rather
+  // than just celebrating each run individually. Uses past sessions (not future) so we're
+  // comparing apples to apples with the actual mileage already logged.
+  const planDeviationFlag = (() => {
+    if (trigger !== "post_run" && trigger !== "weekly_recap") return null;
+    const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+    if (!sessions.length) return null;
+    const tz = userTimezone || "America/New_York";
+    const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+    const [ty, tm, td] = localTodayStr.split("-").map(Number);
+    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
+    // Parse miles from a session label (same logic as computeProjectedWeekMiles)
+    const parseSessionMiles = (label: string): number => {
+      const m = label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
+        || label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i)
+        || label.match(/(\d+(?:\.\d+)?)\s*mi/i);
+      return m ? parseFloat(m[1]) : 0;
+    };
+    // Only look at sessions whose date has already passed (not today, not future)
+    const pastSessions = sessions.filter(s => {
+      const [m, d] = (s.date ?? "").split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      return new Date(Date.UTC(ty, m - 1, d)) < localTodayUTC;
+    });
+    const plannedCompletedMiles = pastSessions.reduce((sum, s) => sum + parseSessionMiles(s.label), 0);
+    // Need meaningful planned data to compare against
+    if (plannedCompletedMiles < 2) return null;
+    const overPlanPct = (weekMileageSoFar - plannedCompletedMiles) / plannedCompletedMiles;
+    // Only flag when athlete has run ≥30% more than planned across ≥3 runs — a pattern, not a one-off
+    if (overPlanPct > 0.30 && weekRunCount >= 3) {
+      const extraMiles = (weekMileageSoFar - plannedCompletedMiles).toFixed(1);
+      return `PLAN DEVIATION PATTERN: The athlete has logged ${weekMileageSoFar.toFixed(1)}mi this week but only ${plannedCompletedMiles.toFixed(1)}mi was planned for the sessions completed so far — that's ${extraMiles}mi (${Math.round(overPlanPct * 100)}%) over plan across ${weekRunCount} runs. This is a pattern, not a single over-effort. A good coach addresses this directly but without criticism. Include one honest question about it in your response: e.g. "You've been going longer than the plan all week — is the plan too conservative for where you are right now, or is something else driving it?" Then offer to recalibrate the plan upward if they want. Do not skip this — consistent overtraining without acknowledgment is how injuries happen.`;
+    }
+    return null;
+  })();
+
+  // For post_run: detect if today had a planned non-run session that was skipped.
+  // When an athlete runs on a strength/mobility/rest day, Dean should briefly mention
+  // the skipped session and offer to reschedule it — without lecturing.
+  const skippedNonRunSession = (() => {
+    if (trigger !== "post_run") return null;
+    const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+    if (!sessions.length) return null;
+    const tz = userTimezone || "America/New_York";
+    const activityDateStr = activityData?.start_date
+      ? new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(activityData.start_date as string))
+      : new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+    const [ay, am, ad] = activityDateStr.split("-").map(Number);
+    const activityUTC = new Date(Date.UTC(ay, am - 1, ad));
+    const todaySessions = sessions.filter(s => {
+      const [m, d] = (s.date ?? "").split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      return new Date(Date.UTC(ay, m - 1, d)).getTime() === activityUTC.getTime();
+    });
+    if (!todaySessions.length) return null;
+    // A session is "non-run" if it lacks a distance marker (mi/km) or matches known non-run keywords.
+    const nonRunKeywords = /strength|mobility|yoga|swim|bike|cycling|cross.train|rest|recovery|hike/i;
+    const hasMileage = /\d+(?:\.\d+)?\s*(mi|km)/i;
+    const nonRun = todaySessions.find(s => nonRunKeywords.test(s.label) || !hasMileage.test(s.label));
+    return nonRun ? nonRun.label : null;
+  })();
+
+  // Detect no-sessions state for reminder triggers.
+  // nightly_reminder: fires before weekly_recap on Sunday — sessions from week 1 are past,
+  //   week 2 sessions not yet written. Claude hallucinates if not guarded.
+  // morning_reminder: fires after weekly_recap, so normally sessions exist. But if
+  //   session extraction failed (parse error, timeout), Monday morning could also be empty.
+  //   Softer guard: just note that no sessions are available so Claude asks the athlete
+  //   rather than inventing a workout.
+  const nightlyNoSessions = (() => {
+    if (trigger !== "nightly_reminder" && trigger !== "morning_reminder") return false;
+    const sessions = (state?.weekly_plan_sessions as Array<{ date: string }> | null) ?? [];
+    if (!sessions.length) return true;
+    const tz = userTimezone || "America/New_York";
+    const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+    const [ty, tm, td] = localTodayStr.split("-").map(Number);
+    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
+    // Has any session with a date >= today? If not, all sessions are in the past.
+    return !sessions.some(s => {
+      const [m, d] = (s.date ?? "").split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      return new Date(Date.UTC(ty, m - 1, d)) >= localTodayUTC;
+    });
+  })();
+
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag);
 
   // For uploaded plans in weekly_recap and user_message: inject next week's sessions directly
   // from the stored plan rather than relying on the periodization engine's inferred values.
@@ -1665,20 +1751,28 @@ Weekly total: ${mileageRange}
   const alreadyCompletedMiles =
     trigger === "initial_plan" || trigger === "weekly_recap" ? 0 : weekMileageSoFar;
   const stripped = stripMarkdown(strippedRaw);
-  // post_run: skip full session-list correction (no session plan in the response)
-  // but still correct "on track for X mi" using the system-computed projection —
-  // Dean sometimes mentions only the next 1-2 sessions while citing the full-week
-  // projected total, making the math look wrong to the user.
+  // post_run / user_message: run correctProjectedTotal to fix "on track for X mi" when
+  // Dean's stated projection diverges from the system-computed value.
+  // post_run: no session plan in the response, so skip the full session-list correction.
+  // user_message: also needs projection correction — athlete asking "how am I tracking?"
+  //   can trigger the same hallucinated-projection bug if sessions are null.
+  //   Run correctMileageTotal FIRST (fixes session-list math), then correctProjectedTotal
+  //   (fixes any "on track for" number that survived the first pass).
+  const weeklyMileageTargetForCap = (state?.weekly_mileage_target as number | null) ?? null;
+  const computedProjection = computeProjectedWeekMiles(
+    (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? null,
+    weekMileageSoFar,
+    weeklyMileageTargetForCap
+  );
   const mileageCorrectedBase = trigger === "post_run"
-    ? correctProjectedTotal(
-        stripped,
-        computeProjectedWeekMiles(
-          (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? null,
-          weekMileageSoFar,
-          (state?.weekly_mileage_target as number | null) ?? null
+    ? correctProjectedTotal(stripped, computedProjection, weeklyMileageTargetForCap)
+    : trigger === "user_message"
+      ? correctProjectedTotal(
+          correctMileageTotal(stripped, alreadyCompletedMiles),
+          computedProjection,
+          weeklyMileageTargetForCap
         )
-      )
-    : correctMileageTotal(stripped, alreadyCompletedMiles);
+      : correctMileageTotal(stripped, alreadyCompletedMiles);
 
   // For plan-generating triggers, apply a second pass using the structured SESSION_LIST
   // data (when available) to catch cases where the text-regex approach missed an error.
@@ -2443,9 +2537,33 @@ function computeProjectedWeekMiles(
  * Dean computes this himself from the session list, but may only mention a subset
  * of upcoming sessions while citing the full projection — making the math look wrong.
  * Replace with the system-computed value when they diverge.
+ *
+ * When projectedWeekMiles is null (no session data), fall back to weeklyMileageTarget
+ * as a sanity cap — if Claude states a projection that's >50% over the target,
+ * replace it with the target to prevent alarming numbers like "on track for 77mi".
  */
-function correctProjectedTotal(message: string, projectedWeekMiles: number | null): string {
-  if (!projectedWeekMiles || projectedWeekMiles <= 0) return message;
+function correctProjectedTotal(message: string, projectedWeekMiles: number | null, weeklyMileageTarget?: number | null): string {
+  // Fallback cap: when session data is unavailable (projectedWeekMiles = null),
+  // use the weekly target to catch wildly wrong Claude projections.
+  if (!projectedWeekMiles || projectedWeekMiles <= 0) {
+    if (!weeklyMileageTarget || weeklyMileageTarget <= 0) return message;
+    const targetRounded = Math.round(weeklyMileageTarget * 10) / 10;
+    const capPatterns: RegExp[] = [
+      /(on\s+track\s+for\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+      /(on\s+pace\s+for\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+      /(projected\s+(?:(?:to\s+hit|total)[:\s]+)?~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    ];
+    let capped = message;
+    for (const pattern of capPatterns) {
+      capped = capped.replace(pattern, (full, pre, num, post) => {
+        const stated = parseFloat(num);
+        if (stated <= weeklyMileageTarget * 1.3) return full; // within 30% of target — leave it
+        console.warn(`[correctProjectedTotal] no sessions — stated ${stated}mi projection exceeds target ${targetRounded}mi by >30% — capping`);
+        return `${pre}${targetRounded}${post}`;
+      });
+    }
+    return capped;
+  }
   const projected = Math.round(projectedWeekMiles * 10) / 10;
   const patterns: RegExp[] = [
     /(on\s+track\s+for\s+~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
@@ -4946,6 +5064,9 @@ function buildUserMessage(
   mostRecentRunRef: string | null = null,
   initialPlanDaysConstraint: string | null = null,
   injuryHoldSince: string | null = null,
+  nightlyNoSessions = false,
+  skippedNonRunSession: string | null = null,
+  planDeviationFlag: string | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -5087,7 +5208,11 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - Only reference THIS WEEK'S PLANNED SESSIONS when describing what's left to do. Do NOT mention NEXT WEEK'S PLANNED SESSIONS in post-run feedback — those belong in the Sunday recap.
 - If no planned sessions are stored yet, reference the most recent plan from conversation history if visible.
 
-ACTIVITY RECENCY: When referencing past activities in RECENT WORKOUTS, use the "(N days ago)" label to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Monday's run") for any activity more than 1 day ago.${injuryReminder}`;
+ACTIVITY RECENCY: When referencing past activities in RECENT WORKOUTS, use the "(N days ago)" label to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Monday's run") for any activity more than 1 day ago.${injuryReminder}${planDeviationFlag ? `
+
+${planDeviationFlag}` : ""}${skippedNonRunSession ? `
+
+PLAN DEVIATION — NON-RUN DAY: Today's plan called for "${skippedNonRunSession}", but the athlete ran instead. Briefly acknowledge this naturally — don't lecture, but do mention the skipped session once, casually. Offer to reschedule it this week if there's room. Example framing: "Today was pencilled in as a strength day — want me to slot that in later this week?" or "The plan had strength work today — easy to shift that to [next available day] if you're up for it." Keep it one sentence. Do not make the athlete feel bad about the swap.` : ""}`;
     }
     case "user_message": {
       const umIsMetric = preferredUnits === "metric";
@@ -5176,6 +5301,17 @@ ${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}ACTIVITY RECENCY: When referen
 CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}${fullArcContext}`;
     }
     case "morning_reminder":
+      if (nightlyNoSessions) {
+        // No session data available — weekly_recap either hasn't fired yet or session
+        // extraction failed. Don't let Claude invent today's workout.
+        return `No planned sessions are stored for this week. The weekly plan may not have been generated yet, or session data is temporarily unavailable.
+
+Send a brief, friendly morning message (under 200 characters) that:
+1. Greets the athlete and acknowledges the new week.
+2. Lets them know their plan is on the way, or asks what they have in mind for today if they've been chatting about it.
+
+Do NOT invent a specific workout, distance, or pace. Do not guess or estimate. No markdown.`;
+      }
       if (missedRunCheckin) {
         return `If RECENT CONVERSATION already shows the athlete mentioned skipping yesterday or rescheduling, skip the missed-run check-in and send today's workout reminder only (plain, under 480 characters).
 
@@ -5213,6 +5349,18 @@ Otherwise, send a short reminder text about today's workout. Three parts, all in
 Keep the whole thing under 480 characters. No markdown, no bullet points. Sound like a real coach texting, not a notification from an app.`;
 
     case "nightly_reminder":
+      if (nightlyNoSessions) {
+        // End-of-week state: weekly_plan_sessions is exhausted (all sessions are in the past)
+        // and the weekly_recap hasn't fired yet. Claude has no session data to reference,
+        // so we must NOT let it guess tomorrow's workout.
+        return `The athlete's training week is complete — all stored sessions for this week are in the past. The weekly recap and next-week plan will be sent shortly tonight.
+
+Send a brief end-of-week message (under 200 characters) that:
+1. Acknowledges the week is done — you can mention their week-to-date mileage from CURRENT TRAINING STATE.
+2. Lets them know their plan for next week is coming tonight.
+
+Do NOT mention a specific workout for tomorrow. Do not invent or guess a session. No markdown.`;
+      }
       if (missedRunCheckin) {
         return `If RECENT CONVERSATION already shows the athlete mentioned skipping today or rescheduling, skip the missed-run check-in and send tomorrow's workout reminder only (plain, under 480 characters).
 
@@ -5280,7 +5428,7 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
         : periodization?.suggestedWeeklyMiles != null
         ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${recapMi(periodization.suggestedWeeklyMiles)} (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
         : "";
-      return `${storedPlanContext}${weekMileageContext}${injuryHoldInstruction}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
+      return `${storedPlanContext}${weekMileageContext}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 
 LONGITUDINAL SIGNALS — USE THESE TO MAKE THE RECAP DATA-DRIVEN:
 If LONGITUDINAL TRAINING ANALYSIS is present above, use it to elevate your first message beyond a simple mileage recap:
@@ -5469,6 +5617,7 @@ SPORT-SPECIFIC GUIDANCE:
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
 
 MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
+WEEKLY TARGET MEANING: The weekly mileage target (e.g., 39mi) is the TOTAL ceiling for the entire week — it includes miles already run AND miles yet to run. If the athlete has logged 8.2mi, they have ~30.8mi remaining, not 39mi + 8.2mi = 47.2mi. Never add already-completed miles onto the weekly target to produce a new inflated total.
 TOTAL LINE FORMAT: The Total line must show ONLY the sum of the planned future sessions. Never write "Total: X mi + your Y mi already this week" — that is confusing and misleading. If the athlete has already run some miles this week and you want to acknowledge it, do so in a separate sentence outside the session list. Never combine planned and already-completed miles in the same Total line.
 <rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.</rule>
 
