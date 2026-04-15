@@ -48,6 +48,10 @@ type Race = {
   goal_distance_miles: number | null;
   goal_time_minutes: number | null;
   goal: string | null;
+  elevation_gain_feet: number | null;
+  elevation_loss_feet: number | null;
+  race_altitude_ft: number | null;
+  trail_subtype: string | null;
 };
 
 type ConversationRow = {
@@ -967,7 +971,7 @@ export default async function DashboardPage({
       .limit(12),
     supabase
       .from("races")
-      .select("id, race_name, race_date, priority, goal_distance_miles, goal_time_minutes, goal")
+      .select("id, race_name, race_date, priority, goal_distance_miles, goal_time_minutes, goal, elevation_gain_feet, elevation_loss_feet, race_altitude_ft, trail_subtype")
       .eq("user_id", user.id)
       .gte("race_date", new Date().toISOString().split("T")[0]!)
       .order("race_date", { ascending: true })
@@ -1139,6 +1143,10 @@ export default async function DashboardPage({
       goalDistanceMiles: race.goal_distance_miles,
       terrainType: (profileData?.terrain_type as "road" | "trail" | "mixed" | null) ?? "road",
       storedEasyPace: (profileData?.current_easy_pace as string | null) ?? undefined,
+      elevationGainFeet: race.elevation_gain_feet ?? undefined,
+      elevationLossFeet: race.elevation_loss_feet ?? undefined,
+      raceAltitudeFt: race.race_altitude_ft ?? undefined,
+      trailSubtype: (race.trail_subtype as "groomed" | "mixed" | "technical" | "highly_technical" | null) ?? undefined,
     });
   });
 

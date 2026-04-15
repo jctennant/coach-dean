@@ -795,7 +795,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .limit(20),
     supabase
       .from("races")
-      .select("race_date, race_name, goal, priority, goal_time_minutes, goal_distance_miles")
+      .select("id, race_date, race_name, goal, priority, goal_time_minutes, goal_distance_miles, elevation_gain_feet, elevation_loss_feet, race_altitude_ft, trail_subtype")
       .eq("user_id", userId)
       .gte("race_date", new Date().toISOString().split("T")[0])
       .order("race_date", { ascending: true })
@@ -1041,6 +1041,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         // Try to predict for the goal race distance if available
         const goalDistMiles = (profile?.goal_distance_miles as number | null) ?? null;
         if (goalDistMiles && goalDistMiles > 0) {
+          const aRace = upcomingRaces.find(r => (r as Record<string, unknown>).priority === "A") as Record<string, unknown> | undefined;
           const prediction = predictRaceTime({
             activities: activitiesForPredict,
             goalDistanceMiles: goalDistMiles,
@@ -1048,14 +1049,22 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
             storedEasyPace: (profile?.current_easy_pace as string | null) ?? undefined,
             recentRaceDistKm: (onbData.recent_race_distance_km as number | null) ?? undefined,
             recentRaceTimeMinutes: (onbData.recent_race_time_minutes as number | null) ?? undefined,
+            elevationGainFeet: (aRace?.elevation_gain_feet as number | null) ?? undefined,
+            elevationLossFeet: (aRace?.elevation_loss_feet as number | null) ?? undefined,
+            raceAltitudeFt: (aRace?.race_altitude_ft as number | null) ?? undefined,
+            trailSubtype: (aRace?.trail_subtype as "groomed" | "mixed" | "technical" | "highly_technical" | null) ?? undefined,
           });
+          const aRaceId = (aRace?.id as string | null) ?? null;
+          const isTrailOrMixed = (profile as Record<string, unknown> | null)?.terrain_type === "trail" || (profile as Record<string, unknown> | null)?.terrain_type === "mixed";
+          const missingCourseData = isTrailOrMixed && aRaceId && !(aRace?.elevation_gain_feet);
           if (prediction) {
             racePredictorBlock = `\nRACE PREDICTOR DATA (pre-computed — use this to answer the athlete's race time question):
 Predicted finish: ${prediction.predictedFormatted} (range: ${prediction.rangeFormatted})
 Confidence: ${prediction.confidence}
 Factors: ${prediction.factors.join("; ")}
 Narrative: ${prediction.narrative}
-Use this prediction as the foundation of your answer. Acknowledge the confidence level honestly. If they asked about a specific race different from the goal race, adjust the prediction accordingly using the VDOT from the factors above. If they provided new course data (elevation, terrain), factor that in.
+${missingCourseData ? `COURSE DATA MISSING: This is a trail/mountain race but no elevation or altitude data is stored — the prediction above does NOT account for climbing or altitude. Before answering, use web_search to look up "${(onbData.race_name as string | null) ?? goalDistMiles + " mile trail race"} course elevation profile" and extract: total gain (ft), start altitude (ft), and terrain type. Then save the data with [RACE_COURSE_UPDATE:{"race_id":"${aRaceId}","elevation_gain_feet":<number>,"elevation_loss_feet":<number>,"race_altitude_ft":<number>,"trail_subtype":"<groomed|mixed|technical|highly_technical>"}] at the end of your response. In your reply, state the revised prediction that accounts for the course profile you found.` : ""}
+Use this prediction as the foundation of your answer. Acknowledge the confidence level honestly. If they asked about a specific race different from the goal race, adjust the prediction accordingly using the VDOT from the factors above.
 `;
           }
         }
@@ -1502,6 +1511,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     : null;
   const skipDayMatch = rawText.match(/\[SKIP_DAY:\s*(\d{4}-\d{2}-\d{2})\]/i);
   const tagSkipDayDate = skipDayMatch ? skipDayMatch[1] : null;
+  const raceCourseUpdateMatch = rawText.match(/\[RACE_COURSE_UPDATE:\s*(\{[\s\S]*?\})\]/i);
+  const rawRaceCourseUpdateJson = raceCourseUpdateMatch ? raceCourseUpdateMatch[1].trim() : null;
   const strippedRaw = stripReasoningPreamble(
     rawText
       .replace(/\[NO_REPLY\]/gi, "")
@@ -1513,6 +1524,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .replace(/\[SESSION_UPDATE:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[WEEK_OVERRIDE:[^\]]+\]/gi, "")
       .replace(/\[SKIP_DAY:\s*\d{4}-\d{2}-\d{2}\]/gi, "")
+      .replace(/\[RACE_COURSE_UPDATE:\s*\{[\s\S]*?\}\]/gi, "")
       .trim()
   );
   // correctMileageTotal catches math errors where Claude states a weekly total that
@@ -2036,6 +2048,40 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           }
         });
       }
+      // Persist race course data if Dean emitted a [RACE_COURSE_UPDATE] tag
+      if (rawRaceCourseUpdateJson) {
+        try {
+          const courseData = JSON.parse(rawRaceCourseUpdateJson) as {
+            race_id?: string;
+            elevation_gain_feet?: number | null;
+            elevation_loss_feet?: number | null;
+            race_altitude_ft?: number | null;
+            trail_subtype?: string | null;
+          };
+          if (courseData.race_id) {
+            const updatePayload: Record<string, unknown> = {};
+            if (courseData.elevation_gain_feet != null) updatePayload.elevation_gain_feet = courseData.elevation_gain_feet;
+            if (courseData.elevation_loss_feet != null) updatePayload.elevation_loss_feet = courseData.elevation_loss_feet;
+            if (courseData.race_altitude_ft != null) updatePayload.race_altitude_ft = courseData.race_altitude_ft;
+            if (courseData.trail_subtype != null) updatePayload.trail_subtype = courseData.trail_subtype;
+            if (Object.keys(updatePayload).length > 0) {
+              const { error: raceUpdateErr } = await supabase
+                .from("races")
+                .update(updatePayload)
+                .eq("id", courseData.race_id)
+                .eq("user_id", userId);
+              if (raceUpdateErr) {
+                console.error("[user_message] race course update failed:", raceUpdateErr);
+              } else {
+                console.log("[user_message] race course data saved:", updatePayload);
+              }
+            }
+          }
+        } catch (parseErr) {
+          console.error("[user_message] RACE_COURSE_UPDATE parse failed:", parseErr);
+        }
+      }
+
       if (!wantsRebuild) {
         const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
         if (rawSessionUpdateJson) {
@@ -3832,14 +3878,33 @@ ${lines.join("\n")}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
   })();
 
+  // Build goal race block (including course data and race ID for RACE_COURSE_UPDATE tag)
+  const goalRaceBlock = (() => {
+    if (!raceIsUpcoming) return "";
+    const aRaceForPrompt = upcomingRaces?.find(r => r.priority === "A");
+    const aRaceIdForPrompt = (aRaceForPrompt?.id as string | null) ?? null;
+    const courseLines: string[] = [];
+    if (aRaceForPrompt) {
+      if (aRaceForPrompt.elevation_gain_feet) courseLines.push("Elevation gain: " + aRaceForPrompt.elevation_gain_feet + "ft");
+      if (aRaceForPrompt.elevation_loss_feet) courseLines.push("Elevation loss: " + aRaceForPrompt.elevation_loss_feet + "ft");
+      if (aRaceForPrompt.race_altitude_ft) courseLines.push("Start altitude: " + aRaceForPrompt.race_altitude_ft + "ft");
+      if (aRaceForPrompt.trail_subtype) courseLines.push("Trail type: " + aRaceForPrompt.trail_subtype);
+    }
+    const goalTimeStr = goalTimeMinutes != null
+      ? " — goal finish time: " + Math.floor(goalTimeMinutes / 60) + ":" + String(Math.round(goalTimeMinutes % 60)).padStart(2, "0") + goalPaceStr
+      : "";
+    const raceIdLine = aRaceIdForPrompt ? "\nRace ID (for RACE_COURSE_UPDATE tag): " + aRaceIdForPrompt : "";
+    const courseDataLine = courseLines.length > 0 ? "\nCourse data: " + courseLines.join(" | ") : "";
+    return "ATHLETE: " + (user.name || "this athlete") + "\n"
+      + "GOAL: " + goalDisplay + " on " + profile!.race_date + goalTimeStr + raceIdLine + courseDataLine + "\n"
+      + "<rule>This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.</rule>\n"
+      + "<rule>GOAL DISCREPANCY — RAISE ONCE ONLY: If there is a discrepancy between the stored goal above and something the athlete said, flag it at most once per conversation. Check RECENT CONVERSATION — if you (Coach Dean) have already asked \"which race is it?\" or flagged a goal mismatch in a prior message, do NOT raise it again. If the athlete has answered, treat their answer as ground truth and proceed. Repeating the same goal-conflict flag three times in a row when the athlete already answered is a serious trust failure.</rule>\n";
+  })();
+
   return `${factsBlock}
 
-${raceIsUpcoming ? `ATHLETE: ${user.name || "this athlete"}
-GOAL: ${goalDisplay} on ${profile!.race_date}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : ""}
-<rule>This is the authoritative source for the athlete's goal race. Use this exact distance and race type whenever referencing their race. If any prior message in this conversation references a different distance or race type, that was an error — disregard it and use the data above.</rule>
-<rule>GOAL DISCREPANCY — RAISE ONCE ONLY: If there is a discrepancy between the stored goal above and something the athlete said, flag it at most once per conversation. Check RECENT CONVERSATION — if you (Coach Dean) have already asked "which race is it?" or flagged a goal mismatch in a prior message, do NOT raise it again. If the athlete has answered, treat their answer as ground truth and proceed. Repeating the same goal-conflict flag three times in a row when the athlete already answered is a serious trust failure.</rule>
-
-` : ""}You are Coach Dean, an expert running coach communicating via text message. You specialize in running — from 5Ks to ultramarathons. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${raceIsUpcoming ? ` on ${profile!.race_date}` : ""}.
+${goalRaceBlock}
+You are Coach Dean, an expert running coach communicating via text message. You specialize in running — from 5Ks to ultramarathons. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${raceIsUpcoming ? ` on ${profile!.race_date}` : ""}.
 
 CRITICAL — OUTPUT RULES:
 Your response is sent directly to the athlete as an SMS text message. Never include any of the following in your output:
@@ -4831,6 +4896,10 @@ Use full day names, comma-separated. Only emit when the athlete is explicitly re
 When you agree to skip a specific training day, append:
 [SKIP_DAY: 2026-04-12]
 Use YYYY-MM-DD format. Compute from the DATE CONTEXT block.
+
+RACE COURSE DATA: If the athlete provides course profile details for their race (total elevation gain, total descent, start altitude, or terrain type), save it immediately by appending at the end of your response:
+[RACE_COURSE_UPDATE:{"race_id":"<uuid>","elevation_gain_feet":<number>,"elevation_loss_feet":<number>,"race_altitude_ft":<number>,"trail_subtype":"<groomed|mixed|technical|highly_technical>"}]
+Only include fields the athlete actually provided — omit the rest. The race_id is in RACE PREDICTOR DATA or the goal race block. The tag is stripped before SMS delivery. After saving, state how the new data affects the finish time prediction (e.g. "With 8,500ft of gain that moves your projected finish from X to Y").
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
 

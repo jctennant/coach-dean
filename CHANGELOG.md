@@ -4,6 +4,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-14 — Mountain race prediction: course data support
+
+**Type:** Feature
+**Reported by:** User feedback
+**User feedback:** "did the new prediction logic actually get applied and run? Mine look aggressive for mountain races still!"
+**Root cause:** The race predictor had elevation/altitude/trail-subtype logic but the dashboard call and the `user_message` race predictor block never passed those values — because the `races` table didn't store course profile data.
+**Fix / Change:**
+- Added `elevation_gain_feet`, `elevation_loss_feet`, `race_altitude_ft`, `trail_subtype` columns to the `races` table (migration 034)
+- Dashboard now reads and passes course data to `predictRaceTime` — mountain race predictions now apply grade-dependent elevation penalties and altitude penalties
+- `user_message` race predictor block also passes course data from the stored A race
+- Dean can now save course data when an athlete mentions it via SMS — emits `[RACE_COURSE_UPDATE:{...}]` tag which is persisted to the races table
+- For trail races missing course data, Dean's prediction prompt includes a note asking him to request and save elevation/altitude from the athlete
+- Course data (gain, loss, altitude, trail type) is shown in the goal race block of Dean's system prompt
+- Removed VDOT badge from the aerobic efficiency card (user reported it looked off)
+- Improved pacing zones display: from monospace joined text to a labeled 3-row grid with color dots and a note clarifying paces are from Dean's coaching notes (not HR-linked)
+**Files changed:** `supabase/migrations/034_race_course_data.sql`, `src/lib/database.types.ts`, `src/app/dashboard/page.tsx`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-14 — v2.0 migration: disable morning/nightly crons + user transition message
 
 **Type:** Feature / Infra

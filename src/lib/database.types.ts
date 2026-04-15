@@ -219,37 +219,49 @@ export type Database = {
       races: {
         Row: {
           created_at: string | null
+          elevation_gain_feet: number | null
+          elevation_loss_feet: number | null
           goal: string
           goal_distance_miles: number | null
           goal_time_minutes: number | null
           id: string
           priority: string
+          race_altitude_ft: number | null
           race_date: string
           race_name: string | null
+          trail_subtype: "groomed" | "mixed" | "technical" | "highly_technical" | null
           updated_at: string | null
           user_id: string | null
         }
         Insert: {
           created_at?: string | null
+          elevation_gain_feet?: number | null
+          elevation_loss_feet?: number | null
           goal: string
           goal_distance_miles?: number | null
           goal_time_minutes?: number | null
           id?: string
           priority?: string
+          race_altitude_ft?: number | null
           race_date: string
           race_name?: string | null
+          trail_subtype?: string | null
           updated_at?: string | null
           user_id?: string | null
         }
         Update: {
           created_at?: string | null
+          elevation_gain_feet?: number | null
+          elevation_loss_feet?: number | null
           goal?: string
           goal_distance_miles?: number | null
           goal_time_minutes?: number | null
           id?: string
           priority?: string
+          race_altitude_ft?: number | null
           race_date?: string
           race_name?: string | null
+          trail_subtype?: string | null
           updated_at?: string | null
           user_id?: string | null
         }

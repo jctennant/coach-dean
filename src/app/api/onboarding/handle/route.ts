@@ -291,8 +291,9 @@ STRAVA CONTEXT:
 When Strava connects and shows training history, demonstrate that you've genuinely analyzed their data — don't just say "I can see your Strava." Reference something specific and concrete: their recent mileage, training frequency, effort distribution, or a notable run. The goal is to make them feel you actually understand who they are as a runner, not just that you have access to their account. Examples: "I can see you've been putting in consistent 40-mile weeks with most of it at easy effort — that's a solid aerobic base to build from." / "Looks like you've been running 5 days a week fairly consistently, with a longer effort on Saturdays." Surface observations that connect to their goal or what they've told you they want to improve. Don't ask a generic "what's been missing?" — let the data itself show you know them.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
 
-RACE DATE — MANDATORY SEARCH:
-The moment an athlete mentions a specific named race, call web_search immediately to find the exact date. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong, and user-provided dates are often wrong too — ALWAYS search, even if the athlete gives you a specific date. This is non-negotiable. A month alone ("next April", "this fall") is never enough — get the specific day.
+RACE DATE AND COURSE PROFILE — MANDATORY SEARCH:
+The moment an athlete mentions a specific named race, call web_search immediately to find the exact date AND the course profile. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong, and user-provided dates are often wrong too — ALWAYS search, even if the athlete gives you a specific date. This is non-negotiable. A month alone ("next April", "this fall") is never enough — get the specific day.
+When searching for a trail, mountain, or ultra race: also look up the course's total elevation gain (in feet), starting altitude (if it's a mountain race), and terrain character (groomed fire roads, singletrack, technical, etc.). Mention these in your response naturally so the extraction pass can capture them — e.g. "Hardrock 100 is on July 19th with about 33,000ft of gain and starting at high altitude in the San Juans." You don't need to ask the athlete for this info if you can find it from the search.
 After searching: if the search result shows the race date is within the next 6 weeks AND the user is starting a new coaching relationship (not explicitly asking for race-week prep), do NOT proceed — ask first: "That's only [X] weeks away — are you looking for race-week prep for this year, or building toward [next year]?" Do not pivot to taper mode or any race-specific framing until the user confirms the year.
 After searching: if the user has not stated a specific date (only a month or vague timeframe), confirm the search result with them before proceeding: "I found it listed as [date] — does that sound right?"
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
@@ -594,7 +595,11 @@ Rules:
 - terrain_type: 'road', 'trail', or 'mixed' based on what athlete says. Null if not mentioned.
 - has_existing_plan: true if athlete says they currently follow a training plan (Runna, TP, coach-written, etc.). False if they say they don't have one or are self-directed without a plan. Null if not mentioned.
 - wants_weekly_recap: true if athlete says yes to weekly recap texts. False if they decline. Null if not asked yet.
-- other_notes: any training preferences, dislikes, or context not captured elsewhere (e.g. "loves hills", "hates treadmills", "prefers morning runs", "wants more cross-training"). Do not duplicate what's in injury_notes.`,
+- other_notes: any training preferences, dislikes, or context not captured elsewhere (e.g. "loves hills", "hates treadmills", "prefers morning runs", "wants more cross-training"). Do not duplicate what's in injury_notes.
+- race_elevation_gain_feet: if Dean's message mentions total elevation gain for the goal race (e.g. "33,000ft of gain", "8,500 feet of climbing"), extract that number in feet. Null if not mentioned.
+- race_elevation_loss_feet: if total descent is mentioned separately, extract it. Usually equal to gain for out-and-back or loop courses; null if not mentioned.
+- race_altitude_ft: if the race start or course altitude is mentioned (e.g. "starts at 9,000ft", "high altitude race"), extract in feet. Null if not mentioned.
+- race_trail_subtype: classify the trail character if described. Groomed = fire roads, well-maintained singletrack. Mixed = standard dirt trail with some rocks/roots. Technical = rocky, rooty, requires careful footing. Highly_technical = scrambling, sustained technical terrain. Null if not mentioned or it's a road race.`,
     messages: [{ role: "user", content: transcript }],
     tools: [{
       name: "save_training_fields",
@@ -652,6 +657,10 @@ Rules:
           has_existing_plan: { type: ["boolean", "null"], description: "True if athlete currently follows a training plan (Runna, TP, etc.)" },
           wants_weekly_recap: { type: ["boolean", "null"], description: "True if athlete wants weekly recap SMS" },
           other_notes: { type: ["string", "null"] },
+          race_elevation_gain_feet: { type: ["number", "null"], description: "Total elevation gain of the goal race course in feet. Extract from Dean's web search results if mentioned in the transcript." },
+          race_elevation_loss_feet: { type: ["number", "null"], description: "Total elevation loss (descent) of the goal race course in feet." },
+          race_altitude_ft: { type: ["number", "null"], description: "Starting or peak altitude of the race in feet. Extract if the race is a mountain race and altitude was mentioned in the transcript." },
+          race_trail_subtype: { type: ["string", "null"], enum: ["groomed", "mixed", "technical", "highly_technical", null], description: "Trail character: groomed=fire roads/groomed singletrack, mixed=dirt/moderate rocks, technical=rocky/rooty/challenging, highly_technical=scrambling/extreme terrain." },
         },
         required: [],
       },
@@ -1128,6 +1137,10 @@ async function completeOnboarding(
         priority: "A" as const,
         goal_time_minutes: (data.goal_time_minutes as number | null) ?? null,
         goal_distance_miles: goalDistanceMiles,
+        elevation_gain_feet: (data.race_elevation_gain_feet as number | null) ?? null,
+        elevation_loss_feet: (data.race_elevation_loss_feet as number | null) ?? null,
+        race_altitude_ft: (data.race_altitude_ft as number | null) ?? null,
+        trail_subtype: (data.race_trail_subtype as "groomed" | "mixed" | "technical" | "highly_technical" | null) ?? null,
       },
       ...((
         data.other_races as Array<{
