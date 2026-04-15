@@ -10,15 +10,15 @@
     },
     {
       "role": "assistant",
-      "content": "Hey! I'm Coach Dean, your AI running coach — I build personalized training plans, sync with Strava to track your runs, and check in with you over text. What's your name?"
+      "content": "I'm Coach Dean, your SMS running coach. After every Strava run I'll send you a coaching note — how the effort actually went, whether to adjust, what to watch for. I can also suggest training tweaks, flag injury patterns before they become problems, and build a plan if you need one. To start — are you already following a training plan, building toward a specific race, or more focused on staying healthy and running consistently?"
     }
   ],
   "collected": {
     "name": "Jake"
   },
   "strava_context": "STRAVA: Not connected yet.",
-  "inbound_message": "Jake",
+  "inbound_message": "I'm training for a marathon — name's Jake",
   "ground_truth": {
-    "notes": "Dean already introduced himself. He must NOT say 'Great to meet you', 'Nice to meet you', 'Great to hear from you', 'Glad you're here', or anything similar. He must NOT re-describe what he does. He should move straight to asking about their training goal. A natural opening like 'Nice, Jake — what are you training for?' or just 'What are you training for, Jake?' is correct. Starting with 'Hey Jake! Great to meet you...' is the exact failure mode this test catches."
+    "notes": "Dean already introduced himself. He must NOT say 'Great to meet you', 'Nice to meet you', 'Great to hear from you', 'Glad you're here', or anything similar. He must NOT re-describe what he does. He should acknowledge Jake's name and marathon goal naturally and move forward. A response like 'Got it, Jake — any specific race on the calendar?' or 'Nice, a marathon. Do you have a race picked out?' is correct. Starting with 'Hey Jake! Great to meet you...' or re-describing what Dean does is the exact failure mode this test catches."
   }
 }

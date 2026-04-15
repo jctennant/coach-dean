@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Onboarding reframe: persona-aware flow and concrete first message
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** "One thing I'm not clear if we do well right now is be ultra clear about the ways you can use coach dean upfront (insights on your running, injury recovery and prevention, upload plan and work from that or create a new plan)"
+**Root cause:** The old first message asked for the athlete's name and used vague Runna-centric positioning ("Runna plans your runs, Garmin tracks them"). It didn't surface the three distinct use cases, so users without a Runna plan or with injury goals felt like the wrong audience. Onboarding also asked for terrain type, training tools, and weekly recap preference as explicit questions — adding turns without much value.
+**Fix / Change:** Rewrote the first message instruction: Dean now opens with a concrete 2-3 sentence description of what he does (post-run notes, training tweaks, injury flagging, plan building), then asks a single branching question to self-select mode (plan complement / race-goal chaser / healthy builder). Name moves to the second turn. Added a CONVERSATION MODE section to the system prompt with three explicit paths — each with different priorities, required fields, and tone guidance. Removed terrain_type, training_tools, and wants_weekly_recap as explicit questions (terrain/tools extracted passively; recap defaults to on). Updated CLAUDE.md onboarding step documentation to reflect the current unified conversation model. Updated eval runner and fixtures to match new expected behavior.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-onboarding-evals.mjs`, `evals/fixtures/onboarding/first-message-intro.json`, `evals/fixtures/onboarding/no-greeting-repeat.json`, `CLAUDE.md`
+
+---
+
+## 2026-04-15 — Evals for uploaded plan scenarios
+
+**Type:** Infra
+**Reported by:** Jake ("do we have any evals for these different states or options? if not, let's make?")
+**User feedback:** "do we have any evals for these different states or options? if not, let's make?"
+**Root cause:** No eval coverage for the uploaded plan path — weekly recap with plan sessions, week sync response, and range session language were all untested.
+**Fix / Change:** Added `uploaded_plan` support to `buildUserMessage` in `evals/run-evals.mjs` (injects `<uploaded_plan_next_week>` block mirroring route.ts logic). Added 3 new fixtures: (1) `uploaded-plan-weekly-recap` — Sunday recap must reference week 3 interval sessions from plan, not invent sessions; (2) `uploaded-plan-week-sync` — user replies "week 1 next week" to plan_import_week_ask, Dean must confirm sessions and mention next Monday; (3) `uploaded-plan-range-sessions` — plan has range sessions (4–6mi, 8–12mi), Dean must preserve range language, not collapse to midpoints. Added range/plan-session specific assertions to `factual-accuracy.mjs` judge.
+**Files changed:** evals/run-evals.mjs, evals/judges/factual-accuracy.mjs, evals/fixtures/uploaded-plan-weekly-recap.json, evals/fixtures/uploaded-plan-week-sync.json, evals/fixtures/uploaded-plan-range-sessions.json
+
 ## 2026-04-15 — Reset training_state to week 1 on plan upload
 
 **Type:** Bug Fix / Improvement
