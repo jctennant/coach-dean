@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Fix "I don't have week 1 specifically" — plan import week sync fallback in coach/respond
+
+**Type:** Bug Fix
+**Reported by:** Jake (conversation showing Dean saying "I don't have week 1 specifically")
+**User feedback:** "weird that dean doesn't have week 1 of the plan?"
+**Root cause:** When a user replies to "which week are you on?" (plan_import_week_ask), the primary path is the linq webhook's `handlePlanWeekSync` interceptor. When that interception failed (for any reason), the fallback `user_message` path in `coach/respond` always showed `uploadedNextWeek = currentWeek + 1` — never the week the user actually requested. Dean could see the plan existed but couldn't see week 1's sessions, so said "I don't have week 1 specifically."
+**Fix / Change:** Added a fallback inside `coach/respond user_message`: if the last assistant message type is `plan_import_week_ask` and an uploaded plan exists, extract the requested week number from the user's message (via `extractPlanWeekNumber` regex helper), override `uploadedNextWeek` to that week, and sync `training_state` after sending the response. The webhook interception remains the fast path; this is the reliable fallback.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-15 — Fix "Failed to save plan" — training_plans has no unique constraint on user_id
 
 **Type:** Bug Fix

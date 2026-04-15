@@ -1334,6 +1334,21 @@ Use this data to:
     }
   }
 
+  // Plan import week sync fallback: when the webhook's handlePlanWeekSync didn't intercept
+  // the user's reply (last assistant msg is still "plan_import_week_ask"), detect the
+  // requested week here and override uploadedNextWeek so Dean sees the right sessions.
+  let planWeekSyncNum: number | null = null;
+  if (isUploadedPlan && trigger === "user_message" && uploadedPlanAllWeeks.length > 0) {
+    const lastAssistantMsg = [...recentMessages].reverse().find(m => m.role === "assistant");
+    if (lastAssistantMsg?.message_type === "plan_import_week_ask") {
+      const latestUserContent = [...recentMessages].reverse().find(m => m.role === "user")?.content ?? "";
+      planWeekSyncNum = extractPlanWeekNumber(latestUserContent, uploadedPlanAllWeeks.length);
+      if (planWeekSyncNum !== null) {
+        uploadedNextWeek = uploadedPlanAllWeeks.find(w => w.week_number === planWeekSyncNum) ?? null;
+      }
+    }
+  }
+
   // Build user message based on trigger
   const injuryNotes = (profile?.injury_notes as string | null) || null;
   const timezoneConfirmed = !!(onboardingData.timezone_confirmed) || !!(onboardingData.strava_city); // confirmed if manually entered or Strava had a city
@@ -1480,9 +1495,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         return `  - ${s.dayOfWeek}: ${s.description}${distPart}${pacePart}`;
       })
       .join("\n");
+    const weekLabel = planWeekSyncNum !== null
+      ? `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount} (athlete is starting this week now):\nThe athlete just confirmed they are starting week ${nextWeekNum}. Acknowledge you have the plan and these sessions, and briefly describe what week ${nextWeekNum} looks like.`
+      : `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount}:\nThe athlete is following an external training plan. These are the prescribed sessions for next week. Use these as the plan — don't replace them with different sessions. You may suggest working within the low end of any ranges if the athlete had a hard week, or the high end if they're feeling strong.`;
     userMessage += `\n\n<uploaded_plan_next_week>
-UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount}:
-The athlete is following an external training plan. These are the prescribed sessions for next week. Use these as the plan — don't replace them with different sessions. You may suggest working within the low end of any ranges if the athlete had a hard week, or the high end if they're feeling strong.
+${weekLabel}
 ${sessionLines}
 Weekly total: ${mileageRange}
 </uploaded_plan_next_week>`;
@@ -1805,6 +1822,45 @@ Weekly total: ${mileageRange}
   }
 
   void trackEvent(userId, "coaching_response_sent", { trigger, onboarding: false });
+
+  // Plan import week sync: if this user_message handled a pending plan_import_week_ask,
+  // sync training_state so morning_plan and post_run see the correct week + sessions.
+  if (planWeekSyncNum !== null && uploadedNextWeek && !dry_run) {
+    const DAY_OFFSETS: Record<string, number> = {
+      monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
+    };
+    const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const syncNow = new Date();
+    const daysFromMonday = syncNow.getDay() === 0 ? 6 : syncNow.getDay() - 1;
+    const syncMonday = new Date(syncNow);
+    syncMonday.setDate(syncNow.getDate() - daysFromMonday);
+
+    const syncSessions = uploadedNextWeek.sessions
+      .filter(s => s.type !== "off")
+      .map(s => {
+        const offset = DAY_OFFSETS[s.dayOfWeek.toLowerCase()] ?? 0;
+        const d = new Date(syncMonday);
+        d.setDate(syncMonday.getDate() + offset);
+        const distPart = s.targetDistanceMiles ? ` ${s.targetDistanceMiles}mi` : "";
+        const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
+        return {
+          day: DAY_SHORT[offset],
+          date: `${d.getMonth() + 1}/${d.getDate()}`,
+          label: `${s.description}${distPart}${pacePart}`,
+          optional: false,
+        };
+      });
+
+    await supabase.from("training_state").upsert({
+      user_id: userId,
+      current_week: planWeekSyncNum,
+      weekly_mileage_target: uploadedNextWeek.total_miles || null,
+      weekly_plan_sessions: syncSessions as unknown as Json,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    console.log(`[coach/respond] plan_import_week_ask fallback: synced week=${planWeekSyncNum}, sessions=${syncSessions.length}`);
+    void trackEvent(userId, "plan_week_synced", { week: planWeekSyncNum, source: "coach_respond_fallback" });
+  }
 
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
@@ -2576,6 +2632,30 @@ function correctTotalFromSessionList(
   });
 
   return corrected;
+}
+
+/**
+ * Extracts a week number from a free-form user message like "Starting fresh with week 1!"
+ * or "I'm on week 4" or "the third week". Returns 1 as default for "fresh start" messages.
+ */
+function extractPlanWeekNumber(text: string, maxWeek: number): number {
+  // "week 3", "week3"
+  const numMatch = text.match(/\bweek\s*(\d{1,2})\b/i);
+  if (numMatch) return Math.min(parseInt(numMatch[1], 10), maxWeek);
+
+  // Ordinal words
+  const ordinals: [string, number][] = [
+    ["first", 1], ["second", 2], ["third", 3], ["fourth", 4], ["fifth", 5],
+    ["sixth", 6], ["seventh", 7], ["eighth", 8], ["ninth", 9], ["tenth", 10],
+    ["eleventh", 11], ["twelfth", 12], ["thirteenth", 13], ["fourteenth", 14],
+    ["fifteenth", 15], ["sixteenth", 16],
+  ];
+  for (const [word, num] of ordinals) {
+    if (new RegExp(`\\b${word}\\b`, "i").test(text)) return Math.min(num, maxWeek);
+  }
+
+  // "fresh start", "from the beginning", "from scratch" → week 1
+  return 1;
 }
 
 function stripMarkdown(text: string): string {
