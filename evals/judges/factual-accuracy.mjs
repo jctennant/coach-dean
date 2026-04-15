@@ -181,6 +181,12 @@ function buildGroundTruthBlock(gt) {
   if (gt.forbidden_content) lines.push(`- FORBIDDEN content in response: ${gt.forbidden_content.join(", ")}`);
   if (gt.must_contain_tag) lines.push(`- REQUIRED TAG: Response MUST end with ${gt.must_contain_tag} (after the coaching message text). If this tag is absent: score 0.`);
   if (gt.forbidden_tags) lines.push(`- FORBIDDEN TAGS (must NOT appear): ${gt.forbidden_tags.join(", ")}. If any forbidden tag appears: score 0.`);
+  if (gt.week3_key_sessions) lines.push(`- REQUIRED PLAN SESSIONS: Response must reference these sessions from the uploaded plan (week 3): ${gt.week3_key_sessions.join(", ")}. Inventing different sessions is a failure.`);
+  if (gt.week1_sessions) lines.push(`- REQUIRED WEEK 1 SESSIONS: Response must reference these sessions: ${gt.week1_sessions.join(", ")}`);
+  if (gt.must_mention_next_monday) lines.push(`- REQUIRED: Response must explicitly mention starting next Monday (not "this Monday" or just "Monday").`);
+  if (gt.range_language_required) lines.push(`- RANGE LANGUAGE: Response must preserve range language from the plan (e.g. "8–12mi", "4–6×800m"). Collapsing a range to its midpoint (e.g. "10mi" for an 8–12mi session, "5×800m" for 4–6×800m) is a factual error.`);
+  if (gt.forbidden_collapses) lines.push(`- FORBIDDEN COLLAPSES (these represent collapsed ranges — must NOT appear): ${gt.forbidden_collapses.join(", ")}`);
+  if (gt.must_reference_plan_sessions) lines.push(`- REQUIRED: Response must reference the actual sessions from the uploaded plan, not invent different sessions.`);
   if (gt.notes) lines.push(`- Evaluator note: ${gt.notes}`);
   return lines.join("\n");
 }

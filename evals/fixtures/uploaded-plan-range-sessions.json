@@ -1,0 +1,149 @@
+{
+  "id": "uploaded-plan-range-sessions",
+  "description": "Mid-week user_message asking 'what does my week look like?' Plan has range-based sessions (e.g. 4–6mi easy, 8–12mi long run). Dean should preserve range language exactly — NOT collapse ranges to their midpoint. Tests that range language from the uploaded plan flows through correctly.",
+  "category": "uploaded_plan_accuracy",
+  "trigger": "user_message",
+  "today": "2026-04-14",
+  "inbound_sms": "what does my week look like?",
+  "user": {
+    "name": "Alex",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Bay to Breakers Half",
+    "goal_race_date": "2026-05-31",
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:10/mi",
+    "tempo_pace": "7:28/mi",
+    "interval_pace": "6:43/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 34,
+    "miles_logged_this_week": 9,
+    "runs_this_week": 2,
+    "injury_notes": "None",
+    "recent_activities": [
+      { "date": "2026-04-14", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:12/mi" },
+      { "date": "2026-04-13", "type": "Easy Run", "distance_miles": 4.0, "pace": "9:18/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Thu", "date": "4/16", "label": "Intervals: 4–6×800m at interval pace (6mi total)" },
+      { "day": "Sat", "date": "4/18", "label": "Easy 4–6mi" },
+      { "day": "Sun", "date": "4/19", "label": "Long run 8–12mi easy" }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "date": "2026-04-09",
+        "content": "Week 4 done — solid 28mi. You're into build week now. Week 5 has some quality work on Thursday and your longest run yet on Sunday."
+      }
+    ]
+  },
+  "uploaded_plan": {
+    "all_weeks": [
+      {
+        "week_number": 1,
+        "total_miles": 22,
+        "sessions": [
+          { "weekNumber": 1, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 1, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 1, "dayOfWeek": "Thursday", "type": "tempo", "targetDistanceMiles": 6, "description": "Tempo 6mi" },
+          { "weekNumber": 1, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 1, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 7, "description": "Long run 7mi" }
+        ]
+      },
+      {
+        "week_number": 2,
+        "total_miles": 26,
+        "sessions": [
+          { "weekNumber": 2, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 2, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 2, "dayOfWeek": "Thursday", "type": "interval", "targetDistanceMiles": 6, "description": "Intervals: 4×800m at interval pace" },
+          { "weekNumber": 2, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 4–5mi" },
+          { "weekNumber": 2, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 8, "description": "Long run 8mi" }
+        ]
+      },
+      {
+        "week_number": 3,
+        "total_miles": 28,
+        "sessions": [
+          { "weekNumber": 3, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 3, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 3, "dayOfWeek": "Thursday", "type": "tempo", "targetDistanceMiles": 7, "description": "Tempo 7mi (4mi at tempo)" },
+          { "weekNumber": 3, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 3, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 9, "description": "Long run 9mi" }
+        ]
+      },
+      {
+        "week_number": 4,
+        "total_miles": 22,
+        "sessions": [
+          { "weekNumber": 4, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi recovery" },
+          { "weekNumber": 4, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 4, "dayOfWeek": "Thursday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 4, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 4, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 7, "description": "Long run 7mi easy" }
+        ]
+      },
+      {
+        "week_number": 5,
+        "total_miles": 34,
+        "total_miles_min": 31,
+        "total_miles_max": 38,
+        "sessions": [
+          { "weekNumber": 5, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 5, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 5, "targetDistanceMilesMin": 4, "targetDistanceMilesMax": 6, "description": "Easy 4–6mi" },
+          { "weekNumber": 5, "dayOfWeek": "Thursday", "type": "interval", "targetDistanceMiles": 6, "description": "Intervals: 4–6×800m at interval pace (6mi total)" },
+          { "weekNumber": 5, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 5, "targetDistanceMilesMin": 4, "targetDistanceMilesMax": 6, "description": "Easy 4–6mi" },
+          { "weekNumber": 5, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 10, "targetDistanceMilesMin": 8, "targetDistanceMilesMax": 12, "description": "Long run 8–12mi easy" }
+        ]
+      },
+      {
+        "week_number": 6,
+        "total_miles": 36,
+        "total_miles_min": 33,
+        "total_miles_max": 40,
+        "sessions": [
+          { "weekNumber": 6, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 6, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 5–6mi" },
+          { "weekNumber": 6, "dayOfWeek": "Thursday", "type": "tempo", "targetDistanceMiles": 8, "description": "Tempo 8mi (5mi at tempo)" },
+          { "weekNumber": 6, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 5–6mi" },
+          { "weekNumber": 6, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 12, "targetDistanceMilesMin": 10, "targetDistanceMilesMax": 13, "description": "Long run 10–13mi" }
+        ]
+      },
+      {
+        "week_number": 7,
+        "total_miles": 26,
+        "sessions": [
+          { "weekNumber": 7, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 7, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 7, "dayOfWeek": "Thursday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi w/ strides" },
+          { "weekNumber": 7, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 7, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 9, "description": "Long run 9mi" }
+        ]
+      },
+      {
+        "week_number": 8,
+        "total_miles": 16,
+        "sessions": [
+          { "weekNumber": 8, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 8, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 3, "description": "Easy 3mi shakeout" },
+          { "weekNumber": 8, "dayOfWeek": "Thursday", "type": "easy", "targetDistanceMiles": 3, "description": "Easy 3mi w/ strides" },
+          { "weekNumber": 8, "dayOfWeek": "Saturday", "type": "off", "description": "Rest" },
+          { "weekNumber": 8, "dayOfWeek": "Sunday", "type": "race", "description": "RACE DAY — Bay to Breakers Half" }
+        ]
+      }
+    ],
+    "next_week_num": 5
+  },
+  "ground_truth": {
+    "current_week": 5,
+    "miles_done_this_week": 9,
+    "remaining_sessions": ["4–6×800m intervals Thursday", "Easy 4–6mi Saturday", "Long run 8–12mi Sunday"],
+    "range_language_required": true,
+    "forbidden_collapses": ["5mi easy Saturday", "10mi long run", "5×800m"],
+    "notes": "Alex is mid-week (Tuesday) in week 5 of an uploaded plan. They've done 9mi so far (Mon 4mi + Tue 5mi). The key test is that Dean preserves range language from the uploaded plan: Thursday is '4–6×800m' (not '5×800m'), Saturday is '4–6mi' (not '5mi'), Sunday is '8–12mi' (not '10mi'). Collapsing ranges to their midpoint is a failure — the plan was written with ranges for a reason and the athlete should see the actual prescribed range. Dean should list the remaining 3 sessions for the week."
+  }
+}

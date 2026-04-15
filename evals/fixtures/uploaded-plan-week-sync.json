@@ -1,0 +1,131 @@
+{
+  "id": "uploaded-plan-week-sync",
+  "description": "User replies to Dean's 'which week are you starting?' question with 'week 1, starting next week'. Dean should confirm week 1 of the uploaded plan, list those sessions, and mention starting next Monday. This tests the plan_import_week_ask fallback path in coach/respond.",
+  "category": "uploaded_plan_accuracy",
+  "trigger": "user_message",
+  "today": "2026-04-15",
+  "inbound_sms": "week 1 starting next week",
+  "user": {
+    "name": "Sarah",
+    "timezone": "America/Denver",
+    "strava_connected": false,
+    "goal": "half_marathon",
+    "goal_race": "Denver Rock 'n' Roll Half",
+    "goal_race_date": "2026-06-28",
+    "current_week": 1,
+    "current_phase": "base",
+    "vdot": 42,
+    "easy_pace": "10:15/mi",
+    "tempo_pace": "8:20/mi",
+    "interval_pace": "7:30/mi",
+    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 23,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_notes": "None",
+    "recent_activities": [],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "date": "2026-04-15",
+        "content": "Got your plan! It's an 8-week half marathon program. Which week are you starting on, and are you kicking it off this Monday or next?",
+        "message_type": "plan_import_week_ask"
+      }
+    ]
+  },
+  "uploaded_plan": {
+    "all_weeks": [
+      {
+        "week_number": 1,
+        "total_miles": 23,
+        "sessions": [
+          { "weekNumber": 1, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 1, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 1, "dayOfWeek": "Friday", "type": "tempo", "targetDistanceMiles": 6, "description": "Tempo 6mi (2mi warm-up, 3mi at tempo, 1mi cool-down)" },
+          { "weekNumber": 1, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 8, "description": "Long run 8mi easy" }
+        ]
+      },
+      {
+        "week_number": 2,
+        "total_miles": 25,
+        "sessions": [
+          { "weekNumber": 2, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 2, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 2, "dayOfWeek": "Friday", "type": "interval", "targetDistanceMiles": 6, "description": "Intervals: 4×1mile at interval pace" },
+          { "weekNumber": 2, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 9, "description": "Long run 9mi" }
+        ]
+      },
+      {
+        "week_number": 3,
+        "total_miles": 27,
+        "sessions": [
+          { "weekNumber": 3, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 3, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 3, "dayOfWeek": "Friday", "type": "tempo", "targetDistanceMiles": 7, "description": "Tempo 7mi (4mi at tempo)" },
+          { "weekNumber": 3, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 10, "description": "Long run 10mi" }
+        ]
+      },
+      {
+        "week_number": 4,
+        "total_miles": 20,
+        "sessions": [
+          { "weekNumber": 4, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi recovery" },
+          { "weekNumber": 4, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 4, "dayOfWeek": "Friday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 4, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 8, "description": "Long run 8mi easy" }
+        ]
+      },
+      {
+        "week_number": 5,
+        "total_miles": 29,
+        "sessions": [
+          { "weekNumber": 5, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 5, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 7, "description": "Easy 7mi" },
+          { "weekNumber": 5, "dayOfWeek": "Friday", "type": "interval", "targetDistanceMiles": 7, "description": "Intervals: 5×1mile at interval pace" },
+          { "weekNumber": 5, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 11, "description": "Long run 11mi" }
+        ]
+      },
+      {
+        "week_number": 6,
+        "total_miles": 31,
+        "sessions": [
+          { "weekNumber": 6, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 6, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 7, "description": "Easy 7mi" },
+          { "weekNumber": 6, "dayOfWeek": "Friday", "type": "tempo", "targetDistanceMiles": 7, "description": "Tempo 7mi (5mi at tempo)" },
+          { "weekNumber": 6, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 12, "description": "Long run 12mi" }
+        ]
+      },
+      {
+        "week_number": 7,
+        "total_miles": 24,
+        "sessions": [
+          { "weekNumber": 7, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 7, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 7, "dayOfWeek": "Friday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi w/ strides" },
+          { "weekNumber": 7, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 9, "description": "Long run 9mi easy" }
+        ]
+      },
+      {
+        "week_number": 8,
+        "total_miles": 14,
+        "sessions": [
+          { "weekNumber": 8, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi shakeout" },
+          { "weekNumber": 8, "dayOfWeek": "Wednesday", "type": "easy", "targetDistanceMiles": 3, "description": "Easy 3mi w/ strides" },
+          { "weekNumber": 8, "dayOfWeek": "Friday", "type": "off", "description": "Rest day" },
+          { "weekNumber": 8, "dayOfWeek": "Sunday", "type": "race", "description": "RACE DAY — Denver Rock 'n' Roll Half" }
+        ]
+      }
+    ],
+    "next_week_num": 1,
+    "is_week_sync": true,
+    "is_next_week": true
+  },
+  "ground_truth": {
+    "week_number": 1,
+    "start_timing": "next_monday",
+    "week1_sessions": ["4mi easy Monday", "5mi easy Wednesday", "6mi tempo Friday", "8mi long run Sunday"],
+    "must_mention_next_monday": true,
+    "notes": "Sarah replied 'week 1 starting next week' to Dean's plan_import_week_ask question. Dean must: (1) confirm she's starting week 1 of the plan, (2) list week 1 sessions from the uploaded plan — 4mi easy Mon, 5mi easy Wed, 6mi tempo Fri, 8mi long run Sun, (3) mention starting next Monday (April 20). Dean should NOT say 'this Monday' or 'starting now'. The response should feel like a friendly acknowledgment of the plan start date plus a preview of week 1."
+  }
+}

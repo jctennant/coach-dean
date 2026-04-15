@@ -1,0 +1,148 @@
+{
+  "id": "uploaded-plan-weekly-recap",
+  "description": "Sunday weekly recap for athlete following an uploaded 8-week half marathon plan. Week 2 complete (26mi vs 28-30mi target range). Dean should recap week 2 accurately and describe week 3's sessions from the uploaded plan — NOT generate new sessions. Ground truth checks: correct mileage (26mi), week 3 interval session (5×1mile) and 10mi long run referenced.",
+  "category": "uploaded_plan_accuracy",
+  "trigger": "weekly_recap",
+  "today": "2026-04-12",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Chicago Spring Half",
+    "goal_race_date": "2026-06-07",
+    "current_week": 2,
+    "current_phase": "base",
+    "vdot": 44,
+    "easy_pace": "9:45/mi",
+    "tempo_pace": "7:55/mi",
+    "interval_pace": "7:08/mi",
+    "training_days": ["monday", "tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 29,
+    "miles_logged_this_week": 26,
+    "runs_this_week": 4,
+    "injury_notes": "None",
+    "recent_activities": [
+      { "date": "2026-04-12", "type": "Long Run", "distance_miles": 9.0, "pace": "9:52/mi" },
+      { "date": "2026-04-11", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:48/mi" },
+      { "date": "2026-04-09", "type": "Tempo Run", "distance_miles": 7.0, "pace": "8:02/mi" },
+      { "date": "2026-04-07", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:50/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "uploaded_plan": {
+    "all_weeks": [
+      {
+        "week_number": 1,
+        "total_miles": 24,
+        "sessions": [
+          { "weekNumber": 1, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 1, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 1, "dayOfWeek": "Thursday", "type": "tempo", "targetDistanceMiles": 6, "description": "Tempo 6mi (3mi warm-up, 2mi at tempo, 1mi cool-down)" },
+          { "weekNumber": 1, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 1, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 8, "description": "Long run 8mi" }
+        ]
+      },
+      {
+        "week_number": 2,
+        "total_miles": 29,
+        "total_miles_min": 28,
+        "total_miles_max": 30,
+        "sessions": [
+          { "weekNumber": 2, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "targetDistanceMilesMin": 4, "targetDistanceMilesMax": 5, "description": "Easy 4–5mi" },
+          { "weekNumber": 2, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 2, "dayOfWeek": "Thursday", "type": "tempo", "targetDistanceMiles": 7, "description": "Tempo 7mi (3mi warm-up, 3mi at tempo, 1mi cool-down)" },
+          { "weekNumber": 2, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 2, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 9, "description": "Long run 9mi" }
+        ]
+      },
+      {
+        "week_number": 3,
+        "total_miles": 31,
+        "total_miles_min": 30,
+        "total_miles_max": 33,
+        "sessions": [
+          { "weekNumber": 3, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "targetDistanceMilesMin": 4, "targetDistanceMilesMax": 6, "description": "Easy 4–6mi" },
+          { "weekNumber": 3, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 3, "dayOfWeek": "Thursday", "type": "interval", "targetDistanceMiles": 7, "description": "Intervals: 5×1mile at interval pace w/ 400m recovery jog" },
+          { "weekNumber": 3, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 3, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 10, "description": "Long run 10mi" }
+        ]
+      },
+      {
+        "week_number": 4,
+        "total_miles": 24,
+        "sessions": [
+          { "weekNumber": 4, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 4, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 4, "dayOfWeek": "Thursday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 4, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 4, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 8, "description": "Long run 8mi" }
+        ]
+      },
+      {
+        "week_number": 5,
+        "total_miles": 34,
+        "total_miles_min": 32,
+        "total_miles_max": 35,
+        "sessions": [
+          { "weekNumber": 5, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 5, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 5, "dayOfWeek": "Thursday", "type": "tempo", "targetDistanceMiles": 8, "description": "Tempo 8mi (4mi at tempo)" },
+          { "weekNumber": 5, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 5, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 11, "description": "Long run 11mi" }
+        ]
+      },
+      {
+        "week_number": 6,
+        "total_miles": 36,
+        "total_miles_min": 34,
+        "total_miles_max": 38,
+        "sessions": [
+          { "weekNumber": 6, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 6, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 6, "dayOfWeek": "Thursday", "type": "interval", "targetDistanceMiles": 8, "description": "Intervals: 6×1mile at interval pace" },
+          { "weekNumber": 6, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 6, "description": "Easy 6mi" },
+          { "weekNumber": 6, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 12, "description": "Long run 12mi" }
+        ]
+      },
+      {
+        "week_number": 7,
+        "total_miles": 27,
+        "total_miles_min": 25,
+        "total_miles_max": 28,
+        "sessions": [
+          { "weekNumber": 7, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 7, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 5, "description": "Easy 5mi" },
+          { "weekNumber": 7, "dayOfWeek": "Thursday", "type": "tempo", "targetDistanceMiles": 6, "description": "Tempo 6mi (2mi at tempo)" },
+          { "weekNumber": 7, "dayOfWeek": "Saturday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 7, "dayOfWeek": "Sunday", "type": "long", "targetDistanceMiles": 8, "description": "Long run 8mi (easy)" }
+        ]
+      },
+      {
+        "week_number": 8,
+        "total_miles": 15,
+        "sessions": [
+          { "weekNumber": 8, "dayOfWeek": "Monday", "type": "easy", "targetDistanceMiles": 4, "description": "Easy 4mi" },
+          { "weekNumber": 8, "dayOfWeek": "Tuesday", "type": "easy", "targetDistanceMiles": 3, "description": "Easy 3mi shakeout" },
+          { "weekNumber": 8, "dayOfWeek": "Thursday", "type": "easy", "targetDistanceMiles": 3, "description": "Easy 3mi w/ 4×100m strides" },
+          { "weekNumber": 8, "dayOfWeek": "Saturday", "type": "off", "description": "Rest" },
+          { "weekNumber": 8, "dayOfWeek": "Sunday", "type": "race", "description": "RACE DAY — Chicago Spring Half Marathon" }
+        ]
+      }
+    ]
+  },
+  "ground_truth": {
+    "miles_this_week": 26,
+    "target_miles_min": 28,
+    "target_miles_max": 30,
+    "runs_completed": 4,
+    "weeks_until_race": 8,
+    "week3_key_sessions": ["5×1mile intervals", "10mi long run"],
+    "must_state_miles_correctly": true,
+    "must_reference_plan_sessions": true,
+    "forbidden_phrases": ["28 miles", "29 miles", "30 miles", "hit your target"],
+    "notes": "Marcus logged 26mi across 4 runs (missed Monday). The recap MUST: (1) state 26mi correctly — NOT 28, 29, or 30mi, (2) reference week 3's actual plan sessions — specifically the 5×1mile interval workout on Thursday and the 10mi long run on Sunday, (3) NOT invent different sessions (e.g., tempo runs instead of intervals). The plan has week 3 ranging 30–33mi. Dean should NOT fabricate sessions that differ from the uploaded plan."
+  }
+}

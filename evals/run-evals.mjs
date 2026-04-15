@@ -548,6 +548,8 @@ function getWeekMonday(dateStr) {
 function buildUserMessage(fixture) {
   const { trigger, user, activity_details, inbound_sms } = fixture;
 
+  let baseMsg;
+
   if (trigger === "post_run" && activity_details) {
     const a = activity_details;
     const weekSoFar = user.miles_logged_this_week || a.distance_miles || 0;
@@ -557,17 +559,13 @@ function buildUserMessage(fixture) {
     msg += `- Avg pace: ${a.pace || "N/A"}\n`;
     if (a.hr) msg += `- Avg HR: ${a.hr} bpm\n`;
     msg += `\n<rule>WEEK-TO-DATE (authoritative — from Strava, Monday through now): ${weekSoFar.toFixed(1)} mi total</rule>`;
-    return msg;
-  }
-
-  if (trigger === "weekly_recap") {
+    baseMsg = msg;
+  } else if (trigger === "weekly_recap") {
     const weekMiles = user.miles_logged_this_week || 0;
     const nextWeekTarget = Math.round((user.weekly_mileage_target || 35) * 1.08);
     const trainingDays = (user.training_days || []).join(", ");
-    return `Weekly recap trigger. Week ${user.current_week} completed with ${weekMiles.toFixed(1)} mi over ${user.runs_this_week || 0} runs. Build week ${user.current_week + 1} plan targeting ~${nextWeekTarget} mi. Training days are: ${trainingDays} — schedule a run on EACH training day including Monday. Do NOT skip any training day.`;
-  }
-
-  if (trigger === "initial_plan" && fixture.category === "plan_quality") {
+    baseMsg = `Weekly recap trigger. Week ${user.current_week} completed with ${weekMiles.toFixed(1)} mi over ${user.runs_this_week || 0} runs. Build week ${user.current_week + 1} plan targeting ~${nextWeekTarget} mi. Training days are: ${trainingDays} — schedule a run on EACH training day including Monday. Do NOT skip any training day.`;
+  } else if (trigger === "initial_plan" && fixture.category === "plan_quality") {
     const weekMiles = user.miles_logged_this_week || 0;
     const weeksUntilRace = user.weeks_until_race;
     const hasInjury = user.injury_notes && user.injury_notes !== "None" && user.injury_notes !== "None reported";
@@ -583,7 +581,7 @@ function buildUserMessage(fixture) {
       ? `\nULTRA-SPECIFIC REQUIREMENTS:\n- Introduce back-to-back long runs (Saturday long + Sunday medium-long) by Week ${backToBackWeek} at the latest — this is the central ultra training stimulus, not a late-plan addition\n- Include trail-specific guidance from Week 1: hiking steep uphills (power-hiking is faster than running them in ultras), running by time-on-feet rather than strict pace, elevation management`
       : "";
 
-    return `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Race is exactly ${weeksUntilRace} weeks away — build a ${weeksUntilRace}-week plan, no more, no fewer.${injuryNote}${ultraNote}
+    baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Race is exactly ${weeksUntilRace} weeks away — build a ${weeksUntilRace}-week plan, no more, no fewer.${injuryNote}${ultraNote}
 
 Build a complete training plan overview with:
 1. Week 1 — every session listed (day, type, distance, any pace targets), then the week total
@@ -592,19 +590,46 @@ Build a complete training plan overview with:
 4. Taper — how many weeks and approximate mileage
 
 Be specific about Week 1 sessions. Approximate weekly targets are fine for the rest.`;
-  }
-
-  if (trigger === "initial_plan") {
+  } else if (trigger === "initial_plan") {
     const weekMiles = user.miles_logged_this_week || 0;
-    return `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Build week 1 plan targeting ${user.weekly_mileage_target || 30} mi total. Acknowledge completed runs separately from planned sessions. Do NOT use additive total format ("Total: X + Y already").`;
+    baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Build week 1 plan targeting ${user.weekly_mileage_target || 30} mi total. Acknowledge completed runs separately from planned sessions. Do NOT use additive total format ("Total: X + Y already").`;
+  } else if (trigger === "morning_reminder") {
+    baseMsg = `Morning reminder trigger. Send today's workout reminder based on the schedule and recent conversation.`;
+  } else {
+    // Default: user message
+    baseMsg = inbound_sms || "What's the plan?";
   }
 
-  if (trigger === "morning_reminder") {
-    return `Morning reminder trigger. Send today's workout reminder based on the schedule and recent conversation.`;
+  // Uploaded plan injection — mirrors coach/respond route.ts logic.
+  // When a fixture has an uploaded_plan field, append the <uploaded_plan_next_week> block
+  // to the user message for weekly_recap and user_message triggers.
+  if (fixture.uploaded_plan && (trigger === "weekly_recap" || trigger === "user_message" || !trigger)) {
+    const { all_weeks, next_week_num, is_week_sync, is_next_week } = fixture.uploaded_plan;
+    const nextWeekNum = next_week_num ?? (user.current_week + 1);
+    const totalWeekCount = all_weeks.length;
+    const uploadedNextWeek = all_weeks.find(w => w.week_number === nextWeekNum);
+    if (uploadedNextWeek) {
+      const mileageRange = uploadedNextWeek.total_miles_min != null && uploadedNextWeek.total_miles_max != null
+        ? `${uploadedNextWeek.total_miles_min}–${uploadedNextWeek.total_miles_max}mi`
+        : `~${uploadedNextWeek.total_miles}mi`;
+      const sessionLines = uploadedNextWeek.sessions
+        .filter(s => s.type !== "off")
+        .map(s => {
+          const distPart = s.targetDistanceMilesMin != null && s.targetDistanceMilesMax != null
+            ? ` (${s.targetDistanceMilesMin}–${s.targetDistanceMilesMax}mi)`
+            : s.targetDistanceMiles != null ? ` (${s.targetDistanceMiles}mi)` : "";
+          const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
+          return `${s.dayOfWeek}: ${s.description}${distPart}${pacePart}`;
+        })
+        .join("\n");
+      const weekLabel = is_week_sync
+        ? `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount} (athlete is starting ${is_next_week ? "next week" : "now"}):\nThe athlete just confirmed they are starting week ${nextWeekNum}${is_next_week ? " next week" : ""}. Acknowledge you have the plan and these sessions, and briefly describe what week ${nextWeekNum} looks like. ${is_next_week ? "Mention the start date (next Monday)." : ""}`
+        : `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount}:\nThe athlete is following an external training plan. These are the prescribed sessions for next week. Use these as the plan — don't replace them with different sessions. You may suggest working within the low end of any ranges if the athlete had a hard week, or the high end if they're feeling strong.`;
+      baseMsg += `\n\n<uploaded_plan_next_week>\n${weekLabel}\n${sessionLines}\nWeekly total: ${mileageRange}\n</uploaded_plan_next_week>`;
+    }
   }
 
-  // Default: user message
-  return inbound_sms || "What's the plan?";
+  return baseMsg;
 }
 
 // ─────────────────────────────────────────────
