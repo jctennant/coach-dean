@@ -124,7 +124,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
     );
   }
 
-  if (status === "preview" && preview) {
+  if ((status === "preview" || status === "saving") && preview) {
     const totalMiles = preview.weeks.reduce((sum, w) => sum + w.total_miles, 0);
     const avgMiles = preview.weeks.length > 0 ? Math.round(totalMiles / preview.weeks.length) : 0;
 
