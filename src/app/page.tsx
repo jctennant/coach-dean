@@ -10,22 +10,22 @@ import { RaceMarquee } from "@/components/race-marquee";
 
 const valueProps = [
   {
-    title: "A personalized plan in minutes",
-    description:
-      "Answer a few questions over text and Coach Dean builds a training plan tailored to your goal, schedule, and fitness level — ready to go before you put your phone down.",
-    screenshot: "/screenshot-1.png",
-  },
-  {
     title: "Instant coaching after every run",
     description:
-      "Connect Strava and Coach Dean analyzes every activity the moment it syncs — pace trends, effort, whether you went out too hard. Real coaching feedback on your actual runs, not a generic \"great job\" notification.",
+      "Connect Strava and Coach Dean analyzes every activity the moment it syncs — pace trends, effort, whether you went out too hard. Real feedback on your actual runs, not a generic \"great job\" notification.",
     screenshot: "/screenshot-2.png",
   },
   {
-    title: "Ask anything, any time",
+    title: "Works alongside the plan you already have",
     description:
-      "Nutrition, race strategy, taper, cross-training — text Coach Dean like you'd text a coach who actually knows your history. Specific answers, not generic advice.",
-    screenshot: "/screenshot-3.png",
+      "Already on a Runna or TrainingPeaks plan? Coach Dean doesn't replace it — he reads it. Upload your plan to the dashboard and Dean will reference it directly when he analyzes your runs. You keep the structure; Dean adds the insight layer your app is missing.",
+    screenshot: "/screenshot-plan-complement.png", // ⚠️ NEW VISUAL NEEDED: conversation or dashboard showing Dean referencing an uploaded Runna/TP plan
+  },
+  {
+    title: "A personalized plan in minutes",
+    description:
+      "No plan yet? Answer a few questions over text and Coach Dean builds a training plan tailored to your goal, schedule, and fitness level — ready to go before you put your phone down.",
+    screenshot: "/screenshot-1.png",
   },
 ];
 
@@ -51,8 +51,7 @@ export default function Home() {
               Your personal running coach, just a text away.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              You signed up for a race. Now what?
-              Coach Dean builds a plan, analyzes every run, and adjusts when life gets in the way — all over text. The guidance of a professional coach, for a fraction of the price.
+              You have the watch, the app, the Strava data. What&apos;s missing is someone who reads it and tells you what it actually means. Coach Dean analyzes every run, answers your training questions over text, and works alongside any plan you already follow — or builds you one from scratch.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -73,26 +72,26 @@ export default function Home() {
           {/* Header */}
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              The elite coaching experience, minus the elite price tag.
+              The intelligence layer your training is missing.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Static plans don&apos;t win races. Most runners are stuck in a gap: a $15/month app that can&apos;t think, or a $200/month coach they can&apos;t afford. Coach Dean is the bridge — high-performance coaching delivered via text, powered by your data, priced for everyone.
+              Apps give you a plan. Garmin gives you data. What neither gives you is someone who synthesizes it all and tells you what to do next. Coach Dean is the connective tissue — real coaching delivered over text, powered by your actual runs, available to everyone.
             </p>
           </div>
 
           {/* Comparison cards */}
           <div className="grid gap-4 md:grid-cols-3 mb-16">
-            {/* Training app */}
+            {/* Training without coaching */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Generic apps</p>
-                <p className="font-serif text-lg font-normal text-gray-700">Runna, TrainingPeaks</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Training without coaching</p>
+                <p className="font-serif text-lg font-normal text-gray-700">Apps alone</p>
               </div>
               <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Stick to the plan or fail — zero adaptation</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Plan tells you what to do — nothing explains why</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> &ldquo;Workout Complete&rdquo; is the only feedback you get</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Support tickets &amp; FAQs</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Another app, another dashboard to manage</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Aches and questions go to Google</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> No one notices when something&apos;s off</li>
               </ul>
               <p className="text-sm font-medium text-gray-500">~$10–20 / month</p>
             </div>
@@ -100,15 +99,15 @@ export default function Home() {
             {/* Coach Dean — featured */}
             <div className="rounded-2xl bg-gray-900 p-6 flex flex-col gap-4 text-white md:-mt-4 md:-mb-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Zero-friction coaching</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">The intelligence layer</p>
                 <p className="font-serif text-lg font-normal">Coach Dean</p>
               </div>
               <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Daily adaptation — sick, busy, overtrained? We adjust.</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Analysis of every Strava run</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Direct text access, always</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Zero apps. Just text &amp; Strava.</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Full season plan visible on your dashboard</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Coaching note after every Strava run</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags injury patterns before they become problems</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Direct text access — ask anything, any time</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Builds a plan from scratch if you need one</li>
               </ul>
               <p className="text-sm font-medium text-gray-300">Free to start, then $10 / month</p>
             </div>
@@ -136,27 +135,27 @@ export default function Home() {
             </h3>
             <div className="grid gap-6 md:grid-cols-2">
               <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">The &ldquo;Life Happens&rdquo; Button</p>
+                <p className="mb-2 font-semibold text-gray-900">Reads every run, not just the totals</p>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  Apps break when you get a cold or a late meeting. Coach Dean doesn&apos;t. Text your schedule change and your plan evolves in real-time — no missed workouts logged as failures.
+                  An app sees a slow pace. Coach Dean sees high humidity, the tail end of a hard week, and tells you that you actually ran that perfectly. Your data tells a story — Dean reads it.
                 </p>
               </div>
               <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">Contextual Intelligence</p>
+                <p className="mb-2 font-semibold text-gray-900">Injury patterns caught early</p>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  An app sees a &ldquo;Slow Pace.&rdquo; Coach Dean sees poor sleep, high humidity, and tells you that you actually crushed it. Your data tells a story — Coach Dean reads it.
+                  Most injuries don&apos;t appear out of nowhere — they build over weeks. Coach Dean tracks your load over time and flags warning signs before a niggle becomes a DNS. And when something does flare up, text him. You get a specific protocol, not a Google rabbit hole.
                 </p>
               </div>
               <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">The Pocket Expert</p>
+                <p className="mb-2 font-semibold text-gray-900">Adapts when life gets in the way</p>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  Stop Googling &ldquo;why does my IT band hurt?&rdquo; Text Coach Dean. Get a specific protocol tailored to your training load — not a generic blog post with 14 possible causes.
+                  Sick, traveling, ran too hard yesterday — text Dean. He adjusts around your reality instead of logging a missed workout as a failure. A good coach works with your life, not against it.
                 </p>
               </div>
               <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">Invisible Tech</p>
+                <p className="mb-2 font-semibold text-gray-900">Invisible tech</p>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  No new dashboard to learn, no app to download. Coach Dean syncs with Strava and talks to you where you already are: your messages.
+                  No new app to download, no dashboard to check daily. Coach Dean syncs with Strava and talks to you where you already are: your messages. It just shows up after every run.
                 </p>
               </div>
             </div>
@@ -208,7 +207,7 @@ export default function Home() {
               Your full season, laid out before you start
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Every phase from base building to race-day taper, visible in one view. Coach Dean texts you the specifics each week and updates the plan as your training evolves.
+              Every phase from base building to race-day taper, visible in one view. Coach Dean texts you the specifics each week and updates the plan as your training evolves. Already following a Runna or TrainingPeaks plan? Upload it to the dashboard and Dean will reference it alongside every run.
             </p>
           </div>
 
@@ -297,12 +296,20 @@ export default function Home() {
           <div className="divide-y">
             {[
               {
-                q: "How is Coach Dean different from Runna or using ChatGPT to plan my workouts?",
+                q: "I already use Runna / TrainingPeaks / a coaching plan — should I still use Coach Dean?",
                 a: (
                   <>
-                    <p>Runna builds a solid plan, but it&apos;s static. It doesn&apos;t know you ran your long run too hard, skipped a week because of travel, or have a 100K six weeks after your target race. Coach Dean sees all of that — and adjusts.</p>
-                    <p className="mt-3">The biggest difference people notice: connect Strava and Coach Dean sends you coaching feedback within minutes of every run finishing. Not a generic notification — actual analysis of your pace, effort, and how it fits your training. That alone is something no app does.</p>
-                    <p className="mt-3">ChatGPT has no memory of your training, no structured plan, and no one proactively checking in. Coach Dean combines a real plan with real-time adaptation and an always-available coaching voice — all over text, no app required.</p>
+                    <p>Yes — and this is actually our most common use case. Coach Dean works alongside your existing plan, not as a replacement. Keep your Runna structure; Dean adds what no app does: a coaching note after every run, a direct line for training questions, and injury pattern flagging before small aches become big problems.</p>
+                    <p className="mt-3">You can upload your plan as a PDF to the dashboard and Dean will reference it directly when he gives you feedback. So instead of "you ran 8:45 pace," you get "that was your recovery day — 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday."</p>
+                  </>
+                ),
+              },
+              {
+                q: "Can Coach Dean help me if I'm not training for a specific race?",
+                a: (
+                  <>
+                    <p>Absolutely — no race on the calendar required. Plenty of Dean&apos;s athletes are focused on building consistent mileage, staying healthy through a high-mileage stretch, or returning from injury. If you&apos;re coming back from something, Dean will ask about your current status and build your program around staying healthy first, performance second.</p>
+                    <p className="mt-3">If you just want to run more consistently and stop getting hurt every time you ramp up, that&apos;s a perfectly complete goal. Dean tracks your load, checks in after every run, and flags patterns before they become injuries.</p>
                   </>
                 ),
               }, 

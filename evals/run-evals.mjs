@@ -145,7 +145,7 @@ function buildEvalSystemPrompt(fixture) {
     const peakMiles = user.weekly_mileage_target ? Math.round(user.weekly_mileage_target / 0.45) : 40;
     if (daysUntilRace <= 7) {
       const raceWeekMiles = Math.round(peakMiles * 0.45);
-      dateContext += `- RACE WEEK (${daysUntilRace} days out). Keep volume light: ~${raceWeekMiles}mi this week. No hard workouts — easy miles only. Final tune-up (15-30 min shakeout) is optional the day before.\n`;
+      dateContext += `- RACE WEEK (${daysUntilRace} days out). Keep volume light: ~${raceWeekMiles}mi this week. No hard workouts — easy miles only. Final tune-up (15-30 min shakeout) is optional the day before — place it ONLY on a confirmed running day, NOT on a gym-only or cross-training day.\n`;
       dateContext += `- Proactively address: gear check (nothing new race day), race morning routine, pacing strategy, mental preparation.\n`;
     } else if (daysUntilRace <= 14) {
       const w2Miles = Math.round(peakMiles * 0.72);
@@ -354,10 +354,12 @@ ${a.hr ? `- Avg HR: ${a.hr} bpm\n` : ""}`;
     fitnessTier = `FITNESS TIER: LOW VOLUME (~${avgWeekly} mi/week). Prioritize easy aerobic volume and consistency.`;
   } else if (avgWeekly < 30) {
     fitnessTier = `FITNESS TIER: MODERATE VOLUME (~${avgWeekly} mi/week). 1-2 quality sessions per week appropriate alongside easy volume.
-<rule>WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${avgWeekly} mi/week. Week 1 should not jump more than 15% above that — target ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.15)} mi. A first-week spike above ${Math.round(avgWeekly * 1.2)} mi risks overuse injury at the start of the plan.</rule>`;
+<rule>WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${avgWeekly} mi/week. Week 1 should not jump more than 15% above that — target ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.15)} mi. A first-week spike above ${Math.round(avgWeekly * 1.2)} mi risks overuse injury at the start of the plan.</rule>
+<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${Math.round(avgWeekly * 0.90)} mi. Starting below current base has no training rationale — the athlete is already adapted to their current volume.</rule>`;
   } else {
     fitnessTier = `FITNESS TIER: HIGH VOLUME (~${avgWeekly} mi/week). Experienced runner. Skip base-building preamble.
-<rule>WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${avgWeekly} mi/week → Week 1 target: ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.12)} mi. Don't jump to peak volume on Day 1.</rule>`;
+<rule>WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${avgWeekly} mi/week → Week 1 target: ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.12)} mi. Don't jump to peak volume on Day 1.</rule>
+<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${Math.round(avgWeekly * 0.90)} mi. Even for masters athletes or first-timers, starting significantly below current base wastes existing fitness. 90% of current average is the floor.</rule>`;
   }
 
   // Goal discrepancy injection (for quality fixture)
@@ -472,8 +474,8 @@ You are texting over iMessage. Write like a human coach would text.
 
 ${fixture.category === "plan_quality" ? `LONG RUN GUIDANCE FOR THIS PLAN:
 ${fixture.ground_truth?.max_week1_miles != null ? `- WEEK 1 HARD CAP: Week 1 total mileage MUST NOT exceed ${fixture.ground_truth.max_week1_miles} miles. This is a hard ceiling — do not exceed it.` : ""}
-${fixture.ground_truth?.min_week1_miles != null ? `- Week 1 should be at least ${fixture.ground_truth.min_week1_miles} miles — do not start too conservatively below the athlete's current base.` : ""}
-${fixture.ground_truth?.max_long_run_miles != null ? `- <rule>LONG RUN HARD CAP: The designated long run session must not exceed ${fixture.ground_truth.max_long_run_miles} miles. This cap applies to the LONG RUN slot only — easy runs and quality sessions on other days are NOT subject to this cap and can be 6–8 miles. Any long run over ${fixture.ground_truth.max_long_run_miles} miles is a plan error.</rule>` : ""}
+${fixture.ground_truth?.min_week1_miles != null ? `- <rule>WEEK 1 HARD MINIMUM: Week 1 total MUST NOT fall below ${fixture.ground_truth.min_week1_miles} miles. Starting below this is too conservative — the athlete is already adapted to their current volume. This is a hard floor, not a guideline.</rule>` : ""}
+${fixture.ground_truth?.max_long_run_miles != null ? `- <rule>LONG RUN HARD CAP: The designated long run session must not exceed ${fixture.ground_truth.max_long_run_miles} miles. This cap applies to the LONG RUN slot only — easy runs and quality sessions on other days are NOT subject to this cap and can be 6–8 miles. Any long run over ${fixture.ground_truth.max_long_run_miles} miles is a plan error. IMPORTANT: a short long run does NOT mean total weekly volume should be low — the other sessions must compensate so total weekly volume stays within the Week 1 floor and target range above.</rule>` : ""}
 ${fixture.ground_truth?.min_long_run_miles != null ? `- The long run should build to at least ${fixture.ground_truth.min_long_run_miles} miles by the peak phase.` : ""}
 ${fixture.ground_truth?.max_peak_weekly_miles != null ? `- PEAK VOLUME CAP: The plan's peak week total MUST NOT exceed ${fixture.ground_truth.max_peak_weekly_miles} miles. This is a hard ceiling — plan the arc so you never need to exceed it.` : ""}
 ${fixture.ground_truth?.min_peak_weekly_miles != null ? `- The plan should reach a peak of at least ${fixture.ground_truth.min_peak_weekly_miles} miles/week to adequately prepare the athlete.` : ""}
@@ -599,7 +601,12 @@ Build a complete training plan overview with:
 Be specific about Week 1 sessions. Approximate weekly targets are fine for the rest.`;
   } else if (trigger === "initial_plan") {
     const weekMiles = user.miles_logged_this_week || 0;
-    baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Build week 1 plan targeting ${user.weekly_mileage_target || 30} mi total. Acknowledge completed runs separately from planned sessions. Do NOT use additive total format ("Total: X + Y already").`;
+    baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Build week 1 plan targeting ${user.weekly_mileage_target || 30} mi total. Acknowledge completed runs separately from planned sessions. Do NOT use additive total format ("Total: X + Y already").
+
+DELOAD WEEKS — REQUIRED:
+Whenever base and build phases together span 5+ consecutive weeks, MUST include at least one deload week. DELOAD DEPTH: ~70% of the prior build week — a REAL 25-30% volume cut, not a 1-2mi step-back. If Week 3 is 20mi, Week 4 deload must be ~14mi. A plan where Week 4 is 18mi or 22mi when Week 3 was 20mi has NO deload and is a safety failure. When presenting the arc summary, explicitly mark deload weeks — e.g., "Weeks 1–3 (build): 17, 18, 20mi; Week 4 (recovery): 14mi; Weeks 5–7 (build): 22, 24, 26mi..."
+
+DATE BOUNDARY: Every session date must fall within the week header you stated. If you write "Week 1: Apr 3–9", every session must have a date between Apr 3 and Apr 9 inclusive. No session may have a date of Apr 10 or later in that block.`;
   } else if (trigger === "morning_reminder") {
     baseMsg = `Morning reminder trigger. Send today's workout reminder based on the schedule and recent conversation.`;
   } else if (trigger === "nightly_reminder") {
@@ -628,6 +635,12 @@ Do NOT mention a specific workout for tomorrow. Do not invent or guess a session
   } else {
     // Default: user message
     baseMsg = inbound_sms || "What's the plan?";
+    // Silence gap + projection accuracy rules for user_message context
+    baseMsg += `
+
+SILENCE GAPS: If the athlete notes you've been out of touch, do not invent an excuse (e.g. "I've been traveling", "been following along in the background"). Own the gap directly and catch up on their recent runs.
+
+WEEKLY PROJECTION ACCURACY: When stating "on track for X mi", X must equal miles already done PLUS remaining planned session distances. Do not quote the stored weekly target if remaining sessions sum to a different total.`;
   }
 
   // Uploaded plan injection — mirrors coach/respond route.ts logic.
