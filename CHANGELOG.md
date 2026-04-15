@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Prompt fixes: non-run weekly mileage, sprint outlier flag, same-next-day tempo gate
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis (2026-04-14)
+**User feedback:** N/A — identified via automated analysis
+**Root cause:**
+1. **Issue 4 (b1b308cf)** — WeightTraining post_run messages were injecting the week's running mileage total into the prompt even though the cross-training activity doesn't contribute to it. When a run and a non-run activity synced concurrently, both post_run messages reported the same weekly total (the run was already stored when the WeightTraining prompt was built), confusing athletes into thinking the run's distance hadn't been counted.
+2. **Issue 1 (a56bc698)** — A 5:23/mi split on a recovery run was presented neutrally as a "sprint finish" without flagging it as a likely GPS artifact or anomalous burst. Dean's INSIGHT RULES had no guard for outlier lap/split paces.
+3. **Issue 5 (ac0ab080)** — Athlete reported left ankle tightness and outer knee tightness at mile 3 of a return-to-run effort. When asked about doing a tempo run the next day, Dean conditionally green-lit it ("if ankle and knee are quiet Thursday morning, go for it"). This is a coaching error: tempo-loading tissue that flagged within the last 24 hours is unsafe regardless of morning symptoms.
+**Fix / Change:**
+- For non-run `post_run` triggers (WeightTraining, rides, swims, etc.), replaced the injected `WEEK-TO-DATE RUNNING` figure with an explicit instruction: "Do NOT cite the week's running mileage total — leave weekly mileage commentary for post-run messages." Prevents confusing duplicate mileage reports when concurrent activities fire.
+- Added a bullet to INSIGHT RULES: when any lap or split is >~90 sec/mi faster than the run average, flag it explicitly rather than presenting it neutrally (likely GPS artifact or unintended burst on an easy/recovery run).
+- Added `SAME-NEXT-DAY INTENSITY GATE` rule to the PROACTIVE INJURY section: when an athlete reported pain/tightness during a recent run and asks about doing tempo/intervals the following day, respond with easy-only at most and defer quality sessions ≥2 days out.
 ## 2026-04-12 — Fix ghost Strava-connected message, duplicate post-run SMS, and mid-week mileage total
 
 **Type:** Bug Fix
