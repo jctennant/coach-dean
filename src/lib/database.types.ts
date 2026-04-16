@@ -328,6 +328,7 @@ export type Database = {
       training_profiles: {
         Row: {
           coaching_mode: string
+          dashboard_insights: Json | null
           constraints: string | null
           crosstraining_tools: string[] | null
           current_easy_pace: string | null
@@ -360,6 +361,7 @@ export type Database = {
         }
         Insert: {
           coaching_mode?: string
+          dashboard_insights?: Json | null
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null
@@ -392,6 +394,7 @@ export type Database = {
         }
         Update: {
           coaching_mode?: string
+          dashboard_insights?: Json | null
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null

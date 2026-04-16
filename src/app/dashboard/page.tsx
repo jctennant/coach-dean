@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { supabase } from "@/lib/supabase";
-import { anthropic } from "@/lib/anthropic";
 import RequestLinkForm from "./request-link-form";
 import { TokenPersist } from "./token-manager";
 import { DashboardTabs } from "./tab-container";
@@ -337,127 +336,6 @@ function buildWeeklyEfficiency(
   return result;
 }
 
-type KeyNote = {
-  label: string;  // short left-side label, e.g. "Recovery", "Load"
-  text: string;   // the actionable note text
-};
-
-/**
- * Build the "Key notes" section content.
- *
- * Pacing zones always appear as a single structured row at the top (if available).
- * A Haiku call then scans recent coaching messages for 1–3 persistent reminders
- * (injury routines, HR cues, form advice). Falls back gracefully on failure.
- */
-async function extractKeyNotes(params: {
-  recentMessages: string[];
-  injuryNotes: string | null;
-  easyPace: string | null;
-  tempoPace: string | null;
-  intervalPace: string | null;
-  loadFlagged: boolean;
-  latestInsightDate: string | null;
-  effTrend: string;
-  loadSummary: string;
-}): Promise<{ paceZones: string | null; notes: KeyNote[]; latestInsightDate: string | null; summary: string | null }> {
-  const { recentMessages, injuryNotes, easyPace, tempoPace, intervalPace, loadFlagged, latestInsightDate, effTrend, loadSummary } = params;
-
-  // Build the pacing zones line
-  const zoneParts: string[] = [];
-  if (easyPace) {
-    const parts = easyPace.replace("/mi", "").split(":");
-    if (parts.length === 2) {
-      const base = parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
-      const ceilSec = base + 30;
-      const ceil = `${Math.floor(ceilSec / 60)}:${String(ceilSec % 60).padStart(2, "0")}`;
-      zoneParts.push(`Easy  ${easyPace.replace("/mi", "")}–${ceil}/mi`);
-    }
-  }
-  if (tempoPace) zoneParts.push(`Tempo  ${tempoPace}`);
-  if (intervalPace) zoneParts.push(`Intervals  ${intervalPace}`);
-  const paceZones = zoneParts.length ? zoneParts.join("   ·   ") : null;
-
-  const staticNotes: KeyNote[] = [];
-  if (loadFlagged) {
-    staticNotes.push({ label: "Load", text: "Mileage spiked this week — keep any remaining runs controlled" });
-  }
-
-  if (!recentMessages.length && !injuryNotes) {
-    return { paceZones, notes: staticNotes, latestInsightDate, summary: null };
-  }
-
-  try {
-    const profileCtx = [
-      injuryNotes ? `Injury history: ${injuryNotes}` : null,
-      easyPace ? `Easy pace: ${easyPace}` : null,
-      `Load trend: ${loadSummary}`,
-      `Aerobic efficiency trend: ${effTrend}`,
-    ].filter(Boolean).join("\n");
-
-    const messagesCtx = recentMessages
-      .slice(0, 10)
-      .map((m, i) => `[${i + 1}] ${m.slice(0, 300)}`)
-      .join("\n");
-
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 640,
-      system: `You are analyzing an athlete's recent coaching messages and training metrics to surface insights for their dashboard.
-
-Your task:
-1. Generate a 1–2 sentence longitudinal summary of what's happening with this athlete's training over the past few weeks. Focus on the most meaningful pattern or trend — not the last single run. Be direct and concrete. Encouraging but honest.
-2. Extract 1–3 persistent actionable coaching reminders (advice that applies across multiple sessions — injury routines, HR targets, form cues, recurring patterns). NOT advice about a specific day. NOT mileage totals.
-
-Each note: short label (1–2 words) + text (under 12 words). Write in second person, addressing the athlete directly — "your easy pace", "you tend to", "keep your" — not third-person observations about them.
-Return empty arrays if there's no clear signal rather than inventing content.`,
-      messages: [{
-        role: "user",
-        content: `Athlete profile:\n${profileCtx}\n\nRecent coaching messages:\n${messagesCtx}`,
-      }],
-      tools: [{
-        name: "save_insights",
-        description: "Save the training summary and coaching notes",
-        input_schema: {
-          type: "object" as const,
-          properties: {
-            summary: {
-              type: "string",
-              description: "1–2 sentence overview of recent training patterns and trajectory",
-            },
-            notes: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  label: { type: "string" },
-                  text: { type: "string" },
-                },
-                required: ["label", "text"],
-              },
-            },
-          },
-          required: ["summary", "notes"],
-        },
-      }],
-      tool_choice: { type: "tool" as const, name: "save_insights" },
-    });
-
-    const block = response.content.find(b => b.type === "tool_use" && b.name === "save_insights");
-    if (block?.type === "tool_use") {
-      const extracted = block.input as { summary?: string; notes?: KeyNote[] };
-      return {
-        paceZones,
-        notes: [...staticNotes, ...(extracted.notes ?? [])].slice(0, 5),
-        latestInsightDate,
-        summary: extracted.summary?.trim() || null,
-      };
-    }
-  } catch {
-    // Non-fatal
-  }
-
-  return { paceZones, notes: staticNotes, latestInsightDate, summary: null };
-}
 
 /** Status signal — returns label, color, and a detail line safe to show next to partial-week data */
 function computeStatus(
@@ -953,7 +831,7 @@ export default async function DashboardPage({
   ] = await Promise.all([
     supabase
       .from("training_profiles")
-      .select("goal, race_date, goal_distance_miles, preferred_units, terrain_type, current_easy_pace, current_tempo_pace, current_interval_pace, injury_notes, manual_prs, training_days, this_week_override_days, this_week_override_expires")
+      .select("goal, race_date, goal_distance_miles, preferred_units, terrain_type, current_easy_pace, current_tempo_pace, current_interval_pace, injury_notes, manual_prs, training_days, this_week_override_days, this_week_override_expires, dashboard_insights")
       .eq("user_id", user.id)
       .single(),
     supabase
@@ -1224,27 +1102,30 @@ export default async function DashboardPage({
     taper: "Taper", deload: "Deload week",
   };
 
-  // Build human-readable load summary for Haiku context
-  const loadSummaryStr = (() => {
-    if (loadTrend.flagged) return `Mileage spiked this week (>10% jump)`;
-    const recent = loadTrend.weeklyMiles.slice(-4).filter(m => m > 0);
-    if (recent.length < 2) return "Insufficient data";
-    const avg = Math.round(recent.reduce((s, m) => s + m, 0) / recent.length * 10) / 10;
-    return `Averaging ${avg} mi/week over last ${recent.length} weeks, stable`;
+  // Pacing zones string — used by the Training zones section
+  const paceZones = (() => {
+    const easy = (profileData?.current_easy_pace as string | null) ?? null;
+    const tempo = (profileData?.current_tempo_pace as string | null) ?? null;
+    const interval = (profileData?.current_interval_pace as string | null) ?? null;
+    if (!easy && !tempo && !interval) return null;
+    const parts: string[] = [];
+    if (easy) parts.push(easy);
+    if (tempo) parts.push(tempo);
+    if (interval) parts.push(interval);
+    return parts.join(" / ");
   })();
 
-  // Key notes — pacing zones + Haiku-extracted coaching reminders + longitudinal summary
-  const { paceZones, notes: keyNotes, latestInsightDate, summary: trainingSummary } = await extractKeyNotes({
-    recentMessages: insights.map(m => m.content ?? ""),
-    injuryNotes: (profileData?.injury_notes as string | null) ?? null,
-    easyPace: (profileData?.current_easy_pace as string | null) ?? null,
-    tempoPace: (profileData?.current_tempo_pace as string | null) ?? null,
-    intervalPace: (profileData?.current_interval_pace as string | null) ?? null,
-    loadFlagged: loadTrend.flagged,
-    latestInsightDate: insights[0]?.created_at ?? null,
-    effTrend: effTrendLabel,
-    loadSummary: loadSummaryStr,
-  });
+  // Dashboard insights — written by generateAndStoreDashboardInsights after each run/plan.
+  // Read the stored JSON; fall back to null (graceful empty state in UI).
+  type DashboardFocus = { label: string; text: string };
+  type StoredInsights = { summary: string; focuses: DashboardFocus[]; generated_at: string; trigger: string };
+  const dashboardInsights = (() => {
+    const raw = profileData?.dashboard_insights;
+    if (!raw || typeof raw !== "object") return null;
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.summary !== "string") return null;
+    return obj as unknown as StoredInsights;
+  })();
 
   // ── Plan tab props ──────────────────────────────────────────────────────────
   const isUploadedPlan = planData?.plan_source === "uploaded";
@@ -1400,33 +1281,44 @@ export default async function DashboardPage({
             }
             overview={<div className="space-y-4">
 
-          {/* ── Last run + Dean's take ───────────────────────────────────── */}
+          {/* ── Dean's focus ────────────────────────────────────────────── */}
           <div className="rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-            {trainingSummary ? (
-              <div className="px-4 pt-4 pb-4">
+            {dashboardInsights ? (
+              <>
+                <div className="px-4 pt-4 pb-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                      Dean&apos;s focus
+                    </p>
+                    <span className={`text-[10px] font-semibold ${
+                      status.color === "green" ? "text-green-600" :
+                      status.color === "orange" ? "text-orange-600" :
+                      status.color === "gray" ? "text-gray-400" :
+                      "text-blue-600"
+                    }`}>{status.label}</span>
+                  </div>
+                  <p className="text-sm text-gray-700 leading-relaxed">{dashboardInsights.summary}</p>
+                </div>
+                {dashboardInsights.focuses.length > 0 && (
+                  <div className="border-t border-gray-50 divide-y divide-gray-50">
+                    {dashboardInsights.focuses.map((focus, i) => (
+                      <div key={i} className="flex items-baseline gap-3 px-4 py-3">
+                        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400 w-20">
+                          {focus.label}
+                        </span>
+                        <p className="text-sm text-gray-700">{focus.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : lastRun ? (
+              <div className="px-4 pt-4 pb-3">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
                     Training overview
                   </p>
-                  <span className={`text-[10px] font-semibold tabular-nums ${
-                    status.color === "green" ? "text-green-600" :
-                    status.color === "orange" ? "text-orange-600" :
-                    status.color === "gray" ? "text-gray-400" :
-                    "text-blue-600"
-                  }`}>{status.label}</span>
-                </div>
-                <p className="text-sm text-gray-700 leading-relaxed">{trainingSummary}</p>
-              </div>
-            ) : lastRun ? (
-              <div className="px-4 pt-4 pb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                    {formatDate(lastRun.start_date)}
-                    {" · "}
-                    {lastRun.activity_type === "TrailRun" ? "Trail run" : lastRun.activity_type ?? "Run"}
-                    {lastRun.average_heartrate && ` · ${Math.round(lastRun.average_heartrate)} bpm avg`}
-                  </p>
-                  <span className={`text-[10px] font-semibold tabular-nums ${
+                  <span className={`text-[10px] font-semibold ${
                     status.color === "green" ? "text-green-600" :
                     status.color === "orange" ? "text-orange-600" :
                     status.color === "gray" ? "text-gray-400" :
@@ -1434,7 +1326,7 @@ export default async function DashboardPage({
                   }`}>{status.label}</span>
                 </div>
                 <p className="text-sm text-gray-400">
-                  {lastRunDistDisplay && `${lastRunDistDisplay} logged.`} No post-run note yet.
+                  {lastRunDistDisplay && `${lastRunDistDisplay} logged.`} Focus areas will appear after your next run.
                 </p>
               </div>
             ) : (
@@ -1744,31 +1636,6 @@ export default async function DashboardPage({
             );
           })()}
 
-          {/* ── Zone 4b: Key notes ──────────────────────────────────────────── */}
-          {keyNotes.length > 0 && (
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
-                  Key notes
-                </h2>
-                {latestInsightDate && (
-                  <span className="text-[10px] text-gray-300">
-                    From run {formatDate(latestInsightDate)}
-                  </span>
-                )}
-              </div>
-              <div className="rounded-xl border border-gray-100 bg-white shadow-sm divide-y divide-gray-50">
-                {keyNotes.map((note, i) => (
-                  <div key={i} className="flex items-baseline gap-3 px-4 py-3.5">
-                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400 w-20">
-                      {note.label}
-                    </span>
-                    <p className="text-sm text-gray-700">{note.text}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
 
 
           {/* ── Last 7 days ─────────────────────────────────────────── */}

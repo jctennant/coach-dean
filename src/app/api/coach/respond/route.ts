@@ -14,6 +14,7 @@ import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
+import { generateAndStoreDashboardInsights } from "@/lib/dashboard-insights";
 import type { ActivityWeatherData } from "@/lib/weather";
 
 export const maxDuration = 120;
@@ -2516,6 +2517,13 @@ Weekly total: ${mileageRange}
         updated_at: new Date().toISOString(),
       })
       .eq("user_id", userId);
+  }
+
+  // Regenerate dashboard insights after runs and weekly/initial plans — async, non-blocking.
+  if (trigger === "post_run" || trigger === "weekly_recap" || trigger === "initial_plan") {
+    after(async () => {
+      await generateAndStoreDashboardInsights(userId, trigger, coachMessage);
+    });
   }
 
   return NextResponse.json({ ok: true, message: coachMessage });
