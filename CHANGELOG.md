@@ -4,6 +4,37 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Six coaching quality fixes from eval analysis
+
+**Type:** Improvement
+**Reported by:** Internal eval analysis
+**User feedback:** N/A
+**Root cause (6 issues from eval failures):**
+1. **plan-5k-beginner**: Plans had no deload week — progression climbed continuously for 7+ weeks without a recovery week. Deload rule said "include a recovery week" but didn't specify depth (model used 1-2mi step-back instead of a true 25-30% cut).
+2. **plan-masters-first-marathon, plan-mile-time-trial**: Week 1 too conservative — model started plans well below current base for MODERATE/HIGH volume athletes. No enforced floor rule existed.
+3. **plan-masters-first-marathon**: Session dates spilled outside the stated week header (e.g., "Week 1: Apr 3–9" but sessions listed Apr 11-12). No boundary rule existed.
+4. **plan-strength-integrated-marathon**: Race week placed a shakeout run on Friday (gym-only day) — violating the athlete's training day constraints. The CROSS-TRAINING DAY PROTECTION rule didn't explicitly cover race week.
+5. **date-post-silence-reengagement**: Coach invented excuses for gaps in contact ("I've been traveling", "been following along") rather than simply owning the silence professionally.
+6. **date-recency-gap-contact**: Weekly mileage projection quoted the stored weekly target instead of computing miles-done + sum of remaining sessions (leading to inconsistent totals when actual sessions don't perfectly fill the target).
+
+**Additionally fixed (from running new eval fixtures):**
+- **mileage-projection-null-sessions**: Claude used additive format ("39mi planned + 8mi = 47mi") because it misunderstood the weekly target as "additional miles." Added WEEKLY TARGET MEANING rule: target is inclusive of all miles for the week.
+- **plan-mile-time-trial**: Model generated 22-24mi in Week 1 (floor = 27mi) by shrinking all sessions when the long run was capped at 5mi. Added SESSION LENGTH MATH rule showing the arithmetic: 3 sessions × 7-8mi + 5mi long run = 27mi+. Also fixed: model was recommending 800m repeats despite them targeting the wrong energy system for a 4-minute race. Added SHORT FAST INTERVALS rule specifying 200m-400m reps only.
+
+**Fix / Change:**
+1. Deload depth rule strengthened: "DELOAD DEPTH: ~70% of prior build week — a REAL 25-30% volume cut. If Week 3 is 20mi, Week 4 deload must be ~14mi." Added to both route.ts and run-evals.mjs.
+2. WEEK 1 MINIMUM FLOOR: Week 1 must not fall below 90% of current avg weekly mileage (MODERATE and HIGH tiers). Hard rule with `<rule>` tag.
+3. DATE BOUNDARY: Every session date must fall within the week header range. Added to DATES AND DAY LABELS section.
+4. Race week shakeout constraint: "Do NOT schedule the shakeout on a gym-only, cross-training-only, or rest day." Added to taper protocol and CROSS-TRAINING DAY PROTECTION.
+5. SILENCE GAPS rule: "Do not invent an excuse for the gap — own the silence directly and move forward."
+6. WEEKLY PROJECTION ACCURACY + WEEKLY TARGET MEANING rules: Projection must equal miles_done + sum of remaining session distances. Target is inclusive, not additive.
+7. MILE TT SESSION MATH: Explicit arithmetic showing 3 sessions must average 7-8mi to reach 27mi floor with 5mi long run cap.
+8. SHORT FAST INTERVALS rule: 200m-400m reps only; 800m repeats explicitly prohibited for mile prep (wrong energy system).
+
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`, `evals/judges/factual-accuracy.mjs`
+
+---
+
 ## 2026-04-15 — Five coaching quality fixes from Weston's first week
 
 **Type:** Bug Fix + Improvement

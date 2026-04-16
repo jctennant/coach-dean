@@ -48,10 +48,10 @@ export default function Home() {
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
             <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              Your personal running coach, just a text away.
+              The running coach who explains every run.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              You have the watch, the app, the Strava data. What&apos;s missing is someone who reads it and tells you what it actually means. Coach Dean analyzes every run, answers your training questions over text, and works alongside any plan you already follow — or builds you one from scratch.
+              Connect Strava and Coach Dean sends you a coaching note after every run — what the effort actually meant, what to watch for, what&apos;s next. Works alongside any plan you already have, or builds one from scratch. All over text.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -90,8 +90,8 @@ export default function Home() {
               <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Plan tells you what to do — nothing explains why</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> &ldquo;Workout Complete&rdquo; is the only feedback you get</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Aches and questions go to Google</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> No one notices when something&apos;s off</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Load builds blind — no one flags what&apos;s coming</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Injury questions go to Google</li>
               </ul>
               <p className="text-sm font-medium text-gray-500">~$10–20 / month</p>
             </div>
@@ -104,8 +104,8 @@ export default function Home() {
               </div>
               <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Coaching note after every Strava run</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tracks weekly load — flags injury risk before it derails training</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags injury patterns before they become problems</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Direct text access — ask anything, any time</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Builds a plan from scratch if you need one</li>
               </ul>
