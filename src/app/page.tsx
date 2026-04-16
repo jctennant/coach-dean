@@ -176,18 +176,6 @@ const valueProps = [
       "Connect Strava and Coach Dean analyzes every activity the moment it syncs — pace trends, effort, whether you went out too hard. Real feedback on your actual runs, not a generic \"great job\" notification.",
     screenshot: "/screenshot-2.png",
   },
-  {
-    title: "Works alongside the plan you already have",
-    description:
-      "Already on a Runna or TrainingPeaks plan? Coach Dean doesn't replace it — he reads it. Upload your plan to the dashboard and Dean will reference it directly when he analyzes your runs. You keep the structure; Dean adds the insight layer your app is missing.",
-    screenshot: "/screenshot-plan-complement.png", // ⚠️ NEW VISUAL NEEDED: conversation or dashboard showing Dean referencing an uploaded Runna/TP plan
-  },
-  {
-    title: "A personalized plan in minutes",
-    description:
-      "No plan yet? Answer a few questions over text and Coach Dean builds a training plan tailored to your goal, schedule, and fitness level — ready to go before you put your phone down.",
-    screenshot: "/screenshot-1.png",
-  },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -289,43 +277,11 @@ export default function Home() {
             </div>
           </div>
 
-          {/* The Coach Dean Difference */}
-          <div>
-            <h3 className="mb-8 text-center font-serif text-xl font-normal md:text-2xl">
-              The Coach Dean Difference
-            </h3>
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">Reads every run, not just the totals</p>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  An app sees a slow pace. Coach Dean sees high humidity, the tail end of a hard week, and tells you that you actually ran that perfectly. Your data tells a story — Dean reads it.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">Injury patterns caught early</p>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Most injuries don&apos;t appear out of nowhere — they build over weeks. Coach Dean tracks your load over time and flags warning signs before a niggle becomes a DNS. And when something does flare up, text him. You get a specific protocol, not a Google rabbit hole.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">Adapts when life gets in the way</p>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Sick, traveling, ran too hard yesterday — text Dean. He adjusts around your reality instead of logging a missed workout as a failure. A good coach works with your life, not against it.
-                </p>
-              </div>
-              <div className="rounded-2xl border border-gray-100 bg-gray-50 p-6">
-                <p className="mb-2 font-semibold text-gray-900">Invisible tech</p>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  No new app to download, no dashboard to check daily. Coach Dean syncs with Strava and talks to you where you already are: your messages. It just shows up after every run.
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 
       {/* Insights section — concrete Dean message examples */}
-      <section className="border-t px-6 py-16 md:py-24">
+      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
@@ -371,7 +327,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Value props — alternating layout */}
+{/* Value props — alternating layout */}
       {valueProps.map((prop, i) => {
         const reversed = i % 2 === 1;
         return (
@@ -408,7 +364,7 @@ export default function Home() {
       })}
 
       {/* Full season plan arc */}
-      <section className="border-t px-6 py-16 md:py-24">
+      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-10 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
