@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-16 — Four prompt guards from 2026-04-15 conversation analysis
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis email (2026-04-15, 13 users, 47 messages)
+**User feedback:** N/A (automated analysis)
+**Root cause:** Four P1 coaching quality failures identified in transcripts:
+1. Dean expressed outdoor Ride activity speed as "min/mile" pace — a running unit that is meaningless for cycling. Strava stores ride speed in mph/km/h and Dean was misreading the speed field as a running pace.
+2. When a structured workout had a final lap faster than the main set, Dean confidently labeled it the "cooldown" — contradicting the pace data and mischaracterizing the athlete's effort zones.
+3. Dean stated a projected weekly total was "slightly lighter than the 24.5 mi target" when the projection (33.3 mi) was actually 36% above the target — the comparison direction was inverted.
+4. After telling an athlete it could not see Sunday's run in Strava, Dean later said "that matches what I saw from the sync" — falsely attributing the athlete-provided data to a Strava sync that never happened.
+**Fix / Change:**
+1. Added `RIDE SPEED UNITS` data guard to `post_run` prompt: when `activityData.type === "Ride"` (not VirtualRide), instructs Claude to report speed in mph/km/h, never min/mile.
+2. Added `LAP PACE SANITY CHECK` rule to `WORKOUT STRUCTURE` block: if the final lap is faster than the middle laps, flag the anomaly rather than asserting it's a cooldown.
+3. Added `PROJECTED vs TARGET DIRECTION` rule to `MILEAGE ACCURACY` block: explicit arithmetic check — if projected > target say "above target", if projected < target say "below target."
+4. Added `MANUALLY-REPORTED ACTIVITY` rule to `user_message` prompt: when Dean previously said it couldn't see an activity and the athlete then provided details manually, do not claim those numbers came from a Strava sync.
 ## 2026-04-15 — Prompt fixes: non-run weekly mileage, sprint outlier flag, same-next-day tempo gate
 
 **Type:** Bug Fix
