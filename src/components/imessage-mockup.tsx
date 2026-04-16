@@ -11,12 +11,12 @@ const MESSAGES = [
   {
     id: 1,
     from: "user" as const,
-    text: "Thanks! My left knee was a little tight around mile 3",
+    text: "My left knee was tight around mile 3.",
   },
   {
     id: 2,
     from: "dean" as const,
-    text: "Good to flag that. Likely just tightness from Tuesday's tempo. Add 5 min of IT band rolling tonight — if it shows up tomorrow we'll swap your long run for a bike day.",
+    text: "This looks like carryover from Tuesday's tempo — you pushed pace about 12% above easy. Roll your IT band for 5 min tonight. If it's still there tomorrow we'll swap the long run for a bike day and keep your week on track.",
   },
   {
     id: 3,

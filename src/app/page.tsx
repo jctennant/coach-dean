@@ -182,10 +182,10 @@ export default function Home() {
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
             <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              Run faster without getting injured.
+              An expert running coach in your pocket.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              Connect Strava and Dean analyzes every run — what it meant, whether to push tomorrow, and what to watch for. All over text.
+              Connect Strava and get instant feedback after every run — what it means, what to do tomorrow, and when to rest. All over text.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -199,6 +199,57 @@ export default function Home() {
       </section>
 
       <RaceMarquee />
+
+      {/* How it works — 3 steps */}
+      <section className="border-t px-6 py-14 md:py-20">
+        <div className="mx-auto max-w-4xl">
+          <div className="grid gap-8 md:grid-cols-3">
+            {[
+              {
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
+                    <path d="M13.5 4.5 21 12l-7.5 7.5" />
+                    <path d="M3 12h18" />
+                  </svg>
+                ),
+                step: "1",
+                label: "Connect Strava",
+                sub: "One tap — Dean reads your history and knows your fitness from day one.",
+              },
+              {
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
+                    <path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4l-4 4-4-4Z" />
+                  </svg>
+                ),
+                step: "2",
+                label: "Dean analyzes every run and texts you",
+                sub: "Coaching note the moment your run syncs. Ask anything, any time.",
+              },
+              {
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
+                    <path d="M3 13.5 7.5 18 21 6" />
+                  </svg>
+                ),
+                step: "3",
+                label: "Train with confidence, not guesswork",
+                sub: "Know when to push, when to back off, and why it's working.",
+              },
+            ].map(({ icon, step, label, sub }) => (
+              <div key={step} className="flex flex-col items-center text-center gap-3 md:items-start md:text-left">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-900 text-white shrink-0">
+                  {icon}
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900 leading-snug">{label}</p>
+                  <p className="mt-1 text-sm text-muted-foreground leading-relaxed">{sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* Insights section — concrete Dean message examples */}
       <section className="border-t px-6 py-16 md:py-24">
