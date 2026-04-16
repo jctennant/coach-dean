@@ -1675,31 +1675,29 @@ export default async function DashboardPage({
                   Orange line: 10% above your recent average. Exceeding it regularly raises injury risk.
                 </p>
               )}
-              {/* ACWR indicator */}
+              {/* ACWR — show actionable ceiling, not the ratio */}
               {acwr.acwr !== null && (() => {
-                const ratio = acwr.acwr;
-                const safe = ratio >= 0.8 && ratio <= 1.3;
-                const high = ratio > 1.3;
-                const low = ratio < 0.8 && acwr.acuteLoad > 0;
-                const color = high ? "text-orange-600" : low ? "text-blue-500" : "text-green-600";
-                const bg = high ? "bg-orange-50 border-orange-100" : low ? "bg-blue-50 border-blue-100" : "bg-green-50 border-green-100";
-                const statusText = high ? "elevated — ease back" : low ? "low — recovery week" : "within safe range";
-                void safe;
+                const ceilingMiles = Math.round(acwr.chronicLoad * 1.3 * 10) / 10;
+                const avgMilesAcwr = Math.round(acwr.chronicLoad * 10) / 10;
+                const ceilingDisplay = useMetric
+                  ? `${Math.round(ceilingMiles * 1.60934 * 10) / 10} ${distUnit}`
+                  : `${ceilingMiles} ${distUnit}`;
+                const avgDisplay = useMetric
+                  ? `${Math.round(avgMilesAcwr * 1.60934 * 10) / 10} ${distUnit}`
+                  : `${avgMilesAcwr} ${distUnit}`;
+                const exceeded = (acwr.acwr ?? 0) > 1.3;
                 return (
-                  <div className={`mt-3 flex items-center justify-between rounded-lg border px-3 py-2 ${bg}`}>
-                    <div>
-                      <p className="text-[11px] font-semibold text-gray-600">
-                        Load ratio (ACWR)
-                        <span className={`ml-1.5 font-bold ${color}`}>{ratio.toFixed(2)}</span>
-                        <span className="ml-1 text-gray-400 font-normal">— {statusText}</span>
+                  <div className={`mt-3 rounded-lg border px-3 py-2.5 ${exceeded ? "bg-orange-50 border-orange-100" : "bg-gray-50 border-gray-100"}`}>
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-[11px] font-semibold text-gray-700">
+                        {exceeded ? "⚠ Over safe limit — " : "Stay under "}
+                        <span className={exceeded ? "text-orange-600" : "text-gray-900"}>{ceilingDisplay} this week</span>
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5">
-                        This week vs 4-week average · safe zone 0.8–1.3
-                      </p>
+                      {exceeded && <span className="text-[10px] font-semibold text-orange-600 ml-2 shrink-0">Scale back</span>}
                     </div>
-                    {high && (
-                      <span className="text-[10px] font-semibold text-orange-600">⚠ High</span>
-                    )}
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      30% above your {avgDisplay}/week 4-week average — exceeding this raises injury risk
+                    </p>
                   </div>
                 );
               })()}
