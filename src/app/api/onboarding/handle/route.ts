@@ -174,6 +174,9 @@ async function handleConversation(
     const longestRunMiles = onboardingData.strava_longest_run_miles as number | null ?? null;
     const avgRunsPerWeek = onboardingData.strava_avg_runs_per_week as number | null ?? null;
     const recent4Weeks = onboardingData.strava_recent_4_weeks as number[] | null ?? null;
+    const hrZonePct = onboardingData.strava_hr_zone_pct as { z1: number; z2: number; z3: number; z4: number; z5: number } | null ?? null;
+    const estimatedMaxHR = onboardingData.strava_estimated_max_hr as number | null ?? null;
+    const maxWeeklySpikePct = onboardingData.strava_max_weekly_spike_pct as number | null ?? null;
 
     const weeklyLine = avgWeeklyMiles != null
       ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
@@ -185,6 +188,12 @@ async function handleConversation(
     const progressionLine = recent4Weeks && recent4Weeks.some(m => m > 0)
       ? ` Weekly miles (oldest→newest): ${[...recent4Weeks].reverse().join(", ")}.`
       : "";
+    const hrZoneLine = hrZonePct
+      ? ` HR zones (% of runs by avg HR): Z1 ${hrZonePct.z1}%, Z2 ${hrZonePct.z2}%, Z3 ${hrZonePct.z3}%, Z4 ${hrZonePct.z4}%, Z5 ${hrZonePct.z5}%.${estimatedMaxHR ? ` Est. max HR: ${estimatedMaxHR} bpm.` : ""}`
+      : "";
+    const spikeLine = maxWeeklySpikePct != null && maxWeeklySpikePct >= 20
+      ? ` ⚠️ Mileage spike detected: largest week-over-week jump in last 4 weeks was +${maxWeeklySpikePct}%.`
+      : "";
 
     if (sbr) {
       const easyRange = easyPaceRange(sbr.easy_pace);
@@ -195,7 +204,7 @@ async function handleConversation(
       const paceNote = sbr.is_trail
         ? ` Note: this is a trail race — easy pace suggestion withheld. Collect a road 5K/10K/HM time to set accurate training zones.`
         : ` Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
-      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
 
       // Store trail-race flag so completeOnboarding can guard the VDOT recalculation.
       // This prevents Haiku from accidentally extracting the trail race distance/time
@@ -208,7 +217,7 @@ async function handleConversation(
       const paceNote = hasRaceData || hasPaceData
         ? " No race activity found on Strava — using pace data already collected from conversation."
         : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
-      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${paceNote}`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine}${paceNote}`;
     }
   } else if (onboardingData.strava_skipped) {
     stravaContext = "\nSTRAVA: User skipped Strava. Collect mileage + pace data manually.";
@@ -228,7 +237,7 @@ Your job: collect the information below through natural conversation, then signa
 
 WHAT TO COLLECT:
 Required before signaling [READY] — for ALL athletes:
-- Athlete's name — CRITICAL: ask in your second message if not already known. Do NOT ask in the first message, but do NOT skip it either. Never address the athlete as "Athlete" or use a placeholder — if you don't have their name, you must ask.
+- Athlete's name — ask in your FIRST message, combined with the training context question. Never address the athlete as "Athlete" or use a placeholder — if you don't have their name, you must ask.
 - Training goal (specific race/event name and type, or general fitness/consistency). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
 - Injury history — REQUIRED FOR ALL ATHLETES. Must ask and receive an answer before [READY]. Frame naturally: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around before?" Even "no injuries at all" is a complete and valid answer. Ask early — after name + goal — not as an afterthought before [READY].
 - Strength & cross-training — REQUIRED FOR ALL ATHLETES. One brief question: "Do you do any strength work or cross-training?" Accept any answer (lifting, yoga, cycling, swimming, or nothing). This directly shapes injury prevention guidance. Ask alongside or right after injury history — they're naturally related.
@@ -253,12 +262,11 @@ ${stravaContext}
 
 CONVERSATION FLOW:
 Everyone gets the same core intake. The order is roughly:
-1. First message: intro + open question about their running situation
-2. Turn 2: get their name, understand their goal more deeply
-3. Once goal is clear: ask about injury history + strength/cross-training (can be one natural question: "Any injuries that have slowed you down, and do you do any strength work?")
-4. Ask about Strava (before collecting any fitness data manually)
-5. Collect remaining required fields: race date, training days, fitness baseline as applicable
-6. Signal [READY] when all required fields are in
+1. First message: intro + ask for their name and training context in one question (e.g. "What's your name, and how's your training been going lately?")
+2. Once goal is clear: ask about injury history + strength/cross-training (can be one natural question: "Any injuries that have slowed you down, and do you do any strength work?")
+3. Ask about Strava (before collecting any fitness data manually)
+4. Collect remaining required fields: race date, training days, fitness baseline as applicable
+5. Signal [READY] when all required fields are in
 
 MODE VARIATIONS — minor adjustments based on what you learn:
 EXISTING PLAN: If they follow Runna, TrainingPeaks, a coach-written plan, etc. — Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT ask for training days. Do NOT offer to rebuild their plan. Ask about Strava early — it's the primary data channel. When asking about injuries, frame it as "what to watch for in the data." For fitness baseline, explain: "This helps me calibrate your training zones so I can tell you whether a run was aerobic or drifting into threshold." For plan sharing, pitch with confidence: "Text me a PDF of your plan or describe it here — it gives me context to make your post-run feedback much more useful."
@@ -277,7 +285,7 @@ INSTRUCTIONS:
 - Day ranges: "Tues-Thursday" means Tuesday, Wednesday, AND Thursday — all days inclusive.
 
 ${isFirstResponse
-  ? `- This is your FIRST message. Open with 2 sentences that are specific and concise about what Dean does — focus on getting faster without getting injured, post-run coaching notes, and load monitoring. Example: "I'm Coach Dean, your AI running coach. I help runners get faster without getting injured — I track your training load, flag injury risk, and send you a coaching note after every Strava run." Then ask a single open question that surfaces both goal and context: "To start — what's your running situation? Racing this year, building a base, or coming back from something?" Do NOT ask for their name in the first message — collect it in the next turn. Do NOT reference specific tools like Runna or TrainingPeaks in the intro. Do NOT use the phrase "SMS running coach" — use "AI running coach" instead.`
+  ? `- This is your FIRST message. Open with 2 sentences that are specific and concise about what Dean does — lead with injury prevention and load monitoring. Example: "I'm Coach Dean, your AI running coach. I flag injury risk, track your training load, and send you a coaching note after every run." Then ask a single question that gets both their name and training context: "What's your name, and how's your training been going lately?" Do NOT reference specific tools like Runna or TrainingPeaks in the intro. Do NOT use the phrase "SMS running coach" — use "AI running coach" instead.`
   : ""}
 
 INJURY INTAKE — Dean's core differentiator:
@@ -329,6 +337,8 @@ When Strava connects, give a genuine analytical read of the data — this is a t
 - Long run proportion: is the longest run appropriately long relative to weekly volume? ("Your long runs are around X% of weekly volume — that's [in a solid range / a bit low for your goal / right where you want it].")
 - Frequency: runs/week pattern. ("You're running 5 days consistently — good base to work with.")
 - Elevation: if they're training for a trail race with significant vert, note whether their elevation load matches the demand. ("Averaging 500ft per run is solid prep for Dipsea's terrain.")
+- HR zones (if present in the STRAVA block): give one honest read of aerobic vs. anaerobic distribution. High Z1-2 % is a strong base; high Z3+ % may mean they're training too hard, too often — something to flag and watch. Be direct: "Most of your runs are in Z2 — that's a solid aerobic base" or "45% of your runs are Z3+, which is on the high side. We'll want to watch that."
+- Mileage spike (if ⚠️ spike warning is present): surface it as a concrete injury risk signal. "Your mileage jumped X% in one week recently — that kind of spike is where overuse injuries start. We'll build from where you are rather than where you were."
 End with one forward-looking sentence connecting their data to their goal — something that demonstrates you're already thinking about their training, not just logging it.
 Do NOT narrate all the stats like a report. Pick what's most interesting and make it feel like a real coach read the data.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.

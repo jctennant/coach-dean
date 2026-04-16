@@ -5,6 +5,7 @@ import { getAllActivities, getAthleteStats, fetchAndStoreBestEfforts } from "@/l
 import { trackEvent } from "@/lib/track";
 import type { Json } from "@/lib/database.types";
 import { parseTimezoneFromLocation } from "@/lib/timezone";
+import { estimateMaxHR } from "@/lib/hr-utils";
 
 /**
  * GET /api/auth/strava/callback
@@ -179,7 +180,7 @@ export async function GET(request: Request) {
   const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
   const { data: activities8w } = await supabase
     .from("activities")
-    .select("distance_meters, moving_time_seconds, elevation_gain, average_heartrate, start_date, activity_type, workout_type")
+    .select("distance_meters, moving_time_seconds, elevation_gain, average_heartrate, max_heartrate, start_date, activity_type, workout_type")
     .eq("user_id", user.id)
     .gte("start_date", eightWeeksAgo)
     .order("start_date", { ascending: true });
@@ -253,6 +254,57 @@ export async function GET(request: Request) {
   // Round to 1 decimal for readability. Only store if we have meaningful data.
   const recent4Weeks = weeklyMilesArr.slice(1, 5).map((m) => Math.round(m * 10) / 10);
   const hasRecentData = recent4Weeks.some((m) => m > 0);
+
+  // HR zone distribution — requires max_heartrate per activity.
+  // Use estimateMaxHR to get a spike-filtered max, then bucket each run by avg HR %.
+  const estimatedMaxHR = estimateMaxHR(
+    runs8w.map((a) => ({
+      activity_type: a.activity_type,
+      workout_type: a.workout_type ?? null,
+      average_heartrate: a.average_heartrate ?? null,
+      max_heartrate: (a as { max_heartrate?: number | null }).max_heartrate ?? null,
+    }))
+  );
+  if (estimatedMaxHR != null) {
+    const zoneCounts = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
+    let runsWithHR = 0;
+    for (const run of runs8w) {
+      if (!run.average_heartrate) continue;
+      runsWithHR++;
+      const pct = run.average_heartrate / estimatedMaxHR;
+      if (pct < 0.60) zoneCounts.z1++;
+      else if (pct < 0.70) zoneCounts.z2++;
+      else if (pct < 0.80) zoneCounts.z3++;
+      else if (pct < 0.90) zoneCounts.z4++;
+      else zoneCounts.z5++;
+    }
+    if (runsWithHR >= 3) {
+      updatedOnboardingData.strava_hr_zone_pct = {
+        z1: Math.round((zoneCounts.z1 / runsWithHR) * 100),
+        z2: Math.round((zoneCounts.z2 / runsWithHR) * 100),
+        z3: Math.round((zoneCounts.z3 / runsWithHR) * 100),
+        z4: Math.round((zoneCounts.z4 / runsWithHR) * 100),
+        z5: Math.round((zoneCounts.z5 / runsWithHR) * 100),
+      };
+      updatedOnboardingData.strava_estimated_max_hr = Math.round(estimatedMaxHR);
+    }
+  }
+
+  // Mileage spike detection — largest week-over-week increase in the 4-week window.
+  // Recent-to-older: completedWeeks[0] = last week, [1] = 2 weeks ago, etc.
+  const completedWeeks = weeklyMilesArr.slice(1, 5);
+  let maxSpikePct = 0;
+  for (let i = 0; i < completedWeeks.length - 1; i++) {
+    const olderWeek = completedWeeks[i + 1];
+    const newerWeek = completedWeeks[i];
+    if (olderWeek > 3) {
+      const spike = (newerWeek - olderWeek) / olderWeek;
+      if (spike > maxSpikePct) maxSpikePct = spike;
+    }
+  }
+  if (maxSpikePct > 0.10) {
+    updatedOnboardingData.strava_max_weekly_spike_pct = Math.round(maxSpikePct * 100);
+  }
 
   // Write analytics into onboarding_data. This is a second DB update — analytics depend
   // on importRecentActivities (line ~170), which runs after the first update at line ~136.

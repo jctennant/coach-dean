@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-16 — Onboarding: name in first message, HR zones + mileage spike at Strava connect
+
+**Type:** Feature / Improvement
+**Reported by:** Internal (product direction)
+**User feedback:** N/A
+**Root cause:** First message felt impersonal (no name ask); post-Strava insights lacked HR and injury-risk signals.
+**Fix / Change:** (1) Dean now asks for name + training context in the first message ("What's your name, and how's your training been going?") — removes the awkward nameless turn. (2) Strava callback now computes HR zone distribution (Z1–Z5 % of runs by avg HR vs estimated max HR) and detects week-over-week mileage spikes; both stored in onboarding_data. (3) Dean's post-connect insight instruction updated to surface aerobic/anaerobic split and flag load spikes as concrete injury risk signals. (4) Dean's intro reordered to lead with injury prevention ("I flag injury risk, track your training load…").
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/auth/strava/callback/route.ts`
+
+---
+
 ## 2026-04-16 — Onboarding redesign: injury-first intake for "get faster without getting injured" pivot
 
 **Type:** Feature / Improvement
