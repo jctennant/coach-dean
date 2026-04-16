@@ -209,7 +209,7 @@ Your job: collect the information below through natural conversation, then signa
 
 WHAT TO COLLECT:
 Required before signaling [READY]:
-- Athlete's name (collect in your second message if not already known — do NOT ask in your first message)
+- Athlete's name — CRITICAL: ask in your second message if not already known. Do NOT ask in the first message, but do NOT skip it either. Never address the athlete as "Athlete" or use a placeholder — if you don't have their name, you must ask.
 - Training goal (specific race/event name and type, or general fitness). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
 - Do they have an existing training plan they're following? (yes/no). If yes: see PLAN COMPLEMENT mode below — training schedule is NOT required. If no: offer to build one if they're self-directed, and training schedule IS required.
 - Training schedule (which days of the week work best) — NOT required for PLAN COMPLEMENT mode users
@@ -244,8 +244,8 @@ CONVERSATION MODE — read the athlete's first response and set the mode before 
 
 PLAN COMPLEMENT (athlete already follows a plan — Runna, TrainingPeaks, coach-written, etc.):
 CORE POSITIONING: Dean is a post-run analyst here, not a plan builder. Every question you ask must be framed in terms of what Dean needs to do its job — analyzing their Strava runs and sending useful feedback. If you can't explain why a question helps Dean analyze runs better, don't ask it.
-- Confirm upfront: Dean works alongside their plan, not as a replacement. Your value: after every Strava run, you'll send a coaching debrief via SMS and write it back to their Strava activity — how the effort looked, what to watch for, what it means for the week.
-- Plan upload: "If you share your plan — describe it here or upload a PDF at coachdean.ai/dashboard — it gives me the context to understand your overall training build and give you more relevant feedback after each run." Keep it brief and natural.
+- Confirm upfront: Dean works alongside their plan, not as a replacement. Your value: after every Strava run, you'll send a coaching debrief and write it back to their Strava activity — how the effort looked, what to watch for, what it means for the week.
+- Plan upload — pitch it with confidence, not as optional admin: "Uploading your plan at coachdean.ai/dashboard gives me the context to understand your overall build — that's where the most useful feedback comes from. You can text me a PDF too." Do not use apologetic framing like "not required, but helpful."
 - Ask about Strava early — it's the primary data channel in this mode.
 - Fitness baseline: if Strava isn't connected, ask for a recent race time or easy pace — but frame it correctly: "This helps me calibrate your training zones so I can tell you whether a run was truly aerobic or whether you were drifting into threshold without realizing it." Not "to build your plan."
 - Do NOT collect training days — Dean fires on Strava activity events and can infer the schedule from data.
@@ -281,7 +281,7 @@ ${isFirstResponse
 
 STRAVA:
 Ask about Strava as your NEXT question once you have the athlete's goal and mode — before asking for race times, pace, or weekly mileage. Strava can provide all of that automatically, so don't collect fitness data manually if Strava might have it. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-When you ask, briefly explain the value in one or two sentences: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. Also mention: after each run, you'll send them a coaching note via SMS and write it back to their Strava activity so it's always there.
+When you ask, briefly explain the value in one or two sentences: connecting Strava means you'll automatically read every run and calibrate training zones from real data — no manual reporting needed. After each run, you'll send them a coaching note and write it back to their Strava activity so it's always there.
 CRITICAL: Even if the athlete volunteers race history, fitness data, or pace information before you've asked about Strava — do NOT follow up on that data yet. Ask about Strava first. You can come back to those details after the Strava question is answered. The Strava question takes priority over any follow-up on volunteered fitness data.
 IMPORTANT: When you ask about Strava, make it a standalone turn — do not combine it with other questions (training days, pace, etc.) in the same message. Ask only the Strava question in that message. Ask other questions in your next turn after the user responds. This prevents you from re-asking questions the user already answered when they were bundled with the Strava link.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message — never embedded inline in a sentence (e.g. never "connect here: [STRAVA_LINK]."). End your question, then put [STRAVA_LINK] on a new line after.
@@ -318,6 +318,9 @@ STRAVA CONTEXT:
 When Strava connects and shows training history, demonstrate that you've genuinely analyzed their data — don't just say "I can see your Strava." Reference something specific and concrete: their recent mileage, training frequency, effort distribution, or a notable run. The goal is to make them feel you actually understand who they are as a runner, not just that you have access to their account. Examples: "I can see you've been putting in consistent 40-mile weeks with most of it at easy effort — that's a solid aerobic base to build from." / "Looks like you've been running 5 days a week fairly consistently, with a longer effort on Saturdays." Surface observations that connect to their goal or what they've told you they want to improve. Don't ask a generic "what's been missing?" — let the data itself show you know them.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
 
+RACE RESPONSE RULE — NO WIKIPEDIA RECAPS:
+When an athlete mentions a race they're doing, do NOT describe the race back to them (distances, elevation stats, location details). They already know the race — they signed up for it. Instead, respond with ONE coaching insight about what the race demands and why it matters for their training. Be specific and useful: e.g. "Dipsea's stairs and Snowbird's vert reward the same thing — strong hiking and climbing legs. Good double-header." Use the course data from your search to inform your insight, not to narrate it back.
+
 RACE DATE AND COURSE PROFILE — MANDATORY SEARCH:
 The moment an athlete mentions a specific named race, call web_search immediately to find the exact date AND the course profile. Do not state, confirm, or summarize any race date without first searching. Memory dates are frequently wrong, and user-provided dates are often wrong too — ALWAYS search, even if the athlete gives you a specific date. This is non-negotiable. A month alone ("next April", "this fall") is never enough — get the specific day.
 When searching for a trail, mountain, or ultra race: also look up the course's total elevation gain (in feet), starting altitude (if it's a mountain race), and terrain character (groomed fire roads, singletrack, technical, etc.). Mention these in your response naturally so the extraction pass can capture them — e.g. "Hardrock 100 is on July 19th with about 33,000ft of gain and starting at high altitude in the San Juans." You don't need to ask the athlete for this info if you can find it from the search.
@@ -327,9 +330,10 @@ FIRST-OF-MONTH GUARD: If the only date information you have is a month ("in June
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
-When you have name + goal + training_days + at least one of (pace/PR data OR Strava connected), end your final message with [READY] on its own line. The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
+When you have name + goal + training_days + at least one of (pace/PR data OR Strava connected), end your final message with [READY] on its own line. For PLAN COMPLEMENT mode: training_days is NOT required — signal [READY] once you have name + goal + fitness baseline (or Strava connected).
+The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
-When you signal [READY], do not ask any more questions in that message. Wrap up warmly and set expectations (e.g. "I'll get your plan put together now") — the plan will be sent right after.
+When you signal [READY], do not ask any more questions in that message. Wrap up warmly. For PLAN COMPLEMENT mode: end with the dashboard link as a next step — "I'll keep key notes and your data at coachdean.ai/dashboard — that's also where you can upload your plan." For all other modes: set expectations (e.g. "I'll get your plan put together now") — the plan will be sent right after.
 
 ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
@@ -608,6 +612,7 @@ async function extractFields(
 
 Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess. Use null for anything not mentioned.
+- name: NEVER extract "Athlete" as the name — that is a transcript label, not the person's name. Only extract a name if the user explicitly stated it (e.g. "I'm Jake", "My name is Sarah").
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
 - has_existing_plan / external_plan_description: ALWAYS extract these when the athlete mentions a training plan. Examples that must set has_existing_plan=true: "I'm already on a Runna plan", "I follow a TrainingPeaks plan", "my coach gave me a plan", "I'm using a Hal Higdon program". For any of these, also capture external_plan_description as a brief factual summary: plan source/name, current week if mentioned, weekly mileage if mentioned. E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Set has_existing_plan=false only if the athlete explicitly says they have no plan or are self-directed without one.
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
@@ -806,7 +811,8 @@ async function handleAwaitingPayment(
   const dashboardToken = userData?.dashboard_token as string | null;
   if (!dashboardToken) return NextResponse.json({ ok: true });
 
-  const firstName = (user.name ?? "").split(" ")[0] || "Hey";
+  const _rawFirst = (user.name ?? "").split(" ")[0];
+  const firstName = (_rawFirst && _rawFirst.toLowerCase() !== "athlete") ? _rawFirst : "Hey";
   const checkoutUrl = getCheckoutPageUrl(dashboardToken);
   const onboardingData = (userData?.onboarding_data as Record<string, unknown>) || {};
 
@@ -1207,7 +1213,8 @@ async function completeOnboarding(
       (userUpdatePayload.dashboard_token as string | null) ??
       (billingUser?.dashboard_token as string | null);
     if (dashboardToken) {
-      const firstName = (name ?? "").split(" ")[0] || "Hey";
+      const _rawFirst2 = (name ?? "").split(" ")[0];
+      const firstName = (_rawFirst2 && _rawFirst2.toLowerCase() !== "athlete") ? _rawFirst2 : "Hey";
       const trialEndDate = new Date();
       trialEndDate.setDate(trialEndDate.getDate() + 7);
       const trialEndFormatted = trialEndDate.toLocaleDateString("en-US", {
@@ -1232,7 +1239,8 @@ async function completeOnboarding(
   // Instead, send a welcome message explaining what Dean will now do for them.
   if (hasExistingPlan === true) {
     void trackEvent(user.id, "onboarding_completed", { goal, mode: "complement" });
-    const firstName = (name ?? "").split(" ")[0] || "Hey";
+    const rawFirst = (name ?? "").split(" ")[0];
+    const firstName = (rawFirst && rawFirst.toLowerCase() !== "athlete") ? rawFirst : "Hey";
     const { data: billingUserPhone } = await supabase
       .from("users")
       .select("phone_number")
@@ -1242,7 +1250,7 @@ async function completeOnboarding(
     const raceCtx = data.race_name
       ? ` I can see you're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every analysis.`
       : "";
-    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a detailed debrief — how the effort compares to what you planned, what the conditions added, and what it means for the week ahead — and I'll write it back to your Strava activity too. You can upload your plan as a PDF at coachdean.ai/dashboard and I'll reference it directly in your feedback. Text me anytime with questions. Let's go.`;
+    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a detailed debrief — how the effort looked, what to watch for, and what it means for the week — and I'll write it back to your Strava activity. Your data and key notes live at coachdean.ai/dashboard — you can upload your plan there too so I can reference it directly. Text me anytime. Let's go.`;
     await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
     return;
   }

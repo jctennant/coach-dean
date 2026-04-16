@@ -283,7 +283,8 @@ export async function GET(request: Request) {
     });
   }
 
-  const firstName = user.name ? ` ${user.name}` : "";
+  const _nameRaw = user.name && user.name.toLowerCase() !== "athlete" ? user.name : null;
+  const firstName = _nameRaw ? ` ${_nameRaw}` : "";
 
   // Don't re-ask for training days if they were already captured during the conversation
   // before the user tapped the Strava link.
