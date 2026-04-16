@@ -1829,13 +1829,18 @@ export default async function DashboardPage({
 
 function NoTokenScreen({ expired = false }: { expired?: boolean }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gray-50 px-6 py-12">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-white px-6 py-12">
       <div className="text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-xl font-bold text-white">
-          D
+        <div
+          className="mx-auto flex h-14 w-14 items-center justify-center rounded-full text-white"
+          style={{ background: "#1a5c35" }}
+        >
+          <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif", fontSize: 15, fontWeight: 600, letterSpacing: 0.5 }}>
+            CD
+          </span>
         </div>
-        <h1 className="mt-4 text-xl font-bold">Coach Dean</h1>
-        <p className="mt-2 text-sm text-gray-500">
+        <h1 className="mt-4 font-serif text-2xl font-normal">Coach Dean</h1>
+        <p className="mt-2 text-sm text-gray-500 max-w-xs mx-auto leading-relaxed">
           {expired
             ? "That link has expired or isn't valid. Enter your number and I'll text you a fresh one."
             : "Enter your phone number and I'll text you a link to your dashboard."}

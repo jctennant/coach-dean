@@ -28,7 +28,7 @@ export default function RequestLinkForm() {
 
   if (status === "sent") {
     return (
-      <div className="rounded-2xl bg-white border border-gray-200 p-6 text-center space-y-2">
+      <div className="rounded-2xl border border-gray-200 bg-white p-6 text-center space-y-2">
         <p className="text-sm font-semibold text-gray-900">Check your texts!</p>
         <p className="text-xs text-gray-500">We sent your plan link to {phone}.</p>
       </div>
@@ -42,13 +42,17 @@ export default function RequestLinkForm() {
         placeholder="Your phone number"
         value={phone}
         onChange={(e) => setPhone(e.target.value)}
-        className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+        className="w-full rounded-xl border px-4 py-3 text-sm outline-none transition-colors"
+        style={{ borderColor: "#e5e7eb" }}
+        onFocus={e => (e.currentTarget.style.borderColor = "#1a5c35")}
+        onBlur={e => (e.currentTarget.style.borderColor = "#e5e7eb")}
         required
       />
       <button
         type="submit"
         disabled={status === "loading"}
-        className="w-full rounded-full bg-gray-900 py-3 text-sm font-medium text-white disabled:opacity-50"
+        className="w-full rounded-full py-3 text-sm font-medium text-white disabled:opacity-50"
+        style={{ background: "#1a5c35" }}
       >
         {status === "loading" ? "Sending…" : "Text me my plan link"}
       </button>
