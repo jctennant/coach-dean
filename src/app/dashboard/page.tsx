@@ -283,28 +283,69 @@ function interpretEfficiency(ae: number): string {
 function BarChart({
   data,
   avgMiles,
+  wowThresholdDisplay,
+  acwrThresholdDisplay,
   useMetric,
 }: {
   data: { label: string; miles: number; isCurrent: boolean }[];
   avgMiles: number;
+  wowThresholdDisplay: number | null;  // 10% above prev week, already in display units
+  acwrThresholdDisplay: number | null; // 30% above 4-wk avg, already in display units
   useMetric: boolean;
 }) {
   const values = data.map(d => useMetric ? d.miles * 1.60934 : d.miles);
   const avg = useMetric ? avgMiles * 1.60934 : avgMiles;
-  const max = Math.max(...values, avg * 1.15, 1);
-  const W = 560, H = 110;
-  const PL = 4, PR = 4, PT = 8, PB = 22;
+  const max = Math.max(
+    ...values,
+    wowThresholdDisplay ?? 0,
+    acwrThresholdDisplay ?? 0,
+    avg * 1.15,
+    1
+  ) * 1.08; // 8% headroom so lines don't sit flush at the top
+  const W = 560, H = 120;
+  const PL = 4, PR = 60, PT = 8, PB = 22; // extra right padding for inline labels
   const barW = Math.floor((W - PL - PR) / data.length);
   const chartH = H - PT - PB;
 
   const getColor = (v: number, isCurrent: boolean) => {
-    if (isCurrent) return "#166534";          // dark green — current week
-    if (avg > 0 && v > avg * 1.1) return "#f59e0b"; // amber — spike
-    return "#bbf7d0";                          // light green — normal
+    if (isCurrent) return "#166534";
+    if (avg > 0 && v > avg * 1.1) return "#f59e0b";
+    return "#bbf7d0";
   };
+
+  const lineY = (val: number) => PT + chartH * (1 - val / max);
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: "280px" }} aria-label="Weekly mileage">
+      {/* 10% WoW threshold line */}
+      {wowThresholdDisplay != null && wowThresholdDisplay > 0 && (() => {
+        const y = lineY(wowThresholdDisplay);
+        return (
+          <g>
+            <line x1={PL} x2={W - PR - 4} y1={y} y2={y}
+              stroke="#fbbf24" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.9" />
+            <text x={W - PR + 2} y={y + 3.5} fontSize="7.5" fill="#d97706" fontWeight="600">
+              +10% wk
+            </text>
+          </g>
+        );
+      })()}
+
+      {/* 30% ACWR threshold line */}
+      {acwrThresholdDisplay != null && acwrThresholdDisplay > 0 && (() => {
+        const y = lineY(acwrThresholdDisplay);
+        return (
+          <g>
+            <line x1={PL} x2={W - PR - 4} y1={y} y2={y}
+              stroke="#f97316" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.9" />
+            <text x={W - PR + 2} y={y + 3.5} fontSize="7.5" fill="#ea580c" fontWeight="600">
+              +30% avg
+            </text>
+          </g>
+        );
+      })()}
+
+      {/* Bars */}
       {data.map((d, i) => {
         const v = values[i]!;
         const barH = v > 0 ? Math.max(3, (v / max) * chartH) : 0;
@@ -579,6 +620,7 @@ export default async function DashboardPage({
   // Weekly chart
   const weeklyMiles = buildWeeklyMiles(activities, timezone);
   const currentWeekMiles = weeklyMiles[weeklyMiles.length - 1]?.miles ?? 0;
+  const priorWeekMiles = weeklyMiles[weeklyMiles.length - 2]?.miles ?? 0;
   const nonZeroWeeks = weeklyMiles.filter(w => w.miles > 0);
   const avgMiles = nonZeroWeeks.length > 0
     ? nonZeroWeeks.reduce((s, w) => s + w.miles, 0) / nonZeroWeeks.length
@@ -591,6 +633,18 @@ export default async function DashboardPage({
   const avgDisplay = useMetric
     ? Math.round(avgMiles * 1.60934 * 10) / 10
     : Math.round(avgMiles * 10) / 10;
+
+  // Two load thresholds for the bar chart
+  // 1. WoW cap: 10% above the previous completed week
+  const wowThresholdMiles = priorWeekMiles > 0 ? priorWeekMiles * 1.1 : null;
+  const wowThresholdDisplay = wowThresholdMiles != null
+    ? useMetric ? Math.round(wowThresholdMiles * 1.60934 * 10) / 10 : Math.round(wowThresholdMiles * 10) / 10
+    : null;
+  // 2. ACWR cap: 30% above 4-week chronic load
+  const acwrCeilingMiles = acwr.chronicLoad > 0 ? acwr.chronicLoad * 1.3 : null;
+  const acwrCeilingDisplay = acwrCeilingMiles != null
+    ? useMetric ? Math.round(acwrCeilingMiles * 1.60934 * 10) / 10 : Math.round(acwrCeilingMiles * 10) / 10
+    : null;
 
   // Weekly target (from training state, or fall back to avg)
   const weeklyTargetMiles = stateData?.weekly_mileage_target ?? (avgMiles > 0 ? Math.round(avgMiles) : null);
@@ -706,19 +760,8 @@ export default async function DashboardPage({
     return obj as unknown as DashboardInsights;
   })();
 
-  // ACWR load warning
-  const acwrWarning = acwr.acwr !== null ? (() => {
-    const ceilingMiles = Math.round(acwr.chronicLoad * 1.3 * 10) / 10;
-    const avgMilesAcwr = Math.round(acwr.chronicLoad * 10) / 10;
-    const ceilingDisplay = useMetric
-      ? `${Math.round(ceilingMiles * 1.60934 * 10) / 10} ${distUnit}`
-      : `${ceilingMiles} ${distUnit}`;
-    const avgAcwrDisplay = useMetric
-      ? `${Math.round(avgMilesAcwr * 1.60934 * 10) / 10} ${distUnit}`
-      : `${avgMilesAcwr} ${distUnit}`;
-    const exceeded = (acwr.acwr ?? 0) > 1.3;
-    return { ceilingDisplay, avgAcwrDisplay, exceeded };
-  })() : null;
+  // ACWR load warning — just track whether the current week has exceeded the 30% ceiling
+  const acwrWarning = acwr.acwr !== null ? { exceeded: (acwr.acwr ?? 0) > 1.3 } : null;
 
   return (
     <>
@@ -832,20 +875,41 @@ export default async function DashboardPage({
                     </span>
                   )}
                 </div>
-                <BarChart data={weeklyMiles} avgMiles={avgMiles} useMetric={useMetric} />
+                <BarChart
+                  data={weeklyMiles}
+                  avgMiles={avgMiles}
+                  wowThresholdDisplay={wowThresholdDisplay}
+                  acwrThresholdDisplay={acwrCeilingDisplay}
+                  useMetric={useMetric}
+                />
 
-                {/* ACWR plain-language warning */}
-                {acwrWarning && (acwrWarning.exceeded || loadTrend.flagged) && (
-                  <div className={`mt-3 rounded-lg border px-3 py-2.5 ${
-                    acwrWarning.exceeded ? "bg-amber-50 border-amber-100" : "bg-gray-50 border-gray-100"
-                  }`}>
-                    <p className={`text-[12px] font-medium leading-snug ${acwrWarning.exceeded ? "text-amber-800" : "text-gray-700"}`}>
-                      {acwrWarning.exceeded
-                        ? `Over safe limit — stay under ${acwrWarning.ceilingDisplay} this week`
-                        : `Stay under ${acwrWarning.ceilingDisplay} this week`}
-                      {" — "}
-                      {acwrWarning.exceeded ? "30%" : "10%"} above your {acwrWarning.avgAcwrDisplay}/week 4-week average.
-                      {" "}Dial back remaining runs to protect your recovery.
+                {/* Threshold numbers below the chart */}
+                {(wowThresholdDisplay != null || acwrCeilingDisplay != null) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1">
+                    {wowThresholdDisplay != null && (
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-0 w-4 border-t-2 border-dashed border-amber-400" />
+                        <span className="text-[11px] text-gray-500">
+                          10% above last week: <span className="font-semibold tabular-nums">{wowThresholdDisplay} {distUnit}</span>
+                        </span>
+                      </div>
+                    )}
+                    {acwrCeilingDisplay != null && (
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-0 w-4 border-t-2 border-dashed border-orange-400" />
+                        <span className="text-[11px] text-gray-500">
+                          30% above 4-wk avg: <span className="font-semibold tabular-nums">{acwrCeilingDisplay} {distUnit}</span>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Warning when current week is already over a threshold */}
+                {acwrWarning && acwrWarning.exceeded && (
+                  <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5">
+                    <p className="text-[12px] font-medium leading-snug text-amber-800">
+                      Over safe limit — dial back remaining runs this week to protect your recovery.
                     </p>
                   </div>
                 )}
