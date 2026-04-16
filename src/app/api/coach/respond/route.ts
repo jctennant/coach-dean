@@ -30,6 +30,7 @@ interface CoachRequest {
   silent?: boolean; // For rebuild_plan: regenerates the arc without sending the "plan ready" SMS
   prescribedWeek1Miles?: number; // For rebuild_plan: admin override for base mileage when Strava data is wrong/incomplete
   partialWeekTarget?: number; // For sync_sessions: re-apply partial-week mileage target after syncArcCurrentWeek
+  skipArcRebase?: boolean; // For sync_sessions: skip arc rebase when partial-week onboard used Strava avg as arc base
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
   missedRunCheckin?: boolean; // True when Strava user had a scheduled workout but no run came through — check if they got it in
