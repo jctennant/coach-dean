@@ -333,9 +333,12 @@ describe("computeLoadTrend (regression)", () => {
   });
 
   it("flags week-over-week jump >10%", () => {
+    // daysAgo:7 / daysAgo:14 land exactly one/two ISO weeks back regardless of
+    // which day of the week the test runs — computeLoadTrend excludes the
+    // current partial week, so daysAgo:3 would silently be dropped on Thu–Sun.
     const activities: ActivityForAnalytics[] = [
-      makeActivity({ daysAgo: 3, miles: 30 }),  // this recent week
-      makeActivity({ daysAgo: 10, miles: 20 }), // prior week
+      makeActivity({ daysAgo: 7, miles: 30 }),  // most recent complete week
+      makeActivity({ daysAgo: 14, miles: 20 }), // prior complete week
     ];
     const result = computeLoadTrend(activities, TZ);
     expect(result.flagged).toBe(true);

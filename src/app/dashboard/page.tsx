@@ -6,7 +6,7 @@ import { TokenPersist } from "./token-manager";
 import { DashboardTabs } from "./tab-container";
 import { PlanTab } from "./plan-tab";
 import type { PlanWeek, PlanSession, PlanRace } from "./plan-tab";
-import { computeLoadTrend, computeAerobicEfficiencyTrend } from "@/lib/training-analytics";
+import { computeLoadTrend, computeAerobicEfficiencyTrend, computeACWR } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { predictRaceTime, estimateVDOT, predictTimeFromVDOT } from "@/lib/race-predictor";
 
@@ -408,7 +408,7 @@ Your task:
 1. Generate a 1–2 sentence longitudinal summary of what's happening with this athlete's training over the past few weeks. Focus on the most meaningful pattern or trend — not the last single run. Be direct and concrete. Encouraging but honest.
 2. Extract 1–3 persistent actionable coaching reminders (advice that applies across multiple sessions — injury routines, HR targets, form cues, recurring patterns). NOT advice about a specific day. NOT mileage totals.
 
-Each note: short label (1–2 words) + text (under 12 words).
+Each note: short label (1–2 words) + text (under 12 words). Write in second person, addressing the athlete directly — "your easy pace", "you tend to", "keep your" — not third-person observations about them.
 Return empty arrays if there's no clear signal rather than inventing content.`,
       messages: [{
         role: "user",
@@ -1018,6 +1018,7 @@ export default async function DashboardPage({
   }));
 
   const loadTrend = computeLoadTrend(analyticsActivities, timezone);
+  const acwr = computeACWR(analyticsActivities, timezone);
   const effTrend = computeAerobicEfficiencyTrend(analyticsActivities, timezone);
   const effSeries = buildWeeklyEfficiency(activities, timezone);
 
@@ -1674,11 +1675,79 @@ export default async function DashboardPage({
                   Orange line: 10% above your recent average. Exceeding it regularly raises injury risk.
                 </p>
               )}
+              {/* ACWR indicator */}
+              {acwr.acwr !== null && (() => {
+                const ratio = acwr.acwr;
+                const safe = ratio >= 0.8 && ratio <= 1.3;
+                const high = ratio > 1.3;
+                const low = ratio < 0.8 && acwr.acuteLoad > 0;
+                const color = high ? "text-orange-600" : low ? "text-blue-500" : "text-green-600";
+                const bg = high ? "bg-orange-50 border-orange-100" : low ? "bg-blue-50 border-blue-100" : "bg-green-50 border-green-100";
+                const statusText = high ? "elevated — ease back" : low ? "low — recovery week" : "within safe range";
+                void safe;
+                return (
+                  <div className={`mt-3 flex items-center justify-between rounded-lg border px-3 py-2 ${bg}`}>
+                    <div>
+                      <p className="text-[11px] font-semibold text-gray-600">
+                        Load ratio (ACWR)
+                        <span className={`ml-1.5 font-bold ${color}`}>{ratio.toFixed(2)}</span>
+                        <span className="ml-1 text-gray-400 font-normal">— {statusText}</span>
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        This week vs 4-week average · safe zone 0.8–1.3
+                      </p>
+                    </div>
+                    {high && (
+                      <span className="text-[10px] font-semibold text-orange-600">⚠ High</span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </section>
 
-          {/* ── Zone 4: Key notes ───────────────────────────────────────── */}
-          {(paceZones || keyNotes.length > 0) && (
+          {/* ── Zone 4a: Training zones reference ───────────────────────── */}
+          {paceZones && (() => {
+            const rawEasy = (profileData?.current_easy_pace as string | null) ?? null;
+            const rawTempo = (profileData?.current_tempo_pace as string | null) ?? null;
+            const rawInterval = (profileData?.current_interval_pace as string | null) ?? null;
+            const easyRange = rawEasy ? (() => {
+              const parts = rawEasy.replace("/mi", "").split(":");
+              if (parts.length === 2) {
+                const base = parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
+                const ceilSec = base + 30;
+                const ceil = `${Math.floor(ceilSec / 60)}:${String(ceilSec % 60).padStart(2, "0")}`;
+                return `${rawEasy.replace("/mi", "")}–${ceil}/mi`;
+              }
+              return rawEasy;
+            })() : null;
+            const zones: { label: string; pace: string; color: string }[] = [];
+            if (easyRange) zones.push({ label: "Easy", pace: easyRange, color: "bg-green-400" });
+            if (rawTempo) zones.push({ label: "Tempo", pace: rawTempo, color: "bg-amber-400" });
+            if (rawInterval) zones.push({ label: "Intervals", pace: rawInterval, color: "bg-red-400" });
+            return (
+              <section className="space-y-3">
+                <h2 className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                  Training zones
+                </h2>
+                <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap gap-x-6 gap-y-2">
+                    {zones.map(z => (
+                      <div key={z.label} className="flex items-center gap-2">
+                        <div className={`h-2 w-2 shrink-0 rounded-full ${z.color}`} />
+                        <span className="text-[11px] font-medium text-gray-500">{z.label}</span>
+                        <span className="text-sm font-mono text-gray-800">{z.pace}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2.5 text-[10px] text-gray-400">Pace targets from Dean · not directly linked to HR zones</p>
+                </div>
+              </section>
+            );
+          })()}
+
+          {/* ── Zone 4b: Key notes ──────────────────────────────────────────── */}
+          {keyNotes.length > 0 && (
             <section className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">
@@ -1691,45 +1760,6 @@ export default async function DashboardPage({
                 )}
               </div>
               <div className="rounded-xl border border-gray-100 bg-white shadow-sm divide-y divide-gray-50">
-                {/* Pacing zones — always first, structured grid */}
-                {paceZones && (() => {
-                  const rawEasy = (profileData?.current_easy_pace as string | null) ?? null;
-                  const rawTempo = (profileData?.current_tempo_pace as string | null) ?? null;
-                  const rawInterval = (profileData?.current_interval_pace as string | null) ?? null;
-                  // Build easy pace range (e.g. 9:30–10:00/mi)
-                  const easyRange = rawEasy ? (() => {
-                    const parts = rawEasy.replace("/mi", "").split(":");
-                    if (parts.length === 2) {
-                      const base = parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
-                      const ceilSec = base + 30;
-                      const ceil = `${Math.floor(ceilSec / 60)}:${String(ceilSec % 60).padStart(2, "0")}`;
-                      return `${rawEasy.replace("/mi", "")}–${ceil}/mi`;
-                    }
-                    return rawEasy;
-                  })() : null;
-                  const zones: { label: string; pace: string; color: string }[] = [];
-                  if (easyRange) zones.push({ label: "Easy", pace: easyRange, color: "bg-green-400" });
-                  if (rawTempo) zones.push({ label: "Tempo", pace: rawTempo, color: "bg-amber-400" });
-                  if (rawInterval) zones.push({ label: "Intervals", pace: rawInterval, color: "bg-red-400" });
-                  return (
-                    <div className="px-4 py-3.5">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2.5">
-                        Pacing zones
-                      </p>
-                      <div className="space-y-1.5">
-                        {zones.map(z => (
-                          <div key={z.label} className="flex items-center gap-3">
-                            <div className={`h-2 w-2 shrink-0 rounded-full ${z.color}`} />
-                            <span className="text-[11px] font-medium text-gray-500 w-16 shrink-0">{z.label}</span>
-                            <span className="text-sm font-mono text-gray-800">{z.pace}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-[10px] text-gray-400">Pace targets from Dean · not directly linked to HR zones</p>
-                    </div>
-                  );
-                })()}
-                {/* Extracted coaching notes */}
                 {keyNotes.map((note, i) => (
                   <div key={i} className="flex items-baseline gap-3 px-4 py-3.5">
                     <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400 w-20">
