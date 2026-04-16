@@ -29,6 +29,7 @@ type ActivityRow = {
   elapsed_time_seconds: number | null;
   activity_type: string | null;
   average_heartrate: number | null;
+  max_heartrate: number | null;
   aerobic_efficiency: number | null;
   cardiac_decoupling_pct: number | null;
   workout_type: number | null;
@@ -59,6 +60,43 @@ type ConversationRow = {
 };
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+const RUN_ACTIVITY_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+
+/**
+ * Robustly estimate an athlete's true max HR from stored activity data.
+ *
+ * Strategy (in priority order):
+ * 1. Collect all max_heartrate values from run activities.
+ * 2. Reject sensor spike outliers: if the single highest reading is 15+ bpm
+ *    above the next-highest, it's almost certainly a HR monitor glitch (dropped
+ *    contact, ECG artifact) — skip it and use the next value.
+ *    15 bpm is conservative: genuine max HR variation run-to-run is ≤5–8 bpm;
+ *    sensor spikes are typically 20–40 bpm above real values.
+ * 3. Apply ×1.02 safety margin (peak race HR ≈ 98% of true physiological max).
+ * 4. Fall back to average_heartrate × 1.12 when max_heartrate is unavailable.
+ */
+function estimateMaxHR(activities: ActivityRow[]): number | null {
+  const maxHRs = activities
+    .filter(a => RUN_ACTIVITY_TYPES.has(a.activity_type ?? "") && (a.max_heartrate ?? 0) > 100)
+    .map(a => a.max_heartrate!)
+    .sort((a, b) => b - a); // descending
+
+  if (maxHRs.length > 0) {
+    const top = maxHRs[0]!;
+    const second = maxHRs[1];
+    // Skip the top reading if it looks like a sensor spike
+    const best = second != null && (top - second) > 15 ? second : top;
+    return best * 1.02;
+  }
+
+  // Fallback: estimate from average HR (avg race/interval HR ≈ 88% of true max)
+  const avgHRs = activities
+    .filter(a => RUN_ACTIVITY_TYPES.has(a.activity_type ?? "") && a.average_heartrate != null)
+    .map(a => a.average_heartrate!);
+  if (avgHRs.length === 0) return null;
+  return Math.max(...avgHRs) * 1.12;
+}
 
 function formatDate(dateStr: string, fmt: "short" | "long" = "short"): string {
   const d = dateStr.length === 10 ? new Date(dateStr + "T12:00:00Z") : new Date(dateStr);
@@ -102,7 +140,7 @@ function buildWeeklyMiles(
   activities: ActivityRow[],
   timezone: string
 ): { label: string; miles: number; isCurrent: boolean }[] {
-  const RUN = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+  const RUN = RUN_ACTIVITY_TYPES;
   const byWeek: Record<string, number> = {};
   for (const a of activities) {
     if (!RUN.has(a.activity_type ?? "")) continue;
@@ -128,7 +166,7 @@ function buildWeeklyEfficiency(
   activities: ActivityRow[],
   timezone: string
 ): { label: string; val: number }[] {
-  const RUN = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+  const RUN = RUN_ACTIVITY_TYPES;
   const byWeek: Record<string, number[]> = {};
   for (const a of activities) {
     if (!RUN.has(a.activity_type ?? "")) continue;
@@ -198,7 +236,7 @@ function buildZoneStrip(
   tempoPaceStr: string | null,
   timezone: string
 ): { runs: ZoneRun[]; weeks: string[]; maxHREstimate: number | null } {
-  const RUN = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+  const RUN = RUN_ACTIVITY_TYPES;
 
   const parsePace = (s: string | null): number | null => {
     if (!s) return null;
@@ -210,13 +248,7 @@ function buildZoneStrip(
   const easyPaceSec = parsePace(easyPaceStr);
   const tempoPaceSec = parsePace(tempoPaceStr);
 
-  const maxHREstimate = (() => {
-    const hrs = activities
-      .filter(a => RUN.has(a.activity_type ?? "") && a.average_heartrate != null)
-      .map(a => a.average_heartrate!);
-    if (hrs.length === 0) return null;
-    return Math.max(...hrs) * 1.12;
-  })();
+  const maxHREstimate = estimateMaxHR(activities);
 
   const now = new Date();
   const weekSet: Set<string> = new Set();
@@ -248,9 +280,21 @@ function buildZoneStrip(
     if (a.workout_type === 2) { runs.push({ date: wk, zone: "easy", signal: "workout_type" }); continue; }
 
     if (maxHREstimate && a.average_heartrate) {
-      const hrPct = a.average_heartrate / maxHREstimate;
-      if (hrPct < 0.75) runs.push({ date: wk, zone: "easy", signal: "hr" });
-      else if (hrPct < 0.85) runs.push({ date: wk, zone: "moderate", signal: "hr" });
+      const avgPct = a.average_heartrate / maxHREstimate;
+      const maxPct = a.max_heartrate ? a.max_heartrate / maxHREstimate : null;
+
+      // Interval/threshold proxy: peak HR cleared the hard zone AND avg HR was
+      // elevated enough (>72%) to rule out a single brief spike on an easy run.
+      // 72% sits just below the moderate boundary (75%) — an interval session
+      // with recovery jogs will land there; a genuinely easy run with one hill
+      // spike will have a much lower avg HR.
+      if (maxPct != null && maxPct > 0.85 && avgPct > 0.72) {
+        runs.push({ date: wk, zone: "hard", signal: "hr" });
+        continue;
+      }
+
+      if (avgPct < 0.75) runs.push({ date: wk, zone: "easy", signal: "hr" });
+      else if (avgPct < 0.85) runs.push({ date: wk, zone: "moderate", signal: "hr" });
       else runs.push({ date: wk, zone: "hard", signal: "hr" });
       continue;
     }
@@ -550,7 +594,7 @@ export default async function DashboardPage({
       .single(),
     supabase
       .from("activities")
-      .select("strava_activity_id, start_date, distance_meters, moving_time_seconds, elapsed_time_seconds, activity_type, average_heartrate, aerobic_efficiency, cardiac_decoupling_pct, workout_type, best_efforts, activity_name")
+      .select("strava_activity_id, start_date, distance_meters, moving_time_seconds, elapsed_time_seconds, activity_type, average_heartrate, max_heartrate, aerobic_efficiency, cardiac_decoupling_pct, workout_type, best_efforts, activity_name")
       .eq("user_id", user.id)
       .order("start_date", { ascending: false })
       .limit(200),
@@ -595,7 +639,7 @@ export default async function DashboardPage({
     distance_meters: a.distance_meters,
     moving_time_seconds: a.moving_time_seconds,
     average_heartrate: a.average_heartrate,
-    max_heartrate: null,
+    max_heartrate: a.max_heartrate,
     elevation_gain: null,
     average_cadence: null,
     aerobic_efficiency: getAerobicEfficiency(a),
@@ -671,15 +715,8 @@ export default async function DashboardPage({
     gray: "bg-gray-300",
   }[status.color];
 
-  // Max HR estimate
-  const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
-  const maxHREstimate = (() => {
-    const hrs = activities
-      .filter(a => RUN_TYPES.has(a.activity_type ?? "") && a.average_heartrate != null)
-      .map(a => a.average_heartrate!);
-    if (hrs.length === 0) return null;
-    return Math.max(...hrs) * 1.12;
-  })();
+  const RUN_TYPES = RUN_ACTIVITY_TYPES;
+  const maxHREstimate = estimateMaxHR(activities);
 
   // Zone data
   const zoneData = buildZoneStrip(
@@ -722,8 +759,12 @@ export default async function DashboardPage({
       else if (a.workout_type === 3) zone = "hard";
       else if (a.workout_type === 2) zone = "easy";
       else if (maxHREstimate && a.average_heartrate) {
-        const hrPct = a.average_heartrate / maxHREstimate;
-        zone = hrPct < 0.75 ? "easy" : hrPct < 0.85 ? "moderate" : "hard";
+        const avgPct = a.average_heartrate / maxHREstimate;
+        const maxPct = a.max_heartrate ? a.max_heartrate / maxHREstimate : null;
+        if (maxPct != null && maxPct > 0.85 && avgPct > 0.72) zone = "hard";
+        else if (avgPct < 0.75) zone = "easy";
+        else if (avgPct < 0.85) zone = "moderate";
+        else zone = "hard";
       }
       const dist = a.distance_meters;
       const distDisplay = dist
