@@ -167,12 +167,23 @@ async function handleConversation(
   let stravaContext = "";
   if (onboardingData.strava_connected) {
     const sbr = await lookupBestStravaRace(user.id);
-    // Build weekly stats line from stored analytics (computed at Strava connect time)
+    // Build analytics lines from stored data (computed at Strava connect time)
     const avgWeeklyMiles = onboardingData.strava_avg_weekly_miles as number | null ?? null;
     const mileageTrend = onboardingData.strava_mileage_trend as string | null ?? null;
     const avgElevFtPerRun = onboardingData.strava_avg_elev_ft_per_run as number | null ?? null;
+    const longestRunMiles = onboardingData.strava_longest_run_miles as number | null ?? null;
+    const avgRunsPerWeek = onboardingData.strava_avg_runs_per_week as number | null ?? null;
+    const recent4Weeks = onboardingData.strava_recent_4_weeks as number[] | null ?? null;
+
     const weeklyLine = avgWeeklyMiles != null
-      ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.${avgElevFtPerRun ? ` Avg elevation/run: ${avgElevFtPerRun} ft.` : ""}`
+      ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
+      : "";
+    const frequencyLine = avgRunsPerWeek != null ? ` ~${avgRunsPerWeek} runs/week.` : "";
+    const longestLine = longestRunMiles != null ? ` Longest run (8 weeks): ${longestRunMiles} mi.` : "";
+    const elevLine = avgElevFtPerRun ? ` Avg elevation/run: ${avgElevFtPerRun} ft.` : "";
+    // Show weekly progression oldest→newest so trend is readable (e.g. "22, 25, 28, 30")
+    const progressionLine = recent4Weeks && recent4Weeks.some(m => m > 0)
+      ? ` Weekly miles (oldest→newest): ${[...recent4Weeks].reverse().join(", ")}.`
       : "";
 
     if (sbr) {
@@ -184,14 +195,14 @@ async function handleConversation(
       const paceNote = sbr.is_trail
         ? ` Note: this is a trail race — easy pace suggestion withheld. Collect a road 5K/10K/HM time to set accurate training zones.`
         : ` Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
-      stravaContext = `\nSTRAVA: Connected.${weeklyLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
     } else {
       const hasRaceData = !!(onboardingData.recent_race_distance_km && onboardingData.recent_race_time_minutes);
       const hasPaceData = !!onboardingData.easy_pace;
       const paceNote = hasRaceData || hasPaceData
         ? " No race activity found on Strava — using pace data already collected from conversation."
         : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
-      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${paceNote}`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${paceNote}`;
     }
   } else if (onboardingData.strava_skipped) {
     stravaContext = "\nSTRAVA: User skipped Strava. Collect mileage + pace data manually.";
@@ -245,7 +256,7 @@ CONVERSATION MODE — read the athlete's first response and set the mode before 
 PLAN COMPLEMENT (athlete already follows a plan — Runna, TrainingPeaks, coach-written, etc.):
 CORE POSITIONING: Dean is a post-run analyst here, not a plan builder. Every question you ask must be framed in terms of what Dean needs to do its job — analyzing their Strava runs and sending useful feedback. If you can't explain why a question helps Dean analyze runs better, don't ask it.
 - Confirm upfront: Dean works alongside their plan, not as a replacement. Your value: after every Strava run, you'll send a coaching debrief and write it back to their Strava activity — how the effort looked, what to watch for, what it means for the week.
-- Plan upload — pitch it with confidence, not as optional admin: "Uploading your plan at coachdean.ai/dashboard gives me the context to understand your overall build — that's where the most useful feedback comes from. You can text me a PDF too." Do not use apologetic framing like "not required, but helpful."
+- Plan sharing — pitch it with confidence, not as optional admin: "Text me a PDF of your plan or just describe it here — it gives me the context to understand your overall build and makes your post-run feedback a lot more useful." Do not use apologetic framing like "not required, but helpful."
 - Ask about Strava early — it's the primary data channel in this mode.
 - Fitness baseline: if Strava isn't connected, ask for a recent race time or easy pace — but frame it correctly: "This helps me calibrate your training zones so I can tell you whether a run was truly aerobic or whether you were drifting into threshold without realizing it." Not "to build your plan."
 - Do NOT collect training days — Dean fires on Strava activity events and can infer the schedule from data.
@@ -302,7 +313,7 @@ DEMONSTRATING VALUE — do this consistently, not just sometimes:
 
 EXISTING PLAN USERS:
 If the athlete already follows a training plan (Runna, TrainingPeaks, coach-written, etc.), Dean works alongside the plan — not as a replacement. See PLAN COMPLEMENT mode above for detailed instructions.
-Key rules: do NOT ask for training schedule/days. Frame every question from the analyst perspective — what Dean needs to read their Strava runs accurately. When asking for a fitness baseline, say why: "This helps me calibrate your training zones so I can tell if a run was aerobic or drifting into threshold." When asking about injuries, ask what to watch for in the data, not what to work around in a plan.
+Key rules: do NOT ask for training schedule/days. Frame every question from the analyst perspective — what Dean needs to read their Strava runs accurately. When asking for a fitness baseline, say why: "This helps me calibrate your training zones so I can tell if a run was aerobic or drifting into threshold." When asking about injuries, ask what to watch for in the data, not what to work around in a plan. For plan sharing, pitch: "Text me a PDF of your plan or describe it here — it gives me the context to understand your build and makes your post-run feedback a lot more useful."
 Do NOT offer to rebuild their plan or question their plan choice. Do NOT reject or discourage athletes who already have a plan — this is a fully supported use case.
 
 RACE TARGET FOR TIME-GOAL ATHLETES:
@@ -315,7 +326,13 @@ If the athlete is training for a triathlon, clarify your role upfront: "For tria
 Also ask about any physical limitations or injury history before signaling [READY] for triathlon goals — this directly affects run-specific programming.
 
 STRAVA CONTEXT:
-When Strava connects and shows training history, demonstrate that you've genuinely analyzed their data — don't just say "I can see your Strava." Reference something specific and concrete: their recent mileage, training frequency, effort distribution, or a notable run. The goal is to make them feel you actually understand who they are as a runner, not just that you have access to their account. Examples: "I can see you've been putting in consistent 40-mile weeks with most of it at easy effort — that's a solid aerobic base to build from." / "Looks like you've been running 5 days a week fairly consistently, with a longer effort on Saturdays." Surface observations that connect to their goal or what they've told you they want to improve. Don't ask a generic "what's been missing?" — let the data itself show you know them.
+When Strava connects, give a genuine analytical read of the data — this is a taste of the post-run coaching they'll get ongoing. Use the specific numbers in the STRAVA block above. Pick 2–3 observations that tell a real story:
+- Volume + trend: are they building, steady, or tapering? ("You've been building — 22, 25, 28, 30 miles over the last four weeks.")
+- Long run proportion: is the longest run appropriately long relative to weekly volume? ("Your long runs are around X% of weekly volume — that's [in a solid range / a bit low for your goal / right where you want it].")
+- Frequency: runs/week pattern. ("You're running 5 days consistently — good base to work with.")
+- Elevation: if they're training for a trail race with significant vert, note whether their elevation load matches the demand. ("Averaging 500ft per run is solid prep for Dipsea's terrain.")
+End with one forward-looking sentence connecting their data to their goal — something that demonstrates you're already thinking about their training, not just logging it.
+Do NOT narrate all the stats like a report. Pick what's most interesting and make it feel like a real coach read the data.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
 
 RACE RESPONSE RULE — NO WIKIPEDIA RECAPS:
@@ -333,7 +350,7 @@ SIGNALING READY:
 When you have name + goal + training_days + at least one of (pace/PR data OR Strava connected), end your final message with [READY] on its own line. For PLAN COMPLEMENT mode: training_days is NOT required — signal [READY] once you have name + goal + fitness baseline (or Strava connected).
 The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
-When you signal [READY], do not ask any more questions in that message. Wrap up warmly. For PLAN COMPLEMENT mode: end with the dashboard link as a next step — "I'll keep key notes and your data at coachdean.ai/dashboard — that's also where you can upload your plan." For all other modes: set expectations (e.g. "I'll get your plan put together now") — the plan will be sent right after.
+When you signal [READY], do not ask any more questions in that message. Wrap up warmly. For PLAN COMPLEMENT mode: wrap up with something like "I'll be analyzing every run you log — text me anytime." The system will send the dashboard link automatically as a follow-up. For all other modes: set expectations (e.g. "I'll get your plan put together now") — the plan will be sent right after.
 
 ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
@@ -1241,17 +1258,30 @@ async function completeOnboarding(
     void trackEvent(user.id, "onboarding_completed", { goal, mode: "complement" });
     const rawFirst = (name ?? "").split(" ")[0];
     const firstName = (rawFirst && rawFirst.toLowerCase() !== "athlete") ? rawFirst : "Hey";
-    const { data: billingUserPhone } = await supabase
+    const { data: complementUser } = await supabase
       .from("users")
-      .select("phone_number")
+      .select("phone_number, dashboard_token")
       .eq("id", user.id)
       .single();
-    const phone = billingUserPhone?.phone_number as string;
+    const phone = complementUser?.phone_number as string;
+    // Generate dashboard token for complement users so they can access their data.
+    let dashboardToken = complementUser?.dashboard_token as string | null;
+    if (!dashboardToken) {
+      dashboardToken = crypto.randomUUID();
+      await supabase.from("users").update({
+        dashboard_token: dashboardToken,
+        trial_started_at: new Date().toISOString(),
+      }).eq("id", user.id);
+    }
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
     const raceCtx = data.race_name
       ? ` I can see you're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every analysis.`
       : "";
-    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a detailed debrief — how the effort looked, what to watch for, and what it means for the week — and I'll write it back to your Strava activity. Your data and key notes live at coachdean.ai/dashboard — you can upload your plan there too so I can reference it directly. Text me anytime. Let's go.`;
+    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a debrief and write it back to your Strava activity. Text me anytime. Let's go.`;
     await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
+    const dashboardMsg = `Your dashboard — I'll keep your key notes and data here. You can also upload your plan as a PDF so I can reference it directly:\n${dashboardUrl}`;
+    await sendAndStore(user.id, phone, dashboardMsg, "initial_plan");
     return;
   }
 

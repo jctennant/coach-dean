@@ -249,12 +249,19 @@ export async function GET(request: Request) {
   const totalElevFt = runs8w.reduce((s, a) => s + (a.elevation_gain ?? 0) * 3.28084, 0);
   const avgElevFtPerRun = runs8w.length > 0 ? Math.round(totalElevFt / runs8w.length) : 0;
 
+  // Recent 4 completed weeks, most-recent first (weeks 1–4 from weeklyMilesArr).
+  // Round to 1 decimal for readability. Only store if we have meaningful data.
+  const recent4Weeks = weeklyMilesArr.slice(1, 5).map((m) => Math.round(m * 10) / 10);
+  const hasRecentData = recent4Weeks.some((m) => m > 0);
+
   // Write analytics into onboarding_data. This is a second DB update — analytics depend
   // on importRecentActivities (line ~170), which runs after the first update at line ~136.
   if (avgWeeklyMiles != null) updatedOnboardingData.strava_avg_weekly_miles = avgWeeklyMiles;
   if (mileageTrend) updatedOnboardingData.strava_mileage_trend = mileageTrend;
   if (avgElevFtPerRun > 200) updatedOnboardingData.strava_avg_elev_ft_per_run = avgElevFtPerRun;
   if (longestRunMiles != null) updatedOnboardingData.strava_longest_run_miles = Math.round(longestRunMiles * 10) / 10;
+  if (avgRunsPerWeek != null) updatedOnboardingData.strava_avg_runs_per_week = avgRunsPerWeek;
+  if (hasRecentData) updatedOnboardingData.strava_recent_4_weeks = recent4Weeks;
 
   await supabase
     .from("users")
