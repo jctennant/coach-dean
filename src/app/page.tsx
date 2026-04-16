@@ -213,13 +213,14 @@ export default function Home() {
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
-            {/* Insight 1 — Fitness building */}
+            {/* Insight 1 — Injury sounding board (shin splints) */}
             <InsightCard
-              context="Your 6-week progress check"
-              tag="Fitness progress"
-              tagColor="#16a34a"
+              context="After today's run"
+              tag="Injury sounding board"
+              tagColor="#dc2626"
               messages={[
-                { from: "dean", text: "Your aerobic efficiency is up 9% over the last 6 weeks — you're running the same pace at a meaningfully lower heart rate. That's your base building in real time. Keep the easy days truly easy and this trend will carry you right through your build phase." },
+                { from: "user", text: "Left shin has been a bit sore the last two runs — not sharp, just there." },
+                { from: "dean", text: "Classic early-stage medial shin stress. Usually means your mileage ramped a bit faster than your bone remodeling can keep up with. Ice it tonight, skip tomorrow's run, and I'll swap it for a pool session or bike day. We'll ease back in over 4–5 days. If it sharpens at all, ping me before you run again." },
               ]}
             />
 
@@ -233,24 +234,23 @@ export default function Home() {
               ]}
             />
 
-            {/* Insight 3 — Load management */}
+            {/* Insight 3 — Fitness building */}
+            <InsightCard
+              context="Your 6-week progress check"
+              tag="Fitness progress"
+              tagColor="#16a34a"
+              messages={[
+                { from: "dean", text: "Your aerobic efficiency is up 9% over the last 6 weeks — you're running the same pace at a meaningfully lower heart rate. That's your base building in real time. Keep the easy days truly easy and this trend will carry you right through your build phase." },
+              ]}
+            />
+
+            {/* Insight 4 — Load management */}
             <InsightCard
               context="After a big training week"
               tag="Load management"
               tagColor="#0891b2"
               messages={[
                 { from: "dean", text: "Big week — you've logged 43% more than your 4-week average. That's real training stimulus. Keep Friday short and easy so your body can actually absorb it. Fitness built on fresh legs sticks; fitness stacked on top of fatigue tends not to." },
-              ]}
-            />
-
-            {/* Insight 4 — Injury sounding board */}
-            <InsightCard
-              context="After today's run"
-              tag="Injury sounding board"
-              tagColor="#dc2626"
-              messages={[
-                { from: "user", text: "My left knee was tight around mile 3 today." },
-                { from: "dean", text: "Likely IT band compensation from Tuesday's tempo — your hip drive tends to drop when fatigued and the knee picks up the slack. 5 min of IT band rolling tonight. If it's there on tomorrow's run, we'll swap the long run for a bike day and keep your week on track." },
               ]}
             />
           </div>
@@ -359,109 +359,112 @@ export default function Home() {
           {/* Dashboard mock */}
           <div className="rounded-2xl border border-gray-200 bg-white p-6 md:p-8 space-y-6">
             {/* Header row */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-0.5">Dashboard · Last 8 weeks</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-0.5">Dashboard · Last 6 weeks</p>
                 <p className="text-base font-semibold text-gray-900">Sarah M. · NYC Marathon build</p>
               </div>
-              <div className="flex gap-4 text-right">
+              <div className="flex gap-5 text-right shrink-0">
                 <div>
-                  <p className="text-2xl font-bold text-gray-900 leading-none">+11%</p>
-                  <p className="text-xs text-gray-400 mt-0.5">aerobic efficiency</p>
+                  <p className="text-xl font-bold text-green-700 leading-none">+11%</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">aerobic efficiency</p>
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-gray-900 leading-none">42</p>
-                  <p className="text-xs text-gray-400 mt-0.5">mi this week</p>
+                  <p className="text-xl font-bold text-gray-900 leading-none">42 mi</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">this week</p>
                 </div>
               </div>
             </div>
 
-            {/* Aerobic efficiency trend */}
+            {/* Run zone strip — dots per run, colored by effort, grouped by week */}
             <div>
-              <p className="text-xs font-medium text-gray-500 mb-3">Aerobic efficiency — pace per heartbeat, higher is better</p>
-              <div className="relative h-20">
-                <svg viewBox="0 0 400 80" className="w-full h-full" preserveAspectRatio="none">
-                  {/* Grid lines */}
-                  <line x1="0" y1="60" x2="400" y2="60" stroke="#f0f0f0" strokeWidth="1" />
-                  <line x1="0" y1="40" x2="400" y2="40" stroke="#f0f0f0" strokeWidth="1" />
-                  <line x1="0" y1="20" x2="400" y2="20" stroke="#f0f0f0" strokeWidth="1" />
-                  {/* Trend line — rising from left to right */}
-                  <polyline
-                    points="0,65 50,60 100,55 150,50 200,48 250,42 300,36 350,30 400,22"
-                    fill="none"
-                    stroke="#16a34a"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  {/* Dots at each week */}
-                  {[[0,65],[50,60],[100,55],[150,50],[200,48],[250,42],[300,36],[350,30],[400,22]].map(([x, y], i) => (
-                    <circle key={i} cx={x} cy={y} r="3.5" fill="#16a34a" />
-                  ))}
-                  {/* Area fill */}
-                  <polyline
-                    points="0,65 50,60 100,55 150,50 200,48 250,42 300,36 350,30 400,22 400,80 0,80"
-                    fill="url(#greenFade)"
-                    stroke="none"
-                  />
-                  <defs>
-                    <linearGradient id="greenFade" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#16a34a" stopOpacity="0.12" />
-                      <stop offset="100%" stopColor="#16a34a" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-                {/* Week labels */}
-                <div className="flex justify-between mt-1">
-                  {["W1","W2","W3","W4","W5","W6","W7","W8"].map(w => (
-                    <span key={w} className="text-[10px] text-gray-400">{w}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Weekly mileage bars */}
-            <div>
-              <p className="text-xs font-medium text-gray-500 mb-3">Weekly mileage</p>
-              <div className="flex items-end gap-1.5 h-14">
-                {[28, 31, 33, 22, 36, 38, 40, 42].map((miles, i) => {
-                  const max = 42;
-                  const heightPct = (miles / max) * 100;
-                  const isDeload = i === 3;
-                  return (
-                    <div key={i} className="flex flex-1 flex-col items-center gap-1">
-                      <div
-                        className={`w-full rounded-sm ${isDeload ? "bg-green-200" : "bg-sky-200"}`}
-                        style={{ height: `${heightPct}%` }}
-                      />
-                      <span className="text-[9px] text-gray-400 leading-none hidden md:block">{miles}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Zone distribution dots */}
-            <div>
-              <p className="text-xs font-medium text-gray-500 mb-3">Training zone distribution — last 4 weeks</p>
-              <div className="flex gap-4 flex-wrap">
+              <p className="text-xs font-medium text-gray-500 mb-3">Training zones — each dot is a run</p>
+              {/* Dot strip — mirrors production RunZoneStrip exactly */}
+              <svg viewBox="0 0 520 32" className="w-full" aria-label="Run zone history">
+                {/* Week 1: Mar 17 — 5 runs */}
+                <circle cx="10"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="31"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="52"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="73"  cy="10" r="9" fill="#f59e0b" opacity="0.85" />
+                <circle cx="94"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <text x="52" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Mar 17</text>
+                {/* Week 2: Mar 24 — 5 runs */}
+                <circle cx="126" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="147" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="168" cy="10" r="9" fill="#ef4444" opacity="0.85" />
+                <circle cx="189" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="210" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <text x="168" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Mar 24</text>
+                {/* Week 3: Mar 31 — 5 runs */}
+                <circle cx="242" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="263" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="284" cy="10" r="9" fill="#f59e0b" opacity="0.85" />
+                <circle cx="305" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="326" cy="10" r="9" fill="#ef4444" opacity="0.85" />
+                <text x="284" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Mar 31</text>
+                {/* Week 4: Apr 7 — 4 runs (deload) */}
+                <circle cx="358" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="379" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="400" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="421" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <text x="389" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Apr 7</text>
+                {/* Week 5: Apr 14 — 4 runs (current, partial) */}
+                <circle cx="453" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="474" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <circle cx="495" cy="10" r="9" fill="#ef4444" opacity="0.85" />
+                <circle cx="516" cy="10" r="9" fill="#22c55e" opacity="0.85" />
+                <text x="484" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Apr 14</text>
+              </svg>
+              {/* Legend */}
+              <div className="flex flex-wrap gap-4 mt-3">
                 {[
-                  { label: "Zone 1–2 (easy)", pct: 76, color: "bg-sky-400" },
-                  { label: "Zone 3 (moderate)", pct: 8, color: "bg-amber-400" },
-                  { label: "Zone 4–5 (hard)", pct: 16, color: "bg-red-400" },
+                  { label: "Easy", color: "#22c55e" },
+                  { label: "Moderate", color: "#f59e0b" },
+                  { label: "Hard", color: "#ef4444" },
+                  { label: "Race", color: "#3b82f6" },
+                ].map(({ label, color }) => (
+                  <span key={label} className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Zone % breakdown */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">Zone distribution — last 4 weeks</p>
+              <div className="flex gap-4 flex-wrap mb-2">
+                {[
+                  { label: "Easy (Z1–2)", pct: 76, color: "#22c55e" },
+                  { label: "Moderate (Z3)", pct: 8, color: "#f59e0b" },
+                  { label: "Hard (Z4–5)", pct: 16, color: "#ef4444" },
                 ].map(({ label, pct, color }) => (
-                  <div key={label} className="flex items-center gap-2">
-                    <div className={`h-2.5 w-2.5 rounded-full ${color} shrink-0`} />
+                  <div key={label} className="flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                     <span className="text-xs text-gray-600">{label}</span>
                     <span className="text-xs font-semibold text-gray-900">{pct}%</span>
                   </div>
                 ))}
               </div>
-              <div className="mt-2 h-2 w-full rounded-full overflow-hidden flex">
-                <div className="bg-sky-400 h-full" style={{ width: "76%" }} />
-                <div className="bg-amber-400 h-full" style={{ width: "8%" }} />
-                <div className="bg-red-400 h-full" style={{ width: "16%" }} />
+              <div className="h-2 w-full rounded-full overflow-hidden flex">
+                <div className="h-full" style={{ width: "76%", backgroundColor: "#22c55e" }} />
+                <div className="h-full" style={{ width: "8%",  backgroundColor: "#f59e0b" }} />
+                <div className="h-full" style={{ width: "16%", backgroundColor: "#ef4444" }} />
               </div>
+            </div>
+
+            {/* Aerobic efficiency line */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">Aerobic efficiency trend — higher is better</p>
+              <svg viewBox="0 0 560 80" className="w-full" style={{ minWidth: "200px" }} aria-label="Aerobic efficiency trend">
+                {/* Trend line — gentle upward slope matching production LineChart */}
+                <polyline
+                  points="4,68 74,62 144,55 214,50 284,46 354,38 430,30 556,22"
+                  fill="none" stroke="#166534" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
+                />
+                <circle cx="556" cy="22" r="3.5" fill="#166534" />
+              </svg>
             </div>
           </div>
         </div>
@@ -486,7 +489,12 @@ export default function Home() {
               },
               {
                 q: "Can Dean actually prevent injuries?",
-                a: "Dean is genuinely good at catching the patterns that precede most running injuries — load spikes, declining aerobic efficiency, grey-zone effort distribution — and flagging them early so you can act conservatively. He's not a physio and can't diagnose anything, but he's the early warning system most runners are missing. The goal is to catch it before it becomes an injury, not to treat one after the fact.",
+                a: (
+                  <>
+                    <p>Dean is genuinely good at catching the patterns that precede most running injuries — load spikes, declining aerobic efficiency, grey-zone effort distribution — and flagging them early so you can act conservatively. He&apos;s not a physio and can&apos;t diagnose anything, but he&apos;s the early warning system most runners are missing.</p>
+                    <p className="mt-3">When something does flare up, Dean will prescribe specific rehab exercises for common running injuries — IT band, shin splints, plantar fasciitis, hip flexor tightness — and swap affected sessions for cross-training alternatives (pool running, cycling, elliptical) so your fitness doesn&apos;t evaporate while you recover. The goal is to stay in training, not just to rest and hope.</p>
+                  </>
+                ),
               },
               {
                 q: "Can Coach Dean help me if I'm not training for a specific race?",
