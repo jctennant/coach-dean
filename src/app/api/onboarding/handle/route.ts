@@ -196,6 +196,12 @@ async function handleConversation(
         ? ` Note: this is a trail race — easy pace suggestion withheld. Collect a road 5K/10K/HM time to set accurate training zones.`
         : ` Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
       stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
+
+      // Store trail-race flag so completeOnboarding can guard the VDOT recalculation.
+      // This prevents Haiku from accidentally extracting the trail race distance/time
+      // (visible in coach conversation history) and producing wrong pace zones.
+      onboardingData.strava_best_race_is_trail = sbr.is_trail;
+      onboardingData.strava_best_race_km = sbr.dist_km;
     } else {
       const hasRaceData = !!(onboardingData.recent_race_distance_km && onboardingData.recent_race_time_minutes);
       const hasPaceData = !!onboardingData.easy_pace;
@@ -502,14 +508,30 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
   // from conversation text (e.g. one mentioned in the Strava insight message).
   // This ensures that if a user provides a better/corrected race time later in the
   // conversation, the VDOT updates rather than being blocked by a stale easy_pace.
-  if (mergedData.recent_race_distance_km && mergedData.recent_race_time_minutes) {
-    const paces = calculateVDOTPaces(
-      mergedData.recent_race_distance_km as number,
-      mergedData.recent_race_time_minutes as number
-    );
-    if (paces.easy) mergedData.easy_pace = paces.easy;
-    if (paces.tempo) mergedData.tempo_pace = paces.tempo;
-    if (paces.interval) mergedData.interval_pace = paces.interval;
+  //
+  // Guard: skip if the extracted distance matches the Strava trail race distance.
+  // Haiku can accidentally extract the trail race from coach conversation history
+  // (the coach mentions "Dipsea 30K in 3:45") — this produces a systematically
+  // slow easy pace. We only skip if the distance matches the trail race within 1km;
+  // if the user provides a different (road) race distance, VDOT still runs correctly.
+  {
+    const extractedDist = mergedData.recent_race_distance_km as number | undefined;
+    const stravaBestIsTrail = mergedData.strava_best_race_is_trail === true;
+    const stravaBestKm = mergedData.strava_best_race_km as number | undefined;
+    const likelyTrailSlipthrough = extractedDist != null
+      && stravaBestIsTrail
+      && stravaBestKm != null
+      && Math.abs(extractedDist - stravaBestKm) < 1;
+
+    if (mergedData.recent_race_distance_km && mergedData.recent_race_time_minutes && !likelyTrailSlipthrough) {
+      const paces = calculateVDOTPaces(
+        mergedData.recent_race_distance_km as number,
+        mergedData.recent_race_time_minutes as number
+      );
+      if (paces.easy) mergedData.easy_pace = paces.easy;
+      if (paces.tempo) mergedData.tempo_pace = paces.tempo;
+      if (paces.interval) mergedData.interval_pace = paces.interval;
+    }
   }
 
   // Store user's inbound message
@@ -634,10 +656,10 @@ Rules:
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
 - has_existing_plan / external_plan_description: ALWAYS extract these when the athlete mentions a training plan. Examples that must set has_existing_plan=true: "I'm already on a Runna plan", "I follow a TrainingPeaks plan", "my coach gave me a plan", "I'm using a Hal Higdon program". For any of these, also capture external_plan_description as a brief factual summary: plan source/name, current week if mentioned, weekly mileage if mentioned. E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Set has_existing_plan=false only if the athlete explicitly says they have no plan or are self-directed without one.
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
-- goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0
+- goal_time_minutes: the athlete's explicit goal finish time for their TARGET race (e.g. "I want to break 4 hours", "sub-20 5K"). Do NOT use a past PR or best time as the goal time unless the athlete says it IS their goal (e.g. "my goal is to beat my 17:50 PR"). A statement like "my fastest 5K is 17:50" or "my PR is 3:45" is a fitness baseline — extract it as recent_race_time_minutes, NOT as goal_time_minutes. Total float minutes: "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0.
 - race_date: use whichever date is stated in the conversation — athlete's or Dean's. If both are stated and differ by 1–2 days, prefer the athlete's. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if the athlete explicitly said "the 1st" or "June 1st". Today is ${today}.
-- recent_race_distance_km: from athlete's messages only (not coach Strava summaries). Extract even if caveated ("net downhill", "a while ago").
-- recent_race_time_minutes: from athlete's messages only. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5.
+- recent_race_distance_km: ONLY from lines labeled "Athlete:" in the transcript — NEVER from "Coach:" lines, Strava summaries, or race data the coach mentions. This captures the athlete's road race PR they state in their own words (e.g. "my fastest 5K is 17:50", "I ran a 1:38 half last fall"). Trail races (Dipsea, ultras, mountain races, any race with "trail" in the name) are NOT eligible — leave null even if the athlete mentions them. If the coach references a Strava trail race (e.g. "your Dipsea 30K"), do NOT extract that distance. Extract even if caveated ("net downhill", "a while ago").
+- recent_race_time_minutes: ONLY from lines labeled "Athlete:" — never from "Coach:" lines. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5. Use the most recent road race time (not trail, not Strava coach summaries). If only a trail time is mentioned by the athlete, leave null.
 - easy_pace: "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile).
 - timezone: IANA string from location ("Provo, UT" → "America/Denver").
 - other_races: B/C secondary races only, not the main A race.

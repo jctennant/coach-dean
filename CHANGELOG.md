@@ -4,6 +4,42 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Fix wrong training paces for trail-race Strava users with road PRs
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "Pacing zones also seem off here for a 17:50 5k" (dashboard showed 9:27-9:57 easy, should be ~7:50-8:20)
+**Root cause:** When the user's Strava best race is a trail race (e.g. Dipsea 30K), the coach conversation mentions that race including its time. Haiku's extraction step could pick up that trail distance/time from the Coach: lines in the transcript despite the "athlete's messages only" rule, storing them as `recent_race_distance_km`/`recent_race_time_minutes`. The VDOT recalculation then computed pace zones from the trail race performance, giving ~40 VDOT (9:42 easy) instead of the correct ~57 VDOT (7:50 easy) from the user's 17:50 5K road PR.
+**Fix / Change:** (1) When `lookupBestStravaRace` returns a trail race, store `strava_best_race_is_trail=true` and `strava_best_race_km` into onboarding_data. (2) VDOT recalculation block now checks: if the extracted `recent_race_distance_km` matches the Strava trail race within 1km, skip the recalc (it's likely the trail race slipping through). If the user provides a different (road) race distance, VDOT still runs correctly. (3) Haiku extraction prompt for `recent_race_distance_km`/`recent_race_time_minutes` now explicitly says "ONLY from lines labeled 'Athlete:' — NEVER from 'Coach:' lines" and names trail races as ineligible.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+## 2026-04-15 — Fix goal_time_minutes incorrectly set from 5K PR instead of explicit goal time
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** Dashboard showed "Goal: 17:50" for the Dipsea race (user's 5K PR, not their Dipsea goal)
+**Root cause:** Haiku extraction rule for `goal_time_minutes` was not specific enough — it extracted any mentioned time as the goal, including past PRs the user stated as fitness baselines.
+**Fix / Change:** Strengthened Haiku rule: "Do NOT use a past PR or best time as the goal time unless the athlete says it IS their goal. A statement like 'my fastest 5K is 17:50' is a fitness baseline — extract it as recent_race_time_minutes, NOT as goal_time_minutes."
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+## 2026-04-15 — Fix PDF upload: drag-and-drop and PDF file selection
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "I can't drag and drop a PDF into the PDF uploader. I also can't select a PDF from my computer for some reason."
+**Root cause:** (1) The file input `accept` attribute didn't include `application/pdf`. (2) No drag-and-drop event handlers were wired up. (3) The upload API didn't have a `pdf_base64` content type path.
+**Fix / Change:** Added `processFile` callback that detects PDF vs image. Added `handleDragOver`/`handleDragLeave`/`handleDrop` handlers with visual feedback. Updated `accept` attribute to include `application/pdf`. Added `pdf_base64` content type to upload API, routing it to the existing `extractFromPDFBase64` function.
+**Files changed:** src/app/dashboard/plan-import-form.tsx, src/app/api/plan/upload/route.ts
+
+## 2026-04-15 — Fix arc rebase on partial-week onboard with reliable Strava baseline
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "The plan that was generated had me starting with 39 miles (maybe a bit high) in week one, but then the arc wasn't in sync with that" (Week 1=39mi, Week 2=26.5mi, Week 3=29mi)
+**Root cause:** `syncArcCurrentWeek` was rebasing the training arc downward when Week 1 session count (partial week, e.g. Thursday onboard with 4 sessions = ~24mi) was below the Strava 4-week average (29mi). Scale factor 0.83× applied, making weeks 2-3 lower than baseline instead of building from it.
+**Fix / Change:** Added `skipRebase` flag to `syncArcCurrentWeek`. When `isPartialWeek && avgWeeklyMileage != null` (Strava data available), skip the arc rebase. The partial week's low session count is by design, not a signal that the baseline is wrong.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-15 — Onboarding prompt improvements for plan-complement users
 
 **Type:** Improvement

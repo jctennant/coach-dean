@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 
 interface ExtractedWeek {
   week_number: number;
@@ -23,29 +23,37 @@ export function PlanImportForm({ userId }: { userId: string }) {
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [pendingContent, setPendingContent] = useState<string | null>(null);
+  const [pendingContentType, setPendingContentType] = useState<"image_base64" | "pdf_base64">("image_base64");
   const [pendingFilename, setPendingFilename] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processFile = useCallback(async (file: File) => {
+    const isPDF = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isImage = file.type.startsWith("image/");
+    if (!isPDF && !isImage) {
+      setErrorMsg("Please upload a PDF or image file.");
+      setStatus("error");
+      return;
+    }
 
     setStatus("extracting");
     setErrorMsg(null);
 
     try {
       const base64 = await fileToBase64(file);
+      const contentType = isPDF ? "pdf_base64" : "image_base64";
       setPendingContent(base64);
+      setPendingContentType(contentType);
       setPendingFilename(file.name);
 
-      // Dry run first — preview without saving
       const res = await fetch("/api/plan/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId,
           content: base64,
-          contentType: "image_base64",
+          contentType,
           filename: file.name,
           dry_run: true,
         }),
@@ -54,13 +62,13 @@ export function PlanImportForm({ userId }: { userId: string }) {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setErrorMsg(data.error ?? "Extraction failed. Try a clearer image or paste the plan as text.");
+        setErrorMsg(data.error ?? "Extraction failed. Try a clearer image or a text description instead.");
         setStatus("error");
         return;
       }
 
       if (!data.weeks || data.weeks.length === 0) {
-        setErrorMsg("Couldn't find a training plan in that image. Try a screenshot of a weekly schedule.");
+        setErrorMsg("Couldn't find a training plan in that file. Try a screenshot of a weekly schedule or paste the plan as text.");
         setStatus("error");
         return;
       }
@@ -71,6 +79,30 @@ export function PlanImportForm({ userId }: { userId: string }) {
       setErrorMsg("Something went wrong. Try again.");
       setStatus("error");
     }
+  }, [userId]);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processFile(file);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    await processFile(file);
   }
 
   async function handleSave() {
@@ -84,7 +116,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
         body: JSON.stringify({
           userId,
           content: pendingContent,
-          contentType: "image_base64",
+          contentType: pendingContentType,
           filename: pendingFilename ?? undefined,
         }),
       });
@@ -191,16 +223,25 @@ export function PlanImportForm({ userId }: { userId: string }) {
 
       {status === "idle" && (
         <>
-          <label className="block cursor-pointer rounded-lg border-2 border-dashed border-gray-200 p-5 text-center hover:border-gray-300 transition-colors">
+          <label
+            className={`block cursor-pointer rounded-lg border-2 border-dashed p-5 text-center transition-colors ${
+              isDragOver ? "border-gray-400 bg-gray-50" : "border-gray-200 hover:border-gray-300"
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             <input
               ref={fileRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
+              accept="application/pdf,image/png,image/jpeg,image/webp,image/gif"
               className="hidden"
               onChange={handleFile}
             />
-            <p className="text-sm font-medium text-gray-700">Upload a plan screenshot</p>
-            <p className="mt-1 text-xs text-gray-400">PNG, JPG, or WebP · Runna, Garmin Coach, printed plans</p>
+            <p className="text-sm font-medium text-gray-700">
+              {isDragOver ? "Drop to upload" : "Upload your plan"}
+            </p>
+            <p className="mt-1 text-xs text-gray-400">PDF or screenshot · drag & drop or click to browse</p>
           </label>
           <p className="mt-2 text-[10px] text-gray-400 text-center">
             Or text Dean: &quot;I&apos;m following Runna&apos;s half plan, week 8 of 16, ~40mi/week&quot;

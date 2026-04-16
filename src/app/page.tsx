@@ -463,7 +463,7 @@ export default function Home() {
                 q: "I already use Runna / TrainingPeaks / a coaching plan — should I still use Coach Dean?",
                 a: (
                   <>
-                    <p>Yes — and this is actually our most common use case. Coach Dean works alongside your existing plan, not as a replacement. Keep your Runna structure; Dean adds what no app does: a coaching note after every run, a direct line for training questions, and injury pattern flagging before small aches become big problems.</p>
+                    <p>Yes — and this is actually our most common use case. Coach Dean works alongside your existing plan, not as a replacement. Keep your Runna structure; Dean adds what no app does: a coaching note after every run, a direct line for training questions, and an early eye on injury patterns before small aches become big problems.</p>
                     <p className="mt-3">You can upload your plan as a PDF to the dashboard and Dean will reference it directly when he gives you feedback. So instead of "you ran 8:45 pace," you get "that was your recovery day — 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday."</p>
                   </>
                 ),

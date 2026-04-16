@@ -19,9 +19,9 @@ export const maxDuration = 120; // PDF path: fetch + Sonnet doc API + Haiku stru
 
 interface UploadRequest {
   userId: string;
-  /** Text content, base64-encoded image, or a URL (for pdf_url) */
+  /** Text content, base64-encoded image, base64-encoded PDF, or a URL (for pdf_url) */
   content: string;
-  contentType: "text" | "image_base64" | "pdf_url";
+  contentType: "text" | "image_base64" | "pdf_base64" | "pdf_url";
   filename?: string;
   /** Dry run — extract and return plan without saving */
   dry_run?: boolean;
@@ -76,6 +76,8 @@ export async function POST(request: Request) {
       ? await extractFromImage(content)
       : contentType === "pdf_url"
       ? await extractFromPDF(content)
+      : contentType === "pdf_base64"
+      ? await extractFromPDFBase64(content)
       : await extractFromText(content);
 
     if (sessions.length === 0) {
@@ -264,6 +266,13 @@ Rules:
 }
 
 /**
+ * Extract structured sessions from a base64-encoded PDF (uploaded directly from the browser).
+ */
+async function extractFromPDFBase64(base64: string): Promise<ExtractedSession[]> {
+  return extractFromPDFData(base64);
+}
+
+/**
  * Extract structured sessions from a PDF URL using Claude's document API + tool use.
  * Single Sonnet call — avoids the two-step approach (Sonnet text → Haiku structure)
  * that was ~88s total and often returned 0 sessions due to intermediate text bloat.
@@ -273,6 +282,10 @@ async function extractFromPDF(pdfUrl: string): Promise<ExtractedSession[]> {
   if (!resp.ok) throw new Error(`PDF fetch failed: ${resp.status}`);
   const buffer = await resp.arrayBuffer();
   const base64 = Buffer.from(buffer).toString("base64");
+  return extractFromPDFData(base64);
+}
+
+async function extractFromPDFData(base64: string): Promise<ExtractedSession[]> {
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
