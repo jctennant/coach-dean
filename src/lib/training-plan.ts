@@ -159,6 +159,58 @@ export function computeRacePreparedness(
 }
 
 /**
+ * Validate and correct the stated distance prefix in a key_workout string.
+ *
+ * Haiku is instructed to make the prefix equal the sum of components
+ * (SESSION MATH RULE), but sometimes gets it wrong. This function parses
+ * patterns like "Tempo 3mi (1mi WU + 1.5mi @ threshold + 1mi CD)", sums the
+ * component distances inside the parentheses, and corrects the prefix if it
+ * differs.
+ *
+ * Only corrects when ALL parenthetical components have explicit distance values
+ * in the target unit — if any component is time-based (e.g. "4×3min") or uses
+ * rep-count notation (e.g. "6×800m"), the total is uncertain and the prefix is
+ * left unchanged.
+ *
+ * @param kw       - The key_workout string from Haiku
+ * @param unitLabel - "mi" or "km" — used to identify distance markers
+ */
+export function fixKeyWorkoutMath(kw: string, unitLabel: "mi" | "km"): string {
+  // Match: "Label Xunit (components...)" — e.g. "Tempo 3.5mi (1mi WU + 1.5mi @ threshold + 1mi CD)"
+  const prefixRe = new RegExp(`^(.+?)\\s+(\\d+(?:\\.\\d+)?)${unitLabel}\\s+\\((.+)\\)(.*)$`);
+  const m = prefixRe.exec(kw);
+  if (!m) return kw;
+
+  const [, label, prefixStr, inside, trailer] = m;
+  const stated = parseFloat(prefixStr);
+
+  // Extract all distance values from inside the parentheses.
+  // A component is "unambiguous" if it has an explicit Xunit marker.
+  // Time-based markers (min, sec) and rep-count notation (×) are ambiguous.
+  const componentRe = new RegExp(`(\\d+(?:\\.\\d+)?)${unitLabel}`, "g");
+  const ambiguousRe = /\d+\s*(?:min|sec|×|x)\b/i;
+
+  if (ambiguousRe.test(inside)) return kw; // uncertain — leave as-is
+
+  const components: number[] = [];
+  let cm: RegExpExecArray | null;
+  const re = new RegExp(componentRe.source, "g");
+  while ((cm = re.exec(inside)) !== null) {
+    components.push(parseFloat(cm[1]));
+  }
+
+  if (components.length < 2) return kw; // not enough components to validate
+
+  const sum = Math.round(components.reduce((a, b) => a + b, 0) * 10) / 10;
+  if (Math.abs(sum - stated) < 0.05) return kw; // already correct within rounding
+
+  console.warn(
+    `[fixKeyWorkoutMath] "${kw}" — stated ${stated}${unitLabel} but components sum to ${sum}${unitLabel}. Correcting.`
+  );
+  return `${label} ${sum}${unitLabel} (${inside})${trailer}`;
+}
+
+/**
  * Compute the full multi-week training arc and save it to training_plans.
  * Generates a dashboard_token and sets trial_started_at on the user record.
  *
@@ -223,7 +275,11 @@ export async function generateAndSaveFullPlan(
   const easyPace = (profile?.current_easy_pace as string | null) ?? null;
   const tempoPace = (profile?.current_tempo_pace as string | null) ?? null;
   const intervalPace = (profile?.current_interval_pace as string | null) ?? null;
-  const daysPerWeek = (profile?.days_per_week as number | null) ?? 4;
+  // Prefer the explicit days_per_week column; fall back to training_days array length
+  // so Haiku enrichment always gets the right session count even if days_per_week is stale or null.
+  const trainingDaysArray = (profile?.training_days as string[] | null) ?? [];
+  const daysPerWeek = (profile?.days_per_week as number | null)
+    ?? (trainingDaysArray.length > 0 ? trainingDaysArray.length : 4);
   const injuryNotes = (profile?.injury_notes as string | null) ?? null;
   const hasRace = !!raceDate;
 
@@ -528,7 +584,7 @@ No other text.`,
     for (const e of enriched) {
       const w = planWeeks.find(x => x.week_number === e.week_number);
       if (w) {
-        w.key_workout = e.key_workout ?? "";
+        w.key_workout = fixKeyWorkoutMath(e.key_workout ?? "", unitLabel);
         w.notes = e.notes ?? "";
       }
     }

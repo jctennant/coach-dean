@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Plan generation and import accuracy fixes
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Pre-launch audit
+**User feedback:** N/A
+**Root cause:** Three accuracy gaps in the plan generation and import paths:
+1. `plan/upload` used `now.getDay()` (server local time) to compute the "this week's Monday" anchor for week-1 sessions. On a UTC server, a user uploading at 11pm US/Eastern would get a Monday that's one day in the past.
+2. `generateAndSaveFullPlan` derived `daysPerWeek` from `profile.days_per_week` with a hardcoded fallback of 4. If the column was null (e.g. old users), Haiku enrichment received the wrong days count and could produce session descriptions out of sync with the athlete's actual schedule.
+3. Haiku's SESSION MATH RULE (distance prefix must equal sum of components) was prompt-only — no code-level validation.
+**Fix / Change:**
+- `plan/upload`: replaced `now.getDay()` / `setDate` with UTC arithmetic (`now.getUTCDay()`, `Date.UTC(...)`, `setUTCDate`, `getUTCMonth/Date`) so the Monday anchor is always correct regardless of server timezone.
+- `training-plan.ts`: `daysPerWeek` now falls back to `training_days.length` before the hardcoded 4, so Haiku always receives the correct count.
+- Added `fixKeyWorkoutMath(kw, unitLabel)` to `training-plan.ts`: runs post-enrichment on each week's `key_workout`, parses "Verb Xunit (components)" patterns, sums unambiguous component distances, and corrects the prefix if wrong. Leaves time-based and rep-count workouts unchanged.
+**Files changed:** `src/app/api/plan/upload/route.ts`, `src/lib/training-plan.ts`, `src/__tests__/lib/training-plan.test.ts`
+
 ## 2026-04-15 — Post-generation accuracy validators for dates, mileage, and plan structure
 
 **Type:** Improvement

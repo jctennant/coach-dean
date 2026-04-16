@@ -146,22 +146,27 @@ export async function POST(request: Request) {
         monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
       };
       const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      // Use UTC arithmetic so the Monday anchor is timezone-independent.
+      // server.getDay() is local time — on a UTC server, a user uploading at 11pm
+      // US/Eastern would get a Monday that's one day off.
       const now = new Date();
-      const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
-      const thisMonday = new Date(now);
-      thisMonday.setDate(now.getDate() - daysFromMonday);
+      const utcDay = now.getUTCDay(); // 0=Sun, 1=Mon, ...
+      const daysFromMonday = utcDay === 0 ? 6 : utcDay - 1;
+      const thisMonday = new Date(Date.UTC(
+        now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMonday,
+      ));
 
       const week1Sessions = week1.sessions
         .filter(s => s.type !== "off")
         .map(s => {
           const offset = DAY_OFFSETS[s.dayOfWeek.toLowerCase()] ?? 0;
           const d = new Date(thisMonday);
-          d.setDate(thisMonday.getDate() + offset);
+          d.setUTCDate(thisMonday.getUTCDate() + offset);
           const distPart = s.targetDistanceMiles ? ` ${s.targetDistanceMiles}mi` : "";
           const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
           return {
             day: DAY_SHORT[offset],
-            date: `${d.getMonth() + 1}/${d.getDate()}`,
+            date: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`,
             label: `${s.description}${distPart}${pacePart}`,
             optional: false,
           };

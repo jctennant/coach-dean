@@ -114,3 +114,44 @@ describe("computePhaseForPlan — taper is always 2 weeks", () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// fixKeyWorkoutMath
+// ---------------------------------------------------------------------------
+import { fixKeyWorkoutMath } from "@/lib/training-plan";
+
+describe("fixKeyWorkoutMath", () => {
+  it("is a no-op when the prefix matches the component sum", () => {
+    const kw = "Tempo 3.5mi (1mi WU + 1.5mi @ threshold + 1mi CD)";
+    expect(fixKeyWorkoutMath(kw, "mi")).toBe(kw);
+  });
+
+  it("corrects a wrong prefix to match component sum", () => {
+    const kw = "Tempo 2mi (1mi WU + 1.5mi @ threshold + 1mi CD)";
+    const result = fixKeyWorkoutMath(kw, "mi");
+    expect(result).toBe("Tempo 3.5mi (1mi WU + 1.5mi @ threshold + 1mi CD)");
+  });
+
+  it("leaves ambiguous time-based workouts unchanged", () => {
+    // 4×3min middle segment makes total uncertain
+    const kw = "Intervals 3mi (1mi WU + 4×3min @ 5K effort + 1mi CD)";
+    expect(fixKeyWorkoutMath(kw, "mi")).toBe(kw);
+  });
+
+  it("leaves rep-count intervals unchanged", () => {
+    // 6×800m has no explicit mi value — can't sum
+    const kw = "Intervals 4mi (1mi WU + 6×800m @ 5K pace + 1mi CD)";
+    expect(fixKeyWorkoutMath(kw, "mi")).toBe(kw);
+  });
+
+  it("is a no-op for simple key workouts with no prefix pattern", () => {
+    const kw = "6×800m @ 5K pace";
+    expect(fixKeyWorkoutMath(kw, "mi")).toBe(kw);
+  });
+
+  it("works with km unit label", () => {
+    const kw = "Tempo 2km (1km WU + 1.5km @ threshold + 1km CD)";
+    const result = fixKeyWorkoutMath(kw, "km");
+    expect(result).toBe("Tempo 3.5km (1km WU + 1.5km @ threshold + 1km CD)");
+  });
+});

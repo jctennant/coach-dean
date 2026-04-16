@@ -920,10 +920,17 @@ describe("coach/respond — lighter_week trigger", () => {
 
 // ---------- helpers for date-sensitive tests ----------
 
-/** Returns a session date string in M/D format for a given offset from today (0 = today, -1 = yesterday). */
-function sessionDateOffset(offsetDays: number): string {
+/**
+ * Returns a session date string in M/D format for a given offset from today.
+ * Uses the same timezone as baseUser() ("America/New_York") so that comparisons
+ * against the route's activity-date logic (which also uses the user's timezone)
+ * remain correct even when CI runs in UTC.
+ */
+function sessionDateOffset(offsetDays: number, timezone = "America/New_York"): string {
   const d = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(d);
+  const [, m, day] = localStr.split("-").map(Number);
+  return `${m}/${day}`;
 }
 
 describe("coach/respond — nightly_reminder end-of-week guard", () => {
