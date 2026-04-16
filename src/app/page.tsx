@@ -203,47 +203,26 @@ export default function Home() {
       {/* How it works — 3 steps */}
       <section className="border-t px-6 py-14 md:py-20">
         <div className="mx-auto max-w-4xl">
-          <div className="grid gap-8 md:grid-cols-3">
+          <h2 className="mb-10 text-center font-serif text-2xl font-normal md:text-3xl">
+            How it works
+          </h2>
+
+          <div className="grid gap-4 md:grid-cols-3 md:gap-6">
             {[
-              {
-                icon: (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
-                    <path d="M13.5 4.5 21 12l-7.5 7.5" />
-                    <path d="M3 12h18" />
-                  </svg>
-                ),
-                step: "1",
-                label: "Connect Strava",
-                sub: "One tap — Dean reads your history and knows your fitness from day one.",
-              },
-              {
-                icon: (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
-                    <path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4l-4 4-4-4Z" />
-                  </svg>
-                ),
-                step: "2",
-                label: "Dean analyzes every run and texts you",
-                sub: "Coaching note the moment your run syncs. Ask anything, any time.",
-              },
-              {
-                icon: (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-7 h-7">
-                    <path d="M3 13.5 7.5 18 21 6" />
-                  </svg>
-                ),
-                step: "3",
-                label: "Train with confidence, not guesswork",
-                sub: "Know when to push, when to back off, and why it's working.",
-              },
-            ].map(({ icon, step, label, sub }) => (
-              <div key={step} className="flex flex-col items-center text-center gap-3 md:items-start md:text-left">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-900 text-white shrink-0">
-                  {icon}
-                </div>
+              { step: "01", label: "Connect Strava", sub: "One tap — Coach Dean reads your full history and knows your fitness baseline from day one." },
+              { step: "02", label: "Coach Dean analyzes every run and texts you", sub: "Coaching note the moment your run syncs. Ask anything, any time." },
+              { step: "03", label: "Train with confidence, not guesswork", sub: "Know when to push, when to back off, and why it's working." },
+            ].map(({ step, label, sub }) => (
+              <div key={step} className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                <span
+                  className="font-mono text-3xl font-bold leading-none"
+                  style={{ color: "#d1e0d7" }}
+                >
+                  {step}
+                </span>
                 <div>
                   <p className="font-semibold text-gray-900 leading-snug">{label}</p>
-                  <p className="mt-1 text-sm text-muted-foreground leading-relaxed">{sub}</p>
+                  <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">{sub}</p>
                 </div>
               </div>
             ))}
@@ -252,11 +231,11 @@ export default function Home() {
       </section>
 
       {/* Insights section — concrete Dean message examples */}
-      <section className="border-t px-6 py-16 md:py-24">
+      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Dean catches what your watch doesn&apos;t tell you.
+              Coach Dean catches what your watch doesn&apos;t tell you.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
               Not &ldquo;great run!&rdquo; notifications. Actual analysis from your Strava data — the kind that changes what you do next.
@@ -277,11 +256,11 @@ export default function Home() {
 
             {/* Insight 2 — Training calibration */}
             <InsightCard
-              context="After your mid-week run"
+              context="After Wednesday's 5.8mi run · 9:12/mi · 148ft gain"
               tag="Training calibration"
               tagColor="#9333ea"
               messages={[
-                { from: "dean", text: "Your last four runs have all been moderate effort — no real easy days, no real hard day. That grey zone accumulates fatigue without building much fitness. Try a genuinely easy 40 minutes tomorrow and your Thursday workout will land a lot better." },
+                { from: "dean", text: "Nice work getting this one in. That said, your last four runs have all landed at moderate effort — 148bpm average today puts you right in the grey zone again. No real easy days, no real hard day. That pattern builds fatigue without building much fitness. Try a genuinely easy 40 min tomorrow and Thursday's workout will land a lot better." },
               ]}
             />
 
@@ -309,7 +288,7 @@ export default function Home() {
       </section>
 
       {/* Comparison — directly below insights with simple bridge */}
-      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
+      <section className="border-t px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <p className="text-sm uppercase tracking-widest text-muted-foreground mb-3">Works alongside the tools you already use</p>
@@ -331,7 +310,6 @@ export default function Home() {
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Load builds blind — no one flags what&apos;s coming</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Injury questions go to Google</li>
               </ul>
-              <p className="text-sm font-medium text-gray-500">~$10–20 / month</p>
             </div>
 
             {/* Coach Dean — featured */}
@@ -371,30 +349,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Screenshot section — post-run analysis */}
-      <section className="border-t px-6 py-16 md:py-24">
-        <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16">
-          {/* Text */}
-          <div className="flex-1 text-center md:text-left">
-            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Analysis the moment you finish.
-            </h2>
-            <p className="text-muted-foreground leading-relaxed">
-              The second your run syncs to Strava, Dean is reading it — pace trends, effort against your zones, whether the workout matched the intent. You get a coaching note before you&apos;ve even stretched. No waiting for a weekly call, no generic app summary.
-            </p>
-          </div>
-          {/* Screenshot */}
-          <div className="flex-1 flex justify-center">
-            <img
-              src="/screenshot-2.png"
-              alt="Post-run coaching analysis"
-              className="w-full object-contain"
-              style={{ maxWidth: "min(380px, 100%)", maxHeight: 520 }}
-            />
-          </div>
-        </div>
-      </section>
-
       {/* Fitness over time — dashboard mock */}
       <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
@@ -403,7 +357,7 @@ export default function Home() {
               Watch your fitness build in real time.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Dean tracks the signal beneath the noise — aerobic efficiency, training load, zone distribution — and surfaces it in a dashboard you can actually read. Not raw data. A picture of whether your training is working.
+              Coach Dean tracks the signal beneath the noise — aerobic efficiency, training load, zone distribution — and surfaces it in a dashboard you can actually read. Not raw data. A picture of whether your training is working.
             </p>
           </div>
 
@@ -533,17 +487,17 @@ export default function Home() {
                 q: "I already use Runna or TrainingPeaks — do I need Coach Dean?",
                 a: (
                   <>
-                    <p>Yes — this is actually our most common use case. Runna gives you the plan. Dean gives you the intelligence layer on top of it: a coaching note after every run, load monitoring, and a direct line for training questions. Keep your Runna structure; Dean adds what no app does.</p>
-                    <p className="mt-3">You can upload your plan as a PDF to the dashboard and Dean will reference it directly when giving you feedback. So instead of "you ran 8:45 pace," you get "that was your recovery day — 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday."</p>
+                    <p>Yes — this is actually our most common use case. Runna gives you the plan. Coach Dean gives you the intelligence layer on top of it: a coaching note after every run, load monitoring, and a direct line for training questions. Keep your Runna structure; Coach Dean adds what no app does.</p>
+                    <p className="mt-3">You can upload your plan as a PDF to the dashboard and Coach Dean will reference it directly when giving you feedback. So instead of "you ran 8:45 pace," you get "that was your recovery day — 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday."</p>
                   </>
                 ),
               },
               {
-                q: "Can Dean actually prevent injuries?",
+                q: "Can Coach Dean actually prevent injuries?",
                 a: (
                   <>
-                    <p>Dean is genuinely good at catching the patterns that precede most running injuries — load spikes, declining aerobic efficiency, grey-zone effort distribution — and flagging them early so you can act conservatively. He&apos;s not a physio and can&apos;t diagnose anything, but he&apos;s the early warning system most runners are missing.</p>
-                    <p className="mt-3">When something does flare up, Dean will prescribe specific rehab exercises for common running injuries — IT band, shin splints, plantar fasciitis, hip flexor tightness — and swap affected sessions for cross-training alternatives (pool running, cycling, elliptical) so your fitness doesn&apos;t evaporate while you recover. The goal is to stay in training, not just to rest and hope.</p>
+                    <p>Coach Dean is genuinely good at catching the patterns that precede most running injuries — load spikes, declining aerobic efficiency, grey-zone effort distribution — and flagging them early so you can act conservatively. He&apos;s not a physio and can&apos;t diagnose anything, but he&apos;s the early warning system most runners are missing.</p>
+                    <p className="mt-3">When something does flare up, Coach Dean will prescribe specific rehab exercises for common running injuries — IT band, shin splints, plantar fasciitis, hip flexor tightness — and swap affected sessions for cross-training alternatives (pool running, cycling, elliptical) so your fitness doesn&apos;t evaporate while you recover. The goal is to stay in training, not just to rest and hope.</p>
                   </>
                 ),
               },
@@ -551,8 +505,8 @@ export default function Home() {
                 q: "Can Coach Dean help me if I'm not training for a specific race?",
                 a: (
                   <>
-                    <p>Absolutely — no race on the calendar required. Plenty of Dean&apos;s athletes are focused on building consistent mileage, staying healthy through a high-mileage stretch, or returning from injury. If you&apos;re coming back from something, Dean will ask about your current status and build your program around staying healthy first, performance second.</p>
-                    <p className="mt-3">If you just want to run more consistently and stop getting hurt every time you ramp up, that&apos;s a perfectly complete goal. Dean tracks your load, checks in after every run, and flags patterns before they become injuries.</p>
+                    <p>Absolutely — no race on the calendar required. Plenty of Coach Dean&apos;s athletes are focused on building consistent mileage, staying healthy through a high-mileage stretch, or returning from injury. If you&apos;re coming back from something, Coach Dean will ask about your current status and build your program around staying healthy first, performance second.</p>
+                    <p className="mt-3">If you just want to run more consistently and stop getting hurt every time you ramp up, that&apos;s a perfectly complete goal. Coach Dean tracks your load, checks in after every run, and flags patterns before they become injuries.</p>
                   </>
                 ),
               },
@@ -580,7 +534,7 @@ export default function Home() {
               },
               {
                 q: "Does Coach Dean build me a training plan?",
-                a: "Yes, if you need one — Dean will build a plan from scratch based on your goal, current fitness, and schedule. But plan generation is a starting point, not the product. The real value is what happens after every run: coaching notes, load tracking, and real-time adjustments as your training evolves. If you already follow Runna or TrainingPeaks, Dean works alongside it and you skip the plan setup entirely.",
+                a: "Yes, if you need one — Coach Dean will build a plan from scratch based on your goal, current fitness, and schedule. But plan generation is a starting point, not the product. The real value is what happens after every run: coaching notes, load tracking, and real-time adjustments as your training evolves. If you already follow Runna or TrainingPeaks, Coach Dean works alongside it and you skip the plan setup entirely.",
               },
               {
                 q: "How much does Coach Dean cost?",
@@ -634,7 +588,7 @@ export default function Home() {
           Ready to run smarter?
         </h2>
         <p className="max-w-md text-muted-foreground leading-relaxed">
-          Your first 7 days are free. Cancel any time — no friction, no forms. Just text Dean and go.
+          Your first 7 days are free. Cancel any time — no friction, no forms. Just text Coach Dean and go.
         </p>
         <Suspense>
           <SignupForm smsPhone={smsPhone} centered />
