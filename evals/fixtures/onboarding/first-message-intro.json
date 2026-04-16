@@ -1,6 +1,6 @@
 {
   "id": "onboarding-first-message-intro",
-  "description": "Dean's very first message should introduce himself concretely and ask a branching mode question — NOT ask for the athlete's name",
+  "description": "Dean's very first message should introduce himself with the 'get faster without getting injured' value prop and ask a single open question about the athlete's running situation — NOT ask for their name",
   "category": "first_message",
   "is_first_response": true,
   "conversation_history": [],
@@ -8,6 +8,6 @@
   "strava_context": "STRAVA: Not connected yet.",
   "inbound_message": "Hey Dean!",
   "ground_truth": {
-    "notes": "Dean has never replied before. He should: (1) introduce himself in 2-3 sentences that are specific about what he does — post-run coaching notes, training tweaks, injury flagging, plan building; (2) ask a single branching question about which mode fits the athlete: already following a plan, building toward a race, or staying healthy/consistent. He should NOT ask for the athlete's name in this first message — name comes in the next turn. He should NOT say 'What's your name?' He should NOT use vague positioning like 'Runna plans your runs, Garmin tracks them'. He should NOT just say 'I'm your AI running coach' with no specifics."
+    "notes": "Dean has never replied before. He should: (1) introduce himself in 2 sentences that are specific about what he does — getting faster without getting injured, post-run coaching notes, load monitoring, injury risk flagging; (2) ask a single open question that surfaces both goal and context, e.g. 'What's your running situation? Racing this year, building a base, or coming back from something?' He should NOT ask for the athlete's name in this first message — name comes in the next turn. He should NOT say 'What's your name?' He should NOT use vague positioning like 'I help you train smarter'. The intro should mention injury prevention or load monitoring specifically — not just 'coaching notes'. He should NOT use the phrase 'SMS running coach' — 'AI running coach' only."
   }
 }

@@ -4,6 +4,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-16 — Onboarding redesign: injury-first intake for "get faster without getting injured" pivot
+
+**Type:** Feature / Improvement
+**Reported by:** Internal (product pivot)
+**User feedback:** "The product is pivoting from 'AI running coach that builds you a plan' to 'Get faster without getting injured.' Onboarding needs to feel less like signing up for a coaching service and more like a smart intake conversation with a coach who's trying to understand your injury history and training context before saying anything else."
+**Root cause:** Previous onboarding was organized around plan creation — the three-mode structure (Plan Complement / Race-Goal Chaser / Healthy Builder) and [READY] conditions were all designed to collect enough info to generate a training schedule. Injury history was an afterthought collected only for ultra and injury_recovery goals. Strength/cross-training wasn't collected at all.
+**Fix / Change:**
+- New first-message framing: "I help runners get faster without getting injured" replaces generic coaching pitch. First question opens on goal + context together ("Racing this year, building a base, or coming back from something?")
+- Injury history elevated to **required for ALL athletes** — must be asked and answered before [READY] regardless of goal type. Previously only required for ultra/injury_recovery goals.
+- Strength & cross-training added as **required intake for ALL athletes** — "Do you do any strength work or cross-training?" Ask once, accept any answer, shapes injury prevention guidance.
+- Simplified conversation flow — replaces the elaborate three-mode architecture with a common injury-first arc with minor mode variations. Plan-building language removed as the default framing.
+- Existing plan handling simplified — Dean is "a post-run analyst, not a plan builder" for plan users. No longer organizes the whole conversation around plan creation.
+- New injury/strength coaching moment: when athlete mentions injury history, Dean explicitly names what it will watch for ("With IT band history, I'll flag when weekly jump is too steep").
+- New Haiku extraction fields: `injury_history`, `current_niggles`, `strength_habits`, `cross_training_activities`
+- `summarizeCollected` updated to display new fields in Dean's context block
+- `completeOnboarding` maps `cross_training_activities` → `crosstraining_tools` DB column; combines `injury_history` + `current_niggles` into `injury_notes`
+- Evals fixture `first-message-intro.json` updated to reflect new intro framing
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/fixtures/onboarding/first-message-intro.json`
+
+---
+
 ## 2026-04-16 — Dashboard redesign: four-section layout
 
 **Type:** Improvement
