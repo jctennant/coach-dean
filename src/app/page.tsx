@@ -166,26 +166,11 @@ function InsightCard({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Value prop sections (alternating layout)                           */
-/* ------------------------------------------------------------------ */
-
-const valueProps = [
-  {
-    title: "Your training intelligence layer",
-    description:
-      "Connect Strava and Coach Dean analyzes every run the moment it syncs — aerobic efficiency trends, effort distribution, whether your training is actually building fitness. Real coaching on your actual runs, not a generic notification. Connect Strava so Dean can monitor your training load and catch problems early — this is how the intelligence layer actually works.",
-    screenshot: "/screenshot-2.png",
-  },
-];
-
-/* ------------------------------------------------------------------ */
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
 export default function Home() {
   const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
-  // Use `?` (not `&`) per RFC 5724, and a literal space so the OS SMS app
-  // doesn't pass "%20" through as literal characters in the message body.
   const smsUrl = `sms:${smsPhone}?body=Hi Coach Dean!`;
   return (
     <div className="flex min-h-screen flex-col" style={{ minHeight: "100vh" }}>
@@ -197,10 +182,10 @@ export default function Home() {
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
             <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              Train harder. Recover smarter. Run faster.
+              Run faster without getting injured.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              Dean analyzes every run the moment it syncs, tracks whether your training is actually building fitness, and tells you exactly what to do next — so the hard work compounds instead of breaking down. Works alongside Runna, TrainingPeaks, or any plan you already follow. All over text, no app required.
+              Connect Strava and Dean analyzes every run — what it meant, whether to push tomorrow, and what to watch for. All over text.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -215,73 +200,8 @@ export default function Home() {
 
       <RaceMarquee />
 
-      {/* Comparison: Coach Dean vs alternatives */}
-      <section className="border-t px-6 py-16 md:py-24">
-        <div className="mx-auto max-w-5xl">
-          {/* Header */}
-          <div className="mb-12 text-center">
-            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              The intelligence layer your training is missing.
-            </h2>
-            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Apps give you a plan. Garmin gives you data. What neither gives you is someone who synthesizes it all and tells you what to do next. Coach Dean is the connective tissue — real coaching delivered over text, powered by your actual runs, available to everyone.
-            </p>
-          </div>
-
-          {/* Comparison cards */}
-          <div className="grid gap-4 md:grid-cols-3 mb-16">
-            {/* Training without coaching */}
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Training without coaching</p>
-                <p className="font-serif text-lg font-normal text-gray-700">Apps alone</p>
-              </div>
-              <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Plan tells you what to do — nothing explains why</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> &ldquo;Workout Complete&rdquo; is the only feedback you get</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Load builds blind — no one flags what&apos;s coming</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Injury questions go to Google</li>
-              </ul>
-              <p className="text-sm font-medium text-gray-500">~$10–20 / month</p>
-            </div>
-
-            {/* Coach Dean — featured */}
-            <div className="rounded-2xl bg-gray-900 p-6 flex flex-col gap-4 text-white md:-mt-4 md:-mb-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">The intelligence layer</p>
-                <p className="font-serif text-lg font-normal">Coach Dean</p>
-              </div>
-              <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tracks whether training is actually building fitness</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tells you when to push and when to back off</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Explains every run in plain language</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags load patterns before they interrupt training</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan</li>
-              </ul>
-              <p className="text-sm font-medium text-gray-300">Free to start, then $10 / month</p>
-            </div>
-
-            {/* Human coach */}
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Private coach</p>
-                <p className="font-serif text-lg font-normal text-gray-700">The gold standard</p>
-              </div>
-              <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Weekly adaptation — requires a call to change anything</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Detailed feedback, but often delayed</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Scheduled calls &amp; email only</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> High friction: schedules, logins, check-ins</li>
-              </ul>
-              <p className="text-sm font-medium text-gray-500">$150–300 / month</p>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
       {/* Insights section — concrete Dean message examples */}
-      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
+      <section className="border-t px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
@@ -337,125 +257,211 @@ export default function Home() {
         </div>
       </section>
 
-{/* Value props — alternating layout */}
-      {valueProps.map((prop, i) => {
-        const reversed = i % 2 === 1;
-        return (
-          <section
-            key={i}
-            className={`border-t px-6 py-16 md:py-24 ${i % 2 === 1 ? "bg-muted/40" : ""}`}
-          >
-            <div
-              className={`mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16 ${
-                reversed ? "md:flex-row-reverse" : ""
-              }`}
-            >
-              {/* Text */}
-              <div className="flex-1 text-center md:text-left">
-                <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-                  {prop.title}
-                </h2>
-                <p className="text-muted-foreground leading-relaxed">
-                  {prop.description}
-                </p>
+      {/* Comparison — directly below insights with simple bridge */}
+      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-12 text-center">
+            <p className="text-sm uppercase tracking-widest text-muted-foreground mb-3">Works alongside the tools you already use</p>
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              The missing layer between your plan and your potential.
+            </h2>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            {/* Training without coaching */}
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Training without coaching</p>
+                <p className="font-serif text-lg font-normal text-gray-700">Apps alone</p>
               </div>
-              {/* Screenshot */}
-              <div className="flex-1 flex justify-center">
-                <img
-                  src={prop.screenshot}
-                  alt={prop.title}
-                  className="w-full object-contain"
-                  style={{ maxWidth: "min(380px, 100%)", maxHeight: 520 }}
-                />
+              <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Plan tells you what to do — nothing explains why</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> &ldquo;Workout Complete&rdquo; is the only feedback you get</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Load builds blind — no one flags what&apos;s coming</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Injury questions go to Google</li>
+              </ul>
+              <p className="text-sm font-medium text-gray-500">~$10–20 / month</p>
+            </div>
+
+            {/* Coach Dean — featured */}
+            <div className="rounded-2xl bg-gray-900 p-6 flex flex-col gap-4 text-white md:-mt-4 md:-mb-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">The intelligence layer</p>
+                <p className="font-serif text-lg font-normal">Coach Dean</p>
+              </div>
+              <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tracks whether training is actually building fitness</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tells you when to push and when to back off</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Explains every run in plain language</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags load patterns before they interrupt training</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan</li>
+              </ul>
+              <div>
+                <p className="text-sm font-medium text-gray-300">Free to start, then $10 / month</p>
+                <p className="text-xs text-gray-500 mt-0.5">Cancel anytime — no friction</p>
               </div>
             </div>
-          </section>
-        );
-      })}
 
-      {/* Full season plan arc */}
+            {/* Human coach */}
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 flex flex-col gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Private coach</p>
+                <p className="font-serif text-lg font-normal text-gray-700">The gold standard</p>
+              </div>
+              <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Weekly adaptation — requires a call to change anything</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Detailed feedback, but often delayed</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Scheduled calls &amp; email only</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> High friction: schedules, logins, check-ins</li>
+              </ul>
+              <p className="text-sm font-medium text-gray-500">$150–300 / month</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Screenshot section — post-run analysis */}
+      <section className="border-t px-6 py-16 md:py-24">
+        <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 md:flex-row md:gap-16">
+          {/* Text */}
+          <div className="flex-1 text-center md:text-left">
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              Analysis the moment you finish.
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              The second your run syncs to Strava, Dean is reading it — pace trends, effort against your zones, whether the workout matched the intent. You get a coaching note before you&apos;ve even stretched. No waiting for a weekly call, no generic app summary.
+            </p>
+          </div>
+          {/* Screenshot */}
+          <div className="flex-1 flex justify-center">
+            <img
+              src="/screenshot-2.png"
+              alt="Post-run coaching analysis"
+              className="w-full object-contain"
+              style={{ maxWidth: "min(380px, 100%)", maxHeight: 520 }}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Fitness over time — dashboard mock */}
       <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="mb-10 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Your full season, laid out before you start
+              Watch your fitness build in real time.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Every phase from base building to race-day taper, visible in one view. Coach Dean texts you the specifics each week and updates the plan as your training evolves. Already following a Runna or TrainingPeaks plan? Upload it to the dashboard and Dean will reference it alongside every run.
+              Dean tracks the signal beneath the noise — aerobic efficiency, training load, zone distribution — and surfaces it in a dashboard you can actually read. Not raw data. A picture of whether your training is working.
             </p>
           </div>
 
-          {/* Plan arc visualization */}
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 md:p-8">
-            {/* Race header */}
-            <div className="mb-6 flex items-end justify-between">
+          {/* Dashboard mock */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 md:p-8 space-y-6">
+            {/* Header row */}
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-0.5">Sample plan</p>
-                <p className="text-base font-semibold text-gray-900">Dipsea Trail Race · 7.4 mi</p>
-                <p className="text-sm text-gray-500 mt-0.5">June 14, 2026</p>
+                <p className="text-xs uppercase tracking-wide text-gray-400 mb-0.5">Dashboard · Last 8 weeks</p>
+                <p className="text-base font-semibold text-gray-900">Sarah M. · NYC Marathon build</p>
               </div>
-              <div className="text-right">
-                <p className="text-3xl font-bold text-gray-900 leading-none">81</p>
-                <p className="text-xs text-gray-400 mt-0.5">days to go</p>
+              <div className="flex gap-4 text-right">
+                <div>
+                  <p className="text-2xl font-bold text-gray-900 leading-none">+11%</p>
+                  <p className="text-xs text-gray-400 mt-0.5">aerobic efficiency</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-gray-900 leading-none">42</p>
+                  <p className="text-xs text-gray-400 mt-0.5">mi this week</p>
+                </div>
               </div>
             </div>
 
-            {/* Week blocks */}
-            <div className="mb-4 grid grid-cols-12 gap-1 md:gap-1.5">
-              {[
-                { phase: "base" },
-                { phase: "base" },
-                { phase: "base" },
-                { phase: "deload" },
-                { phase: "base", current: true },
-                { phase: "build" },
-                { phase: "build" },
-                { phase: "deload" },
-                { phase: "peak" },
-                { phase: "taper" },
-                { phase: "taper" },
-                { phase: "taper" },
-              ].map((w, i) => {
-                const colors: Record<string, string> = {
-                  base: "bg-sky-200",
-                  build: "bg-orange-200",
-                  deload: "bg-green-200",
-                  peak: "bg-red-200",
-                  taper: "bg-purple-200",
-                };
-                return (
-                  <div key={i} className="flex flex-col items-center gap-1">
-                    <div
-                      className={`h-8 w-full rounded md:h-10 ${colors[w.phase]} ${w.current ? "ring-2 ring-gray-900 ring-offset-1" : ""}`}
-                    />
-                    <span className="text-[9px] text-gray-400 leading-none hidden md:block">
-                      W{i + 1}
-                    </span>
-                  </div>
-                );
-              })}
+            {/* Aerobic efficiency trend */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-3">Aerobic efficiency — pace per heartbeat, higher is better</p>
+              <div className="relative h-20">
+                <svg viewBox="0 0 400 80" className="w-full h-full" preserveAspectRatio="none">
+                  {/* Grid lines */}
+                  <line x1="0" y1="60" x2="400" y2="60" stroke="#f0f0f0" strokeWidth="1" />
+                  <line x1="0" y1="40" x2="400" y2="40" stroke="#f0f0f0" strokeWidth="1" />
+                  <line x1="0" y1="20" x2="400" y2="20" stroke="#f0f0f0" strokeWidth="1" />
+                  {/* Trend line — rising from left to right */}
+                  <polyline
+                    points="0,65 50,60 100,55 150,50 200,48 250,42 300,36 350,30 400,22"
+                    fill="none"
+                    stroke="#16a34a"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  {/* Dots at each week */}
+                  {[[0,65],[50,60],[100,55],[150,50],[200,48],[250,42],[300,36],[350,30],[400,22]].map(([x, y], i) => (
+                    <circle key={i} cx={x} cy={y} r="3.5" fill="#16a34a" />
+                  ))}
+                  {/* Area fill */}
+                  <polyline
+                    points="0,65 50,60 100,55 150,50 200,48 250,42 300,36 350,30 400,22 400,80 0,80"
+                    fill="url(#greenFade)"
+                    stroke="none"
+                  />
+                  <defs>
+                    <linearGradient id="greenFade" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#16a34a" stopOpacity="0.12" />
+                      <stop offset="100%" stopColor="#16a34a" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                {/* Week labels */}
+                <div className="flex justify-between mt-1">
+                  {["W1","W2","W3","W4","W5","W6","W7","W8"].map(w => (
+                    <span key={w} className="text-[10px] text-gray-400">{w}</span>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            {/* Legend + current week callout */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap gap-3">
+            {/* Weekly mileage bars */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-3">Weekly mileage</p>
+              <div className="flex items-end gap-1.5 h-14">
+                {[28, 31, 33, 22, 36, 38, 40, 42].map((miles, i) => {
+                  const max = 42;
+                  const heightPct = (miles / max) * 100;
+                  const isDeload = i === 3;
+                  return (
+                    <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                      <div
+                        className={`w-full rounded-sm ${isDeload ? "bg-green-200" : "bg-sky-200"}`}
+                        style={{ height: `${heightPct}%` }}
+                      />
+                      <span className="text-[9px] text-gray-400 leading-none hidden md:block">{miles}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Zone distribution dots */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-3">Training zone distribution — last 4 weeks</p>
+              <div className="flex gap-4 flex-wrap">
                 {[
-                  { label: "Base", color: "bg-sky-200" },
-                  { label: "Build", color: "bg-orange-200" },
-                  { label: "Deload", color: "bg-green-200" },
-                  { label: "Peak", color: "bg-red-200" },
-                  { label: "Taper", color: "bg-purple-200" },
-                ].map(({ label, color }) => (
-                  <span key={label} className="flex items-center gap-1.5 text-xs text-gray-500">
-                    <span className={`inline-block h-2.5 w-2.5 rounded-sm ${color}`} />
-                    {label}
-                  </span>
+                  { label: "Zone 1–2 (easy)", pct: 76, color: "bg-sky-400" },
+                  { label: "Zone 3 (moderate)", pct: 8, color: "bg-amber-400" },
+                  { label: "Zone 4–5 (hard)", pct: 16, color: "bg-red-400" },
+                ].map(({ label, pct, color }) => (
+                  <div key={label} className="flex items-center gap-2">
+                    <div className={`h-2.5 w-2.5 rounded-full ${color} shrink-0`} />
+                    <span className="text-xs text-gray-600">{label}</span>
+                    <span className="text-xs font-semibold text-gray-900">{pct}%</span>
+                  </div>
                 ))}
               </div>
-              <span className="text-xs text-gray-400 flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-2.5 rounded-sm ring-2 ring-gray-900 ring-offset-1 bg-sky-200" />
-                You are here
-              </span>
+              <div className="mt-2 h-2 w-full rounded-full overflow-hidden flex">
+                <div className="bg-sky-400 h-full" style={{ width: "76%" }} />
+                <div className="bg-amber-400 h-full" style={{ width: "8%" }} />
+                <div className="bg-red-400 h-full" style={{ width: "16%" }} />
+              </div>
             </div>
           </div>
         </div>
@@ -490,7 +496,7 @@ export default function Home() {
                     <p className="mt-3">If you just want to run more consistently and stop getting hurt every time you ramp up, that&apos;s a perfectly complete goal. Dean tracks your load, checks in after every run, and flags patterns before they become injuries.</p>
                   </>
                 ),
-              }, 
+              },
               {
                 q: "What type of races can Coach Dean help me prepare for?",
                 a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. If you're training for a triathlon, he focuses on the run leg — your running program will be dialed in, but for swim and bike you'd want dedicated coaching alongside. Not sure what distance is right for you? Tell Coach Dean where you're at and he'll help you figure it out.",
@@ -514,6 +520,10 @@ export default function Home() {
                 ),
               },
               {
+                q: "Does Coach Dean build me a training plan?",
+                a: "Yes, if you need one — Dean will build a plan from scratch based on your goal, current fitness, and schedule. But plan generation is a starting point, not the product. The real value is what happens after every run: coaching notes, load tracking, and real-time adjustments as your training evolves. If you already follow Runna or TrainingPeaks, Dean works alongside it and you skip the plan setup entirely.",
+              },
+              {
                 q: "How much does Coach Dean cost?",
                 a: "It's free for the first 7 days — cancel with no penalties. After that, $10/mo on an annual plan or $20/mo month-to-month.",
               },
@@ -534,7 +544,7 @@ export default function Home() {
                       <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Coach Dean got wrong.</li>
                       <li><span className="font-mono font-semibold text-foreground">MY PLAN</span> — get a link to your training plan dashboard, where you can see your full season schedule.</li>
                       <li><span className="font-mono font-semibold text-foreground">UNSUBSCRIBE</span> — get a link to cancel your subscription at any time.</li>
-                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — stop all messages immediately. You'll also receive a link to cancel billing. Text START to resume at any time.</li>
+                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — stop all messages immediately. You&apos;ll also receive a link to cancel billing. Text START to resume at any time.</li>
                     </ul>
                     <p className="mt-3">Everything else is just plain conversation — ask questions, report a run, tell Coach Dean your knee hurts. He handles it.</p>
                   </>

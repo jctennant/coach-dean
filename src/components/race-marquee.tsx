@@ -2,26 +2,26 @@
 
 const ROW_ONE = [
   "Boston Marathon",
-  "Ironman 70.3",
+  "Returning from stress fracture",
   "5K PR",
   "NYC Marathon",
-  "Post injury recovery",
+  "First injury-free season",
   "First half marathon",
-  "Olympic Tri",
-  "Couch to 5k",
+  "Sub-20 5K",
+  "Couch to 5K",
   "Chicago Marathon",
-  "Sprint Triathlon",
+  "Back after a long break",
 ];
 
 const ROW_TWO = [
-  "Shin split recovery",
+  "Running my first 50 miles/week",
   "Cirque Series",
-  "Philadephia Marathon",
+  "Philadelphia Marathon",
   "10K",
   "Broken Arrow 46K",
   "Sub 2hr Half Marathon",
   "California International Marathon",
-  "Mile Time Trial",
+  "Mile time trial",
   "Paris Marathon",
   "First ultra race",
 ];

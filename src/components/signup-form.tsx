@@ -36,7 +36,7 @@ export function SignupForm({ smsPhone, centered }: SignupFormProps) {
     <div className="flex w-full max-w-sm flex-col gap-3">
       {/* Mobile: full-width deep link button */}
       <a href={smsUrl} className="md:hidden" onClick={() => trackCta("mobile")}>
-        <Button size="lg" className="h-12 w-full rounded-full">Start your free week</Button>
+        <Button size="lg" className="h-12 w-full rounded-full">Get started</Button>
       </a>
       <p className="md:hidden text-center text-sm text-muted-foreground">
         Already a user?{" "}
@@ -48,7 +48,7 @@ export function SignupForm({ smsPhone, centered }: SignupFormProps) {
       {/* Desktop: button with hover QR code */}
       <div className={`group relative hidden w-fit md:block ${centered ? "mx-auto" : ""}`}>
         <a href={smsUrl} onClick={() => trackCta("desktop")}>
-          <Button size="lg" className="h-12 rounded-full px-8">Start your free week</Button>
+          <Button size="lg" className="h-12 rounded-full px-8">Get started</Button>
         </a>
         {/* QR popover */}
         <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
