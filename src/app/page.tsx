@@ -171,9 +171,9 @@ function InsightCard({
 
 const valueProps = [
   {
-    title: "Instant coaching after every run",
+    title: "Your training intelligence layer",
     description:
-      "Connect Strava and Coach Dean analyzes every activity the moment it syncs — pace trends, effort, whether you went out too hard. Real feedback on your actual runs, not a generic \"great job\" notification.",
+      "Connect Strava and Coach Dean analyzes every run the moment it syncs — aerobic efficiency trends, effort distribution, whether your training is actually building fitness. Real coaching on your actual runs, not a generic notification. Connect Strava so Dean can monitor your training load and catch problems early — this is how the intelligence layer actually works.",
     screenshot: "/screenshot-2.png",
   },
 ];
@@ -197,10 +197,10 @@ export default function Home() {
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
             <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              The running coach who explains every run.
+              Train harder. Recover smarter. Run faster.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              Connect Strava and Coach Dean sends you a coaching note after every run — what the effort actually meant, what to watch for, what&apos;s next. Works alongside any plan you already have, or builds one from scratch. All over text.
+              Dean analyzes every run the moment it syncs, tracks whether your training is actually building fitness, and tells you exactly what to do next — so the hard work compounds instead of breaking down. Works alongside Runna, TrainingPeaks, or any plan you already follow. All over text, no app required.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -252,11 +252,11 @@ export default function Home() {
                 <p className="font-serif text-lg font-normal">Coach Dean</p>
               </div>
               <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Coaching note after every Strava run</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tracks weekly load — flags injury risk before it derails training</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tracks whether training is actually building fitness</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tells you when to push and when to back off</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Explains every run in plain language</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags load patterns before they interrupt training</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Direct text access — ask anything, any time</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Builds a plan from scratch if you need one</li>
               </ul>
               <p className="text-sm font-medium text-gray-300">Free to start, then $10 / month</p>
             </div>
@@ -285,25 +285,15 @@ export default function Home() {
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Dean reads the signals most coaches miss.
+              Dean catches what your watch doesn&apos;t tell you.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
               Not &ldquo;great run!&rdquo; notifications. Actual analysis from your Strava data — the kind that changes what you do next.
             </p>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
-            {/* Insight 1 — Load management (protecting gains, not fear) */}
-            <InsightCard
-              context="After a big training week"
-              tag="Load management"
-              tagColor="#0891b2"
-              messages={[
-                { from: "dean", text: "Big week — you've logged 43% more than your 4-week average. That's real training stimulus. Keep Friday short and easy so your body can actually absorb it. Fitness built on fresh legs sticks; fitness stacked on top of fatigue tends not to." },
-              ]}
-            />
-
-            {/* Insight 2 — Aerobic efficiency improvement (purely positive) */}
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Insight 1 — Fitness building */}
             <InsightCard
               context="Your 6-week progress check"
               tag="Fitness progress"
@@ -313,14 +303,34 @@ export default function Home() {
               ]}
             />
 
-            {/* Insight 3 — Pace execution (more fitness than your pacing showed) */}
+            {/* Insight 2 — Training calibration */}
             <InsightCard
-              context="After today's 10-mile long run"
-              tag="Pace execution"
-              tagColor="#2563eb"
+              context="After your mid-week run"
+              tag="Training calibration"
+              tagColor="#9333ea"
               messages={[
-                { from: "user", text: "Just finished — felt really tough toward the end" },
-                { from: "dean", text: "Your splits show 8:55 first half, 9:42 second — that gap usually means there's more fitness there than your pacing gave you credit for. Try starting at 9:30 next week and let the back half open up. You might surprise yourself." },
+                { from: "dean", text: "Your last four runs have all been moderate effort — no real easy days, no real hard day. That grey zone accumulates fatigue without building much fitness. Try a genuinely easy 40 minutes tomorrow and your Thursday workout will land a lot better." },
+              ]}
+            />
+
+            {/* Insight 3 — Load management */}
+            <InsightCard
+              context="After a big training week"
+              tag="Load management"
+              tagColor="#0891b2"
+              messages={[
+                { from: "dean", text: "Big week — you've logged 43% more than your 4-week average. That's real training stimulus. Keep Friday short and easy so your body can actually absorb it. Fitness built on fresh legs sticks; fitness stacked on top of fatigue tends not to." },
+              ]}
+            />
+
+            {/* Insight 4 — Injury sounding board */}
+            <InsightCard
+              context="After today's run"
+              tag="Injury sounding board"
+              tagColor="#dc2626"
+              messages={[
+                { from: "user", text: "My left knee was tight around mile 3 today." },
+                { from: "dean", text: "Likely IT band compensation from Tuesday's tempo — your hip drive tends to drop when fatigued and the knee picks up the slack. 5 min of IT band rolling tonight. If it's there on tomorrow's run, we'll swap the long run for a bike day and keep your week on track." },
               ]}
             />
           </div>
@@ -460,13 +470,17 @@ export default function Home() {
           <div className="divide-y">
             {[
               {
-                q: "I already use Runna / TrainingPeaks / a coaching plan — should I still use Coach Dean?",
+                q: "I already use Runna or TrainingPeaks — do I need Coach Dean?",
                 a: (
                   <>
-                    <p>Yes — and this is actually our most common use case. Coach Dean works alongside your existing plan, not as a replacement. Keep your Runna structure; Dean adds what no app does: a coaching note after every run, a direct line for training questions, and an early eye on injury patterns before small aches become big problems.</p>
-                    <p className="mt-3">You can upload your plan as a PDF to the dashboard and Dean will reference it directly when he gives you feedback. So instead of "you ran 8:45 pace," you get "that was your recovery day — 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday."</p>
+                    <p>Yes — this is actually our most common use case. Runna gives you the plan. Dean gives you the intelligence layer on top of it: a coaching note after every run, load monitoring, and a direct line for training questions. Keep your Runna structure; Dean adds what no app does.</p>
+                    <p className="mt-3">You can upload your plan as a PDF to the dashboard and Dean will reference it directly when giving you feedback. So instead of "you ran 8:45 pace," you get "that was your recovery day — 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday."</p>
                   </>
                 ),
+              },
+              {
+                q: "Can Dean actually prevent injuries?",
+                a: "Dean is genuinely good at catching the patterns that precede most running injuries — load spikes, declining aerobic efficiency, grey-zone effort distribution — and flagging them early so you can act conservatively. He's not a physio and can't diagnose anything, but he's the early warning system most runners are missing. The goal is to catch it before it becomes an injury, not to treat one after the fact.",
               },
               {
                 q: "Can Coach Dean help me if I'm not training for a specific race?",
@@ -550,6 +564,9 @@ export default function Home() {
         <h2 className="max-w-xl font-serif text-2xl font-normal md:text-3xl">
           Ready to run smarter?
         </h2>
+        <p className="max-w-md text-muted-foreground leading-relaxed">
+          Your first 7 days are free. Cancel any time — no friction, no forms. Just text Dean and go.
+        </p>
         <Suspense>
           <SignupForm smsPhone={smsPhone} centered />
         </Suspense>
