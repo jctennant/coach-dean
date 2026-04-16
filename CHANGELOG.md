@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Onboarding prompt improvements for plan-complement users
+
+**Type:** Improvement
+**Reported by:** Jake (first run-through of new onboarding)
+**User feedback:** "Feels like the first message from Dean is too long and wordy + I don't like SMS running coach. Maybe 'AI running coach'. Don't refer to yourself as a SMS coach. Referenced dashboard - a bit unclear. We don't mention that Dean will write to your strava log. It is less clear why Dean needs my paces if he isn't making me a plan. Is 'which days of the week work best for your training' if the user already has a plan? Didn't send the dashboard or super clearly explain next steps. Didn't tell me how to upload my plan to the dashboard or why I may want to do that."
+**Root cause:** First message example used "SMS running coach" (wrong branding) and was over-explained. Plan-complement mode didn't surface the Strava activity annotation feature, framed training-days question oddly for users with fixed schedules, didn't explain why paces matter when Dean isn't building the plan, and the post-onboarding welcome message didn't mention the dashboard or plan upload.
+**Fix / Change:** (1) First message example shortened to 2 sentences, changed "SMS running coach" → "AI running coach", added Strava annotation mention. (2) PLAN COMPLEMENT mode no longer collects training days — Dean fires on Strava activity events so the schedule isn't needed upfront. (3) Plan-sharing value prop now explains the concrete reason to share: Dean can tell you whether today's run matched the schedule, flag drift, and give more specific feedback. (4) EXISTING PLAN USERS section updated to match. (5) Complement mode welcome message now includes the dashboard URL and plan-upload instruction.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-04-15 — Insights section on landing page
 
 **Type:** Feature
