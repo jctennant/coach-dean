@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Post-generation accuracy validators for dates, mileage, and plan structure
+
+**Type:** Improvement
+**Reported by:** Pre-launch audit
+**User feedback:** N/A
+**Root cause:** Several accuracy risks existed where Claude's output could contain wrong weekday/date pairings, wrong session counts, or wrong totals — with no code-level safety net beyond prompt instructions.
+**Fix / Change:**
+- Added `fixSessionDayAbbreviations(message, refYear, refMonth)` to `plan-validation.ts`: parses every `Mon 3/2 · ...` session line, verifies the day abbreviation matches the actual calendar date, and auto-corrects any mismatch (with a console warning). Year rollover handled: if session month < current month, infers next calendar year.
+- Added `countRunningSessions(message)` to `plan-validation.ts`: counts running sessions (sessions with mileage markers) in a plan response for comparison against the athlete's `training_days` preference.
+- Wired `fixSessionDayAbbreviations` into the post-generation pipeline in `route.ts` for `initial_plan` and `weekly_recap` triggers.
+- Added session count logging in `route.ts`: warns when Claude's plan has a different number of running sessions than the athlete's `training_days.length`.
+- The existing `correctMileageTotal`, `correctTotalFromSessionList`, `enforceVolumeCaps`, `fixSessionDistanceErrors`, and `deduplicateSessionLines` validators were already in place covering mileage accuracy.
+**Files changed:** `src/lib/plan-validation.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/plan-validation.test.ts`
+
 ## 2026-04-15 — Six coaching quality fixes from eval analysis
 
 **Type:** Improvement

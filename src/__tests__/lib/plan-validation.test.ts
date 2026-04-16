@@ -4,6 +4,8 @@ import {
   enforceVolumeCaps,
   deduplicateSessionLines,
   fixSessionDistanceErrors,
+  fixSessionDayAbbreviations,
+  countRunningSessions,
 } from "@/lib/plan-validation";
 
 // ---------------------------------------------------------------------------
@@ -230,5 +232,81 @@ Total: 21mi`;
   it("is a no-op when no Total line is present", () => {
     const msg = `Mon 4/6 · Easy 5mi\nWed 4/8 · Tempo 6mi`;
     expect(fixSessionDistanceErrors(msg)).toBe(msg);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fixSessionDayAbbreviations
+// ---------------------------------------------------------------------------
+
+describe("fixSessionDayAbbreviations", () => {
+  // April 2026: refYear=2026, refMonth=4
+  // April 7, 2026 is a Tuesday. April 14 is a Monday. April 21 is a Tuesday.
+
+  it("is a no-op when all day abbreviations are correct", () => {
+    // Tue 4/7/2026 ✓, Thu 4/9/2026 ✓, Sat 4/11/2026 ✓
+    const msg = `Tue 4/7 · Easy 4mi\nThu 4/9 · Tempo 6mi\nSat 4/11 · Long run 9mi`;
+    expect(fixSessionDayAbbreviations(msg, 2026, 4)).toBe(msg);
+  });
+
+  it("corrects a wrong day abbreviation", () => {
+    // 4/7/2026 is a Tuesday, not a Monday
+    const msg = `Mon 4/7 · Easy 4mi`;
+    const result = fixSessionDayAbbreviations(msg, 2026, 4);
+    expect(result).toBe("Tue 4/7 · Easy 4mi");
+  });
+
+  it("corrects multiple wrong day abbreviations in the same plan", () => {
+    // 4/7 = Tue, 4/9 = Thu — both labelled wrong
+    const msg = `Wed 4/7 · Easy 4mi\nMon 4/9 · Tempo 6mi`;
+    const result = fixSessionDayAbbreviations(msg, 2026, 4);
+    expect(result).toContain("Tue 4/7 · Easy 4mi");
+    expect(result).toContain("Thu 4/9 · Tempo 6mi");
+  });
+
+  it("handles year rollover: session month earlier than ref month → next year", () => {
+    // Plan generated in December 2026 (refMonth=12), session on 1/5/2027
+    // Jan 5, 2027 is a Tuesday — if labelled as Mon it should be corrected
+    const msg = `Mon 1/5 · Easy 4mi`;
+    const result = fixSessionDayAbbreviations(msg, 2026, 12);
+    // Jan 5, 2027 = Tuesday
+    expect(result).toBe("Tue 1/5 · Easy 4mi");
+  });
+
+  it("leaves non-session lines unchanged", () => {
+    const msg = `Great week ahead!\nTue 4/7 · Easy 4mi\nSee you soon.`;
+    const result = fixSessionDayAbbreviations(msg, 2026, 4);
+    expect(result).toContain("Great week ahead!");
+    expect(result).toContain("See you soon.");
+  });
+
+  it("is a no-op when there are no session lines", () => {
+    const msg = "No plan, just chatting.";
+    expect(fixSessionDayAbbreviations(msg, 2026, 4)).toBe(msg);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// countRunningSessions
+// ---------------------------------------------------------------------------
+
+describe("countRunningSessions", () => {
+  it("counts only running sessions (sessions with mileage)", () => {
+    const msg = `Tue 4/7 · Easy 4mi\nWed 4/8 · Strength 45min\nThu 4/9 · Tempo 6mi\nSat 4/11 · Long run 9mi`;
+    expect(countRunningSessions(msg)).toBe(3);
+  });
+
+  it("returns 0 when no running sessions", () => {
+    const msg = `Wed 4/8 · Strength 45min\nFri 4/10 · Rest`;
+    expect(countRunningSessions(msg)).toBe(0);
+  });
+
+  it("returns 0 for non-plan messages", () => {
+    expect(countRunningSessions("Good run today!")).toBe(0);
+  });
+
+  it("does not count cross-training sessions as running", () => {
+    const msg = `Mon 4/6 · Easy 5mi\nTue 4/7 · Bike 45min\nThu 4/9 · Swim 30min`;
+    expect(countRunningSessions(msg)).toBe(1);
   });
 });

@@ -8,7 +8,7 @@ import { fetchWeekWeather, buildWeatherBlock, fetchActivityWeather } from "@/lib
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness } from "@/lib/training-plan";
-import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors } from "@/lib/plan-validation";
+import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions } from "@/lib/plan-validation";
 import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
@@ -1812,7 +1812,27 @@ Weekly total: ${mileageRange}
   // Detect session mileage that equals the weekly total (copy-paste errors like "Hill reps 33mi")
   const sessionFixed = fixSessionDistanceErrors(volumeChecked);
   // Remove exact duplicate session lines (e.g. same "Thu 3/26 · Easy 2mi" twice)
-  const coachMessage = deduplicateSessionLines(sessionFixed);
+  const deduped = deduplicateSessionLines(sessionFixed);
+
+  // For plan-generating triggers: fix any weekday/date mismatches (e.g. "Mon 4/15" when
+  // 4/15 is actually a Wednesday). Compute the user's local year+month for year inference.
+  const localRefStr = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
+  const [refYear, refMonth] = localRefStr.split("-").map(Number);
+  const coachMessage = planTriggers.has(trigger)
+    ? fixSessionDayAbbreviations(deduped, refYear, refMonth)
+    : deduped;
+
+  // Session count sanity check — warn when Claude's plan has a different number of
+  // running sessions than the athlete's stated training days preference.
+  if (planTriggers.has(trigger) && profile?.training_days) {
+    const expectedCount = (profile.training_days as string[]).length;
+    const actualCount = countRunningSessions(coachMessage);
+    if (actualCount !== expectedCount) {
+      console.warn(
+        `[sessionCount] expected ${expectedCount} running session(s) per training_days, found ${actualCount} in plan response for userId=${userId}`
+      );
+    }
+  }
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 

@@ -228,6 +228,65 @@ export function fixSessionDistanceErrors(message: string): string {
   return corrected;
 }
 
+// Ordered Sun–Sat so index matches Date.getDay()
+const DAY_ABBREVS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Validate and auto-correct weekday abbreviations in session lines.
+ *
+ * For each "Mon 3/2 · ..." line, checks that the stated weekday abbreviation
+ * actually matches the calendar date. If wrong, replaces the abbreviation with
+ * the correct one and logs a warning.
+ *
+ * Year inference: if the session month is earlier than the reference month it
+ * must belong to the NEXT calendar year (a forward-looking plan never revisits
+ * the past). Same month or later → same year as the reference.
+ *
+ * @param message  - Plan text to validate
+ * @param refYear  - Current calendar year in the user's timezone
+ * @param refMonth - Current month (1-indexed) in the user's timezone
+ */
+export function fixSessionDayAbbreviations(
+  message: string,
+  refYear: number,
+  refMonth: number
+): string {
+  return message.replace(
+    /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2})\/(\d{1,2})\s+·/gm,
+    (fullMatch, dayAbbrev: string, monthStr: string, dayStr: string) => {
+      const month = parseInt(monthStr, 10);
+      const day = parseInt(dayStr, 10);
+
+      // A training plan is always forward-looking. If the session month is
+      // before the reference month, the session belongs to next calendar year.
+      const year = month < refMonth ? refYear + 1 : refYear;
+
+      const date = new Date(year, month - 1, day);
+      // Guard against impossible dates (e.g. Feb 31) — leave them as-is
+      if (date.getMonth() !== month - 1) return fullMatch;
+
+      const correctAbbrev = DAY_ABBREVS[date.getDay()];
+      if (correctAbbrev !== dayAbbrev) {
+        console.warn(
+          `[fixSessionDayAbbreviations] "${dayAbbrev} ${monthStr}/${dayStr}" — ${monthStr}/${dayStr}/${year} is a ${correctAbbrev}. Correcting.`
+        );
+        return fullMatch.replace(dayAbbrev, correctAbbrev);
+      }
+
+      return fullMatch;
+    }
+  );
+}
+
+/**
+ * Count the number of running sessions in a plan response.
+ * A running session is any parsed session line with a non-zero mileage marker.
+ * Cross-training and strength sessions (0 miles) are excluded.
+ */
+export function countRunningSessions(message: string): number {
+  return parseSessionLines(message).filter((s) => s.miles > 0).length;
+}
+
 /**
  * Remove exact duplicate session lines from a plan.
  *
