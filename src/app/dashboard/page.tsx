@@ -5,6 +5,7 @@ import { TokenPersist } from "./token-manager";
 import { computeLoadTrend, computeAerobicEfficiencyTrend, computeACWR } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import type { DashboardInsights } from "@/lib/dashboard-insights";
+import { estimateMaxHR } from "@/lib/hr-utils";
 
 export const metadata: Metadata = {
   title: "Your Dashboard — Coach Dean",
@@ -62,54 +63,6 @@ type ConversationRow = {
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 const RUN_ACTIVITY_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
-
-/**
- * Robustly estimate an athlete's true max HR from stored activity data.
- *
- * Two-stage outlier rejection:
- *
- * Stage 1 — per-activity spike filter:
- *   If an activity has both avg and max HR, and max > avg × 1.4, discard that
- *   max reading. Real peaks during hard intervals are 15–25% above avg HR
- *   (e.g. avg 150, peak 185 = +23%). Sensor glitches from dropped contact are
- *   typically 40–50%+ above avg (e.g. avg 145, max 215 = +48%). The 1.4×
- *   threshold sits comfortably between these ranges.
- *   Activities without avg HR (rare) are kept since we can't apply this check.
- *
- * Stage 2 — cross-activity gap check:
- *   After stage 1, if the remaining top reading is still 15+ bpm above the
- *   next-highest, skip it — catches any isolated spike that slipped through.
- *
- * Final value × 1.02: peak race/interval HR ≈ 98% of true physiological max.
- * Falls back to average_heartrate × 1.12 when max_heartrate is unavailable.
- */
-function estimateMaxHR(activities: ActivityRow[]): number | null {
-  const validMaxHRs = activities
-    .filter(a => {
-      if (!RUN_ACTIVITY_TYPES.has(a.activity_type ?? "")) return false;
-      if ((a.max_heartrate ?? 0) <= 100) return false;
-      // Stage 1: discard per-activity sensor spikes
-      if (a.average_heartrate && a.max_heartrate! > a.average_heartrate * 1.4) return false;
-      return true;
-    })
-    .map(a => a.max_heartrate!)
-    .sort((a, b) => b - a); // descending
-
-  if (validMaxHRs.length > 0) {
-    // Stage 2: cross-activity gap check
-    const top = validMaxHRs[0]!;
-    const second = validMaxHRs[1];
-    const best = second != null && (top - second) > 15 ? second : top;
-    return best * 1.02;
-  }
-
-  // Fallback: estimate from average HR (avg race/interval HR ≈ 88% of true max)
-  const avgHRs = activities
-    .filter(a => RUN_ACTIVITY_TYPES.has(a.activity_type ?? "") && a.average_heartrate != null)
-    .map(a => a.average_heartrate!);
-  if (avgHRs.length === 0) return null;
-  return Math.max(...avgHRs) * 1.12;
-}
 
 function formatDate(dateStr: string, fmt: "short" | "long" = "short"): string {
   const d = dateStr.length === 10 ? new Date(dateStr + "T12:00:00Z") : new Date(dateStr);

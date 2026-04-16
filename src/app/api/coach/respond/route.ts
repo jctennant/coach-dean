@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/lib/paces";
+import { estimateMaxHR } from "@/lib/hr-utils";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
@@ -5865,14 +5866,14 @@ async function annotateStravaActivity(
       : Promise.resolve(null),
     supabase
       .from("activities")
-      .select("max_heartrate")
+      .select("activity_type, workout_type, average_heartrate, max_heartrate")
       .eq("user_id", userId)
       .not("max_heartrate", "is", null)
-      .order("max_heartrate", { ascending: false })
-      .limit(1)
-      .single(),
+      .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
+      .order("start_date", { ascending: false })
+      .limit(150),
   ]);
-  const userMaxHR = (maxHRRow.data?.max_heartrate as number | null) ?? null;
+  const userMaxHR = estimateMaxHR(maxHRRow.data ?? []);
   const existingDescription = (stravaActivity.description as string) || "";
 
   // Activity stats
