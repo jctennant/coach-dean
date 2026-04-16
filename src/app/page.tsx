@@ -5,6 +5,167 @@ import { Navbar } from "@/components/navbar";
 import { RaceMarquee } from "@/components/race-marquee";
 
 /* ------------------------------------------------------------------ */
+/*  Insight card — static iMessage snippet                             */
+/* ------------------------------------------------------------------ */
+
+const SYS_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
+
+function InsightCard({
+  context,
+  tag,
+  tagColor,
+  messages,
+}: {
+  context: string;
+  tag: string;
+  tagColor: string;
+  messages: Array<{ from: "dean" | "user"; text: string }>;
+}) {
+  return (
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      {/* iMessage header */}
+      <div
+        style={{
+          background: "#f2f2f7",
+          borderBottom: "1px solid rgba(0,0,0,0.10)",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "10px 14px",
+        }}
+      >
+        <div
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: "50%",
+            background: "#1a5c35",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: SYS_FONT,
+              fontSize: 11,
+              fontWeight: 600,
+              color: "#ffffff",
+              letterSpacing: 0.4,
+              lineHeight: 1,
+            }}
+          >
+            CD
+          </span>
+        </div>
+        <div>
+          <p
+            style={{
+              fontFamily: SYS_FONT,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#000",
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            Coach Dean
+          </p>
+          <p
+            style={{
+              fontFamily: SYS_FONT,
+              fontSize: 11,
+              color: "#8e8e93",
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {context}
+          </p>
+        </div>
+      </div>
+
+      {/* Bubbles */}
+      <div
+        style={{
+          padding: "14px 14px 16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          flex: 1,
+        }}
+      >
+        {messages.map((msg, i) => {
+          const isUser = msg.from === "user";
+          return (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                justifyContent: isUser ? "flex-end" : "flex-start",
+              }}
+            >
+              <p
+                style={{
+                  maxWidth: "85%",
+                  margin: 0,
+                  padding: "9px 13px",
+                  borderRadius: 18,
+                  fontFamily: SYS_FONT,
+                  fontSize: 14,
+                  fontWeight: 400,
+                  lineHeight: 1.45,
+                  background: isUser ? "#0B84FE" : "#e9e9eb",
+                  color: isUser ? "#ffffff" : "#000000",
+                  wordBreak: "break-word",
+                }}
+              >
+                {msg.text}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tag */}
+      <div
+        style={{
+          borderTop: "1px solid rgba(0,0,0,0.06)",
+          padding: "8px 14px",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: tagColor,
+            flexShrink: 0,
+          }}
+        />
+        <span
+          style={{
+            fontFamily: SYS_FONT,
+            fontSize: 11,
+            fontWeight: 500,
+            color: "#8e8e93",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+          }}
+        >
+          {tag}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Value prop sections (alternating layout)                           */
 /* ------------------------------------------------------------------ */
 
@@ -159,6 +320,53 @@ export default function Home() {
                 </p>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Insights section — concrete Dean message examples */}
+      <section className="border-t px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-5xl">
+          <div className="mb-12 text-center">
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              Dean reads the signals most coaches miss.
+            </h2>
+            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
+              Not &ldquo;great run!&rdquo; notifications. Actual analysis from your Strava data — the kind that changes what you do next.
+            </p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-3">
+            {/* Insight 1 — Load management (protecting gains, not fear) */}
+            <InsightCard
+              context="After a big training week"
+              tag="Load management"
+              tagColor="#0891b2"
+              messages={[
+                { from: "dean", text: "Big week — you've logged 43% more than your 4-week average. That's real training stimulus. Keep Friday short and easy so your body can actually absorb it. Fitness built on fresh legs sticks; fitness stacked on top of fatigue tends not to." },
+              ]}
+            />
+
+            {/* Insight 2 — Aerobic efficiency improvement (purely positive) */}
+            <InsightCard
+              context="Your 6-week progress check"
+              tag="Fitness progress"
+              tagColor="#16a34a"
+              messages={[
+                { from: "dean", text: "Your aerobic efficiency is up 9% over the last 6 weeks — you're running the same pace at a meaningfully lower heart rate. That's your base building in real time. Keep the easy days truly easy and this trend will carry you right through your build phase." },
+              ]}
+            />
+
+            {/* Insight 3 — Pace execution (more fitness than your pacing showed) */}
+            <InsightCard
+              context="After today's 10-mile long run"
+              tag="Pace execution"
+              tagColor="#2563eb"
+              messages={[
+                { from: "user", text: "Just finished — felt really tough toward the end" },
+                { from: "dean", text: "Your splits show 8:55 first half, 9:42 second — that gap usually means there's more fitness there than your pacing gave you credit for. Try starting at 9:30 next week and let the back half open up. You might surprise yourself." },
+              ]}
+            />
           </div>
         </div>
       </section>
@@ -394,7 +602,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t px-6 py-10 text-center text-sm text-muted-foreground">
         <div className="mx-auto flex max-w-2xl flex-col items-center gap-3">
-          <p className="font-medium text-foreground">CoachDean</p>
+          <p className="font-medium text-foreground">Coach Dean</p>
           <p>
             Questions or feedback?{" "}
             <a

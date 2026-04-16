@@ -12,7 +12,7 @@ import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, f
 import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
-import { buildLongitudinalBlock } from "@/lib/training-analytics";
+import { buildLongitudinalBlock, buildRunExecutionAnalysis } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import type { ActivityWeatherData } from "@/lib/weather";
 
@@ -46,6 +46,7 @@ interface ActivityRow {
   distance_meters: number;
   moving_time_seconds: number;
   average_heartrate: number | null;
+  max_heartrate: number | null;
   elevation_gain: number | null;
   average_pace: string;
   start_date: string;
@@ -851,7 +852,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     supabase
       .from("activities")
       .select(
-        "activity_type, distance_meters, moving_time_seconds, average_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct"
+        "activity_type, distance_meters, moving_time_seconds, average_heartrate, max_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct"
       )
       .eq("user_id", userId)
       .order("start_date", { ascending: false })
@@ -1601,6 +1602,16 @@ Weekly total: ${mileageRange}
   // Append race predictor context to user_message prompts.
   if (racePredictorBlock) {
     userMessage = userMessage + "\n" + racePredictorBlock;
+  }
+
+  // Append pace execution analysis to post_run prompts (requires split data).
+  if (trigger === "post_run" && activityData) {
+    const storedSummary = activityData.summary as Record<string, unknown> | null;
+    const splits = Array.isArray(storedSummary?.splits) ? storedSummary.splits : null;
+    const execution = buildRunExecutionAnalysis(splits as Parameters<typeof buildRunExecutionAnalysis>[0]);
+    if (execution.summary) {
+      userMessage = userMessage + "\n" + execution.summary;
+    }
   }
 
   // Append weather-at-activity-time block to post_run prompts.

@@ -1010,6 +1010,9 @@ export default async function DashboardPage({
     distance_meters: a.distance_meters,
     moving_time_seconds: a.moving_time_seconds,
     average_heartrate: a.average_heartrate,
+    max_heartrate: null,       // not fetched in dashboard query
+    elevation_gain: null,      // not fetched in dashboard query
+    average_cadence: null,     // not fetched in dashboard query
     aerobic_efficiency: getAerobicEfficiency(a),
     cardiac_decoupling_pct: a.cardiac_decoupling_pct,
   }));

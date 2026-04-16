@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-15 — Insights section on landing page
+
+**Type:** Feature
+**Reported by:** Internal — product review
+**User feedback:** N/A
+**Root cause:** Landing page sold the channel (SMS + Strava) and the plan/complement concepts but had no concrete examples of what Dean actually analyzes. The value prop was abstract where it needed to be specific.
+**Fix / Change:** Added a new "Dean reads the signals most coaches miss" section between the comparison table and the value props. Shows 3 static iMessage-style cards with real Dean messages demonstrating: (1) ACWR injury risk spike, (2) zone 3 trap / easy run HR compliance, (3) post-run pace fade execution. Each card uses the existing iMessage visual style (SF Pro font, gray/blue bubbles, iPhone-like header). Built as an inline `InsightCard` component in `page.tsx` — no new file needed.
+**Files changed:** `src/app/page.tsx`
+
+## 2026-04-15 — Expanded post-run and weekly recap analytics
+
+**Type:** Feature
+**Reported by:** Internal — product review of core coaching touchpoints
+**User feedback:** N/A
+**Root cause:** The longitudinal analysis block only had three signals (load trend, aerobic efficiency, cardiac drift). Several high-value signals derivable from existing Strava data were never surfaced: ACWR injury risk, long run progression, intensity distribution (zone 3 trap), cadence, elevation load, and per-run pace execution.
+**Fix / Change:**
+- Added `computeACWR` — acute:chronic workload ratio (7-day vs 28-day rolling). Flags >1.3 as injury risk zone.
+- Added `computeLongRunProgression` — tracks longest run per week over 8 weeks. Flags stagnation (4+ week plateau) and overreaching (>25% single-week jump).
+- Added `computeIntensityDistribution` — classifies runs by HR intensity relative to observed max HR. Flags when >50% of runs are in the moderate "gray zone" (common recreational runner mistake).
+- Added `computeCadenceTrend` — average spm over recent runs. Flags <170 spm (overstriding risk).
+- Added `computeElevationLoadTrend` — weekly vertical gain trend. Shown when avg >500ft/week (trail/mountain runners).
+- Added `buildRunExecutionAnalysis` — analyzes per-mile Strava splits for pace fade. Injected into post_run user message when a significant fade or notable negative split is detected.
+- Extended `ActivityForAnalytics` interface to include `max_heartrate`, `elevation_gain`, `average_cadence`.
+- Added `max_heartrate` to the activities DB query in route.ts.
+- All new functions have full test coverage (27 tests in training-analytics.test.ts).
+**Files changed:** `src/lib/training-analytics.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-analytics.test.ts`
+
 ## 2026-04-15 — Plan generation and import accuracy fixes
 
 **Type:** Bug Fix / Improvement
