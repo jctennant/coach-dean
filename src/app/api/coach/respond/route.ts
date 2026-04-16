@@ -632,8 +632,12 @@ Write 1-2 sentences: briefly acknowledge you have the plan (you can mention the 
  * @param partialWeekTarget - When set (> 0), re-applies this value as weekly_mileage_target
  *   after syncArcCurrentWeek runs, preserving the partial-week onboard total
  *   (miles already logged + miles Dean prescribed for remaining days).
+ * @param skipArcRebase - When true, syncArcCurrentWeek will patch week 1 metadata
+ *   (sessions, long run, notes) but will NOT rebase future arc weeks. Use this for
+ *   partial-week onboards where Strava avg was the arc base — the arc is already
+ *   correctly calibrated and the lower session count just reflects fewer remaining days.
  */
-async function handleSyncSessions(userId: string, partialWeekTarget: number | null): Promise<NextResponse> {
+async function handleSyncSessions(userId: string, partialWeekTarget: number | null, skipArcRebase?: boolean): Promise<NextResponse> {
   const [userResult, profileResult, stateResult, convResult] = await Promise.all([
     supabase.from("users").select("id, name").eq("id", userId).single(),
     supabase.from("training_profiles").select("goal").eq("user_id", userId).single(),
@@ -677,6 +681,7 @@ async function handleSyncSessions(userId: string, partialWeekTarget: number | nu
     state.current_phase ?? "base",
     profile.goal ?? "",
     user.name ?? null,
+    skipArcRebase,
   );
 
   // Re-apply the partial-week onboard total if provided — syncArcCurrentWeek overwrites
@@ -802,7 +807,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
 
   if (trigger === "sync_sessions") {
-    return await handleSyncSessions(userId, body.partialWeekTarget ?? null);
+    return await handleSyncSessions(userId, body.partialWeekTarget ?? null, body.skipArcRebase ?? false);
   }
 
   // Injury hold/clear: lightweight state mutations, no Claude call needed.
@@ -2086,7 +2091,10 @@ Weekly total: ${mileageRange}
               await supabase.from("training_state")
                 .update({ weekly_plan_sessions: sessions as unknown as Json })
                 .eq("user_id", userId);
-              await syncArcCurrentWeek(userId, 1, "base", (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
+              // Skip rebase for partial-week onboards with Strava history — the arc is already
+              // calibrated from the Strava avg; the lower session count just reflects fewer days.
+              const skipRebaseForPartial = isPartialWeek && avgWeeklyMileage != null;
+              await syncArcCurrentWeek(userId, 1, "base", (profile?.goal as string) ?? "", (user.name as string | null) ?? null, skipRebaseForPartial);
               if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
                 await supabase.from("training_state")
                   .update({ weekly_mileage_target: weekMileageTarget })
@@ -2104,6 +2112,10 @@ Weekly total: ${mileageRange}
           // Pass partial-week target so syncArcCurrentWeek's session-sum doesn't clobber it.
           if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
             syncBody.partialWeekTarget = weekMileageTarget;
+          }
+          // Skip arc rebase for partial-week onboards with Strava history.
+          if (isPartialWeek && avgWeeklyMileage != null) {
+            syncBody.skipArcRebase = true;
           }
           await fetch(`${appUrl}/api/coach/respond`, {
             method: "POST",
@@ -3437,6 +3449,7 @@ async function syncArcCurrentWeek(
   phase: string,
   goal: string,
   athleteName?: string | null,
+  skipRebase?: boolean,
 ): Promise<void> {
   try {
     // Fetch the sessions that were just stored
@@ -3547,7 +3560,10 @@ Do not use the athlete's name. Be direct and practical. No filler. Return ONLY t
     const scaleFactor = originalWeek1Miles && actualMiles > 0 && originalWeek1Miles > 0
       ? actualMiles / originalWeek1Miles
       : 1.0;
-    const shouldRebase = currentWeekNum === 1 && Math.abs(scaleFactor - 1.0) > 0.05;
+    // Don't rebase when the caller signals the arc base is already correct (partial-week
+    // onboard with Strava avg as anchor). The lower session count just reflects fewer
+    // remaining days — scaling future weeks down would make the arc start below baseline.
+    const shouldRebase = !skipRebase && currentWeekNum === 1 && Math.abs(scaleFactor - 1.0) > 0.05;
     if (shouldRebase) {
       console.log(`[syncArcCurrentWeek] rebasing arc weeks 2+ — week 1 patched from ${originalWeek1Miles}mi to ${actualMiles}mi (scale ×${scaleFactor.toFixed(3)})`);
     }
