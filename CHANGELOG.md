@@ -4,6 +4,52 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-16 — Dashboard redesign: four-section layout
+
+**Type:** Improvement
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Dashboard pivot from "AI running coach that builds plans" to "Get faster without getting injured" — existing layout had wrong information hierarchy and lacked clear health/injury signals.
+**Fix / Change:** Complete dashboard redesign into four sections: Summary (status signal + weekly progress bar + race chips + Dean's Focus), Injury & Load (12-week bar chart with redesigned green/orange colors + strength/recovery card from LLM), Fitness Progress (aerobic efficiency sparkline + training zones ribbon + HR zones + paces in one card), Last 7 Days (run list). Removed: tabs, Base Phase header badge, race finish projections. Updated `dashboard-insights.ts` to also generate strength/recovery exercises when injury notes are present.
+**Files changed:** `src/app/dashboard/page.tsx`, `src/lib/dashboard-insights.ts`
+
+---
+
+## 2026-04-15 — Collapse dashboard to single-scroll page
+
+**Type:** Improvement
+**Reported by:** Internal
+**User feedback:** "Cut entirely: Race projections, Training Overview text blurb, HR zones Z1–Z5 table, Training zones scatter plot, Full training arc (W1–W13 list). Stack rank for the single tab: Dean's Focus / Pace targets / Goal race banner(s) / Last 7 days / Weekly mileage + load warning / Aerobic efficiency trend. Plan upload / 'no plan yet' → move to onboarding or a settings page entirely."
+**Root cause:** The two-tab structure still carried too many low-signal elements (race time predictions, zone scatter plots, full training arc list, HR zone table) and the Plan Upload UI had no place on a coaching dashboard.
+**Fix / Change:**
+- Removed tabs entirely; dashboard is now a single vertically-scrolling page
+- Stack rank (top to bottom): Dean's Focus callouts → Pace targets → Goal race banner(s) → Last 7 days → Weekly mileage chart + ACWR load warning → Aerobic efficiency trend
+- Cut: race time projections, Training Overview blurb, HR zones table, training zones scatter, full training arc list, plan upload UI
+- Goal race condensed to slim banner: name + date + days countdown (no prediction)
+- Removed `DashboardTabs` client component from page; `tab-container.tsx` and `plan-tab.tsx` now unused
+- Removed DB query for `training_plans` table (no longer needed in dashboard)
+- Removed `predictRaceTime`, `estimateVDOT`, `predictTimeFromVDOT` imports
+**Files changed:** `src/app/dashboard/page.tsx`
+
+---
+
+## 2026-04-15 — Reorganize dashboard into "This Week" and "Season" tabs
+
+**Type:** Improvement
+**Reported by:** Internal
+**User feedback:** "Tab 1 = 'What should I do this week and how am I doing?' Tab 2 = 'Is the training working and where am I headed?' The day-by-day schedule is doing a lot of visual work for information that becomes stale the moment someone shuffles a run."
+**Root cause:** Original two tabs (Overview / Training Plan) mixed time horizons — fitness trends and plan arc were split, race countdown was buried in two places, and the day-by-day weekly grid was expensive to generate and quickly became stale.
+**Fix / Change:**
+- Renamed tabs: "Overview" → "This Week", "Training Plan" → "Season"
+- Tab 1 (This Week): Weekly anchors card (week target + long run target + quality session(s) + done-this-week progress bar), load spike warning, Dean's focus callouts, last 7 days
+- Tab 2 (Season): Training overview summary opener, goal race cards + predicted finish, aerobic efficiency trend, weekly mileage chart, training zones scatter, pace zones reference, full training arc (W1–WN)
+- Removed the day-by-day Mon/Tue/Wed schedule grid from the plan tab entirely
+- Removed `buildDailyPlan` / `buildDailyPlanFromSessions` helpers (no longer needed)
+- The analysis summary blurb ("executing hard workouts well but...") moved from Tab 1 top to the Season tab opener where it provides altitude-view context
+**Files changed:** `src/app/dashboard/tab-container.tsx`, `src/app/dashboard/plan-tab.tsx`, `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-15 — Fix wrong training paces for trail-race Strava users with road PRs
 
 **Type:** Bug Fix

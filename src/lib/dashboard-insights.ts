@@ -5,6 +5,7 @@
  * Fetches training context from the DB, calls Haiku to produce:
  *   - A 1–2 sentence context summary of where the athlete is in training
  *   - 3 ranked focus areas: the highest-leverage things to work on right now
+ *   - (when injury notes exist) strength & recovery recommendations
  * Stores the result as JSON in training_profiles.dashboard_insights.
  *
  * Never called at dashboard render time — the dashboard just reads the stored value.
@@ -18,9 +19,29 @@ export type DashboardFocusItem = {
   text: string;
 };
 
+export type StrengthExercise = {
+  name: string;
+  specs: string;   // e.g. "3 × 15 each leg · slow lowering (3 sec down)"
+  reason: string;  // italic explanatory note
+};
+
+export type CrossTraining = {
+  emoji: string;
+  name: string;    // e.g. "Easy bike — Thursday"
+  desc: string;    // e.g. "45–60 min easy. Replaces your easy run…"
+};
+
+export type StrengthRecovery = {
+  intro: string;           // 1–2 sentence context from injury history
+  frequency: string;       // e.g. "2× this week"
+  exercises: StrengthExercise[];
+  cross_training?: CrossTraining;
+};
+
 export type DashboardInsights = {
   summary: string;
   focuses: DashboardFocusItem[];
+  strength_recovery?: StrengthRecovery;
   generated_at: string;
   trigger: string;
 };
@@ -58,6 +79,8 @@ export async function generateAndStoreDashboardInsights(
       .map(m => m.content as string | null)
       .filter((c): c is string => !!c);
 
+    const hasInjuryNotes = !!profile?.injury_notes?.trim();
+
     const profileCtx = [
       profile?.goal ? `Goal: ${profile.goal}` : null,
       profile?.race_date ? `Race date: ${profile.race_date}` : null,
@@ -74,17 +97,52 @@ export async function generateAndStoreDashboardInsights(
       .map((m, i) => `[${i + 1}] ${m.slice(0, 400)}`)
       .join("\n");
 
+    const strengthRecoverySchema = hasInjuryNotes ? {
+      strength_recovery: {
+        type: "object" as const,
+        description: "Strength and recovery plan based on injury history. Only include when there are specific injury notes.",
+        properties: {
+          intro: { type: "string", description: "1–2 sentences tying exercises to the athlete's specific injury pattern" },
+          frequency: { type: "string", description: "Session frequency e.g. '2× this week'" },
+          exercises: {
+            type: "array",
+            maxItems: 4,
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "Exercise name" },
+                specs: { type: "string", description: "Sets/reps/cues, e.g. '3 × 15 each leg · slow lowering (3 sec down)'" },
+                reason: { type: "string", description: "Short italic rationale linking to the injury site" },
+              },
+              required: ["name", "specs", "reason"],
+            },
+          },
+          cross_training: {
+            type: "object",
+            description: "Optional cross-training alternative for one easy run",
+            properties: {
+              emoji: { type: "string", description: "Single emoji for the activity" },
+              name: { type: "string", description: "Activity + day, e.g. 'Easy bike — Thursday'" },
+              desc: { type: "string", description: "1–2 sentence description of benefit" },
+            },
+            required: ["emoji", "name", "desc"],
+          },
+        },
+        required: ["intro", "frequency", "exercises"],
+      },
+    } : {};
+
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 512,
+      max_tokens: 768,
       system: `You are Dean, an AI running coach. Analyze this athlete's training context and recent coaching history to generate a personalized dashboard.
 
-Your output has two parts:
+Your output has two required parts:
 1. Context (1–2 sentences): where the athlete is in their training right now — phase, what's working, the single most important variable to watch. Be specific and concrete, not generic. Reference actual numbers or patterns if available.
-2. Three prioritized focus areas — the highest-leverage things this athlete should do right now to improve and hit their goal. These can cover: pacing discipline, specific workout types to add, strength or mobility work, load management, injury prevention, recovery habits, or race-specific prep. Synthesize from the training data AND coaching history — don't just repeat recent reminders verbatim.
+2. Three prioritized focus areas — the highest-leverage things this athlete should do right now. Rank by impact: #1 = most important. Each focus: short label (1–2 words) + action text under 15 words, second person, direct.
+${hasInjuryNotes ? `
+3. Strength & recovery plan — because this athlete has injury notes, include specific exercises targeting their injury site. Tie each exercise to the injury pattern. Include 2–4 exercises with sets/reps/cues and a short italic rationale. Optionally suggest a cross-training alternative for one easy run day.` : ""}
 
-Rank by impact: #1 = most important right now.
-Each focus: short label (1–2 words) + action text under 15 words, second person, direct ("keep your", "add two", "your X needs").
 Return an empty focuses array if there's insufficient data rather than inventing generic advice.`,
       messages: [{
         role: "user",
@@ -112,6 +170,7 @@ Return an empty focuses array if there's insufficient data rather than inventing
                 required: ["label", "text"],
               },
             },
+            ...strengthRecoverySchema,
           },
           required: ["summary", "focuses"],
         },
@@ -124,12 +183,17 @@ Return an empty focuses array if there's insufficient data rather than inventing
     );
     if (!block || block.type !== "tool_use") return;
 
-    const extracted = block.input as { summary?: string; focuses?: DashboardFocusItem[] };
+    const extracted = block.input as {
+      summary?: string;
+      focuses?: DashboardFocusItem[];
+      strength_recovery?: StrengthRecovery;
+    };
     if (!extracted.summary?.trim()) return;
 
     const insights: DashboardInsights = {
       summary: extracted.summary.trim(),
       focuses: (extracted.focuses ?? []).slice(0, 3),
+      ...(extracted.strength_recovery ? { strength_recovery: extracted.strength_recovery } : {}),
       generated_at: new Date().toISOString(),
       trigger,
     };

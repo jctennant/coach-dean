@@ -7,7 +7,6 @@
 "use client";
 
 import { useState } from "react";
-import { parseKeyWorkoutMiles } from "@/lib/parse-key-workout-miles";
 import { PlanImportForm } from "./plan-import-form";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -103,77 +102,6 @@ const STANDARD_BUCKET_MILES: Record<string, number> = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-type DayWorkout = {
-  day: string;
-  shortDay: string;
-  type: "long" | "key" | "easy" | "rest" | "optional";
-  label: string;
-  miles: number | null;
-};
-
-function buildDailyPlan(week: PlanWeek, trainingDays: string[]): DayWorkout[] {
-  const normalized = trainingDays.map(d => d.charAt(0).toUpperCase() + d.slice(1).toLowerCase());
-  const sorted = [...normalized].sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
-  const longRunDay = sorted[sorted.length - 1];
-  const keyWorkoutDay = sorted.length > 2 ? sorted[Math.floor((sorted.length - 1) / 2)] : null;
-  const easyDays = sorted.filter(d => d !== longRunDay && d !== keyWorkoutDay);
-
-  const longRunMi = week.long_run_target;
-  const isEasyKeyWorkout = /^easy/i.test(week.key_workout || "");
-  const parsedKeyMi = keyWorkoutDay && week.key_workout && !isEasyKeyWorkout
-    ? parseKeyWorkoutMiles(week.key_workout) : null;
-  const keyWorkoutMi = keyWorkoutDay && !isEasyKeyWorkout
-    ? (parsedKeyMi !== null ? parsedKeyMi : Math.round(week.mileage_target * 0.20 * 2) / 2)
-    : 0;
-  const totalEasy = Math.max(0, week.mileage_target - longRunMi - keyWorkoutMi);
-  const easyDayCount = isEasyKeyWorkout ? sorted.length - 1 : easyDays.length;
-  const easyMi = easyDayCount > 0 ? Math.round((totalEasy / easyDayCount) * 10) / 10 : 0;
-
-  return DAY_ORDER.map(day => {
-    const shortDay = DAY_SHORT[day]!;
-    if (!sorted.includes(day)) return { day, shortDay, type: "rest", label: "Rest", miles: null };
-    if (day === longRunDay) return { day, shortDay, type: "long", label: "Long run", miles: longRunMi };
-    if (day === keyWorkoutDay) {
-      if (isEasyKeyWorkout) return { day, shortDay, type: "easy", label: "Easy run", miles: easyMi };
-      return { day, shortDay, type: "key", label: week.key_workout || "Key workout", miles: keyWorkoutMi };
-    }
-    return { day, shortDay, type: "easy", label: "Easy run", miles: easyMi };
-  });
-}
-
-function buildDailyPlanFromSessions(sessions: PlanSession[]): DayWorkout[] {
-  const sessionByDay = new Map(sessions.map(s => [s.day, s]));
-
-  function classifySession(label: string): "long" | "key" | "easy" | "rest" {
-    const l = label.toLowerCase();
-    if (l.includes("long run")) return "long";
-    if (l.startsWith("easy")) return "easy";
-    if (l.includes("tempo") || l.includes("interval") || l.includes("repeat") ||
-        l.includes("stride") || l.includes("threshold") || l.includes("fartlek") ||
-        l.includes("vo2") || l.includes("hills")) return "key";
-    return "easy";
-  }
-
-  function parseMiles(label: string): number | null {
-    const miMatch = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
-    if (miMatch) return parseFloat(miMatch[1]!);
-    const kmMatch = label.match(/(\d+(?:\.\d+)?)\s*km(?!\w)/i);
-    if (kmMatch) return parseFloat(kmMatch[1]!) / 1.60934;
-    return null;
-  }
-
-  return DAY_ORDER.map(day => {
-    const shortDay = DAY_SHORT[day]!;
-    const dayShort = Object.entries(DAY_SHORT_TO_FULL).find(([, v]) => v === day)?.[0];
-    const session = dayShort ? sessionByDay.get(dayShort) : undefined;
-    if (!session) return { day, shortDay, type: "rest", label: "Rest", miles: null };
-    if (session.optional) {
-      return { day, shortDay, type: "optional" as const, label: session.label, miles: parseMiles(session.label) };
-    }
-    return { day, shortDay, type: classifySession(session.label), label: session.label, miles: parseMiles(session.label) };
-  });
-}
 
 function fmtDist(miles: number, useMetric: boolean): string {
   if (useMetric) return `${Math.round(miles * 1.60934 * 10) / 10} km`;
@@ -333,19 +261,6 @@ export function PlanTab({
 
   const allRaceWeekSet = new Set(allRaceWeekNums);
   const currentWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
-  const effectiveTrainingDays = isOverrideActive ? overrideDays : trainingDays;
-
-  const visiblePlanSessions = weeklyPlanSessions && planCreatedDateStr
-    ? weeklyPlanSessions.filter(s => s.date >= planCreatedDateStr)
-    : weeklyPlanSessions ?? null;
-
-  const dailyPlan = visiblePlanSessions && visiblePlanSessions.length > 0
-    ? buildDailyPlanFromSessions(visiblePlanSessions)
-    : (currentWeek && effectiveTrainingDays && effectiveTrainingDays.length > 0
-      ? buildDailyPlan(currentWeek, effectiveTrainingDays)
-      : null);
-
-  const currentWeekActualMiles = actualMilesByWeek[currentWeekNum] ?? null;
 
   return (
     <div className="space-y-4">
@@ -392,100 +307,6 @@ export function PlanTab({
       {/* Upcoming races (when there are multiple) */}
       {upcomingRaces.length > 1 && (
         <UpcomingRacesList races={upcomingRaces} useMetric={useMetric} />
-      )}
-
-      {/* Current week detail */}
-      {currentWeek && (
-        <div className="bg-white rounded-2xl border-2 border-gray-900 p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">This Week</span>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PHASE_COLORS[currentWeek.phase] ?? "bg-gray-100 text-gray-700"}`}>
-              {PHASE_LABELS[currentWeek.phase] ?? currentWeek.phase}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="text-xs text-gray-400 mb-0.5">Weekly target</p>
-              {currentWeek.mileage_target_min != null && currentWeek.mileage_target_max != null ? (
-                <p className="text-2xl font-bold text-gray-900">
-                  {fmtDist(currentWeek.mileage_target_min, useMetric)}
-                  <span className="text-lg font-normal text-gray-400">–</span>
-                  {fmtDist(currentWeek.mileage_target_max, useMetric)}
-                </p>
-              ) : (
-                <p className="text-2xl font-bold text-gray-900">
-                  {useMetric ? Math.round(weeklyMileageTarget * 1.60934 * 10) / 10 : weeklyMileageTarget}
-                  {" "}<span className="text-sm font-normal text-gray-500">{distUnit}</span>
-                </p>
-              )}
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 mb-0.5">Long run</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {useMetric ? Math.round(currentWeek.long_run_target * 1.60934 * 10) / 10 : currentWeek.long_run_target}
-                {" "}<span className="text-sm font-normal text-gray-500">{distUnit}</span>
-              </p>
-            </div>
-          </div>
-          {/* Miles logged this week */}
-          {currentWeekActualMiles !== null && currentWeekActualMiles > 0 && weeklyMileageTarget > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-400">Done this week</span>
-                <span className="text-xs font-semibold text-gray-700">
-                  {fmtDist(Math.round(currentWeekActualMiles * 10) / 10, useMetric)} / {fmtDist(weeklyMileageTarget, useMetric)}
-                </span>
-              </div>
-              <div className="w-full bg-gray-100 rounded-full h-1.5">
-                <div
-                  className={`h-1.5 rounded-full ${currentWeekActualMiles >= weeklyMileageTarget ? "bg-green-500" : "bg-gray-900"}`}
-                  style={{ width: `${Math.min(100, (currentWeekActualMiles / weeklyMileageTarget) * 100)}%` }}
-                />
-              </div>
-            </div>
-          )}
-          {/* Daily breakdown */}
-          {dailyPlan ? (
-            <div className="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden">
-              {dailyPlan.map(d => {
-                const dayIdx = DAY_ORDER.indexOf(d.day);
-                const isPastDay = dayIdx < todayDayIdx;
-                const isOptional = d.type === "optional";
-                const isDimmed = d.type === "rest" || isPastDay;
-                const rowBg = isDimmed || isOptional ? "bg-gray-50" : "bg-white";
-                const dayColor = isDimmed ? "text-gray-300" : isOptional ? "text-gray-400" : "text-gray-500";
-                const labelColor = isDimmed ? "text-gray-300" : isOptional ? "text-gray-400 italic" : "text-gray-600";
-                const valueColor = isDimmed ? "text-gray-300" : isOptional ? "text-gray-400" : d.type === "key" ? "font-semibold text-gray-900" : "text-gray-500";
-                return (
-                  <div key={d.day} className={`flex items-center justify-between px-3 py-2 ${rowBg}`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`text-xs font-semibold w-7 shrink-0 ${dayColor}`}>{d.shortDay}</span>
-                      <span className={`text-sm leading-snug ${labelColor}`}>{d.label}</span>
-                    </div>
-                    {d.miles !== null && (
-                      <span className={`text-sm shrink-0 ml-2 ${valueColor}`}>
-                        {fmtDist(d.miles, useMetric)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            currentWeek.key_workout && (
-              <div className="bg-gray-50 rounded-xl p-3">
-                <p className="text-xs text-gray-400 mb-1">Key workout</p>
-                <p className="text-sm text-gray-800 font-medium">{currentWeek.key_workout}</p>
-              </div>
-            )
-          )}
-          {currentWeek.notes && (
-            <div className="border-t border-gray-100 pt-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Coach&apos;s Note</p>
-              <p className="text-sm text-gray-600 leading-relaxed">{currentWeek.notes}</p>
-            </div>
-          )}
-        </div>
       )}
 
       {/* Full training arc */}

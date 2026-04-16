@@ -991,6 +991,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
         const annotationLocation = onbData.strava_city && onbData.strava_state
           ? { city: onbData.strava_city as string, state: onbData.strava_state as string, timezone: (user.timezone as string) || "America/New_York" }
           : undefined;
+        const dupTz = (user.timezone as string) || "America/New_York";
+        const dupTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: dupTz }).format(new Date());
+        const dupSessions = (state?.weekly_plan_sessions as Array<{ date: string; label: string }> | null) ?? [];
+        const dupTodaySession = dupSessions.find(s => s.date === dupTodayStr);
         await annotateStravaActivity(userId, activityId, {
           activityData,
           weekMileageSoFar,
@@ -1000,6 +1004,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
           splits: storedSplits,
           isAnalystMode: (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst',
+          plannedSessionLabel: dupTodaySession?.label ?? null,
         }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
       }
       return NextResponse.json({ ok: true, skipped: "duplicate_post_run" });
@@ -1867,6 +1872,9 @@ Weekly total: ${mileageRange}
     const annotationLocation = stravaCity && stravaState
       ? { city: stravaCity, state: stravaState, timezone: userTimezone }
       : undefined;
+    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
+    const planSessions = (state?.weekly_plan_sessions as Array<{ date: string; label: string }> | null) ?? [];
+    const todaySession = planSessions.find(s => s.date === todayDateStr);
     await annotateStravaActivity(userId, activityId, {
       activityData,
       weekMileageSoFar,
@@ -1876,6 +1884,7 @@ Weekly total: ${mileageRange}
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
       isAnalystMode: false,
+      plannedSessionLabel: todaySession?.label ?? null,
     }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
   }
 
@@ -4266,7 +4275,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   const factsBlock = (() => {
     const hasStrava = !!(user.strava_athlete_id as number | null);
     const milogged = hasStrava || weekMileageSoFar > 0
-      ? `${tsMi(weekMileageSoFar)} logged (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})${projectedWeekMiles > weekMileageSoFar ? ` | Projected: ${tsMi(projectedWeekMiles)}` : ""}`
+      ? `${tsMi(weekMileageSoFar)} logged (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})${trigger !== "post_run" && projectedWeekMiles > weekMileageSoFar ? ` | Projected: ${tsMi(projectedWeekMiles)}` : ""}`
       : "not tracked (no Strava)";
     const easyRange = easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD";
     const raceLine = raceIsUpcoming && profileRaceDaysUntil !== null
@@ -5197,7 +5206,7 @@ function buildUserMessage(
       const splitCount = (activityForClaude as { summary?: { splits?: unknown[] } })?.summary?.splits?.length ?? 0;
       const dataGuards: string[] = [];
       if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
-      if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead.");
+      if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead. CRITICAL: Do NOT state how many intervals, repeats, or reps were completed (e.g. '5x800m', '6 repeats', '4 strides'). Without lap data you cannot know the rep count — the athlete knows their own workout and will immediately notice if you get it wrong. Describe the workout structure generically (e.g. 'your interval session showed strong pace variation') without citing a specific count.");
       if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference specific HR values.");
       // Power/watt guard: only present when there's no actual power data in the DB record.
       // If average_watts is populated (power meter, Zwift, etc.) Claude can reference the overall average.
@@ -5759,6 +5768,78 @@ interface AnnotationContext {
   // splits_standard from activityData.summary — already fetched by the webhook
   splits: Array<Record<string, unknown>>;
   isAnalystMode?: boolean;
+  // Workout-type context for metric selection
+  plannedSessionLabel: string | null;
+}
+
+type WorkoutKind = "easy" | "long" | "tempo" | "interval" | "mountain" | "race";
+
+function detectWorkoutKind(
+  workoutType: number,
+  activityType: string,
+  elevGainFt: number,
+  distanceMiles: number,
+  plannedLabel: string | null
+): WorkoutKind {
+  if (workoutType === 1) return "race";
+  const lower = (plannedLabel ?? "").toLowerCase();
+  if (/interval|repeat|\dx\d|\d+x\d{3}|strides|fartlek/.test(lower)) return "interval";
+  if (/tempo|threshold|cruise|lactate/.test(lower)) return "tempo";
+  if (/\blong\b/.test(lower)) return "long";
+  if (activityType === "TrailRun" && distanceMiles > 0 && elevGainFt / distanceMiles > 150) return "mountain";
+  if (workoutType === 2) return "long";
+  if (workoutType === 3) return "interval";
+  return "easy";
+}
+
+/**
+ * Compute time (minutes) spent in an HR zone defined by [lowPct, highPct) of maxHR.
+ * Pass highPct=1.0 for Zone 5 (no upper bound). Returns null if splits lack HR data.
+ */
+function computeZoneTime(
+  splits: Array<Record<string, unknown>>,
+  maxHR: number,
+  lowPct: number,
+  highPct = 1.0
+): number | null {
+  const low = maxHR * lowPct;
+  const high = maxHR * highPct;
+  let zoneSecs = 0;
+  let counted = 0;
+  for (const split of splits) {
+    const avgHR = split.average_heartrate as number | null;
+    const movingTime = split.moving_time as number | null;
+    if (avgHR == null || !movingTime) continue;
+    counted++;
+    if (avgHR >= low && avgHR < high) zoneSecs += movingTime;
+  }
+  if (counted === 0) return null;
+  return Math.round(zoneSecs / 60);
+}
+
+/**
+ * Compute % of run time in Zone 1-2 (below z2UpperPct of maxHR, default 75%).
+ * Returns null if splits lack HR data.
+ */
+function computeZone12Pct(
+  splits: Array<Record<string, unknown>>,
+  maxHR: number,
+  z2UpperPct = 0.75
+): number | null {
+  const threshold = maxHR * z2UpperPct;
+  let z12Secs = 0;
+  let totalSecs = 0;
+  let counted = 0;
+  for (const split of splits) {
+    const avgHR = split.average_heartrate as number | null;
+    const movingTime = split.moving_time as number | null;
+    if (avgHR == null || !movingTime) continue;
+    counted++;
+    totalSecs += movingTime;
+    if (avgHR < threshold) z12Secs += movingTime;
+  }
+  if (counted === 0 || totalSecs === 0) return null;
+  return Math.round((z12Secs / totalSecs) * 100);
 }
 
 async function annotateStravaActivity(
@@ -5772,7 +5853,7 @@ async function annotateStravaActivity(
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
   const accessToken = await getValidAccessToken(userId);
-  const [stravaActivity, activityWeather] = await Promise.all([
+  const [stravaActivity, activityWeather, maxHRRow] = await Promise.all([
     getActivity(accessToken, stravaActivityId),
     userLocation
       ? fetchActivityWeather(
@@ -5782,7 +5863,16 @@ async function annotateStravaActivity(
           ((activityData?.start_date as string | null) ?? new Date().toISOString()).slice(0, 10)
         ).catch(() => null)
       : Promise.resolve(null),
+    supabase
+      .from("activities")
+      .select("max_heartrate")
+      .eq("user_id", userId)
+      .not("max_heartrate", "is", null)
+      .order("max_heartrate", { ascending: false })
+      .limit(1)
+      .single(),
   ]);
+  const userMaxHR = (maxHRRow.data?.max_heartrate as number | null) ?? null;
   const existingDescription = (stravaActivity.description as string) || "";
 
   // Activity stats
@@ -5879,83 +5969,85 @@ async function annotateStravaActivity(
     .single();
   const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
 
-  // Header line — coachdean.ai at top as branding anchor
+  // Header: emoji + primary race countdown (or week label if no race)
   const weekLabel = currentWeek
     ? totalWeeks ? `Week ${currentWeek} of ${totalWeeks}` : `Week ${currentWeek}`
     : null;
-  const raceShortLabels = raceData.map(r => r.shortLabel);
-  const headerMeta = [weekLabel, ...raceShortLabels].filter(Boolean).join(" · ");
-  const headerLine = headerMeta ? `${emoji} coachdean.ai — ${headerMeta}` : `${emoji} coachdean.ai`;
+  const headerLabel = raceData.length > 0
+    ? `${emoji} ${raceData[0].shortLabel}`
+    : weekLabel
+    ? `${emoji} ${weekLabel}`
+    : emoji;
 
-  // Build LLM context for the coach note
-  const distanceDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
+  // Grade-adjusted avg pace (used by mountain + tempo fallback)
   const gaAvgPaceStr = gaSpeedMs
     ? (() => { const sec = metersPerUnit / gaSpeedMs; return `${Math.floor(sec / 60)}:${Math.round(sec % 60).toString().padStart(2, "0")}${unitLabel}`; })()
     : null;
-  const weatherLine = activityWeather
-    ? `Weather: ${activityWeather.tempF}°F, ${activityWeather.conditions}${activityWeather.windMph >= 15 ? `, ${activityWeather.windMph}mph wind` : ""}`
-    : null;
 
-  // Metric interpretation guides passed to the LLM so it can write plain-English context
-  const decouplingContext = decouplingLine
-    ? `${decouplingLine} (guide: <5% = held steady, normal training tomorrow fine; 5–10% = moderate drift, easy day; >10% = significant drift, rest or very easy)`
-    : null;
-  const efficiencyContext = efficiencyLine
-    ? `${efficiencyLine} (guide: higher = more economical — rising trend over weeks = improving fitness; dropping trend = fatigue accumulating or overreaching)`
-    : null;
+  // Workout-type-specific metric line
+  const { plannedSessionLabel } = ctx;
+  const workoutKind = detectWorkoutKind(
+    workoutType,
+    activityType,
+    elevGainFt,
+    distanceMiles,
+    plannedSessionLabel
+  );
 
-  const weekContext = isAnalystMode
-    ? `This week's mileage: ${weekMilesDisplay} (no weekly target — Analyst Mode)`
-    : `Week so far: ${weekMilesDisplay}${weekTargetDisplay ? ` / ${weekTargetDisplay} target` : ""}`;
+  let metricLine: string | null = null;
+  switch (workoutKind) {
+    case "easy": {
+      // % of run time in Zone 1-2 (below 75% of max HR). Thresholds per user spec:
+      // 90%+ → ✓ (true recovery stimulus), 80-89% → acceptable, 70-79% → moderate, <70% → ⚠
+      const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR) : null;
+      if (z12Pct !== null) {
+        const indicator = z12Pct >= 90 ? " ✓" : z12Pct < 70 ? " ⚠" : "";
+        metricLine = `Time in easy zone (Z1-Z2): ${z12Pct}%${indicator}`;
+      } else if (decouplingPct !== null) {
+        // Fallback: decoupling tells aerobic steadiness when no HR in splits
+        metricLine = `HR drift: ${decouplingPct.toFixed(0)}% (low = good)`;
+      }
+      break;
+    }
+    case "long": {
+      // Cardiac decoupling is the key long-run metric — shows aerobic system held under fatigue
+      if (decouplingPct !== null) {
+        const note = decouplingPct >= 10 ? " — easy day tomorrow" : "";
+        metricLine = `HR drift: ${decouplingPct.toFixed(0)}%${note} (low = good)`;
+      } else {
+        // Fallback: Z1-2 % if we have HR zone data
+        const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR) : null;
+        if (z12Pct !== null) {
+          const indicator = z12Pct >= 90 ? " ✓" : z12Pct < 70 ? " ⚠" : "";
+          metricLine = `Time in easy zone (Z1-Z2): ${z12Pct}%${indicator}`;
+        }
+      }
+      break;
+    }
+    case "tempo":
+    case "interval": {
+      // Quality work → combined Zone 4+5 time (≥80% maxHR)
+      const qualMins = userMaxHR ? computeZoneTime(splits, userMaxHR, 0.80, 1.0) : null;
+      if (qualMins !== null && qualMins > 0) {
+        metricLine = `Quality effort (Z4-Z5): ${qualMins}min`;
+      } else if (gaAvgPaceStr) {
+        metricLine = `Grade-adj pace: ${gaAvgPaceStr}`;
+      }
+      break;
+    }
+    case "mountain": {
+      if (gaAvgPaceStr) metricLine = `Grade-adj pace: ${gaAvgPaceStr}`;
+      break;
+    }
+    case "race":
+      break; // performance speaks for itself
+  }
 
-  const notePrompt = [
-    `Activity: ${distanceDisplay}${pace ? ` @ ${pace}` : ""}${hr ? `, avg HR ${hr} bpm` : ""}${elevDisplay ? `, ${elevDisplay}` : ""}`,
-    gaAvgPaceStr ? `Grade-adjusted avg pace: ${gaAvgPaceStr}` : "",
-    bestGapLine ?? "",
-    decouplingContext ?? "",
-    efficiencyContext ?? "",
-    splitAnalysis ?? "",
-    weatherLine ?? "",
-    weekContext,
-    !isAnalystMode && raceLabels.length > 0 ? `Races: ${raceLabels.join(", ")}` : "",
-  ].filter(Boolean).join("\n");
-
-  const noteResponse = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 150,
-    messages: [
-      {
-        role: "user",
-        content: `You are Coach Dean. Write exactly 1–2 sentences for this athlete's Strava training log. Rules:
-1. Be specific to the numbers — no filler like "running smart and strong". Reference what the data actually shows.
-2. If weather was notably hot, cold, or windy, briefly acknowledge it as context for elevated HR or slower pace.
-3. For hilly runs, reference grade-adjusted effort over raw pace.
-4. Do NOT restate distance or average pace — Strava shows those already.
-5. Do NOT tell the athlete what to do tomorrow — they already have a training plan for that.
-
-${notePrompt}`,
-      },
-    ],
-  });
-  const deanNote = noteResponse.content[0].type === "text"
-    ? stripMarkdown(noteResponse.content[0].text.trim())
-    : "";
-
-  // Build the annotation block — efficiency and decoupling shown with brief labels
-  const weekLine = isAnalystMode
-    ? `Week: ${weekMilesDisplay}`
-    : weekTargetDisplay
-      ? `Week: ${weekMilesDisplay} / ${weekTargetDisplay}`
-      : `Week: ${weekMilesDisplay}`;
-  const block = [
-    headerLine,
-    weekLine,
-    decouplingLine,
-    efficiencyLine,
-    bestGapLine,
-    "",
-    deanNote,
-  ].filter((l): l is string => l !== null).join("\n");
+  // Block: header → metric → blank line → coachdean.ai branding
+  const blockLines: string[] = [headerLabel];
+  if (metricLine) blockLines.push(metricLine);
+  blockLines.push("", "coachdean.ai");
+  const block = blockLines.join("\n");
 
   const newDescription = existingDescription
     ? `${block}\n\n${existingDescription}`
