@@ -611,7 +611,6 @@ function summarizeCollected(data: Record<string, unknown>): string {
   if (data.terrain_type) lines.push(`Terrain: ${data.terrain_type}`);
   if (data.has_existing_plan != null) lines.push(`Has existing plan: ${data.has_existing_plan ? "yes" : "no"}`);
   if (data.external_plan_description) lines.push(`Current plan: ${data.external_plan_description}`);
-  if (data.wants_weekly_recap != null) lines.push(`Wants weekly recap: ${data.wants_weekly_recap ? "yes" : "no"}`);
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
   if (data.easy_pace) {
     const range = easyPaceRange(data.easy_pace as string);
@@ -681,7 +680,6 @@ Rules:
 - wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.
 - training_tools: array of tools mentioned (lowercase: 'runna', 'trainingpeaks', 'garmin', 'self_directed', 'other'). Null if not mentioned.
 - terrain_type: 'road', 'trail', or 'mixed' based on what athlete says. Null if not mentioned.
-- wants_weekly_recap: true if athlete says yes to weekly recap texts. False if they decline. Null if not asked yet.
 - other_notes: any training preferences, dislikes, or context not captured elsewhere (e.g. "loves hills", "hates treadmills", "prefers morning runs"). Do not duplicate what's in injury_notes or strength_habits.
 - race_elevation_gain_feet: if Dean's message mentions total elevation gain for the goal race (e.g. "33,000ft of gain", "8,500 feet of climbing"), extract that number in feet. Null if not mentioned.
 - race_elevation_loss_feet: if total descent is mentioned separately, extract it. Usually equal to gain for out-and-back or loop courses; null if not mentioned.
@@ -754,7 +752,6 @@ Rules:
           has_existing_plan: { type: ["boolean", "null"], description: "True if athlete currently follows a training plan (Runna, TP, etc.)" },
           wants_plan: { type: ["boolean", "null"], description: "When has_existing_plan is false: true if athlete wants Dean to build a training plan, false if they prefer to train without a set schedule (post-run feedback only). Null if not yet discussed." },
           external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'." },
-          wants_weekly_recap: { type: ["boolean", "null"], description: "True if athlete wants weekly recap SMS" },
           other_notes: { type: ["string", "null"] },
           race_elevation_gain_feet: { type: ["number", "null"], description: "Total elevation gain of the goal race course in feet. Extract from Dean's web search results if mentioned in the transcript." },
           race_elevation_loss_feet: { type: ["number", "null"], description: "Total elevation loss (descent) of the goal race course in feet." },
@@ -1140,7 +1137,6 @@ async function completeOnboarding(
   const hasExistingPlan = (data.has_existing_plan as boolean | null) ?? null;
   const wantsPlan = (data.wants_plan as boolean | null) ?? null;
   const externalPlanDescription = (data.external_plan_description as string | null) || null;
-  const wantsWeeklyRecap = (data.wants_weekly_recap as boolean | null) ?? true; // default on
   const crossTrainingActivities = (data.cross_training_activities as string[] | null) || (data.crosstraining_tools as string[] | null) || [];
   // Combine injury history + current niggles into injury_notes if not already set
   const injuryHistoryText = (data.injury_history as string | null) || null;
@@ -1165,7 +1161,7 @@ async function completeOnboarding(
         training_tools: trainingTools,
         terrain_type: terrainType,
         external_plan_notes: externalPlanDescription,
-        proactive_cadence: wantsWeeklyRecap ? "weekly_only" : "none",
+        proactive_cadence: "weekly_only",
         injury_notes: combinedInjuryNotes,
         goal_distance_miles: goalDistanceMiles,
         updated_at: new Date().toISOString(),

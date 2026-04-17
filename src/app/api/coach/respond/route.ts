@@ -1647,14 +1647,13 @@ Weekly total: ${mileageRange}
   }
   const typingStartMs = Date.now();
 
-  // For initial_plan, complete onboarding immediately: default cadence to nightly_reminders
-  // and clear onboarding_step so the user is treated as fully onboarded from here on.
+  // For initial_plan, complete onboarding immediately: clear onboarding_step so the user
+  // is treated as fully onboarded from here on.
   // Do this BEFORE the Claude call so routing is correct even if the function times out.
+  // Note: proactive_cadence is already set by completeOnboarding() based on wants_weekly_recap —
+  // do NOT overwrite it here.
   if (trigger === "initial_plan") {
-    await Promise.all([
-      supabase.from("users").update({ onboarding_step: null }).eq("id", userId),
-      supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", userId),
-    ]);
+    await supabase.from("users").update({ onboarding_step: null }).eq("id", userId);
   }
 
   const response = await anthropic.messages.create({
@@ -2023,8 +2022,8 @@ Weekly total: ${mileageRange}
         ? `${stravaCity}, ${stravaState}`
         : stravaCity ?? null;
       const howDoesItLookMsg = locationStr
-        ? `How does this look? Happy to adjust anything. I'll send you evening reminders before each session — I've got your location as ${locationStr} so I have the right timezone for you. Let me know if that needs correcting.`
-        : "How does this look? Happy to adjust anything. One quick thing — what city are you in? I want to make sure your reminders go out at the right time for you.";
+        ? `How does this look? Happy to adjust anything. I've got your location as ${locationStr} — let me know if that needs correcting.`
+        : "How does this look? Happy to adjust anything. One quick thing — what city are you in? I want to make sure I have the right timezone for you.";
       if (!locationStr) {
         // Park user on awaiting_timezone so their next reply is handled by handleTimezone
         await supabase.from("users").update({ onboarding_step: "awaiting_timezone" }).eq("id", userId);
@@ -3868,12 +3867,7 @@ ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports
 - If an athlete asks how to connect Strava, tell them to text "connect strava" and you'll send them the link.
 - If an athlete asks how to connect Garmin, Apple Health, or any other service, tell them clearly: "I only have Strava sync right now — just text me after your workouts and I'll track from there."
 - Communication: SMS only. Athletes can text "dashboard" at any time to receive a link to their full week-by-week training plan dashboard. There is no separate app, calendar export, or email — but the plan link is always available on request. When an athlete asks to see their plan, tell them to text "dashboard" and they'll get the link immediately — do NOT say you cannot send it.
-- Proactive reminders: three options are supported: (1) morning-of reminders, (2) evening-before reminders, (3) weekly Sunday overview only.
-- Morning reminders go out at approximately 6am PT / 7am MT / 8am CT / 9am ET. If an athlete asks what time, give them the appropriate time for their timezone.
-- Evening reminders go out at approximately 6pm PT / 7pm MT / 8pm CT / 9pm ET (the evening before the session).
-- Specific times beyond these (e.g. "8:30am", "noon", "3pm", "after work") are NOT supported — just morning or evening.
-- NEVER promise a reminder at a precise time — say "around 6am" or "evening before", not "at 8am exactly".
-- <rule>REMINDER TIME CONSTRAINT: If an athlete requests a specific time that isn't morning or evening (e.g. "3pm", "noon", "lunchtime"), immediately disclose the constraint — do NOT confirm the unsupported time first. Say something like: "I can send reminders around 6am [their timezone] or the evening before — which works better?" Surface the limitation upfront so the athlete can choose. Never confirm a time you cannot support and correct it later.</rule>
+- Proactive messages: weekly Sunday recap and post-run coaching notes after every Strava activity. Athletes can text at any time for Q&A and Dean will respond.
 - If asked about a feature that doesn't exist (a web dashboard, export, calendar sync, etc.), say you don't have that yet rather than fabricating instructions.
 ` : ""}
 

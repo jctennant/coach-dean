@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Removed nightly/morning reminder references from onboarding
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** "In onboarding, it seems like Dean is still saying he'll send nightly reminders before each session, but that's not the case anymore because we got rid of the nightly and morning round robins."
+**Root cause:** Three places still referenced the old reminder system: (1) a hardcoded `initial_plan` message said "I'll send you evening reminders before each session", (2) the coach system prompt described three reminder cadence options (morning-of, evening-before, weekly Sunday), and (3) `initial_plan` was overwriting the `proactive_cadence` set by `completeOnboarding` (based on `wants_weekly_recap`) with `nightly_reminders`.
+**Fix / Change:** Removed reminder mention from the `initial_plan` closing message. Updated system prompt to say only weekly Sunday recap is supported. Removed the `proactive_cadence: "nightly_reminders"` overwrite in `initial_plan` so the user's recap preference from onboarding is preserved.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-17 — Training arc chart on Season tab
 
 **Type:** Feature
