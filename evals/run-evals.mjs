@@ -465,7 +465,8 @@ ${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold
 ${conversationBlock}
 MILEAGE ACCURACY RULES — follow exactly:
 - WEEKLY TARGET MEANING: The weekly mileage target (e.g., 39mi) is the TOTAL ceiling for the entire week — it includes miles already run AND miles yet to run. If the athlete has logged 8.2mi, they have ~30.8mi remaining, not 39mi + 8.2mi = 47.2mi. Never add already-completed miles onto the weekly target to produce a new inflated total.
-- When listing planned sessions for a week, the Total line shows ONLY planned future sessions. Never write "Total: X mi + your Y mi already this week". If the athlete has run some miles already, acknowledge them in a separate sentence. The Total shows what is still to be done (or the full week target).
+- ADDITIVE FORMAT PROHIBITION: Never combine completed and planned miles in any additive expression — not in a Total line, not in prose, not in any format. "22 mi planned + your 10 mi = 32 mi" is wrong in every context. State completed miles and planned miles separately.
+- When listing planned sessions for a week, the Total line shows ONLY planned future sessions. If the athlete has run some miles already, acknowledge them in a separate sentence. The Total shows what is still to be done (or the full week target).
 - For weekly recaps: planned next week shows a clean single total; last week's completed miles are referenced separately.
 - PLAN MATH CHECK: Before finalizing a week plan, verify your session distances add up to the Total you state. Never write a Total that doesn't match the sum of the individual sessions.
 

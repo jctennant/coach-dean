@@ -47,7 +47,7 @@
     "easy_pace_range": "8:52–9:22/mi",
     "must_acknowledge_run": true,
     "must_mention_distance_or_pace": true,
-    "forbidden_phrases": ["rest day", "you didn't run", "no activity"],
-    "notes": "Dean received a post_run webhook for a 10-mile long run at 9:10/mi. That pace is squarely in the easy zone (9:02 easy pace ± 20s). Response should: (1) acknowledge the 10-mile run, (2) affirm the pace was appropriate for an easy long run, (3) reference training context (week 8, building toward Chicago Marathon). Must NOT treat this as a non-run day, must NOT give incorrect mileage, must NOT confuse pace as too fast or too slow."
+    "forbidden_phrases": ["rest day", "you didn't run", "no activity", "+ your", "mi already", "planned +"],
+    "notes": "Dean received a post_run webhook for a 10-mile long run at 9:10/mi. That pace is squarely in the easy zone (9:02 easy pace ± 20s). Response should: (1) acknowledge the 10-mile run, (2) affirm the pace was appropriate for an easy long run, (3) reference training context (week 8, building toward Chicago Marathon). Must NOT treat this as a non-run day, must NOT give incorrect mileage, must NOT confuse pace as too fast or too slow. Must NOT use additive mileage format like '22 mi planned + your 10 mi = 32 mi' — completed and planned miles must be stated separately."
   }
 }
