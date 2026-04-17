@@ -4844,7 +4844,7 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
               ? ` — HEAVIER than last week (${recapMi(weekMileageSoFar)}; progressive step up)`
               : ` — SIMILAR to last week (${recapMi(weekMileageSoFar)})`)
             : "";
-          const effWeek = periodization.effectiveWeek ?? tsEffectiveWeek;
+          const effWeek = periodization.effectiveWeek ?? 1;
           const weekInCycle = ((effWeek - 1) % 4) + 1;
           const cycleNote = weekInCycle === 3
             ? "week 3 of 4 — last hard week, push a bit; recovery comes next week"
