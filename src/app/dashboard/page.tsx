@@ -581,7 +581,7 @@ export default async function DashboardPage({
       .limit(6),
     supabase
       .from("training_state")
-      .select("current_week, current_phase, weekly_mileage_target, weekly_plan_sessions")
+      .select("current_week, current_phase, weekly_mileage_target, weekly_long_run_miles, weekly_quality_session")
       .eq("user_id", user.id)
       .single(),
   ]);
@@ -664,6 +664,13 @@ export default async function DashboardPage({
   const progressPct = weeklyTargetMiles && weeklyTargetMiles > 0
     ? Math.min(100, (currentWeekMiles / weeklyTargetMiles) * 100)
     : 0;
+
+  // This week's plan details
+  const weekLongRunMiles = (stateData?.weekly_long_run_miles as number | null) ?? null;
+  const weekLongRunDisplay = weekLongRunMiles != null
+    ? (useMetric ? Math.round(weekLongRunMiles * 1.60934 * 10) / 10 : weekLongRunMiles)
+    : null;
+  const weekQualitySession = (stateData?.weekly_quality_session as string | null) ?? null;
 
   // Day of week in athlete's timezone
   const weekDayNum = (() => {
@@ -804,21 +811,6 @@ export default async function DashboardPage({
                 </div>
               </div>
 
-              {/* Weekly mileage progress bar */}
-              {weeklyTargetDisplay != null && (
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-green-600"
-                      style={{ width: `${progressPct}%` }}
-                    />
-                  </div>
-                  <span className="text-sm text-gray-600 tabular-nums shrink-0">
-                    {currentWeekDisplay} / {weeklyTargetDisplay} {distUnit}
-                  </span>
-                </div>
-              )}
-
               {/* Race chips */}
               {races.length > 0 && (
                 <div className="grid grid-cols-2 gap-2">
@@ -859,6 +851,42 @@ export default async function DashboardPage({
               </div>
             ) : null}
           </section>
+
+          {/* ══════════════════════════════════════════════════════════════
+              THIS WEEK
+          ══════════════════════════════════════════════════════════════ */}
+          {(weeklyTargetDisplay != null || weekLongRunDisplay != null || weekQualitySession) && (
+            <section className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">This Week</p>
+              <div className="rounded-xl border border-gray-100 bg-white shadow-sm divide-y divide-gray-50">
+                {weeklyTargetDisplay != null && (
+                  <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Target</span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-20 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                        <div className="h-full rounded-full bg-green-500" style={{ width: `${progressPct}%` }} />
+                      </div>
+                      <span className="text-sm font-semibold tabular-nums text-gray-800">
+                        {currentWeekDisplay} / {weeklyTargetDisplay} {distUnit}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {weekLongRunDisplay != null && (
+                  <div className="px-4 py-3.5 flex items-center justify-between gap-3">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Long run</span>
+                    <span className="text-sm font-semibold text-gray-800">~{weekLongRunDisplay} {distUnit}</span>
+                  </div>
+                )}
+                {weekQualitySession && (
+                  <div className="px-4 py-3.5 flex items-start justify-between gap-4">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 shrink-0 pt-0.5">Quality</span>
+                    <span className="text-sm text-gray-700 text-right leading-snug">{weekQualitySession}</span>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           {/* ══════════════════════════════════════════════════════════════
               INJURY & LOAD

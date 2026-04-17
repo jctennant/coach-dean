@@ -878,7 +878,11 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
 
   // Build system prompt with activity trends
-  const userTimezone = (user.timezone as string) || inferTimezoneFromPhone(user.phone_number as string);
+  const storedTimezone = user.timezone as string | null;
+  const userTimezone = storedTimezone || inferTimezoneFromPhone(user.phone_number as string);
+  if (!storedTimezone) {
+    console.warn(`[coach/respond] timezone inferred from phone for userId=${userId} phone=${(user.phone_number as string)?.slice(0, 6)}*** inferred=${userTimezone} trigger=${trigger} — week boundaries may be off; set user.timezone to fix`);
+  }
   // For post_run, exclude the current activity from RECENT WORKOUTS — it's already shown
   // in the user message activity details, and duplicating it causes week-mileage double-counting.
   const excludeFromSummary = trigger === "post_run" && activityData?.start_date
@@ -1653,9 +1657,6 @@ Weekly total: ${mileageRange}
   const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
-  // SESSION_LIST removed: the coach no longer assigns day-level sessions.
-  const sessionUpdateMatch = rawText.match(/\[SESSION_UPDATE:\s*(\[[\s\S]*?\])\]/i);
-  const rawSessionUpdateJson = sessionUpdateMatch ? sessionUpdateMatch[1].trim() : null;
   const weekOverrideMatch = rawText.match(/\[WEEK_OVERRIDE:\s*([^\]]+)\]/i);
   const tagWeekOverrideDays = weekOverrideMatch
     ? weekOverrideMatch[1].trim().split(",").map((d: string) => d.trim().toLowerCase()).filter(Boolean)
@@ -1920,6 +1921,11 @@ Weekly total: ${mileageRange}
     // so the user gets one closing message instead of two back-to-back.
     const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
     // New plan from scratch at the end of onboarding — always start at week 1.
+    // Re-fetch training_profiles here so generateAndSaveFullPlan sees any profile writes
+    // that happened during the onboarding conversation (paces, training_days, race_date, etc.).
+    // The copy loaded at the top of processCoachRequest may predate those writes.
+    const { data: freshProfile } = await supabase.from("training_profiles").select("*").eq("user_id", userId).single();
+    if (freshProfile) profile = freshProfile;
     const _preGenMs = Date.now() - _ipStart;
     console.log(`[initial_plan] ${_preGenMs}ms elapsed before generateAndSaveFullPlan — budget remaining: ~${10000 - _preGenMs}ms`);
     if (_preGenMs > 6000) console.warn(`[initial_plan] ⚠️ already ${_preGenMs}ms in — generateAndSaveFullPlan may exceed 10s Hobby cap`);
@@ -2163,38 +2169,6 @@ Weekly total: ${mileageRange}
       }
 
       if (!wantsRebuild) {
-        const currentSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }>) ?? [];
-        if (rawSessionUpdateJson) {
-          try {
-            const sessions = JSON.parse(rawSessionUpdateJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
-            if (Array.isArray(sessions) && sessions.length > 0) {
-              await supabase.from("training_state")
-                .update({ weekly_plan_sessions: sessions as unknown as Json })
-                .eq("user_id", userId);
-              // Patch key_workout in arc if a quality session is present
-              if (storedPlanId && storedPlanAllWeeks.length > 0) {
-                const qualitySession = sessions.find(s => {
-                  const l = s.label.toLowerCase();
-                  return l.includes("tempo") || l.includes("interval") || l.includes("×") || l.includes("threshold") || l.includes("fartlek") || l.includes("hills");
-                });
-                if (qualitySession) {
-                  const updatedWeeks = storedPlanAllWeeks.map(w =>
-                    w.week_number === periodization.effectiveWeek ? { ...w, key_workout: qualitySession.label } : w
-                  );
-                  await supabase.from("training_plans")
-                    .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
-                    .eq("id", storedPlanId);
-                }
-              }
-              console.log(`[user_message] [SESSION_UPDATE] tag: wrote ${sessions.length} sessions directly`);
-            }
-          } catch (parseErr) {
-            console.error("[user_message] [SESSION_UPDATE] parse failed, falling back to maybeUpdatePlanSessions:", parseErr);
-            await maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage, storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek);
-          }
-        } else {
-          await maybeUpdatePlanSessions(userId, currentSessions, latestUserMsg.content, coachMessage, storedPlanId, storedPlanAllWeeks, periodization.effectiveWeek);
-        }
         if (storedPlanId && storedPlanAllWeeks.length > 0) {
           await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
         }
@@ -2475,63 +2449,6 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
   return corrected;
 }
 
-/**
- * After the SESSION_LIST tag is parsed into structured JSON, use it to compute the
- * authoritative weekly total and correct any "Total: Xmi" (or km) line in the message.
- * This is a more reliable fallback than correctMileageTotal's text-regex approach —
- * it fires when Claude's stated total doesn't match the structured session data.
- */
-function correctTotalFromSessionList(
-  message: string,
-  sessions: Array<{ label: string; optional?: boolean }>,
-  useMetric: boolean,
-): string {
-  const unit = useMetric ? "km" : "mi";
-  const unitRe = useMetric ? /(\d+(?:\.\d+)?)\s*km\b/i : /(\d+(?:\.\d+)?)\s*mi(?:les?)?\b/i;
-  const crossTrainingRe = /\b(bike|biking|cycling|swim|swimming|strength|mobility|stretch|yoga|elliptical|cross.train|spin|zwift|hike|hiking)\b/i;
-
-  let total = 0;
-  for (const s of sessions) {
-    if (s.optional) continue; // optional sessions don't count toward the weekly total
-    if (crossTrainingRe.test(s.label)) continue;
-    const match = s.label.match(unitRe);
-    if (match) total += parseFloat(match[1]);
-  }
-  if (total === 0) return message;
-
-  const roundedTotal = Math.round(total * 10) / 10;
-
-  // Replace any "Total: Xmi" or "Total: X mi" line — but only when Claude's number differs.
-  const totalLineRe = useMetric
-    ? /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*km(?:s)?)/gi
-    : /(Total:\s*~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi;
-
-  let corrected = message.replace(totalLineRe, (full, pre, num, post) => {
-    const stated = parseFloat(num);
-    if (Math.abs(stated - roundedTotal) <= 0.4) return full; // already correct
-    console.warn(`[correctTotalFromSessionList] stated ${stated}${unit}, SESSION_LIST sum is ${roundedTotal}${unit} — correcting`);
-    return `${pre}${roundedTotal}${post}`;
-  });
-
-  // Also fix prose references like "pulling back to ~40 mi" or "targeting ~35 mi this week"
-  // that appear before the session list. These are different from the "Total:" line —
-  // Dean often states the periodization target in prose, then prescribes sessions that
-  // sum to a different number. The session sum is authoritative; the prose must match.
-  // Only trigger when the deviation is >2 mi to avoid spurious fixes on last-week references.
-  const proseWeeklyTotalRe = useMetric
-    ? /(?:(?:pulling back|step(?:ping)? back|back(?:ing)? (?:down|off)|dropping|recover[yi]|easing|bringing(?:\s+\w+)*?\s+(?:down|back)|targeting|aiming for|going for|doing)\b[^.\n]*?)(~?)(\d+(?:\.\d+)?)(\s*km(?:s)?\b)/gi
-    : /(?:(?:pulling back|step(?:ping)? back|back(?:ing)? (?:down|off)|dropping|recover[yi]|easing|bringing(?:\s+\w+)*?\s+(?:down|back)|targeting|aiming for|going for|doing)\b[^.\n]*?)(~?)(\d+(?:\.\d+)?)(\s*mi(?:les?)?\b)/gi;
-
-  corrected = corrected.replace(proseWeeklyTotalRe, (full, tilde, num, post) => {
-    const stated = parseFloat(num);
-    if (Math.abs(stated - roundedTotal) <= 2) return full; // close enough — don't risk false positive
-    console.warn(`[correctTotalFromSessionList] prose total: stated ${stated}${unit}, SESSION_LIST sum is ${roundedTotal}${unit} — correcting`);
-    const suffix = (tilde as string) + (num as string) + (post as string);
-    return full.slice(0, full.length - suffix.length) + tilde + roundedTotal + post;
-  });
-
-  return corrected;
-}
 
 /**
  * Extracts a week number from a free-form user message like "Starting fresh with week 1!"
@@ -3084,80 +3001,6 @@ ${lines.join("\n")}
 `;
 }
 
-
-/**
- * After a user_message exchange, check if the conversation resulted in any plan
- * changes (day swaps, distance changes, cancelled sessions). If so, merge the
- * changes into the stored weekly_plan_sessions so reminders and post-run messages
- * stay consistent with what Dean just agreed to.
- *
- * Only writes to the DB if changes are actually detected — no-ops on normal chat.
- */
-async function maybeUpdatePlanSessions(
-  userId: string,
-  currentSessions: Array<{ day: string; date: string; label: string }>,
-  userMessage: string,
-  coachResponse: string,
-  planId: string | null = null,
-  planAllWeeks: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }> = [],
-  currentWeekNum: number = 1,
-): Promise<void> {
-  if (currentSessions.length === 0) return; // no plan stored yet — nothing to update
-
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 500,
-    system: `You are checking whether a conversation exchange changed any planned training sessions for the week.
-
-Current planned sessions (JSON):
-${JSON.stringify(currentSessions)}
-
-The athlete sent a message and the coach responded. Determine if any sessions were changed (different day, different distance, cancelled, added, or replaced).
-
-If NO changes were made, return exactly: {"changed": false}
-If changes WERE made, return the full updated sessions list AND the new key workout for the plan arc:
-{"changed": true, "sessions": [{"day": "Mon"|"Tue"|..., "date": "M/D", "label": "..."}], "key_workout": "brief label for the defining quality session this week, e.g. '6×800m @ 5K pace' or '4mi tempo'. Null if no quality session was added or changed."}
-
-Rules:
-- Mark changed=true if the coach agreed to a session change. This includes:
-  - Explicit past-tense: "Done — moved strength to Sunday", "I've moved...", "Switched...", "already swapped", "already updated"
-  - Explicit future-tense: "Moving strength to Sunday", "I'll put the easy 3mi on Tuesday instead", "Sure — strength goes to Sunday"
-  - Implicit confirmation where the coach restates the new arrangement without objection, e.g. "Perfect — Saturday long run 10mi, Sunday easy 6mi" or "Sounds good — 10mi Saturday, 6mi Sunday". If the coach's response lists the sessions in an order different from the current plan and doesn't push back, treat this as a confirmed change.
-  - "Already" language ("already swapped", "already updated") still means the DB needs updating — mark changed=true regardless.
-- Mark changed=false if the coach only gave general advice, asked a clarifying question, or suggested a change without agreeing to it.
-- For day swaps: update BOTH the "day" field AND the "date" field. The date for each session should match the calendar date of its new day. Infer dates from the existing sessions (e.g. if Mon is "4/7" and Tue is "4/8", Sun would be "4/13").
-- Preserve all unchanged sessions exactly as-is
-- If a session was cancelled with no replacement, omit it from the list
-- key_workout: pick the most quality-focused session that changed (intervals, tempo, race-specific work). If only easy runs changed, set to null.
-- Return ONLY valid JSON, no other text`,
-    messages: [{ role: "user", content: `Athlete: ${userMessage}\n\nCoach: ${coachResponse}` }],
-  });
-
-  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
-  try {
-    const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
-    if (!parsed.changed || !Array.isArray(parsed.sessions) || parsed.sessions.length === 0) return;
-
-    await supabase
-      .from("training_state")
-      .update({ weekly_plan_sessions: parsed.sessions as unknown as Json })
-      .eq("user_id", userId);
-
-    // If a quality session changed and we have the arc, patch the current week's key_workout
-    // so the dashboard reflects what Dean actually agreed to.
-    if (planId && planAllWeeks.length > 0 && parsed.key_workout) {
-      const updatedWeeks = planAllWeeks.map(w =>
-        w.week_number === currentWeekNum ? { ...w, key_workout: parsed.key_workout as string } : w
-      );
-      await supabase
-        .from("training_plans")
-        .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
-        .eq("id", planId);
-    }
-  } catch {
-    // parse failed — leave sessions unchanged
-  }
-}
 
 /**
  * After a user_message exchange, check if the coach committed to adjusting any
@@ -3768,6 +3611,8 @@ ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within th
 WHEN PACES ARE TBD (no stored paces, VDOT unknown): If the athlete has recent Strava runs visible in RECENT WORKOUTS, use their typical easy run average pace as an estimated baseline — this is better than refusing to prescribe paces entirely. Derive tempo (~45-60 sec/mi faster than easy) and interval (~75-90 sec/mi faster than easy) from that estimate, and label them clearly as estimates (e.g. "~8:45/mi tempo (estimate)"). When you need better calibration data, ask for a recent race time first — any recent race (5K, 10K, half) gives a clean VDOT calculation without requiring extra effort. Only suggest a 5K time trial if they genuinely have no recent race times; if you do suggest one, also offer "share a recent race time" as an alternative in the same message.
 
 HEART RATE ZONES — use when HR data is available: If HEART RATE appears in the activity summary (e.g. "avg 148 bpm across runs, highest avg 162 bpm"), use these to give richer easy run targets. Easy/Zone 2 effort = roughly 10–20 bpm below their "highest avg" figure (which reflects a moderate-to-hard effort). Append a bpm target in parens on easy run session lines when it adds value — e.g. "Easy 6mi @ 9:30-10:00/mi (~140 bpm)". Only do this when HR data is present in the summary. If no HR data, omit bpm targets entirely.
+
+<rule>MAX HR DATA GUARD — applies to ALL contexts: Any max_heartrate value you see (in activity history, recent workouts, or activity JSON) is a single-run peak reading from that specific session — NOT the athlete's physiological maximum heart rate. Never use a single-activity max_heartrate to estimate or state the athlete's true max HR (e.g. do NOT say "your max is around X based on today's peak" or "based on your recent peak of Y, your max HR appears to be Z"). Describe HR intensity in relative terms (e.g. "zone 4-5", "high aerobic effort", "near-maximal") without asserting a specific max HR figure.</rule>
 
 4. PERIODIZATION (Base → Build → Peak → Taper): Phase, recovery week scheduling, and mileage progression targets are code-driven — see CURRENT TRAINING STATE for the authoritative week number, phase, and whether this is a recovery week. If CURRENT TRAINING STATE says "RECOVERY WEEK", follow the recovery week rules exactly. Long runs progress ~1 mile/week. Taper is handled by code-computed targets injected below.
 
@@ -4707,9 +4552,7 @@ If the request is ambiguous about scope (no "just this week" or "from now on"), 
 
 If they clearly want it as a permanent schedule change (e.g. "from now on", "every week", "going forward"), confirm the permanent update: e.g. "Done — moving strength to Sundays as your new standing schedule." The system will sync confirmed changes to their dashboard automatically.
 
-When you confirm a session swap (any scope), immediately append at the end of your response:
-[SESSION_UPDATE: [{"day":"Sat","date":"4/11","label":"Long run 10mi","optional":false},{"day":"Sun","date":"4/12","label":"Easy 6mi","optional":false},...]]
-Include the FULL updated session list (all sessions this week, not just changed ones). Preserve unchanged sessions from THIS WEEK'S PLANNED SESSIONS exactly. The tag is stripped before SMS delivery.
+When you confirm a session swap, confirm it explicitly in plain text — e.g. "Done — moved the tempo to Friday." No structured tag needed.
 
 When you agree to a this-week-only schedule change (athlete can only run certain days this week), append:
 [WEEK_OVERRIDE: Saturday,Sunday]

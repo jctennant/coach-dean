@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Quality audit fixes: TZ inference logging, max HR guard, stale-profile re-fetch
+
+**Type:** Improvement
+**Reported by:** Internal quality audit
+**User feedback:** N/A
+**Root cause:** Three gaps identified in a coaching engine audit: (1) silent timezone inference from phone number could shift week boundaries without any log signal; (2) max_heartrate "true max" fabrication guard existed only in post_run, leaving user_message and weekly_recap unprotected; (3) generateAndSaveFullPlan in initial_plan consumed the profile fetched at handler startup, which predates any writes made during the onboarding conversation.
+**Fix / Change:** (1) Added console.warn when user.timezone is missing and inferTimezoneFromPhone fallback fires, including userId and inferred TZ for debugging. (2) Moved max HR guard into buildSystemPrompt's shared HEART RATE ZONES section so it applies to all triggers (user_message, weekly_recap, post_run). (3) Added a fresh training_profiles re-fetch immediately before generateAndSaveFullPlan in the initial_plan block; profile variable is reassigned if fresh data is available.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
+## 2026-04-17 — Dashboard "This Week" card + coach/respond dead code removal
+
+**Type:** Improvement + Cleanup
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Dashboard fetched `weekly_plan_sessions` but never rendered it (it was stale anyway after the simplified tracking refactor). The new `weekly_long_run_miles` and `weekly_quality_session` columns weren't surfaced anywhere in the UI. `maybeUpdatePlanSessions`, `correctTotalFromSessionList`, `[SESSION_UPDATE]` tag machinery, and `rawSessionUpdateJson` were all dead code left over from the day-level session tracking.
+**Fix / Change:** Dashboard now shows a "This Week" section with target miles (with mini progress bar), long run target, and quality session — sourced from the new columns. Summary card simplified (duplicate progress bar removed). `maybeUpdatePlanSessions`, `correctTotalFromSessionList` removed from coach/respond; `[SESSION_UPDATE]` tag and system prompt instructions replaced with plain "confirm verbally" instruction; `[WEEK_OVERRIDE]` and `[SKIP_DAY]` tags retained as they still have value.
+**Files changed:** `src/app/dashboard/page.tsx`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-16 — Simplified week-level plan tracking (remove day-level session assignment)
 
 **Type:** Refactor
