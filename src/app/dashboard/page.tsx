@@ -254,7 +254,10 @@ function buildZoneStrip(
       // 72% sits just below the moderate boundary (75%) — an interval session
       // with recovery jogs will land there; a genuinely easy run with one hill
       // spike will have a much lower avg HR.
-      if (maxPct != null && maxPct > 0.85 && avgPct > 0.72) {
+      // Threshold is 0.83 (not 0.85) because recovery jogs between reps suppress
+      // peak HR slightly vs sustained efforts — 800s at race effort typically top
+      // out around 83–88% rather than clearing 85% cleanly.
+      if (maxPct != null && maxPct > 0.83 && avgPct > 0.72) {
         runs.push({ date: wk, zone: "hard", signal: "hr" });
         continue;
       }
