@@ -386,8 +386,8 @@ function LineChart({ data }: { data: { label: string; val: number }[] }) {
   const vals = data.map(d => d.val);
   const min = Math.min(...vals) * 0.96;
   const max = Math.max(...vals) * 1.04;
-  const W = 560, H = 80;
-  const PL = 4, PR = 4, PT = 8, PB = 8;
+  const W = 560, H = 96;
+  const PL = 4, PR = 4, PT = 8, PB = 22;
   const chartW = W - PL - PR;
   const chartH = H - PT - PB;
 
@@ -407,11 +407,20 @@ function LineChart({ data }: { data: { label: string; val: number }[] }) {
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: "200px" }} aria-label="Aerobic efficiency trend">
       <polyline points={polyline} fill="none"
         stroke={improving ? "#166534" : "#94a3b8"} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-      {/* end dot */}
       {pts[pts.length - 1] && (
         <circle cx={pts[pts.length - 1]![0]} cy={pts[pts.length - 1]![1]} r="3.5"
           fill={improving ? "#166534" : "#94a3b8"} />
       )}
+      {/* x-axis: first and last week labels */}
+      {data[0] && (
+        <text x={PL} y={H - 4} textAnchor="start" fontSize="8" fill="#94a3b8">{data[0].label}</text>
+      )}
+      {data[data.length - 1] && (
+        <text x={W - PR} y={H - 4} textAnchor="end" fontSize="8" fill="#94a3b8">{data[data.length - 1]!.label}</text>
+      )}
+      {/* y-axis range */}
+      <text x={W - PR} y={PT + 8} textAnchor="end" fontSize="7" fill="#cbd5e1">{max.toFixed(2)}</text>
+      <text x={W - PR} y={H - PB + 4} textAnchor="end" fontSize="7" fill="#cbd5e1">{min.toFixed(2)}</text>
     </svg>
   );
 }
@@ -808,10 +817,24 @@ export default async function DashboardPage({
               {/* Status row */}
               <div className="flex items-start gap-3">
                 <div className={`mt-1 h-3 w-3 shrink-0 rounded-full ${statusDotClass}`} />
-                <div>
+                <div className="flex-1">
                   <p className="text-base font-bold text-gray-900 leading-tight">{status.label}</p>
                   <p className="text-sm text-gray-500 mt-0.5">{status.detail}</p>
                 </div>
+              </div>
+              {/* Status legend */}
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 border-t border-gray-50 pt-3">
+                {[
+                  { color: "bg-green-500",  label: "Fitness building",    desc: "Efficiency trending up" },
+                  { color: "bg-blue-400",   label: "Holding steady",      desc: "Load and efficiency stable" },
+                  { color: "bg-amber-400",  label: "Watch load",          desc: "Mileage spike or dipping efficiency" },
+                  { color: "bg-gray-300",   label: "No recent activity",  desc: "" },
+                ].map(s => (
+                  <div key={s.label} className="flex items-center gap-1.5">
+                    <div className={`h-2 w-2 shrink-0 rounded-full ${s.color}`} />
+                    <span className="text-[10px] text-gray-500">{s.label}</span>
+                  </div>
+                ))}
               </div>
 
               {/* Race chips */}
@@ -896,7 +919,7 @@ export default async function DashboardPage({
           ══════════════════════════════════════════════════════════════ */}
           {activities.length > 0 && (
             <section className="space-y-3">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Injury &amp; Load</p>
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Training Load</p>
 
               {/* 12-week bar chart */}
               <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
@@ -942,6 +965,22 @@ export default async function DashboardPage({
                     )}
                   </div>
                 )}
+
+                {/* Bar chart color key */}
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-2.5 w-2.5 rounded bg-[#166534]" />
+                    <span className="text-[11px] text-gray-500">This week</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-2.5 w-2.5 rounded bg-amber-400" />
+                    <span className="text-[11px] text-gray-500">Elevated volume (&gt;10% above avg)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-2.5 w-2.5 rounded bg-green-200" />
+                    <span className="text-[11px] text-gray-500">Normal week</span>
+                  </div>
+                </div>
 
                 {/* Warning when current week is already over a threshold */}
                 {acwrWarning && acwrWarning.exceeded && (
@@ -1014,122 +1053,132 @@ export default async function DashboardPage({
             <section className="space-y-3">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Fitness Progress</p>
 
-              <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm space-y-5">
-                {/* Aerobic efficiency sparkline */}
-                {effSeries.length >= 4 && currentEffVal != null && (
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-sm text-gray-500">Is it working?</p>
-                      <div className="flex items-baseline gap-2 mt-0.5">
-                        <span className="text-3xl font-bold tabular-nums text-gray-900">
-                          {currentEffVal.toFixed(3)}
-                        </span>
-                        <span className="text-sm text-gray-400">m/beat</span>
-                        <span className={`text-sm font-medium ml-1 ${
-                          effTrend.trend === "improving" ? "text-green-600"
-                          : effTrend.trend === "worsening" ? "text-red-500"
-                          : "text-gray-400"
-                        }`}>
-                          {effTrendLabel}
-                        </span>
-                      </div>
-                    </div>
-
-                    <LineChart data={effSeries} />
-
-                    <EfficiencySpectrum value={currentEffVal} />
-
-                    <p className="text-[11px] text-gray-400 leading-relaxed">
-                      How far you travel per heartbeat on easy runs. Rises gradually with consistent base work — most runners see meaningful improvement over 3–6 months.
+              {/* ── Card 1: Aerobic efficiency ─────────────────────────── */}
+              {effSeries.length >= 4 && currentEffVal != null && (
+                <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Aerobic efficiency</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      How far you travel per heartbeat on easy runs — rises with consistent base training
                     </p>
                   </div>
-                )}
 
-                {/* Training zones ribbon */}
-                {zoneData.runs.length > 0 && (
-                  <div className={effSeries.length >= 4 ? "border-t border-gray-50 pt-5 space-y-3" : "space-y-3"}>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">Training zones — last 6 weeks</p>
-                      <p className="text-[11px] text-gray-400 mt-0.5">
-                        Each dot = one run · mostly green with 1–2 red per week is healthy
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-bold tabular-nums text-gray-900">
+                      {currentEffVal.toFixed(3)}
+                    </span>
+                    <span className="text-sm text-gray-400">m/beat</span>
+                    <span className={`text-sm font-medium ml-1 ${
+                      effTrend.trend === "improving" ? "text-green-600"
+                      : effTrend.trend === "worsening" ? "text-red-500"
+                      : "text-gray-400"
+                    }`}>
+                      {effTrendLabel}
+                    </span>
+                  </div>
+
+                  {/* Line chart — x-axis shows date range, y-axis range shown inline */}
+                  <LineChart data={effSeries} />
+
+                  <EfficiencySpectrum value={currentEffVal} />
+
+                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                    {interpretEfficiency(currentEffVal)} · most runners see meaningful improvement over 3–6 months of consistent easy running
+                  </p>
+                </div>
+              )}
+
+              {/* ── Card 2: Training zones ────────────────────────────── */}
+              {(zoneData.runs.length > 0 || rawEasy || rawTempo || rawInterval) && (
+                <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm space-y-4">
+                  {zoneData.runs.length > 0 && (
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">Run intensity — last 6 weeks</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          Each dot = one run · mostly green with 1–2 red per week is healthy
+                        </p>
+                      </div>
+
+                      <RunZoneStrip runs={zoneData.runs} weeks={zoneData.weeks} />
+
+                      {/* Zone legend */}
+                      <div className="flex items-center gap-4 flex-wrap">
+                        {([
+                          { zone: "easy",     color: "bg-green-400", label: "Easy" },
+                          { zone: "moderate", color: "bg-amber-400",  label: "Moderate" },
+                          { zone: "hard",     color: "bg-red-400",   label: "Hard" },
+                          { zone: "race",     color: "bg-blue-400",  label: "Race" },
+                        ] as const).map(z => (
+                          <div key={z.zone} className="flex items-center gap-1.5">
+                            <div className={`h-2.5 w-2.5 rounded-full ${z.color}`} />
+                            <span className="text-[11px] text-gray-500">{z.label}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* HR zones bar */}
+                      {zoneData.maxHREstimate && (
+                        <div className="space-y-2 pt-1 border-t border-gray-50">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Heart Rate Zones</p>
+                            <p className="text-[10px] text-gray-400">
+                              est. max HR ~{Math.round(zoneData.maxHREstimate)} bpm · from your Strava data
+                            </p>
+                          </div>
+                          <HRZoneBar maxHR={zoneData.maxHREstimate} />
+                          <div className="grid grid-cols-3 gap-x-3 gap-y-1 pt-1">
+                            {[
+                              { dot: "bg-green-400", label: "Easy",     sub: "Z1–Z2 · <75% max HR · aerobic base" },
+                              { dot: "bg-amber-400", label: "Moderate", sub: "Z3 · 75–85% · comfortably hard" },
+                              { dot: "bg-red-400",   label: "Hard",     sub: "Z4–Z5 · >85% · threshold & VO2 max" },
+                            ].map(z => (
+                              <div key={z.label}>
+                                <div className="flex items-center gap-1">
+                                  <div className={`h-2 w-2 rounded-full ${z.dot}`} />
+                                  <span className="text-[11px] font-medium text-gray-700">{z.label}</span>
+                                </div>
+                                <p className="text-[9px] text-gray-400 mt-0.5 leading-snug">{z.sub}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Prescribed paces */}
+                  {(easyRange || rawTempo || rawInterval) && (
+                    <div className={zoneData.runs.length > 0 ? "border-t border-gray-50 pt-4 space-y-2" : "space-y-2"}>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Prescribed Paces</p>
+                        <p className="text-[10px] text-gray-400">From Dean · based on your fitness</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          easyRange && { label: "Easy", pace: easyRange, dot: "bg-green-400" },
+                          rawTempo && { label: "Tempo", pace: rawTempo, dot: "bg-amber-400" },
+                          rawInterval && { label: "Intervals", pace: rawInterval, dot: "bg-red-400" },
+                        ].filter(Boolean).map((p) => {
+                          const pace = p as { label: string; pace: string; dot: string };
+                          return (
+                            <div key={pace.label} className="rounded-lg bg-gray-50 px-3 py-2.5 flex items-center gap-2">
+                              <div className={`h-2 w-2 rounded-full shrink-0 ${pace.dot}`} />
+                              <div>
+                                <p className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">{pace.label}</p>
+                                <p className="text-sm font-bold tabular-nums text-gray-800">{pace.pace}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-gray-400">
+                        Pace zones are derived from your VDOT · HR zones above are estimated from your Strava data · these two scales don&apos;t always align perfectly
                       </p>
                     </div>
-
-                    <RunZoneStrip runs={zoneData.runs} weeks={zoneData.weeks} />
-
-                    {/* Zone legend */}
-                    <div className="flex items-center gap-4 flex-wrap">
-                      {([
-                        { zone: "easy",     color: "bg-green-400", label: "Easy" },
-                        { zone: "moderate", color: "bg-amber-400",  label: "Moderate" },
-                        { zone: "hard",     color: "bg-red-400",   label: "Hard" },
-                        { zone: "race",     color: "bg-blue-400",  label: "Race" },
-                      ] as const).map(z => (
-                        <div key={z.zone} className="flex items-center gap-1.5">
-                          <div className={`h-2.5 w-2.5 rounded-full ${z.color}`} />
-                          <span className="text-[11px] text-gray-500">{z.label}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* HR zones bar */}
-                    {zoneData.maxHREstimate && (
-                      <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Heart Rate Zones</p>
-                          <p className="text-[10px] text-gray-400">est. max HR ~{Math.round(zoneData.maxHREstimate)} bpm</p>
-                        </div>
-                        <HRZoneBar maxHR={zoneData.maxHREstimate} />
-                        <div className="grid grid-cols-3 gap-x-3 gap-y-1 pt-1">
-                          {[
-                            { dot: "bg-green-400", label: "Easy", sub: "Z1–Z2 · <75% max HR · aerobic base" },
-                            { dot: "bg-amber-400", label: "Moderate", sub: "Z3 · 75–85% · comfortably hard" },
-                            { dot: "bg-red-400",   label: "Hard",     sub: "Z4–Z5 · >85% · threshold & VO2 max" },
-                          ].map(z => (
-                            <div key={z.label}>
-                              <div className="flex items-center gap-1">
-                                <div className={`h-2 w-2 rounded-full ${z.dot}`} />
-                                <span className="text-[11px] font-medium text-gray-700">{z.label}</span>
-                              </div>
-                              <p className="text-[9px] text-gray-400 mt-0.5 leading-snug">{z.sub}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Prescribed paces */}
-                {(easyRange || rawTempo || rawInterval) && (
-                  <div className={
-                    (effSeries.length >= 4 || zoneData.runs.length > 0)
-                      ? "border-t border-gray-50 pt-5 space-y-2"
-                      : "space-y-2"
-                  }>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Prescribed Paces</p>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        easyRange && { label: "Easy", pace: easyRange, dot: "bg-green-400" },
-                        rawTempo && { label: "Tempo", pace: rawTempo, dot: "bg-amber-400" },
-                        rawInterval && { label: "Intervals", pace: rawInterval, dot: "bg-red-400" },
-                      ].filter(Boolean).map((p) => {
-                        const pace = p as { label: string; pace: string; dot: string };
-                        return (
-                          <div key={pace.label} className="rounded-lg bg-gray-50 px-3 py-2.5 flex items-center gap-2">
-                            <div className={`h-2 w-2 rounded-full shrink-0 ${pace.dot}`} />
-                            <div>
-                              <p className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">{pace.label}</p>
-                              <p className="text-sm font-bold tabular-nums text-gray-800">{pace.pace}</p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[10px] text-gray-400">Pace targets from Dean · not directly linked to HR zones above</p>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </section>
           )}
 

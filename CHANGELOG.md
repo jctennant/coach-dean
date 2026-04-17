@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Pre-compute microcycle ordinal, injury hold duration, quality session flag, and next-week comparison label
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Claude was deriving several facts from raw data that could be pre-rendered: microcycle position (week N of 4), injury hold age in days, whether a quality session exists this week, and whether next week is lighter/heavier than the current week. Forcing Claude to compute these from raw inputs caused incorrect outputs (wrong progression labels, "stepping up" on recovery weeks, ambiguity about quality session presence).
+**Fix / Change:**
+- FACTS block now includes `microcycleLabel` (e.g. "week 3 of 4 — last hard week; recovery next") on the Training line
+- FACTS block includes `injuryHoldFact` when active: "INJURY HOLD: active for 12 days (since Apr 5) — no running sessions"
+- FACTS block includes `qualitySessionFact`: explicit "YES — Tempo 4mi @ 6:54/mi" or "NO (base building — easy miles only)"
+- `nextWeekContext` in `user_message` trigger now pre-renders [LIGHTER]/[HEAVIER]/[SIMILAR volume] comparison label
+- `weekly_recap` PROGRESSION TARGET replaced with `NEXT WEEK TARGET` line including LIGHTER/HEAVIER/SIMILAR comparison against last week's actual mileage and microcycle position note
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-17 — Renamed "my plan" keyword to "dashboard"
+
+**Type:** Improvement
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** The "my plan" keyword was broadly named and matched natural-language patterns. The dashboard is the canonical place to see training info, so the keyword should reflect that.
+**Fix / Change:** Changed the SMS keyword from "my plan" / "my training plan" to "dashboard" (exact match, case-insensitive). Removed natural-language fuzzy matching in coach/respond. Updated welcome-tips cron, system prompt, fallback SMS messages, and all tests.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/cron/welcome-tips/route.ts`, `src/__tests__/api/linq-webhook.test.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-04-17 — Strava annotation: HR-based workout kind inference for no-plan users
 
 **Type:** Bug Fix

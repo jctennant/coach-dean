@@ -364,7 +364,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
         void trackEvent(userId, "after_error", { trigger: "rebuild_plan", error: String(err) });
         // Send fallback SMS so the user isn't left waiting for a link that never arrives
         try {
-          await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"my plan\" to see your current version.");
+          await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"dashboard\" to see your current version.");
         } catch (smsErr) {
           console.error("[handleRebuildPlan] fallback SMS also failed:", smsErr);
         }
@@ -520,7 +520,7 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
       console.error("[handleInjuryClear] generateAndSaveFullPlan failed:", err);
       void trackEvent(userId, "after_error", { trigger: "injury_clear", error: String(err) });
       try {
-        await sendSMS(phoneNumber, "Something went wrong updating your plan — text \"my plan\" to see your current version.");
+        await sendSMS(phoneNumber, "Something went wrong updating your plan — text \"dashboard\" to see your current version.");
       } catch (smsErr) {
         console.error("[handleInjuryClear] fallback SMS also failed:", smsErr);
       }
@@ -1043,18 +1043,8 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     // recentMessages is oldest-first (DB returns DESC, then reversed at line 239).
     // Spread-reverse to search newest-first and get the most recent user message.
     const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
-    // Catch natural-language plan requests in addition to the exact "my plan" keyword.
-    // "Could you send me my plan for training for bay to breakers?" must hit this path —
-    // if it falls through to Claude, web search kicks in and Claude generates an inline
-    // plan instead of sending the dashboard link.
-    const isPlanRequest = latestUserMsg && (
-      /^\s*my\s+plan\s*$/i.test(latestUserMsg.content) ||
-      /\bsend\s+(?:me\s+)?(?:my|the)\s+(?:training\s+)?plan\b/i.test(latestUserMsg.content) ||
-      /\b(?:show|see|view)\s+(?:me\s+)?(?:my|the)\s+(?:training\s+)?plan\b/i.test(latestUserMsg.content) ||
-      // Catches "show me the entire week by week plan", "show me my full plan", etc.
-      // Allows up to 6 intermediate words between "show/see/view/send me" and "plan".
-      /\b(?:show|see|view|send)\s+me\s+(?:\w+\s+){0,6}plan\b/i.test(latestUserMsg.content)
-    );
+    // Catch "dashboard" keyword — exact match only.
+    const isPlanRequest = latestUserMsg && /^\s*dashboard\s*$/i.test(latestUserMsg.content);
     if (isPlanRequest) {
       if (!dashboardToken) {
         const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
@@ -3573,6 +3563,36 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     return done;
   })();
 
+  // ─── Pre-computed values for FACTS block ───────────────────────────────────
+  // Microcycle position: week N of 4 in the build/deload cycle.
+  const microcycleLabel = (() => {
+    if (!periodization || periodization.isDeloadWeek) return "";
+    const weekInCycle = ((tsEffectiveWeek - 1) % 4) + 1;
+    if (weekInCycle === 3) return ` — week ${weekInCycle} of 4 (last hard week; recovery next)`;
+    return ` — week ${weekInCycle} of 4`;
+  })();
+
+  // Injury hold: pre-compute duration so Claude sees "active for 12 days" not just a raw date.
+  const injuryHoldFact = (() => {
+    const holdDateStr = state?.injury_hold_since as string | null;
+    if (!holdDateStr) return null;
+    const holdDate = new Date(holdDateStr);
+    const todayDate = new Date(todayLocal);
+    const daysDiff = Math.max(0, Math.round((todayDate.getTime() - holdDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const holdDateFormatted = holdDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return `INJURY HOLD: active for ${daysDiff} day${daysDiff !== 1 ? "s" : ""} (since ${holdDateFormatted}) — no running sessions`;
+  })();
+
+  // Quality session: explicit YES/NO so Claude doesn't have to infer from absence.
+  const qualitySessionFact = (() => {
+    const qualitySession = (state?.weekly_quality_session as string | null) ?? null;
+    if (qualitySession) return `Quality session this week: YES — ${qualitySession}`;
+    if (tsTargetMiles || (state?.weekly_long_run_miles as number | null)) {
+      return `Quality session this week: NO${periodization?.isDeloadWeek ? " (recovery week)" : " (base building — easy miles only)"}`;
+    }
+    return null;
+  })();
+
   // ─── FACTS block — pre-computed numbers injected at top of system prompt ───
   const factsBlock = (() => {
     const hasStrava = !!(user.strava_athlete_id as number | null);
@@ -3585,9 +3605,11 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       : "";
     const lines = [
       `Today: ${todayStr}`,
-      `Training: Week ${tsEffectiveWeek} · ${tsPhaseLabel} phase${periodization?.isDeloadWeek ? " — recovery week" : ""}`,
+      `Training: Week ${tsEffectiveWeek} · ${tsPhaseLabel} phase${periodization?.isDeloadWeek ? " — recovery week" : ""}${microcycleLabel}`,
       `This week: ${milogged}`,
       `Paces: Easy ${easyRange} · Tempo ${tsTempoPace} · Interval ${tsIntervalPace}`,
+      ...(injuryHoldFact ? [injuryHoldFact] : []),
+      ...(qualitySessionFact ? [qualitySessionFact] : []),
       ...(raceLine ? [raceLine] : []),
       ...(thisWeekPlan ? [thisWeekPlan] : []),
     ];
@@ -3846,7 +3868,7 @@ ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports
 - Activity tracking: Strava only. If an athlete has connected Strava, their activities sync automatically. No Garmin, Apple Watch, Wahoo, or other platform sync.
 - If an athlete asks how to connect Strava, tell them to text "connect strava" and you'll send them the link.
 - If an athlete asks how to connect Garmin, Apple Health, or any other service, tell them clearly: "I only have Strava sync right now — just text me after your workouts and I'll track from there."
-- Communication: SMS only. Athletes can text "my plan" at any time to receive a link to their full week-by-week training plan dashboard. There is no separate app, calendar export, or email — but the plan link is always available on request. When an athlete asks to see their plan (in any phrasing), either send the link directly if you have it, or tell them to text "my plan" and you'll send it immediately — do NOT say you cannot send it.
+- Communication: SMS only. Athletes can text "dashboard" at any time to receive a link to their full week-by-week training plan dashboard. There is no separate app, calendar export, or email — but the plan link is always available on request. When an athlete asks to see their plan, tell them to text "dashboard" and they'll get the link immediately — do NOT say you cannot send it.
 - Proactive reminders: three options are supported: (1) morning-of reminders, (2) evening-before reminders, (3) weekly Sunday overview only.
 - Morning reminders go out at approximately 6am PT / 7am MT / 8am CT / 9am ET. If an athlete asks what time, give them the appropriate time for their timezone.
 - Evening reminders go out at approximately 6pm PT / 7pm MT / 8pm CT / 9pm ET (the evening before the session).
@@ -4593,7 +4615,17 @@ PLAN DEVIATION — NON-RUN DAY: Today's plan called for "${skippedNonRunSession}
       const umIsMetric = preferredUnits === "metric";
       const umMi = (miles: number) => umIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const nextWeekContext = storedNextPlanWeek
-        ? `Week ${storedNextPlanWeek.week_number} (next week): ${umMi(storedNextPlanWeek.mileage_target)} target, long run ${umMi(storedNextPlanWeek.long_run_target)}, key workout: ${storedNextPlanWeek.key_workout}${weekMileageSoFar > storedNextPlanWeek.mileage_target ? ` <rule>NOTE: This target (${umMi(storedNextPlanWeek.mileage_target)}) is LOWER than this week's current mileage (${umMi(weekMileageSoFar)}). Do NOT say "steps up" or "stepping up the volume" — describe it as a planned lighter week and explain why (pre-race management, recovery, arc design).</rule>` : ''}`
+        ? (() => {
+          const nwt = storedNextPlanWeek.mileage_target;
+          const compLabel = weekMileageSoFar > 0
+            ? (nwt / weekMileageSoFar < 0.85
+              ? " [LIGHTER — do NOT say 'stepping up the volume'; describe as planned pullback]"
+              : nwt / weekMileageSoFar > 1.08
+              ? " [HEAVIER — progressive overload step]"
+              : " [SIMILAR volume to this week]")
+            : "";
+          return `Next week: ${umMi(nwt)} target${compLabel}, long run ~${umMi(storedNextPlanWeek.long_run_target)}, key workout: ${storedNextPlanWeek.key_workout}`;
+        })()
         : null;
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
@@ -4617,7 +4649,7 @@ WEEKLY PROJECTION ACCURACY: When stating "on track for X mi" or any weekly total
 
 PLAN CONSISTENCY: If there are UPCOMING SESSIONS THIS WEEK in CURRENT TRAINING STATE, those are the active plan. When the athlete asks about their schedule or upcoming runs, reference those stored sessions first — don't reconstruct the plan from memory or guess at different distances. If a plan exists and the athlete is asking about it, quote it back to them accurately before offering any adjustments.
 
-FULL PLAN REQUESTS — HARD RULE: If the athlete asks to see their full plan, training schedule, full training arc, all upcoming weeks, or says anything like "send me my plan" / "show me my plan" — your entire response is the dashboard link${dashboardUrl ? `: ${dashboardUrl}` : " (unavailable — tell them to reply \"my plan\" and the system will generate it)"}. One or two sentences max. Do NOT output a week-by-week schedule in the SMS. Do NOT use web search to research the race and build a plan inline. Do NOT promise to send the plan later. This applies even if web search is available — research does not override this rule.
+FULL PLAN REQUESTS — HARD RULE: If the athlete asks to see their full plan, training schedule, full training arc, or all upcoming weeks — your entire response is the dashboard link${dashboardUrl ? `: ${dashboardUrl}` : " (unavailable — tell them to text \"dashboard\" and the system will send it)"}. One or two sentences max. Do NOT output a week-by-week schedule in the SMS. Do NOT use web search to research the race and build a plan inline. Do NOT promise to send the plan later. This applies even if web search is available — research does not override this rule.
 
 EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Do NOT send the dashboard link. Handle it using the THIS WEEK SESSION SWAP rules below.
 
@@ -4803,7 +4835,24 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
         : periodization?.isDeloadWeek
         ? `\n<rule>RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. CRITICAL: Do NOT add extra rest days to hit this target — keep the same number of running days. If the athlete mentioned soreness or tightness, annotate the affected runs (e.g. "(softer surface, stop if pain)") rather than canceling them. The mileage reduction is the recovery — not fewer running days. Recovery weeks are not optional — skipping them is how athletes break down.</rule>\n`
         : periodization?.suggestedWeeklyMiles != null
-        ? `\nPROGRESSION TARGET: This week's suggested mileage is ~${recapMi(periodization.suggestedWeeklyMiles)} (~${periodization.phase === "peak" ? "5%" : "8%"} step up from recent average). Build toward this across the week's sessions. If the athlete's recent pace suggests they're ready to add a quality session, include one. If they've been building for 3+ weeks, this is week ${(periodization.effectiveWeek ?? 0) % 4 === 3 ? "3 of the build — next week is recovery, so push a little this week" : "of the build — stay consistent"}.\n`
+        ? (() => {
+          const nextTarget = periodization.suggestedWeeklyMiles;
+          const compLabel = weekMileageSoFar > 0
+            ? (nextTarget / weekMileageSoFar < 0.85
+              ? ` — LIGHTER than last week (${recapMi(weekMileageSoFar)}; planned pullback — do NOT say 'stepping up')`
+              : nextTarget / weekMileageSoFar > 1.08
+              ? ` — HEAVIER than last week (${recapMi(weekMileageSoFar)}; progressive step up)`
+              : ` — SIMILAR to last week (${recapMi(weekMileageSoFar)})`)
+            : "";
+          const effWeek = periodization.effectiveWeek ?? tsEffectiveWeek;
+          const weekInCycle = ((effWeek - 1) % 4) + 1;
+          const cycleNote = weekInCycle === 3
+            ? "week 3 of 4 — last hard week, push a bit; recovery comes next week"
+            : weekInCycle === 4
+            ? "week 4 of 4 — recovery week already baked in above"
+            : `week ${weekInCycle} of 4 — stay consistent`;
+          return `\nNEXT WEEK TARGET: ~${recapMi(nextTarget)}${compLabel} (~${periodization.phase === "peak" ? "5%" : "8%"} step from recent avg). Microcycle: ${cycleNote}. If the athlete's recent pace suggests they're ready for a quality session, include one.\n`;
+        })()
         : "";
       return `${storedPlanContext}${weekMileageContext}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2–3 short texts recapping last week and previewing the coming week (use DATE CONTEXT for exact dates). Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second: this week's key sessions. Third (optional): one brief motivational or tactical note. No intro fluff.
 

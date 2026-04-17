@@ -7,7 +7,7 @@ export const maxDuration = 60;
 
 const TIPS_MESSAGE =
   "Hey — now that your plan is up and running, a couple shortcuts worth knowing: " +
-  "MY PLAN → your training dashboard, " +
+  "DASHBOARD → your training dashboard, " +
   "FEEDBACK → reaches the team directly, " +
   "UNSUBSCRIBE → cancel your subscription, " +
   "STOP → stop all messages (we'll also send a cancellation link). " +

@@ -461,10 +461,10 @@ async function handleInboundMessage(
     return;
   }
 
-  // Detect "my plan" / "my training plan" — exact match only to avoid false positives.
+  // Detect "dashboard" keyword — exact match only to avoid false positives.
   // If token exists, send immediately. If missing, fall through to coach/respond which
   // will call generateAndSaveFullPlan to regenerate it — don't send a dead-end "not ready" message.
-  const isDashboardIntent = /^(my plan|my training plan)$/i.test(body.trim());
+  const isDashboardIntent = /^dashboard$/i.test(body.trim());
   if (isDashboardIntent) {
     const token = user.dashboard_token as string | null;
     if (token) {

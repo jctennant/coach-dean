@@ -407,7 +407,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
     expect(sendSMS).not.toHaveBeenCalled();
   });
 
-  it("'my plan' with token: sends link immediately, skips coach/respond", async () => {
+  it("'dashboard' with token: sends link immediately, skips coach/respond", async () => {
     mockTables({
       conversations: [
         { data: null, error: null },           // dedup check → no existing
@@ -424,7 +424,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
       },
     });
 
-    const req = makeRequest("+12025551234", "my plan");
+    const req = makeRequest("+12025551234", "dashboard");
     await POST(req);
     await flush();
 
@@ -438,8 +438,8 @@ describe("POST /api/webhooks/linq — message routing", () => {
     );
   });
 
-  it("'my plan' case-insensitive variants all send the link", async () => {
-    for (const variant of ["My plan", "MY PLAN", "my training plan", "My Training Plan"]) {
+  it("'dashboard' case-insensitive variants all send the link", async () => {
+    for (const variant of ["Dashboard", "DASHBOARD"]) {
       vi.clearAllMocks();
       afterQueue.splice(0);
       mockTables({
@@ -469,7 +469,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
     }
   });
 
-  it("'my plan' with no token: falls through to coach/respond instead of dead-end message", async () => {
+  it("'dashboard' with no token: falls through to coach/respond instead of dead-end message", async () => {
     vi.useFakeTimers();
     try {
       mockTables({
@@ -489,7 +489,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
         },
       });
 
-      const req = makeRequest("+12025551234", "my plan");
+      const req = makeRequest("+12025551234", "dashboard");
       await POST(req);
       const flushPromise = flush();
       await vi.advanceTimersByTimeAsync(25_000);

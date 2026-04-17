@@ -334,7 +334,7 @@ describe("coach/respond — B/C race context in system prompt", () => {
   });
 });
 
-describe("coach/respond — 'my plan' keyword early-exit", () => {
+describe("coach/respond — 'dashboard' keyword early-exit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     afterQueue.splice(0);
@@ -352,9 +352,9 @@ describe("coach/respond — 'my plan' keyword early-exit", () => {
       state: baseState(),
       conversations: [
         // newest-first (DB order)
-        { role: "user",      content: "My plan",                                         created_at: "2026-03-30T10:50:00Z" },
+        { role: "user",      content: "dashboard",                                       created_at: "2026-03-30T10:50:00Z" },
         { role: "assistant", content: "Your training plan isn't ready yet",              created_at: "2026-03-30T10:06:00Z" },
-        { role: "user",      content: "My plan",                                         created_at: "2026-03-30T10:06:00Z" },
+        { role: "user",      content: "dashboard",                                       created_at: "2026-03-30T10:06:00Z" },
         { role: "user",      content: "Can you send my full training plan for Philly?",  created_at: "2026-03-30T09:12:00Z" },
       ],
     });
@@ -381,7 +381,7 @@ describe("coach/respond — 'my plan' keyword early-exit", () => {
       profile: baseProfile(),
       state: baseState(),
       conversations: [
-        { role: "user", content: "My plan", created_at: "2026-03-30T10:50:00Z" },
+        { role: "user", content: "dashboard", created_at: "2026-03-30T10:50:00Z" },
         { role: "user", content: "I want to run Philadelphia", created_at: "2026-03-03T04:26:00Z" },
       ],
     });
@@ -399,14 +399,14 @@ describe("coach/respond — 'my plan' keyword early-exit", () => {
     );
   });
 
-  it("does NOT early-exit when latest message is not 'my plan'", async () => {
+  it("does NOT early-exit when latest message is not 'dashboard'", async () => {
     setupSupabase({
       user: baseUser({ dashboard_token: "tok-abc" }),
       profile: baseProfile(),
       state: baseState(),
       conversations: [
         { role: "user", content: "How's my tempo pace looking?", created_at: "2026-03-30T10:50:00Z" },
-        { role: "user", content: "My plan",                      created_at: "2026-03-30T09:00:00Z" },
+        { role: "user", content: "dashboard",                    created_at: "2026-03-30T09:00:00Z" },
       ],
     });
 
@@ -418,18 +418,8 @@ describe("coach/respond — 'my plan' keyword early-exit", () => {
     expect(anthropic.messages.create).toHaveBeenCalled();
   });
 
-  it("early-exits with dashboard link for natural-language plan requests", async () => {
-    // "Could you send me my plan for training for bay to breakers?" was going through
-    // to Claude, which used web search and generated an inline plan instead of the link.
-    const variants = [
-      "Could you send me my plan for training for bay to breakers?",
-      "send me my training plan",
-      "can you show me my plan",
-      "I want to view my training plan",
-      // Verbose phrasing that previously fell through to Claude (Issue 4 regression)
-      "Show me the entire week by week plan",
-      "show me my full plan",
-    ];
+  it("early-exits with dashboard link for 'DASHBOARD' case variants", async () => {
+    const variants = ["Dashboard", "DASHBOARD", " dashboard "];
 
     const { sendSMS } = await import("@/lib/linq");
 
