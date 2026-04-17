@@ -117,6 +117,107 @@ function formatRaceDate(dateStr: string | null): string | null {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+const ARC_PHASE_FILL_FUTURE: Record<string, string> = {
+  base: "#bae6fd", build: "#fed7aa", peak: "#fecaca",
+  taper: "#e9d5ff", deload: "#bbf7d0",
+};
+const ARC_PHASE_FILL_CURRENT: Record<string, string> = {
+  base: "#0ea5e9", build: "#f97316", peak: "#ef4444",
+  taper: "#a855f7", deload: "#22c55e",
+};
+
+function TrainingArcChart({
+  planWeeks, currentWeekNum, allRaceWeekNums,
+}: {
+  planWeeks: PlanWeek[];
+  currentWeekNum: number;
+  allRaceWeekNums: number[];
+}) {
+  const FLAG_H = 20;
+  const CHART_H = 72;
+  const LABEL_H = 16;
+  const SVG_H = FLAG_H + CHART_H + LABEL_H;
+  const BAR_W = 18;
+  const GAP = 2;
+  const n = planWeeks.length;
+  const totalW = n * (BAR_W + GAP) - GAP;
+
+  const maxMileage = Math.max(...planWeeks.map(w => w.mileage_target), 1);
+  const raceWeekSet = new Set(allRaceWeekNums);
+
+  // Sparse label cadence: every 2 weeks for short plans, every 4 for long
+  const labelEvery = n <= 12 ? 2 : 4;
+
+  return (
+    <div className="overflow-x-auto">
+      <svg width={totalW} height={SVG_H} style={{ display: "block" }}>
+        <line x1={0} y1={FLAG_H + CHART_H} x2={totalW} y2={FLAG_H + CHART_H} stroke="#e5e7eb" strokeWidth={1} />
+        {planWeeks.map((week, i) => {
+          const x = i * (BAR_W + GAP);
+          const isCurrent = week.week_number === currentWeekNum;
+          const isPast = week.week_number < currentWeekNum;
+          const isRace = raceWeekSet.has(week.week_number);
+
+          const barH = Math.max(3, (week.mileage_target / maxMileage) * CHART_H);
+          const barY = FLAG_H + CHART_H - barH;
+
+          const fill = isCurrent
+            ? (ARC_PHASE_FILL_CURRENT[week.phase] ?? "#374151")
+            : isPast
+            ? "#d1d5db"
+            : (ARC_PHASE_FILL_FUTURE[week.phase] ?? "#e5e7eb");
+
+          const showLabel = week.week_number === 1
+            || week.week_number % labelEvery === 0
+            || week.week_number === n;
+
+          return (
+            <g key={week.week_number}>
+              <rect x={x} y={barY} width={BAR_W} height={barH} fill={fill} rx={2} />
+              {isCurrent && (
+                <rect x={x - 0.5} y={barY - 0.5} width={BAR_W + 1} height={barH + 1}
+                  fill="none" stroke="#111827" strokeWidth={1.5} rx={2} />
+              )}
+              {isRace && (
+                <g>
+                  <line x1={x + BAR_W / 2} y1={FLAG_H - 2} x2={x + BAR_W / 2} y2={barY - 1}
+                    stroke="#ef4444" strokeWidth={1} strokeDasharray="2,2" />
+                  <circle cx={x + BAR_W / 2} cy={FLAG_H / 2} r={5} fill="#ef4444" />
+                  <text x={x + BAR_W / 2} y={FLAG_H / 2 + 3.5} textAnchor="middle"
+                    fontSize={6} fill="white" fontFamily="system-ui,sans-serif" fontWeight="700">R</text>
+                </g>
+              )}
+              {showLabel && (
+                <text x={x + BAR_W / 2} y={FLAG_H + CHART_H + LABEL_H - 2}
+                  textAnchor="middle" fontSize={8} fill="#9ca3af"
+                  fontFamily="system-ui,sans-serif">
+                  {week.week_number}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {/* Phase legend */}
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+        {(["base", "build", "peak", "taper", "deload"] as const)
+          .filter(p => planWeeks.some(w => w.phase === p))
+          .map(p => (
+            <div key={p} className="flex items-center gap-1">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm"
+                style={{ background: ARC_PHASE_FILL_CURRENT[p] ?? "#9ca3af" }} />
+              <span className="text-xs text-gray-400">{PHASE_LABELS[p] ?? p}</span>
+            </div>
+          ))}
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" />
+          <span className="text-xs text-gray-400">Race</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WeekCard({
   week, isCurrent, isPast, actualMiles, weekStartDate, isRaceWeek, useMetric,
 }: {
@@ -309,9 +410,19 @@ export function PlanTab({
         <UpcomingRacesList races={upcomingRaces} useMetric={useMetric} />
       )}
 
+      {/* Training arc chart */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-5">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">Training Arc</h2>
+        <TrainingArcChart
+          planWeeks={planWeeks}
+          currentWeekNum={currentWeekNum}
+          allRaceWeekNums={allRaceWeekNums}
+        />
+      </div>
+
       {/* Full training arc */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Full Training Arc</h2>
+        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">All Weeks</h2>
         <div className="space-y-2">
           {planWeeks.map(week => {
             const isCurrent = week.week_number === currentWeekNum;

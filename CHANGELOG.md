@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Training arc chart on Season tab
+
+**Type:** Feature
+**Reported by:** Jake Tennant (internal)
+**User feedback:** N/A
+**Root cause:** Dashboard had no visual representation of the full training plan shape — users couldn't see the build/peak/taper arc or where races fell without scrolling through all week cards.
+**Fix / Change:** Added a `TrainingArcChart` SVG component to the Season tab. Shows a bar chart of weekly mileage targets across the full plan, colored by phase (base/build/peak/taper/deload). Current week gets an outlined bar; race weeks get a red marker with a dashed stem. Horizontally scrollable on narrow screens. Phase legend below the chart. Week cards section relabeled "All Weeks".
+**Files changed:** `src/app/dashboard/plan-tab.tsx`
+
+---
+
 ## 2026-04-17 — Three-way plan preference path in onboarding
 
 **Type:** Feature
