@@ -686,90 +686,6 @@ describe("coach/respond — post_run cadence follow-up", () => {
   });
 });
 
-describe("coach/respond — sync_sessions trigger (extractAndStorePlanSessions tool use)", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    afterQueue.splice(0);
-  });
-
-  it("calls save_plan_sessions tool and persists extracted sessions to training_state", async () => {
-    const planText = "Mon 4/7 · Easy 5mi\nWed 4/9 · Tempo 4mi (2mi @ 8:00)\nSat 4/12 · Long run 10mi";
-    const extractedSessions = [
-      { day: "Mon", date: "4/7", label: "Easy 5mi", optional: false },
-      { day: "Wed", date: "4/9", label: "Tempo 4mi (2mi @ 8:00)", optional: false },
-      { day: "Sat", date: "4/12", label: "Long run 10mi", optional: false },
-    ];
-
-    // Build separate chains so we can inspect update() call args on training_state.
-    // training_state is read twice (handleSyncSessions + syncArcCurrentWeek), so we
-    // return sessions on both reads — simulating what was just written.
-    const stateChain = makeChain({
-      data: { current_week: 3, current_phase: "base", weekly_plan_sessions: extractedSessions },
-      error: null,
-    });
-
-    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
-      if (table === "users") return makeChain({ data: { id: "user-001", name: "Jake" }, error: null });
-      if (table === "training_profiles") return makeChain({ data: { goal: "half_marathon" }, error: null });
-      if (table === "training_state") return stateChain;
-      if (table === "conversations") return makeChain({ data: [{ content: planText, created_at: new Date().toISOString() }], error: null });
-      if (table === "training_plans") return makeChain({
-        data: { id: "plan-1", weeks: [{ week_number: 3, phase: "base", mileage_target: 28, long_run_target: 10, key_workout: "Tempo", notes: "" }] },
-        error: null,
-      });
-      return makeChain({ data: null, error: null });
-    });
-
-    // First Haiku call: extractAndStorePlanSessions — must use save_plan_sessions tool
-    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      content: [{ type: "tool_use", id: "tool-1", name: "save_plan_sessions", input: { sessions: extractedSessions } }],
-    });
-    // Second Haiku call: syncArcCurrentWeek dashboard notes — plain text
-    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      content: [{ type: "text", text: "Base building this week. Keep the tempo controlled." }],
-    });
-
-    const req = mockRequest({ userId: "user-001", trigger: "sync_sessions" });
-    await POST(req);
-    await flush();
-
-    // Verify extractAndStorePlanSessions used the tool_use format
-    const llmCalls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const extractionCall = llmCalls[0][0] as Record<string, unknown>;
-    expect(extractionCall.tools).toBeDefined();
-    const tool = (extractionCall.tools as Array<Record<string, unknown>>)[0];
-    expect(tool.name).toBe("save_plan_sessions");
-    expect(extractionCall.tool_choice).toEqual({ type: "tool", name: "save_plan_sessions" });
-
-    // Verify training_state was updated with the sessions from the tool response
-    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
-    const sessionUpdate = updateCalls.find(
-      (c: unknown[]) => c[0] != null && typeof c[0] === "object" && "weekly_plan_sessions" in (c[0] as object)
-    );
-    expect(sessionUpdate).toBeDefined();
-    expect((sessionUpdate![0] as Record<string, unknown>).weekly_plan_sessions).toEqual(extractedSessions);
-  });
-
-  it("returns ok:true with no SMS side effects", async () => {
-    const stateChain = makeChain({ data: { current_week: 1, current_phase: "base", weekly_plan_sessions: [] }, error: null });
-    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
-      if (table === "users") return makeChain({ data: { id: "user-001", name: "Jake" }, error: null });
-      if (table === "training_profiles") return makeChain({ data: { goal: "5k" }, error: null });
-      if (table === "training_state") return stateChain;
-      if (table === "conversations") return makeChain({ data: null, error: null }); // no plan message
-      return makeChain({ data: null, error: null });
-    });
-
-    const req = mockRequest({ userId: "user-001", trigger: "sync_sessions" });
-    await POST(req);
-    await flush();
-
-    // sync_sessions never sends SMS
-    const { sendSMS } = await import("@/lib/linq");
-    expect(sendSMS).not.toHaveBeenCalled();
-  });
-});
-
 describe("coach/respond — injury_hold trigger", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -942,16 +858,17 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
     });
   });
 
-  it("sends no-guess guard to Claude when all stored sessions are in the past", async () => {
-    // All sessions have dates that are before today — week is over, recap hasn't fired yet.
+  it("sends no-guess guard to Claude when no plan exists (all plan columns null)", async () => {
+    // No week-level plan at all — weekly_mileage_target, weekly_long_run_miles, weekly_quality_session all null.
+    // This can happen if initial_plan hasn't fired yet or a plan wipe left no data.
     setupSupabase({
       user: baseUser(),
       profile: baseProfile(),
       state: baseState({
-        weekly_plan_sessions: [
-          { day: "Fri", date: sessionDateOffset(-5), label: "Easy 6mi" },
-          { day: "Sat", date: sessionDateOffset(-4), label: "Long run 14mi" },
-        ],
+        weekly_mileage_target: null,
+        weekly_long_run_miles: null,
+        weekly_quality_session: null,
+        weekly_plan_sessions: null,
       }),
     });
 
@@ -965,21 +882,16 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
 
     // Guard must be present — Claude must not guess tomorrow's workout
     expect(userMsg).toContain("Do NOT mention a specific workout");
-    // Normal "use THIS WEEK'S PLANNED SESSIONS" instruction must NOT be the active branch
+    // Normal reminder instruction must NOT be the active branch
     expect(userMsg).not.toContain("Tomorrow's workout:");
   });
 
-  it("does NOT activate the guard when future sessions still exist", async () => {
-    // One session is tomorrow — week is still in progress, normal reminder path.
+  it("does NOT activate the guard when a week-level plan exists", async () => {
+    // Normal case — weekly_mileage_target is set (standard baseState).
     setupSupabase({
       user: baseUser(),
       profile: baseProfile(),
-      state: baseState({
-        weekly_plan_sessions: [
-          { day: "Sat", date: sessionDateOffset(-1), label: "Long run 14mi" },
-          { day: "Sun", date: sessionDateOffset(1), label: "Easy 5mi" },
-        ],
-      }),
+      state: baseState(), // weekly_mileage_target: 30 by default
     });
 
     const req = mockRequest({ userId: "user-001", trigger: "nightly_reminder" });

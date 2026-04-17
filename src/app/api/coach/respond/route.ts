@@ -8,7 +8,7 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock, fetchActivityWeather } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions } from "@/lib/plan-validation";
 import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
@@ -20,7 +20,7 @@ import type { ActivityWeatherData } from "@/lib/weather";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "sync_sessions" | "injury_hold" | "injury_clear" | "lighter_week" | "plan_import";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week" | "plan_import";
 
 interface CoachRequest {
   userId: string;
@@ -30,8 +30,6 @@ interface CoachRequest {
   dry_run?: boolean;
   silent?: boolean; // For rebuild_plan: regenerates the arc without sending the "plan ready" SMS
   prescribedWeek1Miles?: number; // For rebuild_plan: admin override for base mileage when Strava data is wrong/incomplete
-  partialWeekTarget?: number; // For sync_sessions: re-apply partial-week mileage target after syncArcCurrentWeek
-  skipArcRebase?: boolean; // For sync_sessions: skip arc rebase when partial-week onboard used Strava avg as arc base
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
   missedRunCheckin?: boolean; // True when Strava user had a scheduled workout but no run came through — check if they got it in
@@ -152,7 +150,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
       ? supabase.from("activities").select("distance_meters, start_date").eq("user_id", userId).gte("start_date", eightWeeksAgo).in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
       : Promise.resolve({ data: null }),
     supabase.from("races").select("race_date, race_name, priority").eq("user_id", userId).gt("race_date", now.toISOString().slice(0, 10)).in("priority", ["B", "C"]),
-    supabase.from("training_state").select("weekly_mileage_target, current_week, weekly_plan_sessions").eq("user_id", userId).single(),
+    supabase.from("training_state").select("weekly_mileage_target, current_week, weekly_plan_sessions, weekly_long_run_miles, weekly_quality_session").eq("user_id", userId).single(),
     supabase.from("conversations").select("role, content").eq("user_id", userId).order("created_at", { ascending: false }).limit(20),
   ]);
 
@@ -217,7 +215,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
     }
   }
 
-  const typedStateData = stateData as { weekly_mileage_target: number | null; current_week: number | null; weekly_plan_sessions: unknown } | null;
+  const typedStateData = stateData as { weekly_mileage_target: number | null; current_week: number | null; weekly_plan_sessions: unknown; weekly_long_run_miles: number | null; weekly_quality_session: string | null } | null;
   const existingTarget = typedStateData?.weekly_mileage_target ?? null;
   const currentWeek = typedStateData?.current_week ?? 1;
 
@@ -625,79 +623,6 @@ Write 1-2 sentences: briefly acknowledge you have the plan (you can mention the 
 }
 
 /**
- * Runs extractAndStorePlanSessions + syncArcCurrentWeek in a fresh invocation
- * so initial_plan and weekly_recap stay within the 10s Hobby budget.
- *
- * Reads the plan text from the most recent initial_plan/weekly_recap conversation row —
- * that message is already saved to DB before this trigger fires.
- *
- * @param partialWeekTarget - When set (> 0), re-applies this value as weekly_mileage_target
- *   after syncArcCurrentWeek runs, preserving the partial-week onboard total
- *   (miles already logged + miles Dean prescribed for remaining days).
- * @param skipArcRebase - When true, syncArcCurrentWeek will patch week 1 metadata
- *   (sessions, long run, notes) but will NOT rebase future arc weeks. Use this for
- *   partial-week onboards where Strava avg was the arc base — the arc is already
- *   correctly calibrated and the lower session count just reflects fewer remaining days.
- */
-async function handleSyncSessions(userId: string, partialWeekTarget: number | null, skipArcRebase?: boolean): Promise<NextResponse> {
-  const [userResult, profileResult, stateResult, convResult] = await Promise.all([
-    supabase.from("users").select("id, name").eq("id", userId).single(),
-    supabase.from("training_profiles").select("goal").eq("user_id", userId).single(),
-    supabase.from("training_state").select("current_week, current_phase").eq("user_id", userId).single(),
-    // Fetch the 5 most recent plan rows — the initial_plan/weekly_recap message may be split
-    // into multiple SMS bubbles each saved as a separate row. Reading only the last one
-    // risks getting a closing message with no session list. Instead, we grab up to 5,
-    // identify rows from the same generation (within 90s of the most recent), and
-    // concatenate their content so Haiku sees the full plan text.
-    supabase.from("conversations")
-      .select("content, created_at")
-      .eq("user_id", userId)
-      .eq("role", "assistant")
-      .in("message_type", ["initial_plan", "weekly_recap"])
-      .order("created_at", { ascending: false })
-      .limit(5),
-  ]);
-
-  const user = userResult.data as { id: string; name: string | null } | null;
-  const profile = profileResult.data as { goal: string | null } | null;
-  const state = stateResult.data as { current_week: number | null; current_phase: string | null } | null;
-  const planRows = (convResult.data ?? []) as Array<{ content: string; created_at: string }>;
-
-  if (!user || !profile || !state) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  if (planRows.length > 0) {
-    // Group rows from the same plan generation: keep all rows whose created_at is within
-    // 90 seconds of the most recent row (the plan generation window).
-    const mostRecentMs = new Date(planRows[0].created_at).getTime();
-    const samePlanRows = planRows.filter(r => mostRecentMs - new Date(r.created_at).getTime() <= 90_000);
-    // Rows are newest-first; reverse so the concatenated text reads in send order.
-    const planText = samePlanRows.reverse().map(r => r.content).join("\n\n");
-    await extractAndStorePlanSessions(userId, planText);
-  }
-
-  await syncArcCurrentWeek(
-    userId,
-    state.current_week ?? 1,
-    state.current_phase ?? "base",
-    profile.goal ?? "",
-    user.name ?? null,
-    skipArcRebase,
-  );
-
-  // Re-apply the partial-week onboard total if provided — syncArcCurrentWeek overwrites
-  // weekly_mileage_target with just the prescribed session sum, losing the miles already logged.
-  if (partialWeekTarget != null && partialWeekTarget > 0) {
-    await supabase.from("training_state")
-      .update({ weekly_mileage_target: partialWeekTarget })
-      .eq("user_id", userId);
-  }
-
-  return NextResponse.json({ ok: true });
-}
-
-/**
  * Handles a Strava activity event for a user who hasn't finished onboarding yet.
  * Sends a brief, warm reaction to the run, then re-asks the current onboarding question
  * so the user knows to reply and finish setup.
@@ -806,10 +731,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // Fired after Dean sends a [REBUILD_PLAN] confirmation to the athlete.
   if (trigger === "rebuild_plan") {
     return await handleRebuildPlan(userId, dry_run ?? false, silent ?? false, body.prescribedWeek1Miles);
-  }
-
-  if (trigger === "sync_sessions") {
-    return await handleSyncSessions(userId, body.partialWeekTarget ?? null, body.skipArcRebase ?? false);
   }
 
   // Injury hold/clear: lightweight state mutations, no Claude call needed.
@@ -1554,27 +1475,22 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return nonRun ? nonRun.label : null;
   })();
 
-  // Detect no-sessions state for reminder triggers.
-  // nightly_reminder: fires before weekly_recap on Sunday — sessions from week 1 are past,
-  //   week 2 sessions not yet written. Claude hallucinates if not guarded.
-  // morning_reminder: fires after weekly_recap, so normally sessions exist. But if
-  //   session extraction failed (parse error, timeout), Monday morning could also be empty.
-  //   Softer guard: just note that no sessions are available so Claude asks the athlete
-  //   rather than inventing a workout.
+  // Detect no-plan state for reminder triggers — guard against Claude hallucinating a workout.
+  // With simplified week-level tracking, a plan exists when weekly_long_run_miles,
+  // weekly_quality_session, or weekly_mileage_target is populated (the arc backfill ensures
+  // all existing users have these). Only fall back to "no plan" when none are set.
+  // For uploaded plans: also check weekly_plan_sessions as before.
   const nightlyNoSessions = (() => {
     if (trigger !== "nightly_reminder" && trigger !== "morning_reminder") return false;
+    const hasWeekLevelPlan = !!(
+      (state?.weekly_long_run_miles as number | null) ||
+      (state?.weekly_quality_session as string | null) ||
+      (state?.weekly_mileage_target as number | null)
+    );
+    if (hasWeekLevelPlan) return false;
+    // No week-level plan — check legacy session list (uploaded plans still use this)
     const sessions = (state?.weekly_plan_sessions as Array<{ date: string }> | null) ?? [];
-    if (!sessions.length) return true;
-    const tz = userTimezone || "America/New_York";
-    const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
-    const [ty, tm, td] = localTodayStr.split("-").map(Number);
-    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
-    // Has any session with a date >= today? If not, all sessions are in the past.
-    return !sessions.some(s => {
-      const [m, d] = (s.date ?? "").split("/").map(Number);
-      if (isNaN(m) || isNaN(d)) return false;
-      return new Date(Date.UTC(ty, m - 1, d)) >= localTodayUTC;
-    });
+    return sessions.length === 0;
   })();
 
   let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag);
@@ -1737,8 +1653,7 @@ Weekly total: ${mileageRange}
   const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
-  const sessionListMatch = rawText.match(/\[SESSION_LIST:\s*(\[[\s\S]*?\])\]/i);
-  const rawSessionListJson = sessionListMatch ? sessionListMatch[1].trim() : null;
+  // SESSION_LIST removed: the coach no longer assigns day-level sessions.
   const sessionUpdateMatch = rawText.match(/\[SESSION_UPDATE:\s*(\[[\s\S]*?\])\]/i);
   const rawSessionUpdateJson = sessionUpdateMatch ? sessionUpdateMatch[1].trim() : null;
   const weekOverrideMatch = rawText.match(/\[WEEK_OVERRIDE:\s*([^\]]+)\]/i);
@@ -1783,11 +1698,10 @@ Weekly total: ${mileageRange}
   //   Run correctMileageTotal FIRST (fixes session-list math), then correctProjectedTotal
   //   (fixes any "on track for" number that survived the first pass).
   const weeklyMileageTargetForCap = (state?.weekly_mileage_target as number | null) ?? null;
-  const computedProjection = computeProjectedWeekMiles(
-    (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? null,
-    weekMileageSoFar,
-    weeklyMileageTargetForCap
-  );
+  // No session-level data available to compute a real projection, so pass null.
+  // correctProjectedTotal's null path applies a 30%-over-target cap, which is the
+  // right behavior when we don't have a session-derived projection to compare against.
+  const computedProjection = null;
   const mileageCorrectedBase = trigger === "post_run"
     ? correctProjectedTotal(stripped, computedProjection, weeklyMileageTargetForCap)
     : trigger === "user_message"
@@ -1797,22 +1711,8 @@ Weekly total: ${mileageRange}
           weeklyMileageTargetForCap
         )
       : correctMileageTotal(stripped, alreadyCompletedMiles);
-
-  // For plan-generating triggers, apply a second pass using the structured SESSION_LIST
-  // data (when available) to catch cases where the text-regex approach missed an error.
-  // This is authoritative — SESSION_LIST is machine-generated alongside the plan, and
-  // summing its distances is more reliable than parsing free-form session line text.
-  const planTriggersForSessionListCorrection = new Set<TriggerType>(["initial_plan", "weekly_recap"]);
+  // SESSION_LIST correction removed — no day-level session list in responses anymore.
   let mileageCorrected = mileageCorrectedBase;
-  if (planTriggersForSessionListCorrection.has(trigger) && rawSessionListJson) {
-    try {
-      const parsedSessions = JSON.parse(rawSessionListJson) as Array<{ label: string; optional?: boolean }>;
-      const umForCorrection = (profile?.preferred_units as string | undefined) === "metric";
-      mileageCorrected = correctTotalFromSessionList(mileageCorrectedBase, parsedSessions, umForCorrection);
-    } catch {
-      // parse failed — leave mileageCorrectedBase as-is
-    }
-  }
 
   // Enforce hard volume caps for plan-generating triggers when the athlete is
   // in the low-volume tier (< 10 mi/week). Prompt instructions alone are not
@@ -1833,30 +1733,8 @@ Weekly total: ${mileageRange}
     longRunCapMiles
   );
 
-  // Detect session mileage that equals the weekly total (copy-paste errors like "Hill reps 33mi")
-  const sessionFixed = fixSessionDistanceErrors(volumeChecked);
-  // Remove exact duplicate session lines (e.g. same "Thu 3/26 · Easy 2mi" twice)
-  const deduped = deduplicateSessionLines(sessionFixed);
-
-  // For plan-generating triggers: fix any weekday/date mismatches (e.g. "Mon 4/15" when
-  // 4/15 is actually a Wednesday). Compute the user's local year+month for year inference.
-  const localRefStr = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
-  const [refYear, refMonth] = localRefStr.split("-").map(Number);
-  const coachMessage = planTriggers.has(trigger)
-    ? fixSessionDayAbbreviations(deduped, refYear, refMonth)
-    : deduped;
-
-  // Session count sanity check — warn when Claude's plan has a different number of
-  // running sessions than the athlete's stated training days preference.
-  if (planTriggers.has(trigger) && profile?.training_days) {
-    const expectedCount = (profile.training_days as string[]).length;
-    const actualCount = countRunningSessions(coachMessage);
-    if (actualCount !== expectedCount) {
-      console.warn(
-        `[sessionCount] expected ${expectedCount} running session(s) per training_days, found ${actualCount} in plan response for userId=${userId}`
-      );
-    }
-  }
+  // Day-level session postprocessing removed — coach no longer assigns sessions to specific days.
+  const coachMessage = volumeChecked;
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -1873,9 +1751,6 @@ Weekly total: ${mileageRange}
     const annotationLocation = stravaCity && stravaState
       ? { city: stravaCity, state: stravaState, timezone: userTimezone }
       : undefined;
-    const todayDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
-    const planSessions = (state?.weekly_plan_sessions as Array<{ date: string; label: string }> | null) ?? [];
-    const todaySession = planSessions.find(s => s.date === todayDateStr);
     await annotateStravaActivity(userId, activityId, {
       activityData,
       weekMileageSoFar,
@@ -1885,7 +1760,7 @@ Weekly total: ${mileageRange}
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
       isAnalystMode: false,
-      plannedSessionLabel: todaySession?.label ?? null,
+      plannedSessionLabel: null, // day-level session tracking removed
     }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
   }
 
@@ -2011,27 +1886,7 @@ Weekly total: ${mileageRange}
     const _ipStart = Date.now();
     console.log("[initial_plan] weekMileageSoFar=", weekMileageSoFar, "recentActivities count=", recentActivities.length, "activityTypes=", recentActivities.slice(0, 10).map(a => `${a.activity_type}(${new Date(a.start_date).toISOString().slice(0,10)})`).join(", "));
 
-    // Parse the prescribed week total from the plan text.
-    // Match various formats Dean uses: "Total: ~18mi", "~18 miles this week", "Total: ~29 km", etc.
-    const prescribedWeek1MatchMi =
-      coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*mi/i) ||
-      coachMessage.match(/~(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+this\s+week/i) ||
-      coachMessage.match(/[Tt]hat'?s\s+~?(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+for\s+the\s+week/i) ||
-      coachMessage.match(/(\d+(?:\.\d+)?)\s+mi(?:les?)?\s+(?:total\s+)?for\s+the\s+week/i);
-    const prescribedWeek1MatchKm =
-      coachMessage.match(/Total[:\s~]+(\d+(?:\.\d+)?)\s*km/i) ||
-      coachMessage.match(/~(\d+(?:\.\d+)?)\s+km\s+this\s+week/i) ||
-      coachMessage.match(/[Tt]hat'?s\s+~?(\d+(?:\.\d+)?)\s+km\s+for\s+the\s+week/i) ||
-      coachMessage.match(/(\d+(?:\.\d+)?)\s+km\s+(?:total\s+)?for\s+the\s+week/i);
-    const prescribedWeek1MilesRaw = prescribedWeek1MatchMi
-      ? parseFloat(prescribedWeek1MatchMi[1])
-      : prescribedWeek1MatchKm
-      ? parseFloat(prescribedWeek1MatchKm[1]) / 1.60934
-      : null;
-
-    // Compute how many days this initial plan covers so we can:
-    //   (a) set weekly_mileage_target to match what was actually prescribed (not a phantom full-week target)
-    //   (b) annualize prescribedWeek1Miles for the arc when Strava data isn't available
+    // Compute how many days this initial plan covers so we can set weekly_mileage_target correctly.
     // Sunday (dayOfWeek=0): prompt tells Dean to plan the full upcoming Mon–Sun week → 7 days.
     // Any other day: today + days remaining until Sunday.
     const initPlanNow = new Date();
@@ -2042,16 +1897,14 @@ Weekly total: ${mileageRange}
     const daysInPlan = initPlanDayOfWeek === 0 ? 7 : daysToSunday + 1;
     const isPartialWeek = daysInPlan < 7; // any day other than Mon (7 days) or Sun (7-day upcoming week)
 
-    // weekly_mileage_target stored in training_state: use what was actually prescribed for
-    // the days covered. This prevents "0/65mi done" when only a 2-day plan was assigned.
+    // weekly_mileage_target: use the arc's week 1 target from periodization engine.
     // For partial weeks, add miles already done this week so the dashboard shows the TRUE
-    // weekly total (done + planned), not just the planned sessions. E.g. if a user has run
-    // 17mi Mon-Thu and Dean prescribes 19mi for Fri-Sun, the target should display as 36mi.
-    // The Sunday recap will reset this to the proper full-week target for next week.
+    // weekly total (done + planned). The Sunday recap will reset to the proper full-week target.
+    const arcWeek1Miles = periodization.suggestedWeeklyMiles ?? 0;
     const weekMileageTarget = isPartialWeek
-      ? Math.round(((prescribedWeek1MilesRaw ?? periodization.suggestedWeeklyMiles ?? 0) + weekMileageSoFar) * 2) / 2
-      : periodization.suggestedWeeklyMiles;
-    console.log("[initial_plan] prescribedWeek1MilesRaw=", prescribedWeek1MilesRaw, "isPartialWeek=", isPartialWeek, "weekMileageSoFar=", weekMileageSoFar, "weekMileageTarget=", weekMileageTarget);
+      ? Math.round((arcWeek1Miles * (daysInPlan / 7) + weekMileageSoFar) * 2) / 2
+      : arcWeek1Miles;
+    console.log("[initial_plan] arcWeek1Miles=", arcWeek1Miles, "isPartialWeek=", isPartialWeek, "weekMileageSoFar=", weekMileageSoFar, "weekMileageTarget=", weekMileageTarget);
 
     // Persist week counter, phase, and computed target. Clear taper_peak_miles so the
     // next taper window re-locks the peak from scratch.
@@ -2062,22 +1915,6 @@ Weekly total: ${mileageRange}
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
-    // Arc base mileage calibration:
-    // - If Strava history exists (avgWeeklyMileage != null): always use it — it's an 8-week
-    //   real average and is accurate regardless of what day the user onboarded. The
-    //   prescribedWeek1Miles covers only the days remaining in the current week (as few as 2),
-    //   so it would under-calibrate a high-mileage athlete's entire arc (e.g. Julia at 60mpw
-    //   onboarding Saturday → 16mi prescribed → arc built from 16mi base instead of 60mi).
-    // - If no Strava (user stated their mileage, which is what Dean worked from): annualize
-    //   prescribedWeek1MilesRaw × (7 / daysInPlan) to get the full-week equivalent. This
-    //   scales correctly for any onboard day: Sat (×3.5), Wed (×1.4), Mon (×1.0).
-    const annualizedWeek1Miles = prescribedWeek1MilesRaw != null
-      ? Math.round((prescribedWeek1MilesRaw * 7 / daysInPlan) * 2) / 2
-      : null;
-    const prescribedWeek1Miles = avgWeeklyMileage
-      ? null               // Strava avg is authoritative — don't let partial-week total distort the arc
-      : annualizedWeek1Miles; // no Strava: annualized prescribed total is the best estimate
-
     // Generate and save the full multi-week training arc.
     // skipLinkSms=true — we'll include the dashboard URL inline in the cadence question below
     // so the user gets one closing message instead of two back-to-back.
@@ -2086,59 +1923,8 @@ Weekly total: ${mileageRange}
     const _preGenMs = Date.now() - _ipStart;
     console.log(`[initial_plan] ${_preGenMs}ms elapsed before generateAndSaveFullPlan — budget remaining: ~${10000 - _preGenMs}ms`);
     if (_preGenMs > 6000) console.warn(`[initial_plan] ⚠️ already ${_preGenMs}ms in — generateAndSaveFullPlan may exceed 10s Hobby cap`);
-    const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, prescribedWeek1Miles: prescribedWeek1Miles ?? undefined, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true, wantsSpeedWork });
+    const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true, wantsSpeedWork });
     console.log(`[initial_plan] generateAndSaveFullPlan done — total elapsed: ${Date.now() - _ipStart}ms`);
-
-    // Fire sync_sessions in a fresh invocation so it doesn't eat into the 10s Hobby budget.
-    // It must run AFTER generateAndSaveFullPlan (which clears weekly_plan_sessions) but
-    // the plan message is now in the DB, so sync_sessions can read it from conversations.
-    after(async () => {
-      try {
-        let sessionsWritten = false;
-        if (rawSessionListJson) {
-          try {
-            const sessions = JSON.parse(rawSessionListJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
-            if (Array.isArray(sessions) && sessions.length > 0) {
-              await supabase.from("training_state")
-                .update({ weekly_plan_sessions: sessions as unknown as Json })
-                .eq("user_id", userId);
-              // Skip rebase for partial-week onboards with Strava history — the arc is already
-              // calibrated from the Strava avg; the lower session count just reflects fewer days.
-              const skipRebaseForPartial = isPartialWeek && avgWeeklyMileage != null;
-              await syncArcCurrentWeek(userId, 1, "base", (profile?.goal as string) ?? "", (user.name as string | null) ?? null, skipRebaseForPartial);
-              if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
-                await supabase.from("training_state")
-                  .update({ weekly_mileage_target: weekMileageTarget })
-                  .eq("user_id", userId);
-              }
-              sessionsWritten = true;
-              console.log(`[initial_plan] [SESSION_LIST] tag: wrote ${sessions.length} sessions directly`);
-            }
-          } catch (parseErr) {
-            console.error("[initial_plan] [SESSION_LIST] parse failed, falling back to sync_sessions:", parseErr);
-          }
-        }
-        if (!sessionsWritten) {
-          const syncBody: Record<string, unknown> = { userId, trigger: "sync_sessions" };
-          // Pass partial-week target so syncArcCurrentWeek's session-sum doesn't clobber it.
-          if (isPartialWeek && weekMileageTarget != null && weekMileageTarget > 0) {
-            syncBody.partialWeekTarget = weekMileageTarget;
-          }
-          // Skip arc rebase for partial-week onboards with Strava history.
-          if (isPartialWeek && avgWeeklyMileage != null) {
-            syncBody.skipArcRebase = true;
-          }
-          await fetch(`${appUrl}/api/coach/respond`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(syncBody),
-          });
-        }
-      } catch (err) {
-        console.error("[coach/respond] sync_sessions trigger failed (initial_plan):", err);
-        void trackEvent(userId, "after_error", { trigger: "sync_sessions_initial_plan", error: String(err) });
-      }
-    });
 
     // Build the dashboard URL from the token generateAndSaveFullPlan just created/returned.
     const planToken = newDashboardToken ?? dashboardToken;
@@ -2192,8 +1978,6 @@ Weekly total: ${mileageRange}
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
-    // Note: syncArcCurrentWeek below will overwrite weekly_mileage_target with the actual
-    // session sum — this sets the periodization engine's suggestion as a fallback only.
     // During injury hold: advance the clock (calendar keeps moving) but do NOT update
     // the mileage target — it stays at 0 until injury_clear triggers a plan rebuild.
     const isOnInjuryHold = !!(state?.injury_hold_since as string | null);
@@ -2207,7 +1991,6 @@ Weekly total: ${mileageRange}
       } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
-    // Fire sync_sessions in a fresh invocation — saves ~3s vs inline Haiku calls.
     after(async () => {
       try {
         // Sync B/C races from onboarding_data.other_races → races table.
@@ -2253,80 +2036,14 @@ Weekly total: ${mileageRange}
         }
 
         // During injury hold: don't sync arc — the arc will be rebuilt when injury clears.
-        // Store the cross-training sessions so reminders have something to reference.
-        let sessionsWritten = false;
-
-        // For uploaded plans: directly load next week's sessions from the stored plan data.
-        // This is more reliable than extracting from Dean's free-form recap text.
-        if (isUploadedPlan && uploadedNextWeek && !isOnInjuryHold) {
-          const DAY_OFFSETS_REC: Record<string, number> = {
-            monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
-          };
-          const DAY_SHORT_REC = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-          // Compute next week's Monday
-          const nowRec = new Date();
-          const daysFromMonRec = nowRec.getDay() === 0 ? 6 : nowRec.getDay() - 1;
-          const thisMonday = new Date(nowRec);
-          thisMonday.setDate(nowRec.getDate() - daysFromMonRec);
-          const nextMonday = new Date(thisMonday);
-          nextMonday.setDate(thisMonday.getDate() + 7);
-
-          const uploadedSessions = uploadedNextWeek.sessions
-            .filter(s => s.type !== "off")
-            .map(s => {
-              const offset = DAY_OFFSETS_REC[s.dayOfWeek.toLowerCase()] ?? 0;
-              const d = new Date(nextMonday);
-              d.setDate(nextMonday.getDate() + offset);
-              const distPart = s.targetDistanceMilesMin != null && s.targetDistanceMilesMax != null
-                ? ` ${s.targetDistanceMilesMin}–${s.targetDistanceMilesMax}mi`
-                : s.targetDistanceMiles ? ` ${s.targetDistanceMiles}mi` : "";
-              const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
-              return {
-                day: DAY_SHORT_REC[offset]!,
-                date: `${d.getMonth() + 1}/${d.getDate()}`,
-                label: `${s.description}${distPart}${pacePart}`,
-                optional: false,
-              };
-            });
-
-          if (uploadedSessions.length > 0) {
-            await supabase.from("training_state")
-              .update({ weekly_plan_sessions: uploadedSessions as unknown as Json })
-              .eq("user_id", userId);
-            sessionsWritten = true;
-            console.log(`[weekly_recap] uploaded plan: wrote ${uploadedSessions.length} sessions for week ${uploadedNextWeek.week_number}`);
-          }
-        }
-
-        if (!sessionsWritten) {
-          if (rawSessionListJson) {
-            try {
-              const sessions = JSON.parse(rawSessionListJson) as Array<{ day: string; date: string; label: string; optional?: boolean }>;
-              if (Array.isArray(sessions) && sessions.length > 0) {
-                await supabase.from("training_state")
-                  .update({ weekly_plan_sessions: sessions as unknown as Json })
-                  .eq("user_id", userId);
-                if (!isOnInjuryHold) {
-                  await syncArcCurrentWeek(userId, periodization.effectiveWeek, periodization.phase, (profile?.goal as string) ?? "", (user.name as string | null) ?? null);
-                }
-                sessionsWritten = true;
-                console.log(`[weekly_recap] [SESSION_LIST] tag: wrote ${sessions.length} sessions${isOnInjuryHold ? " (injury hold — arc sync skipped)" : ""}`);
-              }
-            } catch (parseErr) {
-              console.error("[weekly_recap] [SESSION_LIST] parse failed, falling back to sync_sessions:", parseErr);
-            }
-          }
-          if (!sessionsWritten && !isOnInjuryHold) {
-            await fetch(`${appUrl}/api/coach/respond`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ userId, trigger: "sync_sessions" }),
-            });
-          }
+        if (!isOnInjuryHold) {
+          // Advance simplified week-level plan state from the training arc.
+          await syncWeekFromArc(userId, periodization.effectiveWeek);
+          console.log(`[weekly_recap] synced arc week ${periodization.effectiveWeek} to training_state`);
         }
       } catch (err) {
-        console.error("[coach/respond] sync_sessions trigger failed (weekly_recap):", err);
-        void trackEvent(userId, "after_error", { trigger: "sync_sessions_weekly_recap", error: String(err) });
+        console.error("[coach/respond] weekly_recap after() failed:", err);
+        void trackEvent(userId, "after_error", { trigger: "weekly_recap_after", error: String(err) });
       }
     });
   }
@@ -3367,258 +3084,6 @@ ${lines.join("\n")}
 `;
 }
 
-/**
- * After generating an initial_plan or weekly_recap, extract the specific planned
- * sessions as structured JSON and store them in training_state.weekly_plan_sessions.
- * This gives every subsequent message (post_run, reminders) a single authoritative
- * source for session distances — Claude cannot contradict itself if it reads from here.
- */
-async function extractAndStorePlanSessions(userId: string, planText: string): Promise<void> {
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 500,
-    system: `Extract the list of planned training sessions from this coaching message and call save_plan_sessions.
-If a session starts with "(Optional)" or "Optional:", set "optional": true and strip that prefix from the label.
-If no session list is found, call save_plan_sessions with an empty sessions array.`,
-    messages: [{ role: "user", content: planText }],
-    tools: [{
-      name: "save_plan_sessions",
-      description: "Save the extracted training sessions from the plan message.",
-      input_schema: {
-        type: "object" as const,
-        properties: {
-          sessions: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                day: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
-                date: { type: "string", description: "M/D format, e.g. 3/10" },
-                label: { type: "string", description: "Session description, e.g. Easy 6.5mi" },
-                optional: { type: "boolean" },
-              },
-              required: ["day", "date", "label", "optional"],
-            },
-          },
-        },
-        required: ["sessions"],
-      },
-    }],
-    tool_choice: { type: "tool" as const, name: "save_plan_sessions" },
-  });
-
-  const toolBlock = response.content.find(b => b.type === "tool_use" && b.name === "save_plan_sessions");
-  let sessions: Array<{ day: string; date: string; label: string; optional?: boolean }> = [];
-  if (toolBlock && toolBlock.type === "tool_use") {
-    const input = toolBlock.input as { sessions?: unknown };
-    if (Array.isArray(input.sessions)) sessions = input.sessions as typeof sessions;
-  }
-
-  // Sanitize cross-training labels with incorrect units or suspiciously short durations.
-  const CROSS_TRAINING_KEYWORDS = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin)\b/i;
-  sessions = sessions.map(s => {
-    if (!CROSS_TRAINING_KEYWORDS.test(s.label)) return s;
-    let label = s.label;
-    // Fix 1: "X mi" on a cross-training session → "X min" (e.g. "3.5 mi" → "4 min", then fix 2 below)
-    // e.g. "Strength + mobility 3.5 mi" → "Strength + mobility 4 min"
-    label = label.replace(/(\d+(?:\.\d+)?)\s*mi(?!\w)/gi, (_, num) => {
-      const mins = Math.round(parseFloat(num));
-      return `${mins} min`;
-    });
-    // Fix 2: suspiciously short decimal durations (< 5 min) like "3.5min" or "3.5 min" are almost
-    // certainly a mis-extracted "35 min" where the Haiku extractor dropped a digit.
-    // e.g. "Strength + mobility 3.5min" → "Strength + mobility 35 min"
-    label = label.replace(/(\d+\.\d+)\s*min\b/gi, (match, num) => {
-      const val = parseFloat(num);
-      if (val < 5) return `${Math.round(val * 10)} min`;
-      return match;
-    });
-    return { ...s, label };
-  });
-
-  await supabase
-    .from("training_state")
-    .update({ weekly_plan_sessions: sessions as unknown as Json })
-    .eq("user_id", userId);
-}
-
-/**
- * After extractAndStorePlanSessions runs, sync the training arc's current week entry
- * so the dashboard shows what Dean actually prescribed — not what the Haiku arc
- * generator guessed during plan creation.
- *
- * Updates three fields on the current week row in training_plans.weeks:
- *   - mileage_target  → sum of miles from stored sessions
- *   - key_workout     → label of the quality session (or long run)
- *   - notes           → Haiku-generated note based on actual sessions
- *
- * Non-fatal: failures are logged and the arc is left as-is.
- */
-async function syncArcCurrentWeek(
-  userId: string,
-  currentWeekNum: number,
-  phase: string,
-  goal: string,
-  athleteName?: string | null,
-  skipRebase?: boolean,
-): Promise<void> {
-  try {
-    // Fetch the sessions that were just stored
-    const { data: stateRow } = await supabase
-      .from("training_state")
-      .select("weekly_plan_sessions")
-      .eq("user_id", userId)
-      .single();
-
-    const sessions = (stateRow?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
-    if (sessions.length === 0) return;
-
-    // Compute actual mileage from session labels.
-    // Handles three cases:
-    //  1. Interval sessions: "6×800m @ pace (1mi WU + ... + 1mi CD)" — sum interval distance + WU/CD
-    //  2. Explicit total distance: "Easy 6mi", "Tempo 4mi (2mi @ pace)" — first mi match
-    //  3. Time-based run/walk sessions: "Run 2 min, walk 2 min × 6 (~24 min total)" — estimate at 13 min/mi
-    function parseMilesFromLabel(label: string): number {
-      // Check for track-style interval notation: N×X(m|km|mi)
-      const intervalMatch = label.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(m|km|mi)\b/i);
-      if (intervalMatch) {
-        const reps = parseInt(intervalMatch[1]!);
-        const dist = parseFloat(intervalMatch[2]!);
-        const unit = intervalMatch[3]!.toLowerCase();
-        const intervalMi = unit === "mi" ? dist : unit === "km" ? dist * 0.621371 : dist / 1609.34;
-        const intervalTotal = reps * intervalMi;
-        // Also sum explicit WU/CD miles outside the interval notation (e.g. "1mi WU", "1mi CD")
-        const labelWithoutInterval = label.replace(/\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:m|km|mi)\b/gi, "");
-        const wuCdMiles = [...labelWithoutInterval.matchAll(/(\d+(?:\.\d+)?)\s*mi(?!\w)/gi)]
-          .reduce((sum, mc) => sum + parseFloat(mc[1]!), 0);
-        return Math.round((intervalTotal + wuCdMiles) * 10) / 10;
-      }
-      // Explicit total distance in miles (takes the first match — handles "Tempo 4mi (2mi @ pace)")
-      const m = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
-      if (m) return parseFloat(m[1]!);
-      // Fallback: time-based run/walk session → estimate at ~13 min/mile
-      if (/\b(run|walk)\b/i.test(label)) {
-        const totalMinMatch = label.match(/~?(\d+)\s*min(?:\s+total)?[)]/i);
-        if (totalMinMatch) return Math.round(parseInt(totalMinMatch[1]) / 13 * 10) / 10;
-      }
-      return 0;
-    }
-    const actualMiles = Math.round(sessions.reduce((sum, s) => sum + parseMilesFromLabel(s.label), 0) * 2) / 2;
-
-    // Detect the key quality session (intervals, tempo, etc.) and the long run
-    function isQualitySession(label: string): boolean {
-      const l = label.toLowerCase();
-      return l.includes("tempo") || l.includes("interval") || l.includes("repeat") ||
-        l.includes("threshold") || l.includes("fartlek") || l.includes("vo2") ||
-        l.includes("hill") || l.includes("stride") || l.includes("progression");
-    }
-    const qualitySession = sessions.find(s => isQualitySession(s.label));
-    // Identify the long run: prefer explicit "long" keyword, fall back to the
-    // highest-mileage running session (Dean sometimes omits "Long run" and just
-    // writes "Easy 11mi" for the Saturday session).
-    const CROSS_TRAINING_RE = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin)\b/i;
-    const longRunByLabel = sessions.find(s => s.label.toLowerCase().includes("long"));
-    const longRunByMileage = sessions
-      .filter(s => !CROSS_TRAINING_RE.test(s.label))
-      .reduce<{ day: string; date: string; label: string } | null>((best, s) =>
-        parseMilesFromLabel(s.label) > parseMilesFromLabel(best?.label ?? "") ? s : best
-      , null);
-    const longRunSession = longRunByLabel ?? longRunByMileage;
-    const longRunMiles = longRunSession ? parseMilesFromLabel(longRunSession.label) : 0;
-    const keySession = qualitySession ?? longRunSession ?? sessions[0];
-    let derivedKeyWorkout = keySession?.label ?? "";
-    if (derivedKeyWorkout.length > 80) derivedKeyWorkout = derivedKeyWorkout.slice(0, 77) + "...";
-
-    // Generate notes using actual sessions so the dashboard reflects what Dean prescribed
-    let derivedNotes = "";
-    try {
-      const sessionList = sessions.map(s => `${s.day}: ${s.label}`).join("; ");
-      const notesResp = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 180,
-        system: `Write a 2-sentence coach's note for an athlete's training week dashboard. Phase: ${phase}. Goal: ${goal || "general running fitness"}.
-First sentence: this week's purpose and why it matters. Second sentence: one brief execution tip for the key session — what to focus on during that workout.
-If the session list includes jargon (strides, tempo, intervals), use plain language to describe the effort level in that second sentence.
-Do not use the athlete's name. Be direct and practical. No filler. Return ONLY the note text.`,
-        messages: [{ role: "user", content: `Sessions: ${sessionList}\nTotal: ~${actualMiles}mi` }],
-      });
-      derivedNotes = notesResp.content[0].type === "text" ? notesResp.content[0].text.trim() : "";
-    } catch (err) {
-      console.error("[syncArcCurrentWeek] notes generation failed (non-fatal):", err);
-    }
-
-    // Fetch the latest plan for this user and patch the current week
-    const { data: planRow } = await supabase
-      .from("training_plans")
-      .select("id, weeks")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (!planRow) return;
-
-    const planWeeks = (planRow.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>) ?? [];
-
-    // When patching week 1, rebase all future weeks proportionally so the arc
-    // progression starts from what Dean actually prescribed rather than the Strava
-    // avg the arc generator used. E.g. if arc was built from 14mi avg but Dean
-    // prescribed 18mi in the initial plan, week 2 would show 15.5 (drop from 18) —
-    // rebasing scales week 2 to ~20, week 3 to ~22, etc., preserving arc shape.
-    const originalWeek1Miles = currentWeekNum === 1
-      ? (planWeeks.find(w => w.week_number === 1)?.mileage_target ?? actualMiles)
-      : null;
-    const scaleFactor = originalWeek1Miles && actualMiles > 0 && originalWeek1Miles > 0
-      ? actualMiles / originalWeek1Miles
-      : 1.0;
-    // Don't rebase when the caller signals the arc base is already correct (partial-week
-    // onboard with Strava avg as anchor). The lower session count just reflects fewer
-    // remaining days — scaling future weeks down would make the arc start below baseline.
-    const shouldRebase = !skipRebase && currentWeekNum === 1 && Math.abs(scaleFactor - 1.0) > 0.05;
-    if (shouldRebase) {
-      console.log(`[syncArcCurrentWeek] rebasing arc weeks 2+ — week 1 patched from ${originalWeek1Miles}mi to ${actualMiles}mi (scale ×${scaleFactor.toFixed(3)})`);
-    }
-
-    const updatedWeeks = planWeeks.map(w => {
-      if (w.week_number === currentWeekNum) {
-        return {
-          ...w,
-          ...(actualMiles > 0 ? { mileage_target: actualMiles } : {}),
-          ...(longRunMiles > 0 ? { long_run_target: longRunMiles } : {}),
-          ...(derivedKeyWorkout ? { key_workout: derivedKeyWorkout } : {}),
-          ...(derivedNotes ? { notes: derivedNotes } : {}),
-        };
-      }
-      if (shouldRebase && w.week_number > currentWeekNum) {
-        return {
-          ...w,
-          mileage_target: Math.round(w.mileage_target * scaleFactor * 2) / 2,
-          long_run_target: Math.round(w.long_run_target * scaleFactor * 2) / 2,
-        };
-      }
-      return w;
-    });
-
-    await supabase
-      .from("training_plans")
-      .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
-      .eq("id", planRow.id as string);
-
-    // Also sync training_state.weekly_mileage_target to match what Dean actually prescribed
-    // (the value set during weekly_recap is the periodization engine's suggestion, which may
-    // differ from what Claude prescribed after adjusting for the athlete's specific week).
-    if (actualMiles > 0) {
-      await supabase
-        .from("training_state")
-        .update({ weekly_mileage_target: actualMiles })
-        .eq("user_id", userId);
-    }
-
-    console.log(`[syncArcCurrentWeek] synced week ${currentWeekNum}: ${actualMiles}mi, key="${derivedKeyWorkout.slice(0, 50)}"`);
-  } catch (err) {
-    console.error("[syncArcCurrentWeek] failed (non-fatal):", err);
-  }
-}
 
 /**
  * After a user_message exchange, check if the conversation resulted in any plan
@@ -4167,98 +3632,23 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
     return est.tempo ? tsFormatPace(est.tempo) : null;
   })();
-  const { sessionRows, projectedWeekMiles, remainingPlanLine } = (() => {
-    const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
-    if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
-    const tz2 = timezone || "America/New_York";
-    const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz2 }).format(new Date());
-    const [ty, tm, td] = localTodayStr.split("-").map(Number);
-    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
-    const dayOfWeekToday = localTodayUTC.getUTCDay();
-    const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
-    const endOfWeekMs = Date.UTC(ty, tm - 1, td + daysToSunday);
-    const todaySessions = sessions.filter(s => {
-      const [m, d] = s.date.split("/").map(Number);
-      if (isNaN(m) || isNaN(d)) return false;
-      return new Date(Date.UTC(ty, m - 1, d)).getTime() === localTodayUTC.getTime();
-    });
-    const futureSessions = sessions.filter(s => {
-      const [m, d] = s.date.split("/").map(Number);
-      if (isNaN(m) || isNaN(d)) return false; // no parseable date = exclude, not treat as perpetually future
-      return new Date(Date.UTC(ty, m - 1, d)) > localTodayUTC;
-    });
-    const activeSessions = [...todaySessions, ...futureSessions];
-    if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
-    const parseSessionMiles = (s: { label: string }) => {
-      // Try miles first
-      const miMatch = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i) || s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
-      if (miMatch) return parseFloat(miMatch[1]);
-      // Try km — convert to miles for internal tracking
-      const kmMatch = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*km/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*km(?:\s+total)?\)/i) || s.label.match(/(\d+(?:\.\d+)?)\s*km/i);
-      if (kmMatch) return parseFloat(kmMatch[1]) / 1.60934;
-      return 0;
-    };
-    const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
-    const todaySessionMiles = trigger !== "post_run" ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0) : 0;
-    const totalRemainingPlanMiles = todaySessionMiles + remainingSessionMiles;
-    const targetAlreadyMet = tsTargetMiles > 0 && weekMileageSoFar >= tsTargetMiles;
-    let sessionRows = "";
-    if (todaySessions.length > 0) {
-      const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-      const todayLabel = trigger === "post_run"
-        ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
-        : `TODAY'S PLANNED SESSION (check BOTH RECENT WORKOUTS AND RECENT CONVERSATION before giving future-tense advice: (1) If the athlete's message reports completing ANY workout today, treat today as DONE. (2) If today's session is a Long Run and RECENT WORKOUTS already shows a long effort from earlier this week — labeled "yesterday", "2 days ago", etc. — that long run IS already done for the week. Do NOT prescribe it again. Tell the athlete their long run is covered and what remains is rest or an easy shakeout.)`;
-      sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
-    }
-    if (futureSessions.length > 0) {
-      if (targetAlreadyMet) {
-        const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
-        sessionRows += `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n${futureList}\n`;
-      } else {
-        const thisWeekFuture = futureSessions.filter(s => {
-          const [mm, dd] = s.date.split("/").map(Number);
-          if (isNaN(mm) || isNaN(dd)) return false; // no parseable date = exclude from this week
-          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
-        });
-        const nextWeekFuture = futureSessions.filter(s => {
-          const [mm, dd] = s.date.split("/").map(Number);
-          if (isNaN(mm) || isNaN(dd)) return false;
-          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() > endOfWeekMs;
-        });
-        if (thisWeekFuture.length > 0) {
-          sessionRows += `\n- UPCOMING SESSIONS THIS WEEK (week ends Sunday):\n${thisWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
-        }
-        if (nextWeekFuture.length > 0) {
-          sessionRows += `\n- NEXT WEEK'S PLANNED SESSIONS (starts Monday — do NOT count these as part of this week's mileage or day count):\n${nextWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
-        }
-      }
-    }
-    let remainingPlanLine = "";
-    if (totalRemainingPlanMiles > 0 && !targetAlreadyMet && trigger !== "post_run") {
-      const thisWeekRemaining = [
-        ...todaySessions,
-        ...futureSessions.filter(s => {
-          const [mm, dd] = s.date.split("/").map(Number);
-          if (isNaN(mm) || isNaN(dd)) return true;
-          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
-        }),
-      ];
-      const breakdown = thisWeekRemaining.map(s => {
-        const [m, d] = s.date.split("/").map(Number);
-        const isToday = !isNaN(m) && !isNaN(d) && new Date(Date.UTC(ty, m - 1, d)).getTime() === localTodayUTC.getTime();
-        return `${isToday ? "today's" : `${s.day} ${s.date}`} ${s.label}`;
-      }).join(" + ");
-      const projTotal = weekMileageSoFar + totalRemainingPlanMiles;
-      remainingPlanLine = `\n- MILES REMAINING IN PLAN THIS WEEK: ${tsMi(totalRemainingPlanMiles)} across ${thisWeekRemaining.length} session${thisWeekRemaining.length !== 1 ? "s" : ""} (${breakdown}) → projected week total: ${tsMi(projTotal)}`;
-    }
-    return {
-      sessionRows,
-      projectedWeekMiles: trigger === "post_run"
-        ? weekMileageSoFar + remainingSessionMiles
-        : weekMileageSoFar + totalRemainingPlanMiles,
-      remainingPlanLine,
-    };
+  // Simplified week plan — target, long run, quality session from arc.
+  // No longer tracks day-level sessions; the coach prescribes a weekly target and
+  // the athlete decides when to run each session.
+  const thisWeekPlan = (() => {
+    const target = tsTargetMiles;
+    const longRun = (state?.weekly_long_run_miles as number | null) ?? null;
+    const qualitySession = (state?.weekly_quality_session as string | null) ?? null;
+    if (!target && !longRun && !qualitySession) return "";
+    const lines: string[] = [];
+    if (target) lines.push(`Target: ${tsMi(target)}`);
+    if (longRun) lines.push(`Long run: ~${tsMi(longRun)} (fit it wherever works)`);
+    if (qualitySession) lines.push(`Quality session: ${qualitySession}`);
+    return lines.length > 0 ? `\nTHIS WEEK'S PLAN:\n${lines.map(l => `- ${l}`).join("\n")}` : "";
   })();
+  const sessionRows = thisWeekPlan; // referenced in system prompt sections below
+  const projectedWeekMiles = weekMileageSoFar;
+  const remainingPlanLine = "";
   const tsMileageLine = (() => {
     const hasStrava = !!(user.strava_athlete_id as number | null);
     if (!hasStrava && weekMileageSoFar === 0 && weekRunCount === 0) {
@@ -4266,9 +3656,6 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     }
     const done = `${tsMi(weekMileageSoFar)} done so far this week (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`;
     if (trigger === "post_run") return `${done} (includes today's synced run — do NOT add it again)`;
-    if (projectedWeekMiles !== null && projectedWeekMiles > weekMileageSoFar) {
-      return `${done} | Projected week total (done + upcoming sessions): ${tsMi(projectedWeekMiles)}`;
-    }
     return done;
   })();
 
@@ -4276,14 +3663,11 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   const factsBlock = (() => {
     const hasStrava = !!(user.strava_athlete_id as number | null);
     const milogged = hasStrava || weekMileageSoFar > 0
-      ? `${tsMi(weekMileageSoFar)} logged (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})${trigger !== "post_run" && projectedWeekMiles > weekMileageSoFar ? ` | Projected: ${tsMi(projectedWeekMiles)}` : ""}`
+      ? `${tsMi(weekMileageSoFar)} logged (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`
       : "not tracked (no Strava)";
     const easyRange = easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD";
     const raceLine = raceIsUpcoming && profileRaceDaysUntil !== null
       ? `Race: ${goalDisplay} on ${profile!.race_date as string} · ${profileRaceDaysUntil} day${profileRaceDaysUntil !== 1 ? "s" : ""} / ~${Math.round(profileRaceDaysUntil / 7)} week${Math.round(profileRaceDaysUntil / 7) !== 1 ? "s" : ""} out`
-      : "";
-    const remainingLine = remainingPlanLine
-      ? `Miles remaining this week:${remainingPlanLine.replace(/^- MILES REMAINING IN PLAN THIS WEEK:/, "").split("→")[0].trim()} → ${remainingPlanLine.split("→")[1]?.trim() ?? ""}`
       : "";
     const lines = [
       `Today: ${todayStr}`,
@@ -4291,7 +3675,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       `This week: ${milogged}`,
       `Paces: Easy ${easyRange} · Tempo ${tsTempoPace} · Interval ${tsIntervalPace}`,
       ...(raceLine ? [raceLine] : []),
-      ...(remainingLine ? [remainingLine] : []),
+      ...(thisWeekPlan ? [thisWeekPlan] : []),
     ];
     return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FACTS — pre-computed by system. Never recalculate these.
@@ -5218,6 +4602,9 @@ function buildUserMessage(
       if (!hasCadence) dataGuards.push("No cadence data is available for this activity. Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, or range.");
       // Per-mile and per-lap elevation breakdown is not a Strava-provided field — only total elevation gain is.
       dataGuards.push("Per-mile and per-lap elevation breakdowns (e.g. '500ft gain on lap 2', '721ft at miles 11-12') are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific footage to individual miles or laps.");
+      // max_heartrate is this activity's single-run peak, NOT the athlete's physiological maximum.
+      // Do not multiply it by ~1.02 or otherwise derive a "true max HR" estimate from it.
+      dataGuards.push("The `max_heartrate` field in the activity JSON is this run's single-activity peak reading, NOT the athlete's physiological maximum heart rate. Do NOT use it to estimate or state the athlete's max HR (e.g. do NOT say 'your max is around X based on today's peak'). If you need to reference HR zones, describe them in relative terms (e.g. 'zone 4-5', 'high aerobic effort') without asserting a specific max HR figure.");
       // splits_standard gives one split per mile, so splitCount ≈ ceil(runDistanceMiles).
       // Guard: if splits look like km data (far more splits than miles), warn Claude.
       // This handles legacy activities stored before the switch to splits_standard.
@@ -5561,16 +4948,6 @@ MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of runni
 TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the miles from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: 32.5 mi". Wrong: adding past-week miles to next week’s total (e.g. if the plan is 32.5 mi but the recap week had 30.8 mi, the Total is 32.5 mi, not 63.3 mi).
 <rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60mi". Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.</rule>
 
-SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the upcoming week's plan. Format exactly:
-[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"Easy 6mi","optional":false},{"day":"Wed","date":"M/D","label":"6×800m @ 5K pace 3mi","optional":false}]]
-Rules:
-- day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
-- date: M/D format matching the calendar date you assigned to this session
-- label: concise session description including distance (e.g. "Easy 6mi", "Long run 10mi", "6×800m @ 5K pace 3mi", "Strength 30min")
-- optional: true only for explicitly optional sessions, false otherwise
-- Include every session in the upcoming week — do not omit any
-- The tag is stripped before the athlete sees the message — they will never see it
-
 ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Thursday's tempo run") for any activity more than 1 day ago.`;
     }
     case "workout_image":
@@ -5748,15 +5125,7 @@ ONE QUESTION RULE: Do not ask any questions in this response — no follow-ups a
 ${!hasStrava ? `
 NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so there's no automatic activity sync. Weave a natural, low-key line into the closing of the plan that tells them to text you after each run. Make it feel like a coach thing, not a system requirement. Examples: "Since you're not on Strava, just shoot me a text after each run — even a quick 'done, 5 miles' — and I'll track from there." or "No Strava sync here, so just drop me a message after each workout and I'll keep tabs on your progress." Vary the phrasing. One sentence only — don't dwell on it.` : ""}
 
-SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the week's plan. Format exactly:
-[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"${umUseMetric ? "Easy 10 km" : "Easy 6mi"}","optional":false},{"day":"Wed","date":"M/D","label":"${umUseMetric ? "6×800m @ 5K pace 4.8 km" : "6×800m @ 5K pace 3mi"}","optional":false}]]
-Rules:
-- day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
-- date: M/D format matching the calendar date you assigned to this session
-- label: concise session description including distance (e.g. ${umUseMetric ? '"Easy 10 km", "Long run 16 km", "6×800m @ 5K pace 4.8 km", "Strength 30min"' : '"Easy 6mi", "Long run 10mi", "6×800m @ 5K pace 3mi", "Strength 30min"'})
-- optional: true only for explicitly optional sessions, false otherwise
-- Include every session in the week — do not omit any
-- The tag is stripped before the athlete sees the message — they will never see it`;
+`;
     }
     default:
       return "";

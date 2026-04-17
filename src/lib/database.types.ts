@@ -450,8 +450,10 @@ export type Database = {
           updated_at: string | null
           user_id: string
           week_mileage_so_far: number | null
+          weekly_long_run_miles: number | null
           weekly_mileage_target: number | null
           weekly_plan_sessions: Json | null
+          weekly_quality_session: string | null
         }
         Insert: {
           current_phase?: string | null
@@ -467,8 +469,10 @@ export type Database = {
           updated_at?: string | null
           user_id: string
           week_mileage_so_far?: number | null
+          weekly_long_run_miles?: number | null
           weekly_mileage_target?: number | null
           weekly_plan_sessions?: Json | null
+          weekly_quality_session?: string | null
         }
         Update: {
           current_phase?: string | null
@@ -484,8 +488,10 @@ export type Database = {
           updated_at?: string | null
           user_id?: string
           week_mileage_so_far?: number | null
+          weekly_long_run_miles?: number | null
           weekly_mileage_target?: number | null
           weekly_plan_sessions?: Json | null
+          weekly_quality_session?: string | null
         }
         Relationships: [
           {

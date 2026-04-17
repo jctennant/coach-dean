@@ -4,6 +4,37 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-16 — Simplified week-level plan tracking (remove day-level session assignment)
+
+**Type:** Refactor
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Day-level session tracking (`weekly_plan_sessions`) caused a cascade of bugs: wrong day assignments, mileage math errors requiring correction passes, session dedup logic, and fragile `[SESSION_LIST]` JSON tag extraction from Claude's free-form responses. The `sync_sessions` trigger, `extractAndStorePlanSessions`, and `syncArcCurrentWeek` functions added significant complexity and latency without reliable output.
+**Fix / Change:** Replaced `weekly_plan_sessions` (day-level JSON array) with two simple columns: `weekly_long_run_miles` and `weekly_quality_session`. The coach now communicates the weekly plan as a framework — target miles, long run, quality session — rather than a day-by-day schedule. The `[SESSION_LIST]` machine-readable tag, `extractAndStorePlanSessions`, `syncArcCurrentWeek`, and `handleSyncSessions` functions are removed. On `initial_plan`, `generateAndSaveFullPlan` directly populates the new columns from the arc. On `weekly_recap`, `syncWeekFromArc` reads the arc for the new week and writes the simplified state. Arc rebase logic is removed (the arc is now the authoritative source — no post-hoc corrections needed).
+**Files changed:** `supabase/migrations/037_simplified_training_state.sql`, `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`, `src/lib/database.types.ts`
+
+## 2026-04-16 — Guard against estimating max HR from single-run peak
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "this last message seemed incorrect - max hr is def higher! For 800m intervals you want to be hitting zone 4-5 — roughly 85-95% max HR. With your max around 171 (based on today's 168 peak), that puts your target interval HR around 145-162 bpm."
+**Root cause:** The activity JSON passed to Claude includes `max_heartrate` (the single-run peak). Claude was independently multiplying this by ~1.02 to derive a "true max HR" estimate, exactly as our `estimateMaxHR` algorithm does. But a single-interval peak is not the athlete's physiological max — theirs is higher.
+**Fix / Change:** Added a data guard to the `post_run` user message telling Claude that `max_heartrate` is a single-run peak, not physiological max, and prohibiting it from estimating or stating a max HR figure based on that field. Zone references should use descriptive language (e.g. "zone 4-5") rather than asserting a specific max HR.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-16 — Fix regression: projected mileage correction used wrong tolerance
+
+**Type:** Bug Fix
+**Reported by:** Internal (test failure)
+**User feedback:** N/A
+**Root cause:** A pre-existing change set `computedProjection = weeklyMileageTargetForCap` (e.g. 40) instead of `null` when no session data is available. `correctProjectedTotal` has two paths: a tight ±0.4mi tolerance when it has a session-derived projection, and a 30%-over-target cap when projection is null. By passing the target itself as a real projection, projections like "42mi on a 40mi-target week" were being corrected down to 40 even though they were within the intended 30% tolerance.
+**Fix / Change:** Changed `computedProjection = null` to preserve the 30% fallback cap behavior when session-level data isn't available.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-16 — Onboarding: name in first message, HR zones + mileage spike at Strava connect
 
 **Type:** Feature / Improvement

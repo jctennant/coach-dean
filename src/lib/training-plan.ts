@@ -651,11 +651,15 @@ No other text.`,
         current_week: 1,
         ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
         weekly_plan_sessions: null,
+        weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
+        weekly_quality_session: planWeeks[0]?.key_workout || null,
       } : {}),
       ...(!resetToWeek1 && week1Reset ? {
         // Week-1 mid-plan rebuild: update mileage target + clear future sessions (preserve past).
         ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
         weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json,
+        weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
+        weekly_quality_session: planWeeks[0]?.key_workout || null,
       } : {}),
     })
     .eq("user_id", userId);
@@ -690,4 +694,29 @@ No other text.`,
   }
 
   return dashboardToken;
+}
+
+/**
+ * Sync the simplified weekly plan fields (long_run_miles, quality_session) from the
+ * stored training arc for a given week number.
+ *
+ * Called at the end of weekly_recap so the next week's targets are live in
+ * training_state before the next morning_plan or reminder fires.
+ */
+export async function syncWeekFromArc(userId: string, weekNum: number): Promise<void> {
+  const { data: plan } = await supabase
+    .from("training_plans")
+    .select("weeks")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  if (!plan?.weeks || !Array.isArray(plan.weeks)) return;
+  const weeks = plan.weeks as Array<{ week_number: number; long_run_target: number; key_workout: string }>;
+  const week = weeks.find(w => w.week_number === weekNum);
+  if (!week) return;
+  await supabase.from("training_state").update({
+    weekly_long_run_miles: week.long_run_target ?? null,
+    weekly_quality_session: week.key_workout || null,
+  }).eq("user_id", userId);
 }
