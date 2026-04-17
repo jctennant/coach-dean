@@ -1102,10 +1102,7 @@ export default async function DashboardPage({
                   {/* Prescribed paces */}
                   {(easyRange || rawTempo || rawInterval) && (
                     <div className={zoneData.runs.length > 0 ? "border-t border-gray-50 pt-4 space-y-2" : "space-y-2"}>
-                      <div className="flex items-center justify-between">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Prescribed Paces</p>
-                        <p className="text-[10px] text-gray-400">From Dean · based on your fitness</p>
-                      </div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Prescribed Paces</p>
                       <div className="flex flex-wrap gap-2">
                         {[
                           easyRange && { label: "Easy", pace: easyRange, dot: "bg-green-400" },
@@ -1124,9 +1121,6 @@ export default async function DashboardPage({
                           );
                         })}
                       </div>
-                      <p className="text-[10px] text-gray-400">
-                        Pace zones are derived from your VDOT · HR zones above are estimated from your Strava data · these two scales don&apos;t always align perfectly
-                      </p>
                     </div>
                   )}
                 </div>

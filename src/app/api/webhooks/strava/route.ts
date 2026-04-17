@@ -280,4 +280,29 @@ async function processStravaEvent(body: {
       console.error("Error processing Strava activity webhook:", err);
     }
   }
+
+  if (object_type === "activity" && aspect_type === "update") {
+    // Refresh mutable fields (title, type) when an athlete edits their activity.
+    // Most common case: title updated 10–15 min post-run.
+    try {
+      const { data: user } = await supabase
+        .from("users")
+        .select("id, strava_access_token, strava_refresh_token, strava_token_expires_at")
+        .eq("strava_athlete_id", owner_id)
+        .single();
+      if (!user) return;
+
+      const accessToken = await getValidAccessToken(user.id);
+      const activity = await getActivity(accessToken, object_id);
+
+      await supabase
+        .from("activities")
+        .update({ activity_name: activity.name || null })
+        .eq("strava_activity_id", object_id);
+
+      console.log(`[strava-webhook] updated activity_name for ${object_id}: "${activity.name}"`);
+    } catch (err) {
+      console.error("[strava-webhook] error processing activity update:", err);
+    }
+  }
 }
