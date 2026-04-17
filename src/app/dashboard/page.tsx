@@ -171,22 +171,24 @@ function computeStatus(
     return { label: "No recent activity", color: "gray", detail: "Connect Strava to start tracking" };
   }
   if (loadTrend.flagged && effTrend.trend === "worsening") {
-    return { label: "Watch your load this week", color: "orange", detail: "Mileage jumped and efficiency is dipping — easy week?" };
+    return { label: "Watch your load this week", color: "orange", detail: "Mileage jumped and aerobic efficiency is dipping — both signals suggest your body needs easier running right now." };
   }
   if (loadTrend.flagged) {
-    return { label: "Watch your load this week", color: "orange", detail: "Mileage spiked — keep remaining runs easy" };
+    return { label: "Watch your load this week", color: "orange", detail: "Your mileage spiked relative to recent weeks. Keep remaining runs easy to stay in a safe range." };
   }
   if (effTrend.trend === "improving") {
-    return { label: "Fitness building", color: "green", detail: "Aerobic efficiency is trending up" };
+    return { label: "Fitness building", color: "green", detail: "Your aerobic efficiency is trending up over the last several weeks — the base work is paying off." };
   }
   if (effTrend.trend === "worsening") {
-    return { label: "Check recovery", color: "orange", detail: "Efficiency is dipping — may need more easy running" };
+    return { label: "Check recovery", color: "orange", detail: "Your aerobic efficiency has been dipping — you're working harder for the same pace. More easy running usually fixes this." };
   }
   const earlyWeek = weekDayNum <= 3;
   return {
     label: "Holding steady",
     color: "blue",
-    detail: earlyWeek ? "Load and efficiency stable — week in progress" : "Load and efficiency are stable",
+    detail: earlyWeek
+      ? "Your mileage is on track and aerobic efficiency is stable — nothing to change."
+      : "Load and efficiency have been consistent. Keep doing what you're doing.",
   };
 }
 
@@ -817,24 +819,10 @@ export default async function DashboardPage({
               {/* Status row */}
               <div className="flex items-start gap-3">
                 <div className={`mt-1 h-3 w-3 shrink-0 rounded-full ${statusDotClass}`} />
-                <div className="flex-1">
+                <div>
                   <p className="text-base font-bold text-gray-900 leading-tight">{status.label}</p>
                   <p className="text-sm text-gray-500 mt-0.5">{status.detail}</p>
                 </div>
-              </div>
-              {/* Status legend */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 border-t border-gray-50 pt-3">
-                {[
-                  { color: "bg-green-500",  label: "Fitness building",    desc: "Efficiency trending up" },
-                  { color: "bg-blue-400",   label: "Holding steady",      desc: "Load and efficiency stable" },
-                  { color: "bg-amber-400",  label: "Watch load",          desc: "Mileage spike or dipping efficiency" },
-                  { color: "bg-gray-300",   label: "No recent activity",  desc: "" },
-                ].map(s => (
-                  <div key={s.label} className="flex items-center gap-1.5">
-                    <div className={`h-2 w-2 shrink-0 rounded-full ${s.color}`} />
-                    <span className="text-[10px] text-gray-500">{s.label}</span>
-                  </div>
-                ))}
               </div>
 
               {/* Race chips */}
@@ -1053,42 +1041,7 @@ export default async function DashboardPage({
             <section className="space-y-3">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Fitness Progress</p>
 
-              {/* ── Card 1: Aerobic efficiency ─────────────────────────── */}
-              {effSeries.length >= 4 && currentEffVal != null && (
-                <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm space-y-3">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800">Aerobic efficiency</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      How far you travel per heartbeat on easy runs — rises with consistent base training
-                    </p>
-                  </div>
-
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-3xl font-bold tabular-nums text-gray-900">
-                      {currentEffVal.toFixed(3)}
-                    </span>
-                    <span className="text-sm text-gray-400">m/beat</span>
-                    <span className={`text-sm font-medium ml-1 ${
-                      effTrend.trend === "improving" ? "text-green-600"
-                      : effTrend.trend === "worsening" ? "text-red-500"
-                      : "text-gray-400"
-                    }`}>
-                      {effTrendLabel}
-                    </span>
-                  </div>
-
-                  {/* Line chart — x-axis shows date range, y-axis range shown inline */}
-                  <LineChart data={effSeries} />
-
-                  <EfficiencySpectrum value={currentEffVal} />
-
-                  <p className="text-[10px] text-gray-400 leading-relaxed">
-                    {interpretEfficiency(currentEffVal)} · most runners see meaningful improvement over 3–6 months of consistent easy running
-                  </p>
-                </div>
-              )}
-
-              {/* ── Card 2: Training zones ────────────────────────────── */}
+              {/* ── Card 1: Training zones ───────────────────────────── */}
               {(zoneData.runs.length > 0 || rawEasy || rawTempo || rawInterval) && (
                 <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm space-y-4">
                   {zoneData.runs.length > 0 && (
@@ -1177,6 +1130,40 @@ export default async function DashboardPage({
                       </p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ── Card 2: Aerobic efficiency ────────────────────────── */}
+              {effSeries.length >= 4 && currentEffVal != null && (
+                <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Aerobic efficiency</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      How far you travel per heartbeat on easy runs — rises with consistent base training
+                    </p>
+                  </div>
+
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-bold tabular-nums text-gray-900">
+                      {currentEffVal.toFixed(3)}
+                    </span>
+                    <span className="text-sm text-gray-400">m/beat</span>
+                    <span className={`text-sm font-medium ml-1 ${
+                      effTrend.trend === "improving" ? "text-green-600"
+                      : effTrend.trend === "worsening" ? "text-red-500"
+                      : "text-gray-400"
+                    }`}>
+                      {effTrendLabel}
+                    </span>
+                  </div>
+
+                  <LineChart data={effSeries} />
+
+                  <EfficiencySpectrum value={currentEffVal} />
+
+                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                    {interpretEfficiency(currentEffVal)} · most runners see meaningful improvement over 3–6 months of consistent easy running
+                  </p>
                 </div>
               )}
             </section>
