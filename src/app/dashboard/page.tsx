@@ -748,10 +748,31 @@ export default async function DashboardPage({
       else if (maxHREstimate && a.average_heartrate) {
         const avgPct = a.average_heartrate / maxHREstimate;
         const maxPct = a.max_heartrate ? a.max_heartrate / maxHREstimate : null;
-        if (maxPct != null && maxPct > 0.85 && avgPct > 0.72) zone = "hard";
+        if (maxPct != null && maxPct > 0.83 && avgPct > 0.72) zone = "hard";
         else if (avgPct < 0.75) zone = "easy";
         else if (avgPct < 0.85) zone = "moderate";
         else zone = "hard";
+      } else {
+        const easyPaceSec = (() => {
+          const s = (profileData?.current_easy_pace as string | null) ?? null;
+          if (!s) return null;
+          const parts = s.replace("/mi", "").replace("/km", "").split(":");
+          if (parts.length !== 2) return null;
+          return parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
+        })();
+        const tempoPaceSec = (() => {
+          const s = (profileData?.current_tempo_pace as string | null) ?? null;
+          if (!s) return null;
+          const parts = s.replace("/mi", "").replace("/km", "").split(":");
+          if (parts.length !== 2) return null;
+          return parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
+        })();
+        if (easyPaceSec && a.moving_time_seconds && a.distance_meters) {
+          const paceSec = a.moving_time_seconds / (a.distance_meters / 1609.34);
+          if (paceSec >= easyPaceSec - 45) zone = "easy";
+          else if (tempoPaceSec && paceSec <= tempoPaceSec + 15) zone = "hard";
+          else zone = "moderate";
+        }
       }
       const dist = a.distance_meters;
       const distDisplay = dist
@@ -1046,12 +1067,7 @@ export default async function DashboardPage({
                 <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm space-y-4">
                   {zoneData.runs.length > 0 && (
                     <div className="space-y-3">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-800">Run intensity — last 6 weeks</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          Each dot = one run · mostly green with 1–2 red per week is healthy
-                        </p>
-                      </div>
+                      <p className="text-sm font-semibold text-gray-800">Run intensity — last 6 weeks</p>
 
                       <RunZoneStrip runs={zoneData.runs} weeks={zoneData.weeks} />
 
@@ -1075,26 +1091,9 @@ export default async function DashboardPage({
                         <div className="space-y-2 pt-1 border-t border-gray-50">
                           <div className="flex items-center justify-between">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Heart Rate Zones</p>
-                            <p className="text-[10px] text-gray-400">
-                              est. max HR ~{Math.round(zoneData.maxHREstimate)} bpm · from your Strava data
-                            </p>
+                            <p className="text-[10px] text-gray-400">est. max HR ~{Math.round(zoneData.maxHREstimate)} bpm</p>
                           </div>
                           <HRZoneBar maxHR={zoneData.maxHREstimate} />
-                          <div className="grid grid-cols-3 gap-x-3 gap-y-1 pt-1">
-                            {[
-                              { dot: "bg-green-400", label: "Easy",     sub: "Z1–Z2 · <75% max HR · aerobic base" },
-                              { dot: "bg-amber-400", label: "Moderate", sub: "Z3 · 75–85% · comfortably hard" },
-                              { dot: "bg-red-400",   label: "Hard",     sub: "Z4–Z5 · >85% · threshold & VO2 max" },
-                            ].map(z => (
-                              <div key={z.label}>
-                                <div className="flex items-center gap-1">
-                                  <div className={`h-2 w-2 rounded-full ${z.dot}`} />
-                                  <span className="text-[11px] font-medium text-gray-700">{z.label}</span>
-                                </div>
-                                <p className="text-[9px] text-gray-400 mt-0.5 leading-snug">{z.sub}</p>
-                              </div>
-                            ))}
-                          </div>
                         </div>
                       )}
                     </div>

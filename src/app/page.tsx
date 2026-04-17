@@ -555,7 +555,7 @@ export default function Home() {
                     <p>Beyond just chatting, a few keywords trigger specific actions:</p>
                     <ul className="mt-3 space-y-2">
                       <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Coach Dean got wrong.</li>
-                      <li><span className="font-mono font-semibold text-foreground">MY PLAN</span> — get a link to your training plan dashboard, where you can see your full season schedule.</li>
+                      <li><span className="font-mono font-semibold text-foreground">DASHBOARD</span> — get a link to your training dashboard, where you can see your current week and upcoming schedule.</li>
                       <li><span className="font-mono font-semibold text-foreground">UNSUBSCRIBE</span> — get a link to cancel your subscription at any time.</li>
                       <li><span className="font-mono font-semibold text-foreground">STOP</span> — stop all messages immediately. You&apos;ll also receive a link to cancel billing. Text START to resume at any time.</li>
                     </ul>
