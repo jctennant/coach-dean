@@ -273,9 +273,9 @@ export async function GET(request: Request) {
       runsWithHR++;
       const pct = run.average_heartrate / estimatedMaxHR;
       if (pct < 0.60) zoneCounts.z1++;
-      else if (pct < 0.70) zoneCounts.z2++;
-      else if (pct < 0.80) zoneCounts.z3++;
-      else if (pct < 0.90) zoneCounts.z4++;
+      else if (pct < 0.75) zoneCounts.z2++;
+      else if (pct < 0.85) zoneCounts.z3++;
+      else if (pct < 0.92) zoneCounts.z4++;
       else zoneCounts.z5++;
     }
     if (runsWithHR >= 3) {

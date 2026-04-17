@@ -398,7 +398,7 @@ export function computeIntensityDistribution(
   let easy = 0, moderate = 0, hard = 0;
   for (const a of runsWithHR) {
     const intensity = (a.average_heartrate ?? 0) / observedMaxHR;
-    if (intensity < 0.76) easy++;
+    if (intensity < 0.75) easy++;
     else if (intensity < 0.88) moderate++;
     else hard++;
   }
