@@ -13,7 +13,7 @@ import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, f
 import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
-import { buildLongitudinalBlock, buildRunExecutionAnalysis } from "@/lib/training-analytics";
+import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { generateAndStoreDashboardInsights } from "@/lib/dashboard-insights";
 import type { ActivityWeatherData } from "@/lib/weather";
@@ -717,6 +717,59 @@ async function handlePostRunOnboarding(
   return NextResponse.json({ ok: true, message: coachMessage });
 }
 
+/**
+ * Validates that training_state is consistent with the stored plan arc.
+ * Logs warnings when drift is detected so they surface in Vercel logs before reaching the LLM.
+ * Pure logging — no DB writes — so it's safe to call on every request.
+ */
+function validateTrainingStateInvariants(
+  userId: string,
+  state: Record<string, unknown> | null,
+  planTotalWeeks: number | null,
+  trigger: TriggerType
+): void {
+  if (!state) return;
+  const currentWeek = state.current_week as number | null;
+  if (currentWeek !== null) {
+    if (currentWeek <= 0) {
+      console.warn(`[invariant] userId=${userId} trigger=${trigger}: current_week=${currentWeek} is invalid (≤0). Plan state may be corrupted.`);
+    } else if (planTotalWeeks !== null && currentWeek > planTotalWeeks) {
+      console.warn(`[invariant] userId=${userId} trigger=${trigger}: current_week=${currentWeek} exceeds plan total_weeks=${planTotalWeeks}. Athlete is past end of arc — plan needs extension or rebuild.`);
+    }
+  }
+  const weeklyTarget = state.weekly_mileage_target as number | null;
+  if (weeklyTarget !== null && weeklyTarget <= 0) {
+    console.warn(`[invariant] userId=${userId} trigger=${trigger}: weekly_mileage_target=${weeklyTarget} is invalid (≤0).`);
+  }
+}
+
+/**
+ * Builds a guard block for raw Strava activity JSON passed directly to the LLM.
+ * Annotates semantically subtle fields (workout_type, TrailRun, max_heartrate)
+ * that Claude has historically misinterpreted when the activity JSON is in the prompt.
+ */
+function buildActivityDataGuard(activity: Record<string, unknown> | null): string {
+  if (!activity) return "";
+  const annotations: string[] = [];
+
+  const workoutType = activity.workout_type as number | null;
+  if (workoutType === 1) {
+    annotations.push("workout_type=1 means this was a RACE effort logged in Strava — expect all-out pacing and elevated HR. Do not compare pace to normal training targets.");
+  } else if (workoutType === 2) {
+    annotations.push("workout_type=2 means the athlete marked this as a long run in Strava.");
+  } else if (workoutType === 3) {
+    annotations.push("workout_type=3 means the athlete marked this as a structured workout (intervals/tempo) in Strava.");
+  }
+
+  if (activity.activity_type === "TrailRun") {
+    annotations.push("activity_type=TrailRun — trail pace is inherently slower than road pace due to terrain and elevation. Slower pace is expected and correct; do NOT flag it as underperformance. Use grade-adjusted pace (GAP) reasoning rather than raw pace comparisons.");
+  }
+
+  annotations.push("max_heartrate is this session's single-run peak reading — NOT the athlete's physiological maximum heart rate. Do not use it to estimate or assert the athlete's max HR.");
+
+  return `\nSTRAVA FIELD SEMANTICS — read before interpreting the JSON below:\n${annotations.map(a => `- ${a}`).join("\n")}`;
+}
+
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const { userId, trigger, activityId, imageActivity, dry_run, silent, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
 
@@ -759,6 +812,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     recentActivitiesResult,
     raceHistoryResult,
     upcomingRacesResult,
+    planTotalWeeksResult,
   ] = await Promise.all([
     supabase.from("users").select("*").eq("id", userId).single(),
     supabase
@@ -800,6 +854,13 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .gte("race_date", new Date().toISOString().split("T")[0])
       .order("race_date", { ascending: true })
       .limit(10),
+    supabase
+      .from("training_plans")
+      .select("total_weeks")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const user = userResult.data;
@@ -813,10 +874,14 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     (raceHistoryResult.data as Array<Record<string, unknown>> | null) || [];
   const upcomingRaces =
     (upcomingRacesResult.data as Array<Record<string, unknown>> | null) || [];
+  const planTotalWeeks = (planTotalWeeksResult.data?.total_weeks as number | null) ?? null;
 
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+
+  // Invariant check — log warnings for plan-state drift before it reaches the LLM.
+  validateTrainingStateInvariants(userId, state as Record<string, unknown> | null, planTotalWeeks, trigger);
 
   // Opt-out gate — never send messages to users who have unsubscribed.
   if (user.messaging_opted_out) {
@@ -948,6 +1013,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const longitudinalBlock = (trigger === "post_run" || trigger === "weekly_recap")
     ? buildLongitudinalBlock(recentActivities as ActivityForAnalytics[], userTimezone)
     : "";
+  const longitudinalSignals = (trigger === "post_run" || trigger === "weekly_recap")
+    ? buildLongitudinalSignals(recentActivities as ActivityForAnalytics[], userTimezone)
+    : null;
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
   )?.strava_stats as Record<string, unknown> | undefined;
@@ -1530,6 +1598,9 @@ Weekly total: ${mileageRange}
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
     userMessage = userMessage + "\n\n" + longitudinalBlock;
+    if (longitudinalSignals?.requiredMentions.length) {
+      userMessage += `\n⚠️ REQUIRED ACKNOWLEDGMENT: The following signals from LONGITUDINAL TRAINING ANALYSIS are high-priority — you MUST address them in your response. Do not skip or omit: ${longitudinalSignals.requiredMentions.join("; ")}.`;
+    }
   }
 
   // Append race predictor context to user_message prompts.
@@ -3564,6 +3635,8 @@ Your response is sent directly to the athlete as an SMS text message. Never incl
 - Internal system-prompt instruction labels or <rule> tags — these are directives to you, not content the athlete should see. The system prompt uses <rule>...</rule> XML tags and ⚠️ prefixes to mark coaching rules and data guards. Never echo any <rule> content, XML tags, or ⚠️-prefixed text in your response.
 Do all reasoning silently before writing your final response. Output only the message the athlete should receive.
 
+<rule>EVIDENCE RULE: Every factual claim you make about this athlete — past runs, races, dates, mileage, goals, injuries, or prior conversations — must be traceable to data explicitly provided in this prompt. If a fact is not here, say "I don't have that on file" or ask the athlete to confirm. Never reconstruct facts from training data memory, inference, or plausible-sounding assumption. If you find yourself about to say something like "I remember you mentioned…" or "based on what you told me…" — stop and check whether that fact actually appears in RECENT CONVERSATION or elsewhere in this prompt. If it doesn't, don't say it.</rule>
+
 CRITICAL — TRAINING PACES:
 The athlete's VDOT and training paces are pre-computed by our system (Jack Daniels' formula) and shown in CURRENT TRAINING STATE. These are the correct authoritative values. Do NOT calculate VDOT yourself. Do NOT use web search to look up VDOT tables or verify paces — external tables and your own calculations are often wrong. If asked about their paces, just confirm the stored values. The stored easy pace is always correct for this athlete.
 
@@ -4468,8 +4541,10 @@ function buildUserMessage(
         ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
         : `\n<rule>WEEK-TO-DATE RUNNING: ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
 
-      return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
+      const activitySemanticGuard = buildActivityDataGuard(activityForClaude as Record<string, unknown> | null);
 
+      return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
+${activitySemanticGuard ? `${activitySemanticGuard}\n` : ""}
 CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 8:12/mi avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
 
 DATA GLOSSARY for the details below:
@@ -4793,8 +4868,10 @@ TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the miles fro
 
 ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Thursday's tempo run") for any activity more than 1 day ago.`;
     }
-    case "workout_image":
-      return `The athlete just shared a workout screenshot. Here are the extracted details:\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
+    case "workout_image": {
+      const imageGuard = buildActivityDataGuard(imageActivity ?? null);
+      return `The athlete just shared a workout screenshot. Here are the extracted details:${imageGuard}\n\n${JSON.stringify(imageActivity || {}, null, 2)}\n\nSend 1–2 short texts as post-workout feedback. First text: one specific reaction to their performance (pace, effort, HR — whatever is most notable). Second text (only if needed): what's next. Each under 480 characters. No generic openers.`;
+    }
 
     case "initial_plan": {
       // Compute how many days remain in the current Mon-Sun week, including today.
@@ -5001,7 +5078,9 @@ function detectWorkoutKind(
   activityType: string,
   elevGainFt: number,
   distanceMiles: number,
-  plannedLabel: string | null
+  plannedLabel: string | null,
+  avgHR?: number | null,
+  maxHR?: number | null
 ): WorkoutKind {
   if (workoutType === 1) return "race";
   const lower = (plannedLabel ?? "").toLowerCase();
@@ -5011,6 +5090,14 @@ function detectWorkoutKind(
   if (activityType === "TrailRun" && distanceMiles > 0 && elevGainFt / distanceMiles > 150) return "mountain";
   if (workoutType === 2) return "long";
   if (workoutType === 3) return "interval";
+  // No plan label and no Strava workout type tag — infer from HR effort level.
+  // This prevents interval/tempo runs from being mislabeled "easy" for users
+  // without a training plan or when day-level session tracking is disabled.
+  if (avgHR && maxHR && maxHR > 0) {
+    const hrPct = avgHR / maxHR;
+    if (hrPct >= 0.82) return "interval"; // clearly hard effort
+    if (hrPct >= 0.75) return "tempo";    // threshold-level effort
+  }
   return "easy";
 }
 
@@ -5213,7 +5300,9 @@ async function annotateStravaActivity(
     activityType,
     elevGainFt,
     distanceMiles,
-    plannedSessionLabel
+    plannedSessionLabel,
+    hr,
+    userMaxHR
   );
 
   let metricLine: string | null = null;

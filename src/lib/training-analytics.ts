@@ -661,3 +661,41 @@ Use these signals to inform your coaching — e.g. flag a load spike, acknowledg
 
 `;
 }
+
+export interface LongitudinalSignals {
+  hasLoadSpike: boolean;
+  hasLongRunPlateau: boolean;
+  hasZone3Trap: boolean;
+  requiredMentions: string[];
+}
+
+/**
+ * Returns structured flags for high-signal longitudinal patterns that Dean MUST address.
+ * Separate from buildLongitudinalBlock so callers can inject a required-mention directive
+ * alongside the data block rather than burying the obligation in the data itself.
+ */
+export function buildLongitudinalSignals(
+  activities: ActivityForAnalytics[],
+  timezone: string
+): LongitudinalSignals {
+  const acwr = computeACWR(activities, timezone);
+  const longRun = computeLongRunProgression(activities, timezone);
+  const intensity = computeIntensityDistribution(activities);
+
+  const requiredMentions: string[] = [];
+  const hasLoadSpike = acwr.flagged;
+  const hasLongRunPlateau = longRun.trend === "stagnating";
+  const hasZone3Trap = intensity.inZone3Trap;
+
+  if (hasLoadSpike) {
+    requiredMentions.push(`load spike (ACWR ~${acwr.acwr?.toFixed(2) ?? "high"} — in injury risk zone)`);
+  }
+  if (hasLongRunPlateau) {
+    requiredMentions.push("4-week long run plateau (no progression)");
+  }
+  if (hasZone3Trap) {
+    requiredMentions.push("zone 3 intensity trap (too much moderate effort, not enough easy or hard)");
+  }
+
+  return { hasLoadSpike, hasLongRunPlateau, hasZone3Trap, requiredMentions };
+}

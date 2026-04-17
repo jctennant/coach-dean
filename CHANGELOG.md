@@ -4,6 +4,30 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Strava annotation: HR-based workout kind inference for no-plan users
+
+**Type:** Bug Fix
+**Reported by:** Jake (wife's account)
+**User feedback:** Interval workout got annotated as "easy 40% of the workout" — wrong because Dean has no training plan for her and can't tell it was an interval run
+**Root cause:** `detectWorkoutKind` fell back to `"easy"` whenever `plannedSessionLabel` was null and Strava's `workoutType` wasn't explicitly 2 (long) or 3 (interval). For users without a training plan, `plannedSessionLabel` is always null, so ALL runs were classified as easy. The Z1-Z2 metric was then computed and shown, producing nonsense results like "40% in easy zone" on a hard interval workout.
+**Fix / Change:** Extended `detectWorkoutKind` to accept `avgHR` and `maxHR` as optional inputs. When no plan label or Strava workout tag provides a signal, HR effort level is used as a fallback: ≥82% of max HR → interval, ≥75% → tempo, otherwise easy. This prevents the mislabeling without requiring a training plan.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-17 — Recurring hallucination reducers: evidence rule, invariant check, required-mention, activity semantics
+
+**Type:** Improvement
+**Reported by:** Internal changelog analysis
+**User feedback:** N/A
+**Root cause:** Four recurring failure classes identified from changelog patterns: (A) Strava field misinterpretation across triggers, (B) plan-state desync reaching the LLM, (C) fabricating context when data is absent, (D) longitudinal signals ignored in responses.
+**Fix / Change:**
+- **EVIDENCE RULE**: Added top-level system prompt rule requiring every factual claim about the athlete to be traceable to data in the prompt. Prevents fabricated past references ("I remember you mentioned…") and plausible-sounding but ungrounded assertions.
+- **`validateTrainingStateInvariants()`**: Runs at the start of every `processCoachRequest` call. Fetches `total_weeks` from `training_plans` as an 8th parallel query and logs warnings when `current_week` is invalid (≤0), exceeds the plan arc length, or `weekly_mileage_target` is ≤0. Pure logging — no DB writes. Surfaces drift before it reaches the LLM.
+- **Required-mention for longitudinal signals**: Added `buildLongitudinalSignals()` to `training-analytics.ts`. When ACWR > 1.3 (load spike), long run is plateaued (4-week stagnation), or the zone-3 intensity trap is active, a `⚠️ REQUIRED ACKNOWLEDGMENT` directive is injected into the user message so Dean cannot skip the signal.
+- **`buildActivityDataGuard()` helper**: Shared function that annotates semantically subtle Strava fields (`workout_type=1` = race, `TrailRun` pace expectations, `max_heartrate` = single-run peak). Injected for both `post_run` and `workout_image` triggers. The `post_run` path already had inline guards; this adds `workout_type` and `TrailRun` annotations it was missing, and brings `workout_image` up to the same level.
+**Files changed:** `src/lib/training-analytics.ts`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-17 — Quality audit fixes: TZ inference logging, max HR guard, stale-profile re-fetch
 
 **Type:** Improvement
