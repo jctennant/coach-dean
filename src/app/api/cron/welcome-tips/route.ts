@@ -6,12 +6,12 @@ import { trackEvent } from "@/lib/track";
 export const maxDuration = 60;
 
 const TIPS_MESSAGE =
-  "Hey — now that your plan is up and running, a couple shortcuts worth knowing: " +
+  "Hey — now that you're all set up, a couple shortcuts worth knowing: " +
   "DASHBOARD → your training dashboard, " +
   "FEEDBACK → reaches the team directly, " +
   "UNSUBSCRIBE → cancel your subscription, " +
   "STOP → stop all messages (we'll also send a cancellation link). " +
-  "Otherwise just text me like you'd text a coach. Good luck out there!";
+  "After every Strava run I'll send you feedback automatically — or just text me anytime. Good luck out there!";
 
 /**
  * GET /api/cron/welcome-tips

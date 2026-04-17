@@ -259,7 +259,10 @@ function buildZoneStrip(
       // Threshold is 0.83 (not 0.85) because recovery jogs between reps suppress
       // peak HR slightly vs sustained efforts — 800s at race effort typically top
       // out around 83–88% rather than clearing 85% cleanly.
-      if (maxPct != null && maxPct > 0.83 && avgPct > 0.72) {
+      // avgPct threshold is 0.78 (not 0.72): easy runs on hilly terrain regularly
+      // hit a momentary max above 83% while averaging only 73–74% — the original
+      // 0.72 cutoff was too low and incorrectly flagged those as hard.
+      if (maxPct != null && maxPct > 0.83 && avgPct > 0.78) {
         runs.push({ date: wk, zone: "hard", signal: "hr" });
         continue;
       }
@@ -748,7 +751,7 @@ export default async function DashboardPage({
       else if (maxHREstimate && a.average_heartrate) {
         const avgPct = a.average_heartrate / maxHREstimate;
         const maxPct = a.max_heartrate ? a.max_heartrate / maxHREstimate : null;
-        if (maxPct != null && maxPct > 0.83 && avgPct > 0.72) zone = "hard";
+        if (maxPct != null && maxPct > 0.83 && avgPct > 0.78) zone = "hard";
         else if (avgPct < 0.75) zone = "easy";
         else if (avgPct < 0.85) zone = "moderate";
         else zone = "hard";

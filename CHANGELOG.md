@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Fix easy runs misclassified as Hard in dashboard intensity chart
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal observation)
+**User feedback:** "something looks off with all of my runs being red - looks like 150+ would be zone 4, but many of these average below that"
+**Root cause:** The interval-proxy check (`maxPct > 0.83 && avgPct > 0.72`) was designed to detect interval sessions by looking for a high max HR combined with an "elevated" average. But the avgPct threshold of 0.72 was too low — easy runs on hilly terrain regularly produce avg HR of 73–74% of max while still hitting a momentary peak above 83%, incorrectly triggering the "hard" classification.
+**Fix / Change:** Raised the avgPct threshold from 0.72 to 0.78 in both `buildZoneStrip` (6-week scatter) and the "Last 7 Days" section. True interval sessions with recovery jogs still average well above 78%; easy runs do not.
+**Files changed:** src/app/dashboard/page.tsx
+
+---
+
 ## 2026-04-17 — Pre-compute microcycle ordinal, injury hold duration, quality session flag, and next-week comparison label
 
 **Type:** Improvement

@@ -102,7 +102,6 @@ const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
   awaiting_anything_else: "Anything else I should know before I put your plan together?",
   awaiting_ultra_background: "Have you run any ultras or very long trail races before?",
   awaiting_injury_background: "Any injuries or physical limitations I should keep in mind?",
-  awaiting_cadence: "Last thing — would you like a reminder the morning of each workout, or the evening before? If not, I'll just send you a weekly plan every Sunday.",
 };
 
 /**
