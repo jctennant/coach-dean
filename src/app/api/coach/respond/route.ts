@@ -1497,6 +1497,12 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // comparing apples to apples with the actual mileage already logged.
   const planDeviationFlag = (() => {
     if (trigger !== "post_run" && trigger !== "weekly_recap") return null;
+    // Volume deviation is meaningless for non-running activities (e.g. WeightTraining with 0 mi).
+    // Applying a mileage-over-plan warning immediately after a weight session is contextually wrong.
+    if (trigger === "post_run" && activityData) {
+      const actType = activityData.activity_type as string | null;
+      if (actType && !["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(actType)) return null;
+    }
     const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
     if (!sessions.length) return null;
     const tz = userTimezone || "America/New_York";
@@ -4465,6 +4471,10 @@ TONE:
 - Sound like a knowledgeable friend, not a customer service bot.
 - Use specific numbers for paces and distances. Only state specific dates when they appear explicitly in the data provided to you (activity dates, race date, DATE CONTEXT). Never invent or guess a date.
 - One emoji max per response. Often none is better.
+- Never use "postpartum" to mean "post-run" or "after the activity." "Postpartum" specifically means the period after childbirth. Use "post-run," "after the effort," or "afterward" instead. If the athlete's profile indicates they are postpartum, any check-in must be clearly scoped to that recovery context — do not conflate it with run recovery.
+
+ANSWERING DIRECT QUESTIONS:
+When the athlete asks a direct question, answer it explicitly. Do not address only the surrounding context while ignoring the question itself. If a message contains both a statement and a question (e.g. "legs are tight. how do I get leg speed up?"), address both — the statement first, then the question with a concrete answer. A coaching response that ignores a direct "how do I get faster / stronger / more efficient" question is a material miss.
 
 FORMATTING:
 - NEVER use asterisks, markdown bold/italic, bullet points, or dashes as list markers — SMS does not render markdown and they appear as raw characters.
@@ -5218,6 +5228,9 @@ function buildUserMessage(
       if (!hasCadence) dataGuards.push("No cadence data is available for this activity. Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, or range.");
       // Per-mile and per-lap elevation breakdown is not a Strava-provided field — only total elevation gain is.
       dataGuards.push("Per-mile and per-lap elevation breakdowns (e.g. '500ft gain on lap 2', '721ft at miles 11-12') are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific footage to individual miles or laps.");
+      // When laps are present, guard against false precision from citing specific lap indices.
+      // The athlete knows their own workout structure; using index numbers adds false certainty.
+      if (hasLaps) dataGuards.push("Lap data is available. When referencing effort patterns, use descriptive language (e.g. 'several of your harder laps averaged 155 bpm', 'the higher-effort segments') rather than citing specific lap numbers by index (e.g. 'laps 3/6/7/8'). Lap indices suggest precise ordering knowledge you may not have — describe the effort pattern instead.");
       // splits_standard gives one split per mile, so splitCount ≈ ceil(runDistanceMiles).
       // Guard: if splits look like km data (far more splits than miles), warn Claude.
       // This handles legacy activities stored before the switch to splits_standard.

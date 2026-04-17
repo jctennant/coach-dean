@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Four coaching quality fixes from 2026-04-16 conversation analysis
+
+**Type:** Bug Fix
+**Reported by:** Automated daily conversation analysis (2026-04-16, 12 users)
+**User feedback:** N/A
+**Root cause (4 issues):**
+1. **P0 — Per-lap hallucination risk (User 0cb902da):** Dean cited specific lap numbers by index ("laps 3/6/7/8 averaged 155-164 bpm") on a Ride activity. Even when lap data is present, referencing specific indices asserts ordering/identity knowledge that may not be reliable.
+2. **P1 — Overtraining warning on WeightTraining (User b1b308cf):** `planDeviationFlag` fired on a WeightTraining activity with 0 mi, producing a mileage-over-plan warning ("17.1mi vs 6mi planned") that was contextually incoherent and tonally jarring after a weight session.
+3. **P1 — "postpartum" used as synonym for "post-run" (User 7170bad2):** Dean wrote "How did your body feel postpartum on this one?" — "postpartum" means after childbirth, not after a run.
+4. **P1 — Unanswered direct speed question (User 95fd0845):** Athlete asked "how do I get leg speed up" and Dean responded only to the tightness context, ignoring the direct question entirely.
+**Fix / Change:**
+1. Added data guard in the `post_run` user message builder: when lap data is present, instruct Dean to use descriptive language ("several of the harder laps") rather than specific lap indices ("laps 3/6/7/8").
+2. `planDeviationFlag` now returns `null` when `trigger === "post_run"` and the current activity type is not a running type (Run/TrailRun/VirtualRun/Treadmill).
+3. Added prompt instruction: never use "postpartum" as a synonym for "post-run" or "after the activity."
+4. Added `ANSWERING DIRECT QUESTIONS` prompt section: when an athlete asks a direct question, Dean must answer it explicitly, even if the message also contains other context to address.
+**Skipped:** Issue 2 (duplicate messages for User 95fd0845) — the system already deduplicates by `external_message_id`. Content-based dedup within a 30s window would require adding a DB query to the async ingestion path and updating ~15 test mocks. Skipped to avoid risky test churn; worth a dedicated pass.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-16 — Onboarding: name in first message, HR zones + mileage spike at Strava connect
 
 **Type:** Feature / Improvement
