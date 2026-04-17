@@ -339,7 +339,7 @@ When Strava connects, give a genuine analytical read of the data — this is a t
 - Elevation: for trail athletes, elevation load = specificity. ("Averaging 500ft per run is solid prep for Dipsea's terrain.")
 - HR zones (if present): frame this as performance insight, not a warning label. High Z1-2 is a strong aerobic base — the engine that gets you faster. High Z3+ means they're working harder than the base phase calls for, which limits how much fitness they can absorb. Be direct but frame it as "here's what this means for your training": "85% of your runs are in Z1-2 — that's a genuinely strong aerobic base, your fitness will compound well" or "About half your runs are running at threshold or harder — that's leaving gains on the table. Keeping the easy days easy is usually the fastest path to a PR."
 - Mileage spike (if ⚠️ spike warning is present): surface it within the performance narrative. "One thing I want to flag — there's a week where mileage jumped X%. That kind of spike is where most runners get hurt and lose a training block. We'll keep the progression smoother from here." Don't open with the warning — let it land after the positive read.
-End with one forward-looking sentence connecting their data to their goal.
+End with one forward-looking sentence connecting their data to their goal — UNLESS the PACE CALIBRATION section below requires asking a road race question in this message. In that case, the pace calibration question is the final sentence; do NOT add a separate forward-looking sentence after it.
 Do NOT narrate all the stats like a report. Pick what's most interesting and make it feel like a real coach read the data — the performance picture first, risk context woven in.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
 
@@ -355,7 +355,12 @@ FIRST-OF-MONTH GUARD: If the only date information you have is a month ("in June
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
-When you have name + goal + injury history + at least one of (pace/PR data OR Strava connected), end your final message with [READY] on its own line.
+When you have name + goal + injury history + at least one of (pace/PR data OR Strava connected) + confirmed plan preference (for race goals), end your final message with [READY] on its own line.
+For race goals: you MUST confirm the athlete's plan preference before signaling [READY]. There are three options — make sure you know which applies:
+1. They already follow a plan (Runna, TrainingPeaks, coach-written, spreadsheet, etc.) — Dean works alongside it as a post-run analyst.
+2. They don't have a plan and want Dean to build one.
+3. They don't have a plan and prefer to train without a set schedule — Dean just gives post-run feedback.
+If this hasn't come up naturally, ask: "Are you following a training plan already, or would you want me to build one for you?" Accept any of the three answers.
 The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
 When you signal [READY], do not ask any more questions in that message. Wrap up warmly — focus on what starts now, not on plan delivery. Frame it as the coaching relationship kicking off: "Dean is calibrated, your first coaching note lands after your next run." Use the athlete's specific goal or race to make it personal. The system will follow up automatically.
@@ -548,7 +553,7 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
-    await sendAndStore(user.id, user.phone_number, responseText, "onboarding");
+    await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
     await completeOnboarding(user, mergedData, chatId);
     return NextResponse.json({ ok: true });
   }
@@ -561,7 +566,7 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
         onboarding_data: mergedData as unknown as Json,
       })
       .eq("id", user.id);
-    if (responseText) await sendAndStore(user.id, user.phone_number, responseText, "awaiting_strava");
+    if (responseText) await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "awaiting_strava");
     if (stravaMsg) await sendAndStore(user.id, user.phone_number, stravaMsg, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
@@ -570,7 +575,7 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
   await supabase.from("users")
     .update({ onboarding_data: mergedData as unknown as Json })
     .eq("id", user.id);
-  await sendAndStore(user.id, user.phone_number, responseText, "onboarding");
+  await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
   return NextResponse.json({ ok: true });
 }
 
@@ -747,6 +752,7 @@ Rules:
           },
           terrain_type: { type: ["string", "null"], enum: ["road", "trail", "mixed", null], description: "Primary running terrain" },
           has_existing_plan: { type: ["boolean", "null"], description: "True if athlete currently follows a training plan (Runna, TP, etc.)" },
+          wants_plan: { type: ["boolean", "null"], description: "When has_existing_plan is false: true if athlete wants Dean to build a training plan, false if they prefer to train without a set schedule (post-run feedback only). Null if not yet discussed." },
           external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'." },
           wants_weekly_recap: { type: ["boolean", "null"], description: "True if athlete wants weekly recap SMS" },
           other_notes: { type: ["string", "null"] },
@@ -1132,6 +1138,7 @@ async function completeOnboarding(
   const trainingTools = (data.training_tools as string[] | null) || [];
   const terrainType = (data.terrain_type as string | null) || null;
   const hasExistingPlan = (data.has_existing_plan as boolean | null) ?? null;
+  const wantsPlan = (data.wants_plan as boolean | null) ?? null;
   const externalPlanDescription = (data.external_plan_description as string | null) || null;
   const wantsWeeklyRecap = (data.wants_weekly_recap as boolean | null) ?? true; // default on
   const crossTrainingActivities = (data.cross_training_activities as string[] | null) || (data.crosstraining_tools as string[] | null) || [];
@@ -1323,6 +1330,37 @@ async function completeOnboarding(
     const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a debrief and write it back to your Strava activity. Text me anytime. Let's go.`;
     await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
     const dashboardMsg = `Your dashboard — I'll keep your key notes and data here. You can also upload your plan as a PDF so I can reference it directly:\n${dashboardUrl}`;
+    await sendAndStore(user.id, phone, dashboardMsg, "initial_plan");
+    return;
+  }
+
+  // User has no existing plan and doesn't want one — post-run feedback only, no schedule.
+  if (hasExistingPlan === false && wantsPlan === false) {
+    void trackEvent(user.id, "onboarding_completed", { goal, mode: "no_plan" });
+    const rawFirst = (name ?? "").split(" ")[0];
+    const firstName = (rawFirst && rawFirst.toLowerCase() !== "athlete") ? rawFirst : "Hey";
+    const { data: noPlanUser } = await supabase
+      .from("users")
+      .select("phone_number, dashboard_token")
+      .eq("id", user.id)
+      .single();
+    const phone = noPlanUser?.phone_number as string;
+    let dashboardToken = noPlanUser?.dashboard_token as string | null;
+    if (!dashboardToken) {
+      dashboardToken = crypto.randomUUID();
+      await supabase.from("users").update({
+        dashboard_token: dashboardToken,
+        trial_started_at: new Date().toISOString(),
+      }).eq("id", user.id);
+    }
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
+    const raceCtx = data.race_name
+      ? ` You're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every note.`
+      : "";
+    const welcomeMsg = `${firstName}, you're all set.${raceCtx} No set schedule — I'll send you a coaching note after every run: effort, load, what to watch for. Text me anytime.`;
+    await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
+    const dashboardMsg = `Your dashboard:\n${dashboardUrl}`;
     await sendAndStore(user.id, phone, dashboardMsg, "initial_plan");
     return;
   }

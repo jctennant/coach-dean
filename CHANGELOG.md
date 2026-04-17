@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Three-way plan preference path in onboarding
+
+**Type:** Feature
+**Reported by:** Jake Tennant (internal)
+**User feedback:** N/A
+**Root cause:** Onboarding only handled two cases: existing plan (complement mode) or no plan (generate one). Users who don't have a plan and don't want one had no path.
+**Fix / Change:** Added `wants_plan` extraction field. Dean now explicitly confirms plan preference (three options: existing plan / build one / no schedule). New "no_plan" completion mode sends a post-run-feedback-only welcome and skips plan generation entirely. Updated `SIGNALING READY` prompt to require plan preference for race goals.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
+## 2026-04-17 — Dean now asks about existing plans before signaling [READY]
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (internal observation)
+**User feedback:** "it looks like Dean is still acting like he has to create a plan in onboarding - in this case, he didn't actually ask me if I wanted a plan or already had one"
+**Root cause:** `has_existing_plan` was mentioned in the MODE VARIATIONS section as something to ask about for race goals, but was not listed as a required field in the `SIGNALING READY` conditions. Dean could fire `[READY]` (triggering plan generation) without ever confirming whether the user already follows a training plan.
+**Fix / Change:** Added `has_existing_plan` to the `SIGNALING READY` required field list for race goals. Added an explicit instruction that Dean must confirm existing-plan status before `[READY]`, with a suggested question if not yet addressed.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-17 — Fix easy runs misclassified as Hard in dashboard intensity chart
 
 **Type:** Bug Fix
