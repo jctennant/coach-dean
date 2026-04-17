@@ -2,6 +2,8 @@ import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getActivity } from "@/lib/strava";
 import { fetchActivityWeatherByCoords } from "@/lib/weather";
+import { estimateLTHRFromRaces } from "@/lib/hr-zones";
+import { estimateMaxHR } from "@/lib/hr-utils";
 
 /**
  * GET /api/webhooks/strava
@@ -258,6 +260,52 @@ async function processStravaEvent(body: {
           console.log(`[strava-webhook] post_run sent in last 5min for user ${user.id}, suppressing duplicate`);
           suppressCoaching = true;
         }
+      }
+
+      // Recompute LTHR when a new race activity arrives — this is the highest-quality signal.
+      // Runs async and never blocks coaching.
+      if (isNew && activity.workout_type === 1 && user.onboarding_step === null) {
+        void (async () => {
+          try {
+            const { data: allActivities } = await supabase
+              .from("activities")
+              .select("workout_type, average_heartrate, moving_time_seconds, activity_name, start_date, activity_type, max_heartrate")
+              .eq("user_id", user.id)
+              .order("start_date", { ascending: false })
+              .limit(200);
+
+            if (allActivities && allActivities.length > 0) {
+              const maxHR = estimateMaxHR(allActivities.map(a => ({
+                activity_type: a.activity_type,
+                workout_type: a.workout_type ?? null,
+                average_heartrate: a.average_heartrate ?? null,
+                max_heartrate: a.max_heartrate ?? null,
+              })));
+              const lthrResult = estimateLTHRFromRaces(
+                allActivities.map(a => ({
+                  workout_type: a.workout_type ?? null,
+                  average_heartrate: a.average_heartrate ?? null,
+                  moving_time_seconds: a.moving_time_seconds ?? null,
+                  activity_name: a.activity_name ?? null,
+                  start_date: a.start_date ?? null,
+                })),
+                maxHR
+              );
+              if (lthrResult) {
+                await supabase.from("training_profiles").update({
+                  lthr_estimate: lthrResult.lthr,
+                  lthr_source: lthrResult.source,
+                  lthr_confidence: lthrResult.confidence,
+                  lthr_last_updated: new Date().toISOString(),
+                  hr_zone_method: "lthr",
+                }).eq("user_id", user.id);
+                console.log(`[strava-webhook] LTHR updated for user ${user.id}: ${lthrResult.lthr} bpm (${lthrResult.confidence})`);
+              }
+            }
+          } catch (lthrErr) {
+            console.warn("[strava-webhook] LTHR recompute failed (non-fatal):", lthrErr);
+          }
+        })();
       }
 
       // Fire coaching response for new activities. Fully onboarded users get the full

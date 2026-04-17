@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/lib/paces";
 import { estimateMaxHR } from "@/lib/hr-utils";
+import { buildHRZoneContext, deriveZones, type LTHRConfidence } from "@/lib/hr-zones";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
@@ -994,6 +995,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
           splits: storedSplits,
           isAnalystMode: (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst',
+          lthrEstimate: (profile?.lthr_estimate as number | null) ?? null,
           plannedSessionLabel: dupTodaySession?.label ?? null,
         }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
       }
@@ -1273,6 +1275,14 @@ Use this data to:
     }
   }
 
+  const lthrData = (() => {
+    const lthr = profile?.lthr_estimate as number | null;
+    const source = profile?.lthr_source as string | null;
+    const confidence = profile?.lthr_confidence as LTHRConfidence | null;
+    if (lthr && source && confidence) return { lthr, source, confidence };
+    return null;
+  })();
+
   const systemPrompt = buildSystemPrompt(
     user,
     profile,
@@ -1291,7 +1301,8 @@ Use this data to:
     computedVdot,
     trigger,
     periodization,
-    upcomingRaces
+    upcomingRaces,
+    lthrData
   ) + aerobicTrendBlock;
 
   // For weekly_recap and user_message, fetch the stored training plan.
@@ -1820,7 +1831,8 @@ Weekly total: ${mileageRange}
       preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
       splits: storedSplits,
       isAnalystMode: false,
-      plannedSessionLabel: null, // day-level session tracking removed
+      lthrEstimate: (profile?.lthr_estimate as number | null) ?? null,
+      plannedSessionLabel: null,
     }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
   }
 
@@ -3147,7 +3159,8 @@ function buildSystemPrompt(
   freshVdot?: number | null,
   trigger?: TriggerType,
   periodization?: PeriodizationContext,
-  upcomingRaces?: Array<Record<string, unknown>>
+  upcomingRaces?: Array<Record<string, unknown>>,
+  lthrData?: { lthr: number; source: string; confidence: LTHRConfidence } | null
 ): string {
   // Which trigger-conditional sections to include.
   const isReminder = trigger === "morning_reminder" || trigger === "nightly_reminder";
@@ -3703,9 +3716,11 @@ ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within th
 
 WHEN PACES ARE TBD (no stored paces, VDOT unknown): If the athlete has recent Strava runs visible in RECENT WORKOUTS, use their typical easy run average pace as an estimated baseline — this is better than refusing to prescribe paces entirely. Derive tempo (~45-60 sec/mi faster than easy) and interval (~75-90 sec/mi faster than easy) from that estimate, and label them clearly as estimates (e.g. "~8:45/mi tempo (estimate)"). When you need better calibration data, ask for a recent race time first — any recent race (5K, 10K, half) gives a clean VDOT calculation without requiring extra effort. Only suggest a 5K time trial if they genuinely have no recent race times; if you do suggest one, also offer "share a recent race time" as an alternative in the same message.
 
-HEART RATE ZONES — use when HR data is available: If HEART RATE appears in the activity summary (e.g. "avg 148 bpm across runs, highest avg 162 bpm"), use these to give richer easy run targets. Easy/Zone 2 effort = roughly 10–20 bpm below their "highest avg" figure (which reflects a moderate-to-hard effort). Append a bpm target in parens on easy run session lines when it adds value — e.g. "Easy 6mi @ 9:30-10:00/mi (~140 bpm)". Only do this when HR data is present in the summary. If no HR data, omit bpm targets entirely.
+${lthrData
+  ? buildHRZoneContext(lthrData.lthr, lthrData.source, lthrData.confidence)
+  : `HEART RATE ZONES — use when HR data is available: If HEART RATE appears in the activity summary (e.g. "avg 148 bpm across runs, highest avg 162 bpm"), use these to give richer easy run targets. Easy/Zone 2 effort = roughly 10–20 bpm below their "highest avg" figure (which reflects a moderate-to-hard effort). Append a bpm target in parens on easy run session lines when it adds value — e.g. "Easy 6mi @ 9:30-10:00/mi (~140 bpm)". Only do this when HR data is present in the summary. If no HR data, omit bpm targets entirely.`}
 
-<rule>MAX HR DATA GUARD — applies to ALL contexts: Any max_heartrate value you see (in activity history, recent workouts, or activity JSON) is a single-run peak reading from that specific session — NOT the athlete's physiological maximum heart rate. Never use a single-activity max_heartrate to estimate or state the athlete's true max HR (e.g. do NOT say "your max is around X based on today's peak" or "based on your recent peak of Y, your max HR appears to be Z"). Describe HR intensity in relative terms (e.g. "zone 4-5", "high aerobic effort", "near-maximal") without asserting a specific max HR figure.</rule>
+<rule>MAX HR DATA GUARD — applies to ALL contexts: Any max_heartrate value you see (in activity history, recent workouts, or activity JSON) is a single-run peak reading from that specific session — NOT the athlete's physiological maximum heart rate. Never use a single-activity max_heartrate to estimate or state the athlete's true max HR (e.g. do NOT say "your max is around X based on today's peak" or "based on your recent peak of Y, your max HR appears to be Z"). Describe HR intensity in relative terms (e.g. "zone 4-5", "high aerobic effort", "near-maximal") without asserting a specific max HR figure.${lthrData ? " The HEART RATE ZONES block above uses a separately stored LTHR estimate computed from race history — this is distinct from any single-activity max_heartrate value." : ""}</rule>
 
 4. PERIODIZATION (Base → Build → Peak → Taper): Phase, recovery week scheduling, and mileage progression targets are code-driven — see CURRENT TRAINING STATE for the authoritative week number, phase, and whether this is a recovery week. If CURRENT TRAINING STATE says "RECOVERY WEEK", follow the recovery week rules exactly. Long runs progress ~1 mile/week. Taper is handled by code-computed targets injected below.
 
@@ -5109,6 +5124,7 @@ interface AnnotationContext {
   // splits_standard from activityData.summary — already fetched by the webhook
   splits: Array<Record<string, unknown>>;
   isAnalystMode?: boolean;
+  lthrEstimate?: number | null;
   // Workout-type context for metric selection
   plannedSessionLabel: string | null;
 }
@@ -5169,15 +5185,17 @@ function computeZoneTime(
 }
 
 /**
- * Compute % of run time in Zone 1-2 (below z2UpperPct of maxHR, default 75%).
- * Returns null if splits lack HR data.
+ * Compute % of run time in Zone 1-2.
+ * When LTHR is available, pass z2BpmCeiling = lthr * 0.89 for accurate LTHR-anchored Z2.
+ * Falls back to maxHR * z2UpperPct (75% of max HR) when no LTHR override is provided.
  */
 function computeZone12Pct(
   splits: Array<Record<string, unknown>>,
   maxHR: number,
-  z2UpperPct = 0.75
+  z2UpperPct = 0.75,
+  z2BpmCeiling?: number
 ): number | null {
-  const threshold = maxHR * z2UpperPct;
+  const threshold = z2BpmCeiling ?? maxHR * z2UpperPct;
   let z12Secs = 0;
   let totalSecs = 0;
   let counted = 0;
@@ -5199,7 +5217,7 @@ async function annotateStravaActivity(
   ctx: AnnotationContext,
   userLocation?: { city: string; state: string; timezone: string }
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode, lthrEstimate } = ctx;
 
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
@@ -5350,26 +5368,24 @@ async function annotateStravaActivity(
   let metricLine: string | null = null;
   switch (workoutKind) {
     case "easy": {
-      // % of run time in Zone 1-2 (below 75% of max HR). Thresholds per user spec:
-      // 90%+ → ✓ (true recovery stimulus), 80-89% → acceptable, 70-79% → moderate, <70% → ⚠
-      const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR) : null;
+      // Z2 ceiling: prefer LTHR-derived boundary (lthr * 0.89), fall back to 75% of max HR.
+      const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
+      const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
       if (z12Pct !== null) {
         const indicator = z12Pct >= 90 ? " ✓" : z12Pct < 70 ? " ⚠" : "";
         metricLine = `Time in easy zone (Z1-Z2): ${z12Pct}%${indicator}`;
       } else if (decouplingPct !== null) {
-        // Fallback: decoupling tells aerobic steadiness when no HR in splits
         metricLine = `HR drift: ${decouplingPct.toFixed(0)}% (low = good)`;
       }
       break;
     }
     case "long": {
-      // Cardiac decoupling is the key long-run metric — shows aerobic system held under fatigue
       if (decouplingPct !== null) {
         const note = decouplingPct >= 10 ? " — easy day tomorrow" : "";
         metricLine = `HR drift: ${decouplingPct.toFixed(0)}%${note} (low = good)`;
       } else {
-        // Fallback: Z1-2 % if we have HR zone data
-        const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR) : null;
+        const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
+        const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
         if (z12Pct !== null) {
           const indicator = z12Pct >= 90 ? " ✓" : z12Pct < 70 ? " ⚠" : "";
           metricLine = `Time in easy zone (Z1-Z2): ${z12Pct}%${indicator}`;

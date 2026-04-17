@@ -341,11 +341,17 @@ export type Database = {
           goal: string | null
           goal_distance_miles: number | null
           goal_time_minutes: number | null
+          hr_zone_method: string
           id: string
           injury_body_parts: string[] | null
           injury_notes: string | null
           last_morning_reminder_date: string | null
           last_nightly_reminder_date: string | null
+          lthr_confidence: string | null
+          lthr_estimate: number | null
+          lthr_history: Json | null
+          lthr_last_updated: string | null
+          lthr_source: string | null
           manual_prs: Json | null
           preferred_units: string
           proactive_cadence: string | null
@@ -374,11 +380,17 @@ export type Database = {
           goal?: string | null
           goal_distance_miles?: number | null
           goal_time_minutes?: number | null
+          hr_zone_method?: string
           id?: string
           injury_body_parts?: string[] | null
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          lthr_confidence?: string | null
+          lthr_estimate?: number | null
+          lthr_history?: Json | null
+          lthr_last_updated?: string | null
+          lthr_source?: string | null
           manual_prs?: Json | null
           preferred_units?: string
           proactive_cadence?: string | null
@@ -407,11 +419,17 @@ export type Database = {
           goal?: string | null
           goal_distance_miles?: number | null
           goal_time_minutes?: number | null
+          hr_zone_method?: string
           id?: string
           injury_body_parts?: string[] | null
           injury_notes?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          lthr_confidence?: string | null
+          lthr_estimate?: number | null
+          lthr_history?: Json | null
+          lthr_last_updated?: string | null
+          lthr_source?: string | null
           manual_prs?: Json | null
           preferred_units?: string
           proactive_cadence?: string | null

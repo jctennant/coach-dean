@@ -1,3 +1,4 @@
+import React from "react";
 import type { Metadata } from "next";
 import { supabase } from "@/lib/supabase";
 import RequestLinkForm from "./request-link-form";
@@ -6,6 +7,7 @@ import { computeLoadTrend, computeAerobicEfficiencyTrend, computeACWR } from "@/
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import type { DashboardInsights } from "@/lib/dashboard-insights";
 import { estimateMaxHR } from "@/lib/hr-utils";
+import { deriveZones, lthrMethodLabel, type LTHRSource } from "@/lib/hr-zones";
 
 export const metadata: Metadata = {
   title: "Your Dashboard — Coach Dean",
@@ -489,32 +491,57 @@ function RunZoneStrip({ runs, weeks }: { runs: ZoneRun[]; weeks: string[] }) {
   );
 }
 
-function HRZoneBar({ maxHR }: { maxHR: number }) {
-  const zones = [
-    { label: "Z1", pct: 0.60, color: "#93c5fd" },
-    { label: "Z2", pct: 0.75, color: "#34d399" },
-    { label: "Z3", pct: 0.85, color: "#fbbf24" },
-    { label: "Z4", pct: 0.93, color: "#f97316" },
-    { label: "Z5", pct: 1.00, color: "#ef4444" },
-  ];
-  const prevPcts = [0, 0.60, 0.75, 0.85, 0.93];
+type HRZoneBarProps =
+  | { lthr: number; source: LTHRSource; confidence: string }
+  | { maxHR: number };
+
+function HRZoneBar(props: HRZoneBarProps) {
+  const ZONE_COLORS = ["#93c5fd", "#34d399", "#fbbf24", "#f97316", "#ef4444"];
+  const ZONE_LABELS = ["Z1", "Z2", "Z3", "Z4", "Z5"];
+
+  let floors: number[];
+  let ceilings: number[];
+  let methodBadge: React.ReactNode;
+
+  if ("lthr" in props) {
+    const z = deriveZones(props.lthr);
+    floors   = [0,              z.z1_ceiling, z.z2_ceiling, z.z3_ceiling, z.z4_ceiling];
+    ceilings = [z.z1_ceiling,   z.z2_ceiling, z.z3_ceiling, z.z4_ceiling, 999];
+    methodBadge = (
+      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 font-medium">
+        {lthrMethodLabel(props.source)}
+      </span>
+    );
+  } else {
+    const m = props.maxHR;
+    const pcts = [0, 0.60, 0.75, 0.85, 0.93];
+    const ends = [0.60, 0.75, 0.85, 0.93, 1.0];
+    floors   = pcts.map(p => Math.round(p * m));
+    ceilings = ends.map(p => Math.round(p * m));
+    methodBadge = (
+      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
+        % max HR (estimated)
+      </span>
+    );
+  }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
+      <div className="flex justify-end">{methodBadge}</div>
       <div className="flex rounded-md overflow-hidden h-6">
-        {zones.map((z) => (
-          <div key={z.label} className="flex items-center justify-center flex-1" style={{ backgroundColor: z.color }}>
-            <span className="text-[10px] font-bold text-white drop-shadow-sm">{z.label}</span>
+        {ZONE_LABELS.map((label, i) => (
+          <div key={label} className="flex items-center justify-center flex-1" style={{ backgroundColor: ZONE_COLORS[i] }}>
+            <span className="text-[10px] font-bold text-white drop-shadow-sm">{label}</span>
           </div>
         ))}
       </div>
       <div className="flex">
-        {zones.map((z, i) => (
-          <div key={z.label} className="flex-1 text-center">
+        {ZONE_LABELS.map((label, i) => (
+          <div key={label} className="flex-1 text-center">
             <div className="text-[9px] text-gray-400 tabular-nums">
-              {i === zones.length - 1
-                ? `>${Math.round(prevPcts[i]! * maxHR)}`
-                : `${Math.round(prevPcts[i]! * maxHR)}–${Math.round(z.pct * maxHR)}`}
+              {i === ZONE_LABELS.length - 1
+                ? `>${floors[i]}`
+                : `${floors[i]}–${ceilings[i]}`}
             </div>
           </div>
         ))}
@@ -572,7 +599,7 @@ export default async function DashboardPage({
   ] = await Promise.all([
     supabase
       .from("training_profiles")
-      .select("goal, race_date, goal_distance_miles, preferred_units, terrain_type, current_easy_pace, current_tempo_pace, current_interval_pace, injury_notes, manual_prs, training_days, this_week_override_days, this_week_override_expires, dashboard_insights")
+      .select("goal, race_date, goal_distance_miles, preferred_units, terrain_type, current_easy_pace, current_tempo_pace, current_interval_pace, injury_notes, manual_prs, training_days, this_week_override_days, this_week_override_expires, dashboard_insights, lthr_estimate, lthr_source, lthr_confidence, hr_zone_method")
       .eq("user_id", user.id)
       .single(),
     supabase
@@ -707,6 +734,11 @@ export default async function DashboardPage({
 
   const RUN_TYPES = RUN_ACTIVITY_TYPES;
   const maxHREstimate = estimateMaxHR(activities);
+
+  // LTHR from stored profile (preferred) or fall back to estimated max HR
+  const storedLthr = (profileData?.lthr_estimate as number | null) ?? null;
+  const storedLthrSource = (profileData?.lthr_source as LTHRSource | null) ?? null;
+  const storedLthrConfidence = (profileData?.lthr_confidence as string | null) ?? null;
 
   // Zone data
   const zoneData = buildZoneStrip(
@@ -1090,13 +1122,21 @@ export default async function DashboardPage({
                       </div>
 
                       {/* HR zones bar */}
-                      {zoneData.maxHREstimate && (
+                      {(storedLthr || zoneData.maxHREstimate) && (
                         <div className="space-y-2 pt-1 border-t border-gray-50">
                           <div className="flex items-center justify-between">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Heart Rate Zones</p>
-                            <p className="text-[10px] text-gray-400">est. max HR ~{Math.round(zoneData.maxHREstimate)} bpm</p>
+                            {storedLthr
+                              ? <p className="text-[10px] text-gray-400">threshold ~{storedLthr} bpm</p>
+                              : <p className="text-[10px] text-gray-400">est. max HR ~{Math.round(zoneData.maxHREstimate!)} bpm</p>
+                            }
                           </div>
-                          <HRZoneBar maxHR={zoneData.maxHREstimate} />
+                          {storedLthr && storedLthrSource && storedLthrConfidence
+                            ? <HRZoneBar lthr={storedLthr} source={storedLthrSource} confidence={storedLthrConfidence} />
+                            : zoneData.maxHREstimate
+                              ? <HRZoneBar maxHR={zoneData.maxHREstimate} />
+                              : null
+                          }
                         </div>
                       )}
                     </div>

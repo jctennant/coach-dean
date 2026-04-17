@@ -6,6 +6,7 @@ import { trackEvent } from "@/lib/track";
 import type { Json } from "@/lib/database.types";
 import { parseTimezoneFromLocation } from "@/lib/timezone";
 import { estimateMaxHR } from "@/lib/hr-utils";
+import { estimateLTHRFromRaces } from "@/lib/hr-zones";
 
 /**
  * GET /api/auth/strava/callback
@@ -180,7 +181,7 @@ export async function GET(request: Request) {
   const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
   const { data: activities8w } = await supabase
     .from("activities")
-    .select("distance_meters, moving_time_seconds, elevation_gain, average_heartrate, max_heartrate, start_date, activity_type, workout_type")
+    .select("distance_meters, moving_time_seconds, elevation_gain, average_heartrate, max_heartrate, start_date, activity_type, workout_type, activity_name")
     .eq("user_id", user.id)
     .gte("start_date", eightWeeksAgo)
     .order("start_date", { ascending: true });
@@ -288,6 +289,23 @@ export async function GET(request: Request) {
       };
       updatedOnboardingData.strava_estimated_max_hr = Math.round(estimatedMaxHR);
     }
+  }
+
+  // LTHR estimation from race history
+  const lthrResult = estimateLTHRFromRaces(
+    runs8w.map(a => ({
+      workout_type: a.workout_type ?? null,
+      average_heartrate: a.average_heartrate ?? null,
+      moving_time_seconds: a.moving_time_seconds ?? null,
+      activity_name: (a as { activity_name?: string | null }).activity_name ?? null,
+      start_date: a.start_date ?? null,
+    })),
+    estimatedMaxHR ?? null
+  );
+  if (lthrResult) {
+    updatedOnboardingData.strava_lthr_estimate = lthrResult.lthr;
+    updatedOnboardingData.strava_lthr_source = lthrResult.source;
+    updatedOnboardingData.strava_lthr_confidence = lthrResult.confidence;
   }
 
   // Mileage spike detection — largest week-over-week increase in the 4-week window.

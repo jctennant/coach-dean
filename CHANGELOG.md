@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — LTHR-anchored HR zone system (Phase 1 + 2 foundation)
+
+**Type:** Feature
+**Reported by:** Internal — product initiative
+**User feedback:** N/A
+**Root cause:** N/A — proactive improvement. Existing zone system used % of max HR, a coarse population-average heuristic that ignores individual physiology. LTHR (Lactate Threshold Heart Rate) anchors zones to the runner's actual aerobic/anaerobic boundary.
+**Fix / Change:**
+- New `lib/hr-zones.ts`: `estimateLTHRFromRaces()` infers LTHR from stored race activities using duration-based correction factors (25–180 min brackets, correcting avg race HR → LTHR). `deriveZones()` computes Z1–Z5 bpm ranges. `buildHRZoneContext()` generates coaching system prompt block.
+- Migration `038_lthr_fields.sql`: adds `lthr_estimate`, `lthr_source`, `lthr_confidence`, `lthr_last_updated`, `lthr_history`, `hr_zone_method` to `training_profiles`.
+- Strava callback: computes LTHR at connect time, stores in `onboarding_data` for transfer at profile creation.
+- Onboarding handle: includes LTHR fields in `training_profiles` upsert when available.
+- Strava webhook: recomputes LTHR on new race activity (workout_type=1), updates profile directly.
+- Coach respond: injects LTHR zone context block into system prompt when available; falls back to generic % max HR text. `computeZone12Pct` accepts optional `z2BpmCeiling` override for LTHR-accurate Z2 boundary. Both `annotateStravaActivity` call sites pass `lthrEstimate` through `AnnotationContext`.
+- Dashboard: `HRZoneBar` upgraded to accept either `{ lthr, source, confidence }` or `{ maxHR }` props. Shows green "LTHR — from race data" badge vs gray "% max HR (estimated)" badge. LTHR bpm ceilings derived from `deriveZones()`.
+- Admin `POST /api/admin/backfill-lthr`: estimates LTHR for all existing Strava-connected users with profiles; skips already-upgraded users unless `force=true`.
+**Files changed:** `lib/hr-zones.ts` (new), `lib/database.types.ts`, `migrations/038_lthr_fields.sql` (new), `api/auth/strava/callback/route.ts`, `api/onboarding/handle/route.ts`, `api/webhooks/strava/route.ts`, `api/coach/respond/route.ts`, `dashboard/page.tsx`, `api/admin/backfill-lthr/route.ts` (new)
+
 ## 2026-04-17 — Removed nightly/morning reminder references from onboarding
 
 **Type:** Bug Fix

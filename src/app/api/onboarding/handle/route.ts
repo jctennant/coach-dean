@@ -1145,6 +1145,12 @@ async function completeOnboarding(
     || [injuryHistoryText, currentNiggles].filter(Boolean).join(" | ")
     || null;
 
+  // Carry LTHR estimate from Strava connect into the profile if available
+  const onbDataForLthr = data as Record<string, unknown>;
+  const lthrEstimate = (onbDataForLthr.strava_lthr_estimate as number | null) ?? null;
+  const lthrSource = (onbDataForLthr.strava_lthr_source as string | null) ?? null;
+  const lthrConfidence = (onbDataForLthr.strava_lthr_confidence as string | null) ?? null;
+
   const [profileResult, stateResult] = await Promise.all([
     supabase.from("training_profiles").upsert(
       {
@@ -1164,6 +1170,13 @@ async function completeOnboarding(
         proactive_cadence: "weekly_only",
         injury_notes: combinedInjuryNotes,
         goal_distance_miles: goalDistanceMiles,
+        ...(lthrEstimate != null ? {
+          lthr_estimate: lthrEstimate,
+          lthr_source: lthrSource,
+          lthr_confidence: lthrConfidence,
+          lthr_last_updated: new Date().toISOString(),
+          hr_zone_method: "lthr",
+        } : {}),
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
