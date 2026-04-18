@@ -80,10 +80,10 @@ function buildOpenAIClient(): Anthropic {
       const src = block.source as { media_type: string; data: string };
       if (src.media_type === "application/pdf") {
         try {
-          // Use the core function directly to avoid pdf-parse's test-file initialization
-          // which fails in bundled environments (Vercel) because the test PDF paths don't exist.
+          // pdf-parse is in serverExternalPackages (next.config.ts) so Next.js does NOT bundle
+          // it — Node.js resolves it natively at runtime, avoiding internal-path issues.
           // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const pdfParse = require("pdf-parse/lib/pdf-parse.js");
+          const pdfParse = require("pdf-parse");
           const buffer = Buffer.from(src.data, "base64");
           const parsed = await pdfParse(buffer) as { text: string; numpages: number };
           const text = parsed.text?.trim() ?? "";
