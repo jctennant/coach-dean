@@ -8,6 +8,8 @@ import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import type { DashboardInsights } from "@/lib/dashboard-insights";
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { deriveZones, lthrMethodLabel, type LTHRSource } from "@/lib/hr-zones";
+import { PlanTab } from "./plan-tab";
+import type { PlanWeek as PlanTabWeek, PlanSession, PlanRace } from "./plan-tab";
 
 export const metadata: Metadata = {
   title: "Your Dashboard — Coach Dean",
@@ -497,16 +499,17 @@ type HRZoneBarProps =
 
 function HRZoneBar(props: HRZoneBarProps) {
   const ZONE_COLORS = ["#93c5fd", "#34d399", "#fbbf24", "#f97316", "#ef4444"];
-  const ZONE_LABELS = ["Z1", "Z2", "Z3", "Z4", "Z5"];
 
   let floors: number[];
   let ceilings: number[];
+  let zoneLabels: string[];
   let methodBadge: React.ReactNode;
 
   if ("lthr" in props) {
     const z = deriveZones(props.lthr);
-    floors   = [0,              z.z1_ceiling, z.z2_ceiling, z.z3_ceiling, z.z4_ceiling];
-    ceilings = [z.z1_ceiling,   z.z2_ceiling, z.z3_ceiling, z.z4_ceiling, 999];
+    floors      = [0,              z.z1_ceiling, z.z2_ceiling, z.z3_ceiling, z.z4_ceiling];
+    ceilings    = [z.z1_ceiling,   z.z2_ceiling, z.z3_ceiling, z.z4_ceiling, 999];
+    zoneLabels  = ["Recovery", "< LT1", "Gray zone", "~ LT2", "> LT2"];
     methodBadge = (
       <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 font-medium">
         {lthrMethodLabel(props.source)}
@@ -516,8 +519,9 @@ function HRZoneBar(props: HRZoneBarProps) {
     const m = props.maxHR;
     const pcts = [0, 0.60, 0.75, 0.85, 0.93];
     const ends = [0.60, 0.75, 0.85, 0.93, 1.0];
-    floors   = pcts.map(p => Math.round(p * m));
-    ceilings = ends.map(p => Math.round(p * m));
+    floors      = pcts.map(p => Math.round(p * m));
+    ceilings    = ends.map(p => Math.round(p * m));
+    zoneLabels  = ["Z1", "Z2", "Z3", "Z4", "Z5"];
     methodBadge = (
       <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
         % max HR (estimated)
@@ -529,17 +533,17 @@ function HRZoneBar(props: HRZoneBarProps) {
     <div className="space-y-1.5">
       <div className="flex justify-end">{methodBadge}</div>
       <div className="flex rounded-md overflow-hidden h-6">
-        {ZONE_LABELS.map((label, i) => (
+        {zoneLabels.map((label, i) => (
           <div key={label} className="flex items-center justify-center flex-1" style={{ backgroundColor: ZONE_COLORS[i] }}>
             <span className="text-[10px] font-bold text-white drop-shadow-sm">{label}</span>
           </div>
         ))}
       </div>
       <div className="flex">
-        {ZONE_LABELS.map((label, i) => (
+        {zoneLabels.map((label, i) => (
           <div key={label} className="flex-1 text-center">
             <div className="text-[9px] text-gray-400 tabular-nums">
-              {i === ZONE_LABELS.length - 1
+              {i === zoneLabels.length - 1
                 ? `>${floors[i]}`
                 : `${floors[i]}–${ceilings[i]}`}
             </div>
@@ -596,6 +600,7 @@ export default async function DashboardPage({
     { data: insightsRaw },
     { data: racesData },
     { data: stateData },
+    { data: planData },
   ] = await Promise.all([
     supabase
       .from("training_profiles")
@@ -625,9 +630,16 @@ export default async function DashboardPage({
       .limit(6),
     supabase
       .from("training_state")
-      .select("current_week, current_phase, weekly_mileage_target, weekly_long_run_miles, weekly_quality_session")
+      .select("current_week, current_phase, weekly_mileage_target, weekly_long_run_miles, weekly_quality_session, weekly_plan_sessions")
       .eq("user_id", user.id)
       .single(),
+    supabase
+      .from("training_plans")
+      .select("id, weeks, total_weeks, plan_source, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   const activities = (activitiesRaw ?? []) as ActivityRow[];
@@ -846,6 +858,135 @@ export default async function DashboardPage({
 
   // ACWR load warning — just track whether the current week has exceeded the 30% ceiling
   const acwrWarning = acwr.acwr !== null ? { exceeded: (acwr.acwr ?? 0) > 1.3 } : null;
+
+  // ── Plan tab data ──────────────────────────────────────────────────────────
+  type UploadedSession = { dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null; targetPace?: string | null };
+  type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
+  type DeanWeek = { week_number: number; phase: string; mileage_target: number; mileage_target_min?: number; mileage_target_max?: number; long_run_target: number; key_workout: string; notes: string };
+
+  const hasPlan = !!planData?.weeks && Array.isArray(planData.weeks) && (planData.weeks as unknown[]).length > 0;
+  const isUploadedPlan = planData?.plan_source === "uploaded";
+  const planTotalWeeks = planData?.total_weeks ?? 0;
+  const planCurrentWeek = (stateData as { current_week?: number | null } | null)?.current_week ?? 1;
+  const planCurrentPhase = (stateData as { current_phase?: string | null } | null)?.current_phase ?? null;
+  const weeklyPlanSessions = (stateData as { weekly_plan_sessions?: unknown } | null)?.weekly_plan_sessions as PlanSession[] | null;
+
+  const planWeeks: PlanTabWeek[] = (() => {
+    if (!hasPlan || !planData?.weeks) return [];
+    const rawWeeks = planData.weeks as unknown[];
+    if (isUploadedPlan) {
+      return (rawWeeks as UploadedWeek[]).map(w => {
+        const longRun = w.sessions.find(s => s.type === "long");
+        const quality = w.sessions.find(s => s.type === "tempo" || s.type === "interval");
+        return {
+          week_number: w.week_number,
+          phase: "base",
+          mileage_target: w.total_miles,
+          mileage_target_min: w.total_miles_min,
+          mileage_target_max: w.total_miles_max,
+          long_run_target: longRun?.targetDistanceMiles ?? 0,
+          key_workout: quality?.description ?? longRun?.description ?? "",
+          notes: "",
+        } satisfies PlanTabWeek;
+      });
+    }
+    return (rawWeeks as DeanWeek[]).map(w => ({
+      week_number: w.week_number,
+      phase: w.phase ?? "base",
+      mileage_target: w.mileage_target ?? 0,
+      mileage_target_min: w.mileage_target_min,
+      mileage_target_max: w.mileage_target_max,
+      long_run_target: w.long_run_target ?? 0,
+      key_workout: w.key_workout ?? "",
+      notes: w.notes ?? "",
+    } satisfies PlanTabWeek));
+  })();
+
+  // Week 1 Monday: inferred from training_plans.created_at (the Monday of that week)
+  const week1MondayStr = (() => {
+    const createdAt = planData?.created_at;
+    if (!createdAt) {
+      const now = new Date();
+      const dow = now.getUTCDay();
+      const daysFromMon = dow === 0 ? 6 : dow - 1;
+      const mon = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMon));
+      return mon.toISOString().slice(0, 10);
+    }
+    const d = new Date(createdAt);
+    const dow = d.getUTCDay();
+    const daysFromMon = dow === 0 ? 6 : dow - 1;
+    const mon = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - daysFromMon));
+    return mon.toISOString().slice(0, 10);
+  })();
+
+  // Actual miles per plan week (keyed by plan week number)
+  const actualMilesByWeek = (() => {
+    if (!hasPlan || planTotalWeeks === 0) return {} as Record<number, number>;
+    const w1 = new Date(week1MondayStr + "T00:00:00Z");
+    const result: Record<number, number> = {};
+    for (const a of activities) {
+      if (!RUN_ACTIVITY_TYPES.has(a.activity_type ?? "")) continue;
+      if (!a.distance_meters || !a.start_date) continue;
+      const daysDiff = (new Date(a.start_date).getTime() - w1.getTime()) / (1000 * 60 * 60 * 24);
+      const weekNum = Math.floor(daysDiff / 7) + 1;
+      if (weekNum >= 1 && weekNum <= planTotalWeeks) {
+        result[weekNum] = (result[weekNum] ?? 0) + a.distance_meters / 1609.34;
+      }
+    }
+    for (const k of Object.keys(result)) {
+      result[Number(k)] = Math.round(result[Number(k)]! * 10) / 10;
+    }
+    return result;
+  })();
+
+  // Race weeks: which plan week numbers contain a race
+  const allRaceWeekNums = (() => {
+    if (!hasPlan) return [] as number[];
+    const w1 = new Date(week1MondayStr + "T00:00:00Z");
+    return races.flatMap(r => {
+      const daysDiff = (new Date(r.race_date + "T12:00:00Z").getTime() - w1.getTime()) / (1000 * 60 * 60 * 24);
+      const weekNum = Math.floor(daysDiff / 7) + 1;
+      return weekNum >= 1 && weekNum <= planTotalWeeks ? [weekNum] : [];
+    });
+  })();
+
+  // Today's day index within the week (0=Mon … 6=Sun)
+  const todayDayIdx = (() => {
+    const dow = new Date().getUTCDay();
+    return dow === 0 ? 6 : dow - 1;
+  })();
+
+  const upcomingRacesForPlan: PlanRace[] = races.map(r => ({
+    id: r.id,
+    race_name: r.race_name ?? null,
+    race_date: r.race_date,
+    priority: r.priority ?? "C",
+    goal: r.goal ?? "trail_race",
+    goal_distance_miles: r.goal_distance_miles ?? null,
+  }));
+
+  const planGoalLabel = (() => {
+    const goal = profileData?.goal as string | null;
+    if (!goal) return "";
+    const labels: Record<string, string> = {
+      mile: "Mile", "5k": "5K", "10k": "10K", half_marathon: "Half Marathon",
+      marathon: "Marathon", "30k": "30K", "50k": "50K", "50mi": "50 Miles",
+      "100k": "100K", "100mi": "100 Miles", trail_race: "Trail Race",
+      general_fitness: "General Fitness", return_to_running: "Return to Running",
+      injury_recovery: "Injury Recovery",
+    };
+    const raceA = races.find(r => r.priority === "A");
+    const name = raceA?.race_name ?? null;
+    const distLabel = labels[goal] ?? goal.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    return name ? `${name} · ${distLabel}` : distLabel;
+  })();
+
+  const planRaceDate = (profileData?.race_date as string | null) ?? null;
+  const planRaceDays = planRaceDate ? daysUntil(planRaceDate) : null;
+  const planTrainingDays = (profileData?.training_days as string[] | null) ?? null;
+  const planOverrideDays = (profileData?.this_week_override_days as string[] | null) ?? null;
+  const planOverrideExpires = (profileData?.this_week_override_expires as string | null) ?? null;
+  const isPlanOverrideActive = planOverrideDays != null && planOverrideExpires != null && new Date(planOverrideExpires) > new Date();
 
   return (
     <>
@@ -1275,6 +1416,36 @@ export default async function DashboardPage({
               </div>
             )
           )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TRAINING PLAN
+          ══════════════════════════════════════════════════════════════ */}
+          <section className="space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Training Plan</p>
+            <PlanTab
+              planWeeks={planWeeks}
+              totalWeeks={planTotalWeeks}
+              currentWeekNum={planCurrentWeek}
+              currentPhase={planCurrentPhase}
+              weeklyMileageTarget={stateData?.weekly_mileage_target ?? 0}
+              weeklyPlanSessions={weeklyPlanSessions}
+              planCreatedDateStr={planData?.created_at ?? null}
+              trainingDays={planTrainingDays}
+              overrideDays={planOverrideDays}
+              isOverrideActive={isPlanOverrideActive}
+              actualMilesByWeek={actualMilesByWeek}
+              week1Monday={week1MondayStr}
+              allRaceWeekNums={allRaceWeekNums}
+              todayDayIdx={todayDayIdx}
+              upcomingRaces={upcomingRacesForPlan}
+              useMetric={useMetric}
+              goalLabel={planGoalLabel}
+              raceDate={planRaceDate}
+              raceDays={planRaceDays}
+              hasPlan={hasPlan}
+              userId={user.id}
+            />
+          </section>
 
           <p className="pb-4 text-center text-[10px] text-gray-300">Coach Dean · Reply to any text to chat</p>
         </div>

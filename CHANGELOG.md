@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Show uploaded plan in dashboard + better plan orientation message
+
+**Type:** Feature / Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "What do we do with the plan once a user uploads it? It isn't showing up in my dashboard at all" and "We should probably give a comment or two about how the plan aligns or works with the user's goals and any other commentary and orientation about how Dean will use the plan"
+**Root cause:** (1) `plan-tab.tsx` and its PlanTab component were built but never connected to `page.tsx` — the dashboard had no plan view at all. (2) Dean's `plan_import_week_ask` response prompt told Dean to acknowledge the plan and describe the week, but didn't instruct Dean to orient the user on how the plan will be used going forward.
+**Fix / Change:** (1) Wired `PlanTab` into `page.tsx` — queries `training_plans`, maps uploaded/stored plan weeks into `PlanTabWeek` format, computes `week1Monday` from `training_plans.created_at`, derives `actualMilesByWeek` and `allRaceWeekNums` from activities+races. Added a "Training Plan" section to the dashboard that renders the full plan arc and week calendar. (2) Updated the `planWeekSyncNum` prompt branch in `route.ts` to instruct Dean to include 1-2 sentences of orientation: explaining the plan will be used as context after every run and for weekly planning, and inviting the user to reach out about cross training, adjustments, or anything else.
+**Files changed:** `src/app/dashboard/page.tsx`, `src/app/api/coach/respond/route.ts`
+
+## 2026-04-18 — Updated HR zone labels to show LT1/gray zone/LT2 nomenclature
+
+**Type:** Improvement
+**Reported by:** Jake (internal testing)
+**User feedback:** "I thought we updated the dashboard to be <LT1, gray zone, >LT2"
+**Root cause:** The LT1/LT2 physiological zone naming was added to the coaching system prompt (`buildHRZoneContext`) but never applied to the dashboard UI — both LTHR and % max HR paths used generic Z1–Z5 labels.
+**Fix / Change:** When `lthr` data is available, `HRZoneBar` now displays Recovery / < LT1 / Gray zone / ~ LT2 / > LT2 labels instead of Z1–Z5. The % max HR fallback retains Z1–Z5 since that system doesn't map cleanly to physiological thresholds.
+**Files changed:** `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-17 — Switched AI provider from Anthropic to OpenAI (temporary)
 
 **Type:** Infra
