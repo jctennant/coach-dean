@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Fix PDF plan extraction: only 1 week stored for large plans
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "yeah it looks like maybe only a single week is stored in trainingplans for my user"
+**Root cause:** `extractFromPDFData` had `max_tokens: 8192`. A 20-week plan with 5+ sessions/week generates ~140 sessions of JSON, easily exceeding 8192 tokens. Additionally, the prompt didn't explicitly warn against assigning weekNumber: 1 to all sessions — SWAP-style plans use date ranges instead of "Week N" labels, which Claude may have collapsed into a single week.
+**Fix / Change:** Increased `max_tokens` to 32000. Improved prompt with explicit week numbering rules: date-range plans should be numbered sequentially (first range = week 1, second = week 2, etc.), and the model is explicitly warned never to assign weekNumber: 1 to all sessions.
+**Files changed:** src/app/api/plan/upload/route.ts
+
 ## 2026-04-18 — Plan arc chart on dashboard
 
 **Type:** Feature

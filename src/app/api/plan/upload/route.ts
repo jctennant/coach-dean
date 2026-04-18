@@ -292,11 +292,15 @@ async function extractFromPDFData(base64: string): Promise<ExtractedSession[]> {
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 8192,
-    system: `Extract structured training sessions from the training plan PDF. Call extract_sessions with every session you find.
+    max_tokens: 32000,
+    system: `Extract structured training sessions from the training plan PDF. Call extract_sessions with EVERY session from ALL weeks.
 
 Rules:
-- weekNumber: 1-indexed. If the plan doesn't explicitly number weeks, infer from context (e.g., "Week 1", "Mon Jan 6 - Sun Jan 12").
+- weekNumber: 1-indexed sequential week number. CRITICAL: scan the ENTIRE document and assign correct week numbers.
+  - If weeks are labeled "Week 1", "Week 2", etc. — use those numbers directly.
+  - If weeks use date ranges (e.g. "Mon Jan 6 – Sun Jan 12", "Apr 14 – Apr 20") — number them sequentially: first date range = week 1, second = week 2, etc.
+  - If weeks use phase names only (Base 1, Build 2, etc.) — still number 1, 2, 3... sequentially across the whole plan.
+  - NEVER assign weekNumber: 1 to all sessions — each week must have its own sequential number.
 - dayOfWeek: full name (Monday, Tuesday, etc.)
 - type: "easy" | "tempo" | "long" | "interval" | "recovery" | "off" | "cross"
 - Distance ranges (e.g. "4-8 miles", "6–10 km"):
@@ -308,7 +312,8 @@ Rules:
 - targetPace: extract if specified (e.g. "9:30/mi", "4:30/km"). Null if not specified.
 - description: preserve range language exactly as written (e.g. "Easy 4–8mi" not "Easy 6mi"). For intervals, preserve the rep range (e.g. "6–10×800m at 5k pace").
 - Extract ALL sessions including rest days (type: "off") and cross-training.
-- If a session has a total distance AND individual segments, use the total.`,
+- If a session has a total distance AND individual segments, use the total.
+- Include sessions from every week in the document — do not stop after the first few weeks.`,
     messages: [{
       role: "user",
       content: [
@@ -322,7 +327,7 @@ Rules:
         } as unknown as { type: "text"; text: string },
         {
           type: "text",
-          text: "Extract all training sessions from this plan.",
+          text: "Extract all training sessions from every week in this plan. Make sure to include sessions from ALL weeks, not just the first few.",
         },
       ],
     }],
