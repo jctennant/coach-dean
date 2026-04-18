@@ -1068,10 +1068,12 @@ export default async function DashboardPage({
             <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Your Plan</p>
             <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
               <p className="text-sm font-semibold text-gray-800 mb-1">
-                {hasPlan ? "Update your training plan" : "Upload your training plan"}
+                {hasPlan ? "Update your training plan" : "Following a training plan?"}
               </p>
               <p className="text-xs text-gray-400 mb-4">
-                Upload a PDF or screenshot of your plan — Dean will reference it when coaching you after each run.
+                {hasPlan
+                  ? "Upload a new PDF or screenshot and Dean will reference it when coaching you after each run."
+                  : "If you're following a plan from Runna, TrainingPeaks, or anywhere else, upload it here — Dean will reference it after each run. No plan? Post-run coaching works great without one."}
               </p>
               <PlanImportForm userId={user.id} />
             </div>

@@ -242,7 +242,7 @@ Required before signaling [READY] — for ALL athletes:
 - Injury history — REQUIRED FOR ALL ATHLETES. Must ask and receive an answer before [READY]. Frame naturally: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around before?" Even "no injuries at all" is a complete and valid answer. Ask early — after name + goal — not as an afterthought before [READY].
 - Strength & cross-training — REQUIRED FOR ALL ATHLETES. One brief question: "Do you do any strength work or cross-training?" Accept any answer (lifting, yoga, cycling, swimming, or nothing). This directly shapes injury prevention guidance. Ask alongside or right after injury history — they're naturally related.
 - Strava (before collecting fitness data manually)
-- Fitness baseline: a recent race PR, current easy pace, OR Strava connected
+- Fitness baseline: a recent race PR, current easy pace, OR Strava connected. If the athlete is clearly just starting out or returning after a long break and genuinely has no benchmarks — accept that. Don't push for numbers that don't exist. Dean will calibrate from their first few runs.
 - Current weekly mileage — REQUIRED if Strava is not connected AND not already shown in the STRAVA context above. If Strava shows "Recent avg: ~X mi/week", that IS the baseline — do NOT ask again. Ask directly: "How many miles are you running per week right now?" If they say they're not running yet, record as 0.
 - Terrain type and training tools: do NOT ask directly — extract passively. Infer terrain from goal. Extract tools from any mention of Runna, TrainingPeaks, Garmin, etc.
 - Training days (specific days of week) — collect if mentioned naturally, but do NOT ask for them. Not required.
@@ -357,7 +357,7 @@ FIRST-OF-MONTH GUARD: If the only date information you have is a month ("in June
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
-When you have name + goal + injury history + at least one of (pace/PR data OR Strava connected) + confirmed plan preference (for race goals), end your final message with [READY] on its own line.
+When you have name + goal + injury history + at least one of (pace/PR data OR Strava connected OR confirmed they are just starting out / returning with no benchmarks yet) + confirmed plan preference (for race goals), end your final message with [READY] on its own line.
 For race goals: you MUST confirm the athlete's plan preference before signaling [READY]. There are three options — make sure you know which applies:
 1. They already follow a plan (Runna, TrainingPeaks, coach-written, spreadsheet, etc.) — Dean works alongside it as a post-run analyst.
 2. They don't have a plan and want Dean to build one.
@@ -1358,8 +1358,6 @@ async function completeOnboarding(
   // User has no existing plan and doesn't want one — post-run feedback only, no schedule.
   if (hasExistingPlan === false && wantsPlan === false) {
     void trackEvent(user.id, "onboarding_completed", { goal, mode: "no_plan" });
-    const rawFirst = (name ?? "").split(" ")[0];
-    const firstName = (rawFirst && rawFirst.toLowerCase() !== "athlete") ? rawFirst : "Hey";
     const { data: noPlanUser } = await supabase
       .from("users")
       .select("phone_number, dashboard_token")
@@ -1376,10 +1374,8 @@ async function completeOnboarding(
     }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
-    const raceCtx = data.race_name
-      ? ` You're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every note.`
-      : "";
-    const welcomeMsg = `${firstName}, you're all set.${raceCtx} No set schedule — I'll send you a coaching note after every run: effort, load, what to watch for. Text me anytime.\n\nYour dashboard:\n${dashboardUrl}`;
+    // Claude's [READY] message already closed warmly — just send the dashboard link as a follow-up.
+    const welcomeMsg = `Your dashboard is where your coaching notes and training data will live:\n${dashboardUrl}`;
     await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
     return;
   }

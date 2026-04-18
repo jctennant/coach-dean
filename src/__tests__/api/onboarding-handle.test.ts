@@ -212,7 +212,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     const stravaMsg = smsCalls[0]?.[1] as string;
     expect(stravaMsg).not.toContain("[STRAVA_LINK]");
     expect(stravaMsg).toContain("https://coachdean.ai/api/auth/strava");
-    expect(stravaMsg).toContain('reply "skip"');
+    expect(stravaMsg).toContain('"skip"');
     // Only one SMS sent (no separate pre-Strava response)
     expect(smsCalls.length).toBe(1);
 

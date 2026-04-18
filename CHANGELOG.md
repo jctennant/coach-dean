@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Better experience for general fitness / no-race users
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Two friction points for users without hard races or pace benchmarks: (1) onboarding fitness baseline instruction implied a number was always required, which could pressure beginners/returning runners who genuinely have none; (2) dashboard "Your Plan" section copy implied everyone should upload a training plan.
+**Fix / Change:** Onboarding: fitness baseline requirement now explicitly accepts "just starting out / no benchmarks yet" as a valid answer — Dean will calibrate from early runs. SIGNALING READY condition updated to match. Dashboard: "Upload your training plan" heading changed to "Following a training plan?" with copy that makes the upload optional and acknowledges post-run coaching works without one.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/dashboard/page.tsx`
+
+## 2026-04-18 — Onboarding quality improvements: strength exercises, duplicate close, spike specificity, multi-race acknowledgment, Strava skip context
+
+**Type:** Improvement
+**Reported by:** User feedback (Jake Tennant onboarding review)
+**User feedback:** "Broken promise: strength exercises were never delivered... Duplicate 'you're all set' messages... Vague data callout on the mileage spike... Third race quietly disappears... Strava skip option doesn't communicate cost"
+**Root cause:** (1) System prompt had no enforcement that explicitly-requested strength exercises must be delivered before [READY] — Dean acknowledged but deferred indefinitely. (2) Claude's [READY] message + completeOnboarding welcome both sent "you're all set" for hasExistingPlan and no_plan paths. (3) Spike instruction said "there was a notable one recently" without requiring specific numbers. (4) No instruction to surface all races in the calibration summary. (5) Strava skip line gave no context on what connecting unlocks.
+**Fix / Change:** (1) Added mandatory STRENGTH EXERCISES section to system prompt: if athlete asks, Dean must deliver 3-4 specific exercises with sets/reps (tibialis raise, eccentric heel drop, single-leg calf raise, single-leg RDL) adapted to injury history, in the message after Strava connects. (2) Removed "you're all set" from completeOnboarding welcome for hasExistingPlan and no_plan paths — Claude's [READY] message closes warmly, system follow-up just sends the dashboard URL. (3) Updated spike instruction to require specific mileage numbers from the progression data and an approximate date. (4) Added multi-race instruction to STRAVA CONTEXT: name ALL races and explain the periodization logic between them. (5) Updated all Strava skip messages to explain that connecting unlocks personalized post-run feedback.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/__tests__/api/onboarding-handle.test.ts
+
 ## 2026-04-18 — Dashboard: gray zone color fix + plan upload section
 
 **Type:** Bug Fix / Feature
