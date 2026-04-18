@@ -467,6 +467,7 @@ export type Database = {
           taper_peak_miles: number | null
           updated_at: string | null
           user_id: string
+          week1_start_date: string | null
           week_mileage_so_far: number | null
           weekly_long_run_miles: number | null
           weekly_mileage_target: number | null
@@ -486,6 +487,7 @@ export type Database = {
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id: string
+          week1_start_date?: string | null
           week_mileage_so_far?: number | null
           weekly_long_run_miles?: number | null
           weekly_mileage_target?: number | null
@@ -505,6 +507,7 @@ export type Database = {
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id?: string
+          week1_start_date?: string | null
           week_mileage_so_far?: number | null
           weekly_long_run_miles?: number | null
           weekly_mileage_target?: number | null

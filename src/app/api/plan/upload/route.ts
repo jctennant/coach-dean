@@ -174,11 +174,14 @@ export async function POST(request: Request) {
           };
         });
 
+      const week1StartStr = `${thisMonday.getUTCFullYear()}-${String(thisMonday.getUTCMonth() + 1).padStart(2, "0")}-${String(thisMonday.getUTCDate()).padStart(2, "0")}`;
+
       await supabase.from("training_state").upsert({
         user_id: userId,
         current_week: 1,
         current_phase: "base",
         taper_peak_miles: null,
+        week1_start_date: week1StartStr,
         weekly_mileage_target: week1.total_miles || null,
         weekly_plan_sessions: week1Sessions as unknown as import("@/lib/database.types").Json,
         updated_at: new Date().toISOString(),

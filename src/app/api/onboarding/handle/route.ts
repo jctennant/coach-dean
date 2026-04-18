@@ -668,7 +668,7 @@ Rules:
 - race_date: use whichever date is stated in the conversation — athlete's or Dean's. If both are stated and differ by 1–2 days, prefer the athlete's. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if the athlete explicitly said "the 1st" or "June 1st". Today is ${today}.
 - recent_race_distance_km: ONLY from lines labeled "Athlete:" in the transcript — NEVER from "Coach:" lines, Strava summaries, or race data the coach mentions. This captures the athlete's road race PR they state in their own words (e.g. "my fastest 5K is 17:50", "I ran a 1:38 half last fall"). Trail races (Dipsea, ultras, mountain races, any race with "trail" in the name) are NOT eligible — leave null even if the athlete mentions them. If the coach references a Strava trail race (e.g. "your Dipsea 30K"), do NOT extract that distance. Extract even if caveated ("net downhill", "a while ago").
 - recent_race_time_minutes: ONLY from lines labeled "Athlete:" — never from "Coach:" lines. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5. Use the most recent road race time (not trail, not Strava coach summaries). If only a trail time is mentioned by the athlete, leave null.
-- easy_pace: "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile).
+- easy_pace: the athlete's stated easy running pace — "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile). ONLY from lines labeled "Athlete:" — never from "Coach:" lines, training plan content, PDF attachments, or pace suggestions the coach provides. If Dean says "your easy pace is 9:30/mi" but the athlete never stated it themselves, leave null.
 - timezone: IANA string from location ("Provo, UT" → "America/Denver").
 - other_races: B/C secondary races only, not the main A race.
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
@@ -1145,11 +1145,27 @@ async function completeOnboarding(
     || [injuryHistoryText, currentNiggles].filter(Boolean).join(" | ")
     || null;
 
-  // Carry LTHR estimate from Strava connect into the profile if available
-  const onbDataForLthr = data as Record<string, unknown>;
-  const lthrEstimate = (onbDataForLthr.strava_lthr_estimate as number | null) ?? null;
-  const lthrSource = (onbDataForLthr.strava_lthr_source as string | null) ?? null;
-  const lthrConfidence = (onbDataForLthr.strava_lthr_confidence as string | null) ?? null;
+  // Carry LTHR estimate from Strava connect into the profile if available.
+  // Re-fetch onboarding_data fresh from the DB to avoid a race condition: the Strava
+  // callback writes strava_lthr_estimate asynchronously, but any handleConversation
+  // turn that ran between the callback write and this [READY] fire may have written
+  // mergedData (built at request-start) back to the DB, clobbering the LTHR. The
+  // fresh fetch ensures we see whatever the Strava callback wrote, not the stale copy.
+  const { data: freshUserData } = await supabase
+    .from("users")
+    .select("onboarding_data")
+    .eq("id", user.id)
+    .single();
+  const freshOnbData = (freshUserData?.onboarding_data as Record<string, unknown>) ?? {};
+  const lthrEstimate = (freshOnbData.strava_lthr_estimate as number | null)
+    ?? ((data as Record<string, unknown>).strava_lthr_estimate as number | null)
+    ?? null;
+  const lthrSource = (freshOnbData.strava_lthr_source as string | null)
+    ?? ((data as Record<string, unknown>).strava_lthr_source as string | null)
+    ?? null;
+  const lthrConfidence = (freshOnbData.strava_lthr_confidence as string | null)
+    ?? ((data as Record<string, unknown>).strava_lthr_confidence as string | null)
+    ?? null;
 
   const [profileResult, stateResult] = await Promise.all([
     supabase.from("training_profiles").upsert(

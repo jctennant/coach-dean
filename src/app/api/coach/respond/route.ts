@@ -1926,6 +1926,11 @@ Weekly total: ${mileageRange}
     const syncMonday = new Date(syncNow);
     syncMonday.setDate(syncNow.getDate() - daysFromMonday + (planWeekSyncNextWeek ? 7 : 0));
 
+    // week1_start_date: back-calculate from the confirmed week number
+    const week1Start = new Date(syncMonday);
+    week1Start.setDate(syncMonday.getDate() - (planWeekSyncNum - 1) * 7);
+    const week1StartStr = week1Start.toISOString().slice(0, 10);
+
     const syncSessions = uploadedNextWeek.sessions
       .filter(s => s.type !== "off")
       .map(s => {
@@ -1945,6 +1950,7 @@ Weekly total: ${mileageRange}
     await supabase.from("training_state").upsert({
       user_id: userId,
       current_week: planWeekSyncNum,
+      week1_start_date: week1StartStr,
       weekly_mileage_target: uploadedNextWeek.total_miles || null,
       weekly_plan_sessions: syncSessions as unknown as Json,
       updated_at: new Date().toISOString(),

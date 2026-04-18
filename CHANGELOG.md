@@ -4,6 +4,14 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Store week1_start_date on training_state for accurate plan arc anchoring
+
+**Type:** Feature / Infra
+**Reported by:** Internal — identified while designing the plan mileage arc for the dashboard
+**Root cause:** The plan's week 1 Monday was approximated from `training_plans.created_at`, which is off when a user uploads mid-week and confirms they're on a different week. The confirmed Monday was computed but never stored.
+**Fix / Change:** Added `week1_start_date date` column to `training_state`. Populated in two places: (1) `plan/upload/route.ts` — sets it to the current UTC Monday when training_state is initialised to week 1 after upload; (2) `coach/respond/route.ts` planWeekSyncNum block — back-calculates week 1 Monday from the confirmed week number (`syncMonday - (weekNum-1)*7`). Dashboard reads it from `training_state`, falling back to `training_plans.created_at` for existing users who haven't re-confirmed.
+**Files changed:** `supabase/migrations/039_week1_start_date.sql`, `src/lib/database.types.ts`, `src/app/api/plan/upload/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`
+
 ## 2026-04-18 — Show uploaded plan in dashboard + better plan orientation message
 
 **Type:** Feature / Improvement
@@ -12,6 +20,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Root cause:** (1) `plan-tab.tsx` and its PlanTab component were built but never connected to `page.tsx` — the dashboard had no plan view at all. (2) Dean's `plan_import_week_ask` response prompt told Dean to acknowledge the plan and describe the week, but didn't instruct Dean to orient the user on how the plan will be used going forward.
 **Fix / Change:** (1) Wired `PlanTab` into `page.tsx` — queries `training_plans`, maps uploaded/stored plan weeks into `PlanTabWeek` format, computes `week1Monday` from `training_plans.created_at`, derives `actualMilesByWeek` and `allRaceWeekNums` from activities+races. Added a "Training Plan" section to the dashboard that renders the full plan arc and week calendar. (2) Updated the `planWeekSyncNum` prompt branch in `route.ts` to instruct Dean to include 1-2 sentences of orientation: explaining the plan will be used as context after every run and for weekly planning, and inviting the user to reach out about cross training, adjustments, or anything else.
 **Files changed:** `src/app/dashboard/page.tsx`, `src/app/api/coach/respond/route.ts`
+
+## 2026-04-18 — Fixed LTHR race condition and pace extraction from PDF/plan content
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal testing)
+**User feedback:** "my paces are all off" + LTHR not set despite connecting Strava with qualifying race
+**Root cause (paces):** `easy_pace` Haiku extraction had no "Athlete lines only" guard — unlike `recent_race_time_minutes`, it could be populated from Coach messages, training plan PDFs, or any text in the conversation. During onboarding, a PDF training plan attachment contained sub-5:00/mi workout paces; Haiku extracted one as the user's easy pace, producing VDOT 75 / 4:51/mi — unrealistically fast.
+**Root cause (LTHR):** `completeOnboarding` read `strava_lthr_estimate` from in-memory `mergedData` (built at request start). Any `handleConversation` turn that ran between the Strava callback's LTHR write and the `[READY]` fire would write `mergedData` (without LTHR) back to the DB, clobbering the value. The subsequent `[READY]` request would then load stale `onboarding_data` with no LTHR.
+**Fix / Change:** (1) Added "ONLY from Athlete lines" restriction to the `easy_pace` Haiku extraction rule. (2) `completeOnboarding` now re-fetches `onboarding_data` fresh from the DB immediately before reading LTHR fields, with in-memory `data` as fallback — ensures the Strava callback's write is always seen regardless of request ordering.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
 
 ## 2026-04-18 — Updated HR zone labels to show LT1/gray zone/LT2 nomenclature
 

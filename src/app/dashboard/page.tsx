@@ -8,8 +8,7 @@ import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import type { DashboardInsights } from "@/lib/dashboard-insights";
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { deriveZones, lthrMethodLabel, type LTHRSource } from "@/lib/hr-zones";
-import { PlanTab } from "./plan-tab";
-import type { PlanWeek as PlanTabWeek, PlanSession, PlanRace } from "./plan-tab";
+import type { PlanWeek as PlanTabWeek, PlanSession } from "./plan-tab";
 
 export const metadata: Metadata = {
   title: "Your Dashboard — Coach Dean",
@@ -630,7 +629,7 @@ export default async function DashboardPage({
       .limit(6),
     supabase
       .from("training_state")
-      .select("current_week, current_phase, weekly_mileage_target, weekly_long_run_miles, weekly_quality_session, weekly_plan_sessions")
+      .select("current_week, current_phase, weekly_mileage_target, weekly_long_run_miles, weekly_quality_session, weekly_plan_sessions, week1_start_date")
       .eq("user_id", user.id)
       .single(),
     supabase
@@ -860,16 +859,30 @@ export default async function DashboardPage({
   const acwrWarning = acwr.acwr !== null ? { exceeded: (acwr.acwr ?? 0) > 1.3 } : null;
 
   // ── Plan tab data ──────────────────────────────────────────────────────────
-  type UploadedSession = { dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null; targetPace?: string | null };
-  type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
-  type DeanWeek = { week_number: number; phase: string; mileage_target: number; mileage_target_min?: number; mileage_target_max?: number; long_run_target: number; key_workout: string; notes: string };
-
+  // ── Plan data (for hero card + future arc) ────────────────────────────────
   const hasPlan = !!planData?.weeks && Array.isArray(planData.weeks) && (planData.weeks as unknown[]).length > 0;
   const isUploadedPlan = planData?.plan_source === "uploaded";
   const planTotalWeeks = planData?.total_weeks ?? 0;
   const planCurrentWeek = (stateData as { current_week?: number | null } | null)?.current_week ?? 1;
-  const planCurrentPhase = (stateData as { current_phase?: string | null } | null)?.current_phase ?? null;
   const weeklyPlanSessions = (stateData as { weekly_plan_sessions?: unknown } | null)?.weekly_plan_sessions as PlanSession[] | null;
+
+  // week1_start_date: stored when plan week is confirmed; fall back to plan created_at Monday
+  const week1StartDate = (() => {
+    const stored = (stateData as { week1_start_date?: string | null } | null)?.week1_start_date;
+    if (stored) return stored;
+    const ref = planData?.created_at;
+    if (!ref) return null;
+    const d = new Date(ref);
+    const dow = d.getUTCDay();
+    const daysFromMon = dow === 0 ? 6 : dow - 1;
+    const mon = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - daysFromMon));
+    return mon.toISOString().slice(0, 10);
+  })();
+
+  // Map plan weeks to a normalised shape usable for the arc (both uploaded and Dean-generated)
+  type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null };
+  type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
+  type DeanWeek = { week_number: number; phase: string; mileage_target: number; mileage_target_min?: number; mileage_target_max?: number; long_run_target: number; key_workout: string; notes: string };
 
   const planWeeks: PlanTabWeek[] = (() => {
     if (!hasPlan || !planData?.weeks) return [];
@@ -901,92 +914,6 @@ export default async function DashboardPage({
       notes: w.notes ?? "",
     } satisfies PlanTabWeek));
   })();
-
-  // Week 1 Monday: inferred from training_plans.created_at (the Monday of that week)
-  const week1MondayStr = (() => {
-    const createdAt = planData?.created_at;
-    if (!createdAt) {
-      const now = new Date();
-      const dow = now.getUTCDay();
-      const daysFromMon = dow === 0 ? 6 : dow - 1;
-      const mon = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysFromMon));
-      return mon.toISOString().slice(0, 10);
-    }
-    const d = new Date(createdAt);
-    const dow = d.getUTCDay();
-    const daysFromMon = dow === 0 ? 6 : dow - 1;
-    const mon = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - daysFromMon));
-    return mon.toISOString().slice(0, 10);
-  })();
-
-  // Actual miles per plan week (keyed by plan week number)
-  const actualMilesByWeek = (() => {
-    if (!hasPlan || planTotalWeeks === 0) return {} as Record<number, number>;
-    const w1 = new Date(week1MondayStr + "T00:00:00Z");
-    const result: Record<number, number> = {};
-    for (const a of activities) {
-      if (!RUN_ACTIVITY_TYPES.has(a.activity_type ?? "")) continue;
-      if (!a.distance_meters || !a.start_date) continue;
-      const daysDiff = (new Date(a.start_date).getTime() - w1.getTime()) / (1000 * 60 * 60 * 24);
-      const weekNum = Math.floor(daysDiff / 7) + 1;
-      if (weekNum >= 1 && weekNum <= planTotalWeeks) {
-        result[weekNum] = (result[weekNum] ?? 0) + a.distance_meters / 1609.34;
-      }
-    }
-    for (const k of Object.keys(result)) {
-      result[Number(k)] = Math.round(result[Number(k)]! * 10) / 10;
-    }
-    return result;
-  })();
-
-  // Race weeks: which plan week numbers contain a race
-  const allRaceWeekNums = (() => {
-    if (!hasPlan) return [] as number[];
-    const w1 = new Date(week1MondayStr + "T00:00:00Z");
-    return races.flatMap(r => {
-      const daysDiff = (new Date(r.race_date + "T12:00:00Z").getTime() - w1.getTime()) / (1000 * 60 * 60 * 24);
-      const weekNum = Math.floor(daysDiff / 7) + 1;
-      return weekNum >= 1 && weekNum <= planTotalWeeks ? [weekNum] : [];
-    });
-  })();
-
-  // Today's day index within the week (0=Mon … 6=Sun)
-  const todayDayIdx = (() => {
-    const dow = new Date().getUTCDay();
-    return dow === 0 ? 6 : dow - 1;
-  })();
-
-  const upcomingRacesForPlan: PlanRace[] = races.map(r => ({
-    id: r.id,
-    race_name: r.race_name ?? null,
-    race_date: r.race_date,
-    priority: r.priority ?? "C",
-    goal: r.goal ?? "trail_race",
-    goal_distance_miles: r.goal_distance_miles ?? null,
-  }));
-
-  const planGoalLabel = (() => {
-    const goal = profileData?.goal as string | null;
-    if (!goal) return "";
-    const labels: Record<string, string> = {
-      mile: "Mile", "5k": "5K", "10k": "10K", half_marathon: "Half Marathon",
-      marathon: "Marathon", "30k": "30K", "50k": "50K", "50mi": "50 Miles",
-      "100k": "100K", "100mi": "100 Miles", trail_race: "Trail Race",
-      general_fitness: "General Fitness", return_to_running: "Return to Running",
-      injury_recovery: "Injury Recovery",
-    };
-    const raceA = races.find(r => r.priority === "A");
-    const name = raceA?.race_name ?? null;
-    const distLabel = labels[goal] ?? goal.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-    return name ? `${name} · ${distLabel}` : distLabel;
-  })();
-
-  const planRaceDate = (profileData?.race_date as string | null) ?? null;
-  const planRaceDays = planRaceDate ? daysUntil(planRaceDate) : null;
-  const planTrainingDays = (profileData?.training_days as string[] | null) ?? null;
-  const planOverrideDays = (profileData?.this_week_override_days as string[] | null) ?? null;
-  const planOverrideExpires = (profileData?.this_week_override_expires as string | null) ?? null;
-  const isPlanOverrideActive = planOverrideDays != null && planOverrideExpires != null && new Date(planOverrideExpires) > new Date();
 
   return (
     <>
@@ -1416,36 +1343,6 @@ export default async function DashboardPage({
               </div>
             )
           )}
-
-          {/* ══════════════════════════════════════════════════════════════
-              TRAINING PLAN
-          ══════════════════════════════════════════════════════════════ */}
-          <section className="space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Training Plan</p>
-            <PlanTab
-              planWeeks={planWeeks}
-              totalWeeks={planTotalWeeks}
-              currentWeekNum={planCurrentWeek}
-              currentPhase={planCurrentPhase}
-              weeklyMileageTarget={stateData?.weekly_mileage_target ?? 0}
-              weeklyPlanSessions={weeklyPlanSessions}
-              planCreatedDateStr={planData?.created_at ?? null}
-              trainingDays={planTrainingDays}
-              overrideDays={planOverrideDays}
-              isOverrideActive={isPlanOverrideActive}
-              actualMilesByWeek={actualMilesByWeek}
-              week1Monday={week1MondayStr}
-              allRaceWeekNums={allRaceWeekNums}
-              todayDayIdx={todayDayIdx}
-              upcomingRaces={upcomingRacesForPlan}
-              useMetric={useMetric}
-              goalLabel={planGoalLabel}
-              raceDate={planRaceDate}
-              raceDays={planRaceDays}
-              hasPlan={hasPlan}
-              userId={user.id}
-            />
-          </section>
 
           <p className="pb-4 text-center text-[10px] text-gray-300">Coach Dean · Reply to any text to chat</p>
         </div>
