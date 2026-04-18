@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Strava annotation: replace raw metric line with colored status line
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** The annotation showed a raw number (e.g. "Time in easy zone: 84% ✓") with no plain-English verdict — useful data but not immediately readable at a glance.
+**Fix / Change:** Replaced `metricLine` with a `statusLine` that combines a 🟢/🟡/🔴 emoji + verdict + the supporting number. Priority order: (1) aerobic fitness trend (improving/steady/declining) for easy/long runs using last 3 vs prior 3 efficiency values; (2) per-workout zone metric (Z1-Z2 % for easy, HR drift for long, Z4-Z5 min for quality); (3) plain grade-adj pace for mountain/trail with no HR; (4) Haiku-generated 1-sentence fallback when no HR data is available at all.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-18 — Fix gray zone misfire on Z2 runs + deliver full strength routine specs on request
 
 **Type:** Bug Fix

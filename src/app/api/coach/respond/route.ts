@@ -5261,7 +5261,7 @@ async function annotateStravaActivity(
       : Promise.resolve(null),
     supabase
       .from("activities")
-      .select("activity_type, workout_type, average_heartrate, max_heartrate")
+      .select("activity_type, workout_type, average_heartrate, max_heartrate, aerobic_efficiency")
       .eq("user_id", userId)
       .not("max_heartrate", "is", null)
       .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
@@ -5269,6 +5269,7 @@ async function annotateStravaActivity(
       .limit(150),
   ]);
   const userMaxHR = estimateMaxHR(maxHRRow.data ?? []);
+  const efficiencyTrend = computeEfficiencyTrend(maxHRRow.data ?? []);
   const existingDescription = (stravaActivity.description as string) || "";
 
   // Activity stats
@@ -5392,56 +5393,91 @@ async function annotateStravaActivity(
     userMaxHR
   );
 
-  let metricLine: string | null = null;
-  switch (workoutKind) {
-    case "easy": {
-      // Z2 ceiling: prefer LTHR-derived boundary (lthr * 0.89), fall back to 75% of max HR.
-      const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
-      const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
-      if (z12Pct !== null) {
-        const indicator = z12Pct >= 90 ? " ✓" : z12Pct < 70 ? " ⚠" : "";
-        metricLine = `Time in easy zone (Z1-Z2): ${z12Pct}%${indicator}`;
-      } else if (decouplingPct !== null) {
-        metricLine = `HR drift: ${decouplingPct.toFixed(0)}% (low = good)`;
-      }
-      break;
+  // Status line — colored verdict + number.
+  // Priority: (1) fitness trend for easy/long, (2) zone metric, (3) plain GAP fallback,
+  // (4) Haiku 1-sentence fallback when no computable metric.
+  let statusLine: string | null = null;
+
+  // Fitness trend (easy + long only — aerobic base signal, needs ≥6 runs of history)
+  if (workoutKind === "easy" || workoutKind === "long") {
+    switch (efficiencyTrend) {
+      case "improving": statusLine = "🟢 Aerobic fitness trending up"; break;
+      case "steady":    statusLine = "🟡 Fitness holding steady"; break;
+      case "declining": statusLine = "🔴 Efficiency dipping — recovery may help"; break;
     }
-    case "long": {
-      if (decouplingPct !== null) {
-        const note = decouplingPct >= 10 ? " — easy day tomorrow" : "";
-        metricLine = `HR drift: ${decouplingPct.toFixed(0)}%${note} (low = good)`;
-      } else {
+  }
+
+  if (!statusLine) {
+    switch (workoutKind) {
+      case "easy": {
         const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
         const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
         if (z12Pct !== null) {
-          const indicator = z12Pct >= 90 ? " ✓" : z12Pct < 70 ? " ⚠" : "";
-          metricLine = `Time in easy zone (Z1-Z2): ${z12Pct}%${indicator}`;
+          if (z12Pct >= 90)      statusLine = `🟢 Easy zone nailed — ${z12Pct}% Z1-Z2`;
+          else if (z12Pct >= 70) statusLine = `🟡 Mostly easy — ${z12Pct}% Z1-Z2`;
+          else                   statusLine = `🔴 Ran harder than easy — ${z12Pct}% Z1-Z2`;
         }
+        break;
       }
-      break;
-    }
-    case "tempo":
-    case "interval": {
-      // Quality work → combined Zone 4+5 time (≥80% maxHR)
-      const qualMins = userMaxHR ? computeZoneTime(splits, userMaxHR, 0.80, 1.0) : null;
-      if (qualMins !== null && qualMins > 0) {
-        metricLine = `Quality effort (Z4-Z5): ${qualMins}min`;
-      } else if (gaAvgPaceStr) {
-        metricLine = `Grade-adj pace: ${gaAvgPaceStr}`;
+      case "long": {
+        if (decouplingPct !== null) {
+          if (decouplingPct < 5)       statusLine = `🟢 Low HR drift (${decouplingPct.toFixed(0)}%) — efficiency held`;
+          else if (decouplingPct < 10) statusLine = `🟡 Moderate HR drift (${decouplingPct.toFixed(0)}%) — normal for long effort`;
+          else                         statusLine = `🔴 High HR drift (${decouplingPct.toFixed(0)}%) — recovery priority tomorrow`;
+        } else {
+          const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
+          const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
+          if (z12Pct !== null) {
+            if (z12Pct >= 90)      statusLine = `🟢 Easy zone nailed — ${z12Pct}% Z1-Z2`;
+            else if (z12Pct >= 70) statusLine = `🟡 Mostly easy — ${z12Pct}% Z1-Z2`;
+            else                   statusLine = `🔴 Ran harder than easy — ${z12Pct}% Z1-Z2`;
+          }
+        }
+        break;
       }
-      break;
+      case "tempo":
+      case "interval": {
+        const qualMins = userMaxHR ? computeZoneTime(splits, userMaxHR, 0.80, 1.0) : null;
+        if (qualMins !== null && qualMins > 0) {
+          if (qualMins >= 15)     statusLine = `🟢 Quality work locked in — ${qualMins} min Z4-Z5`;
+          else if (qualMins >= 5) statusLine = `🟡 Some quality effort — ${qualMins} min Z4-Z5`;
+          else                    statusLine = `🔴 Didn't reach target zones`;
+        } else if (gaAvgPaceStr) {
+          statusLine = `Grade-adj pace: ${gaAvgPaceStr}`;
+        }
+        break;
+      }
+      case "mountain": {
+        if (gaAvgPaceStr) statusLine = `Grade-adj pace: ${gaAvgPaceStr}`;
+        break;
+      }
+      case "race": {
+        statusLine = "🏁 Race effort logged";
+        break;
+      }
     }
-    case "mountain": {
-      if (gaAvgPaceStr) metricLine = `Grade-adj pace: ${gaAvgPaceStr}`;
-      break;
-    }
-    case "race":
-      break; // performance speaks for itself
   }
 
-  // Block: header → metric → blank line → coachdean.ai branding
+  // Haiku fallback — 1-sentence analysis when there's no computable metric
+  if (!statusLine) {
+    const distDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
+    const weatherSummary = activityWeather
+      ? `${activityWeather.tempF}°F, ${activityWeather.conditions}`
+      : null;
+    statusLine = await generateAnnotationFallback(
+      workoutKind,
+      distDisplay,
+      pace,
+      elevDisplay,
+      weekLabel,
+      raceData.length > 0 ? raceData[0].shortLabel : null,
+      weatherSummary
+    );
+  }
+
+  // Block: header → status → blank line → coachdean.ai branding
   const blockLines: string[] = [headerLabel];
-  if (metricLine) blockLines.push(metricLine);
+  if (statusLine) blockLines.push(statusLine);
   blockLines.push("", "coachdean.ai");
   const block = blockLines.join("\n");
 
@@ -5451,6 +5487,64 @@ async function annotateStravaActivity(
 
   await updateActivityDescription(accessToken, stravaActivityId, newDescription);
   console.log(`[strava-annotation] annotated activity ${stravaActivityId} for user ${userId}`);
+}
+
+/**
+ * Compute aerobic efficiency trend from recent runs (last 3 vs prior 3).
+ * Returns null when there aren't enough data points to be meaningful.
+ */
+function computeEfficiencyTrend(
+  recentRuns: Array<{ aerobic_efficiency?: number | null }>
+): "improving" | "declining" | "steady" | null {
+  const withEff = recentRuns
+    .filter((r): r is typeof r & { aerobic_efficiency: number } => typeof r.aerobic_efficiency === "number")
+    .slice(0, 10);
+  if (withEff.length < 6) return null;
+  const recent3 = withEff.slice(0, 3).map(r => r.aerobic_efficiency);
+  const older3 = withEff.slice(3, 6).map(r => r.aerobic_efficiency);
+  const avgRecent = recent3.reduce((s, v) => s + v, 0) / 3;
+  const avgOlder = older3.reduce((s, v) => s + v, 0) / 3;
+  const delta = avgRecent - avgOlder;
+  if (Math.abs(delta) < 0.02) return "steady";
+  return delta > 0 ? "improving" : "declining";
+}
+
+/**
+ * Generate a 1-sentence Strava annotation via Haiku when no HR-based metric is available.
+ * Used as a fallback for runs without a heart rate monitor or insufficient split data.
+ */
+async function generateAnnotationFallback(
+  workoutKind: WorkoutKind,
+  distanceDisplay: string,
+  pace: string | null,
+  elevDisplay: string | null,
+  weekLabel: string | null,
+  raceShortLabel: string | null,
+  weatherSummary: string | null
+): Promise<string | null> {
+  const lines = [
+    `Workout type: ${workoutKind}`,
+    `Distance: ${distanceDisplay}`,
+    pace ? `Pace: ${pace}` : null,
+    elevDisplay ? `Elevation: ${elevDisplay}` : null,
+    weekLabel ? `Training context: ${weekLabel}` : null,
+    raceShortLabel ? `Race: ${raceShortLabel}` : null,
+    weatherSummary ? `Weather: ${weatherSummary}` : null,
+  ].filter(Boolean).join("\n");
+
+  try {
+    const resp = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 80,
+      messages: [{
+        role: "user",
+        content: `Write one short sentence (max 12 words) summarizing this run for a Strava activity description. Be specific to the data. No intro, no quotes.\n\n${lines}`,
+      }],
+    });
+    return resp.content.find(c => c.type === "text")?.text?.trim() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
