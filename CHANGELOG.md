@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Fix gray zone misfire on Z2 runs + deliver full strength routine specs on request
+
+**Type:** Bug Fix
+**Reported by:** Jake (user conversation)
+**User feedback:** "Seems I was in the 'easier zone' but Dean's first post run message didn't seem to think so. Also I don't think he actually gave me the strength routine. These should be delivered with specifics around reps / rounds and how often (ideally once over text, then in the dashboard)."
+**Root cause (gray zone):** Dean applied the "avoid gray zone" training philosophy to a run where avg HR (152 bpm) was solidly in Z2 (Aerobic Base, 152–167 bpm). The guard was missing: Dean was allowed to flag gray zone even when the current run's HR was in the correct zone.
+**Fix (gray zone):** Added GRAY ZONE GUARD to post_run INSIGHT RULES: only flag gray zone if avg_heartrate is actually in Z3. Z2 or below = appropriate effort, do not call it gray zone. If commenting on a multi-run trend, frame it as a trend, not about today's run.
+**Root cause (strength routine):** (1) `strengthRoutineBlock` returned empty string when no routine was stored, leaving Dean with no instruction — causing hallucinated references to "the prescribed strength routine." (2) When a routine IS stored, instruction said "reference when naturally relevant" but gave no direction to deliver full specs when the athlete directly asks.
+**Fix (strength routine):** When no routine is stored, inject an explicit guard: "do NOT reference 'the prescribed strength routine' — it doesn't exist yet." When a routine is stored, instruct Dean to deliver the full routine (all exercises + sets/reps/cues + frequency) in SMS when the athlete directly asks — don't just point to the dashboard.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-18 — Disable web search for user_message on OpenAI provider
 
 **Type:** Bug Fix

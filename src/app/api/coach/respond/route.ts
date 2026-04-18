@@ -1295,9 +1295,9 @@ Use this data to:
       exercises?: Array<{ name: string; specs: string; reason?: string }>;
       frequency?: string;
     } | null;
-    if (!sr?.exercises?.length) return "";
-    const lines = sr.exercises.map(ex => `- ${ex.name}: ${ex.specs}`).join("\n");
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (visible on athlete's dashboard):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nReference this when naturally relevant — e.g. reinforce after a run that stressed a known injury site, or mention it in a weekly recap if they haven't acknowledged it. Don't lecture unprompted unless there's a clear injury signal.`;
+    if (!sr?.exercises?.length) return `\n\nNO STRENGTH ROUTINE STORED: No strength routine has been prescribed for this athlete yet. Do NOT reference "the prescribed strength routine" or imply one exists — it would be a hallucination. If the athlete asks about strength work or a routine, say you'll add recommendations to their dashboard based on their injury history.`;
+    const lines = sr.exercises.map(ex => `- ${ex.name}: ${ex.specs}${ex.reason ? ` (${ex.reason})` : ""}`).join("\n");
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (stored on athlete's dashboard):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nWhen the athlete DIRECTLY ASKS about the strength routine, send the FULL routine in your response — list every exercise with complete specs (sets/reps/cues) and frequency. Do not just tell them to check the dashboard; they need to see the details in SMS. Otherwise (unprompted), reference it briefly when naturally relevant — e.g. after a run that stressed a known injury site, or in a weekly recap. Don't lecture about it unless there's a clear injury signal.`;
   })();
 
   const systemPrompt = buildSystemPrompt(
@@ -4625,6 +4625,7 @@ INSIGHT RULES:
 - If weather at run time shows heat (>75°F feels-like): acknowledge the conditions-adjusted effort explicitly. Don't let the athlete think a slower pace means something went wrong.
 - If aerobic efficiency or cardiac drift is improving: name the specific trend. Specific progress is more motivating than "you're doing great."
 - If the athlete has a goal race: connect at least one insight to race prep.
+- GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if the activity's avg_heartrate is actually in Z3 (the gray zone band shown in HEART RATE ZONES above). If avg_heartrate is in Z2 (Aerobic Base) or lower, today's effort was appropriate and well-executed — do not call it gray zone. If you want to comment on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it clearly as a training trend ("your recent runs have been trending toward moderate effort") — never apply it to today's run when today was Z2 or below.
 
 COACHING FORWARD — tell them what it means, not just what happened:
 - Connect the run to where they're going. If they've been building volume for weeks: is it time for a quality session?
