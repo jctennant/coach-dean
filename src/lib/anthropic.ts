@@ -43,10 +43,9 @@ const MODEL_MAP: Record<string, string> = {
   "claude-sonnet-4-5-20250929": "gpt-4o",
   "claude-sonnet-4-6": "gpt-4o",
 };
-// gpt-4o-search-preview has a very low TPM limit (6k) at low OpenAI tiers — not enough
-// for the coaching system prompt. Fall back to gpt-4o (no live web search, but won't crash).
-// TODO: replace with a proper Tavily/Serper function-tool once on a higher tier.
-const SEARCH_MODEL = "gpt-4o";
+// gpt-4o-search-preview: used only for onboarding web searches (short prompts).
+// The full coaching system prompt is too large for its 6k TPM limit at low tiers.
+const SEARCH_MODEL = "gpt-4o-search-preview";
 
 function buildOpenAIClient(): Anthropic {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -126,21 +125,28 @@ function buildOpenAIClient(): Anthropic {
     return result;
   }
 
-  /** Convert Anthropic tool definitions to OpenAI function definitions (skip web_search). */
+  /** Convert Anthropic tool definitions to OpenAI tool definitions.
+   *  web_search_20250305 → web_search_preview (OpenAI native); other tools → function. */
   function convertTools(tools: Array<Record<string, unknown>>): unknown[] {
-    return tools
-      .filter((t) => t.type !== "web_search_20250305")
-      .map((tool) => ({
-        type: "function",
-        function: {
-          name: tool.name as string,
-          description: (tool.description as string) ?? "",
-          parameters: (tool.input_schema as Record<string, unknown>) ?? {
-            type: "object",
-            properties: {},
+    const result: unknown[] = [];
+    for (const tool of tools) {
+      if ((tool.type as string) === "web_search_20250305") {
+        result.push({ type: "web_search_preview" });
+      } else {
+        result.push({
+          type: "function",
+          function: {
+            name: tool.name as string,
+            description: (tool.description as string) ?? "",
+            parameters: (tool.input_schema as Record<string, unknown>) ?? {
+              type: "object",
+              properties: {},
+            },
           },
-        },
-      }));
+        });
+      }
+    }
+    return result;
   }
 
   /** Convert OpenAI ChatCompletion to Anthropic-shaped response. */

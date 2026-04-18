@@ -10,6 +10,7 @@ import { estimateMaxHR } from "@/lib/hr-utils";
 import { deriveZones, lthrMethodLabel, type LTHRSource } from "@/lib/hr-zones";
 import type { PlanWeek as PlanTabWeek, PlanSession } from "./plan-tab";
 import { PlanArcChart } from "./plan-arc-chart";
+import { PlanImportForm } from "./plan-import-form";
 
 export const metadata: Metadata = {
   title: "Your Dashboard — Coach Dean",
@@ -498,7 +499,7 @@ type HRZoneBarProps =
   | { maxHR: number };
 
 function HRZoneBar(props: HRZoneBarProps) {
-  const ZONE_COLORS = ["#93c5fd", "#34d399", "#fbbf24", "#f97316", "#ef4444"];
+  const ZONE_COLORS = ["#93c5fd", "#34d399", "#9ca3af", "#f97316", "#ef4444"];
 
   let floors: number[];
   let ceilings: number[];
@@ -510,9 +511,14 @@ function HRZoneBar(props: HRZoneBarProps) {
     floors      = [0,              z.z1_ceiling, z.z2_ceiling, z.z3_ceiling, z.z4_ceiling];
     ceilings    = [z.z1_ceiling,   z.z2_ceiling, z.z3_ceiling, z.z4_ceiling, 999];
     zoneLabels  = ["Recovery", "< LT1", "Gray zone", "~ LT2", "> LT2"];
+    const isLowConf = props.confidence === "low";
     methodBadge = (
-      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-700 font-medium">
-        {lthrMethodLabel(props.source)}
+      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+        isLowConf
+          ? "bg-amber-50 text-amber-700"
+          : "bg-green-50 text-green-700"
+      }`}>
+        {lthrMethodLabel(props.source)}{isLowConf ? " · low confidence" : ""}
       </span>
     );
   } else {
@@ -1041,7 +1047,7 @@ export default async function DashboardPage({
           {/* ══════════════════════════════════════════════════════════════
               PLAN ARC
           ══════════════════════════════════════════════════════════════ */}
-          {hasPlan && planWeeks.length > 0 && (
+          {(hasPlan && planWeeks.length > 0) && (
             <section className="space-y-3">
               <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
                 <PlanArcChart
@@ -1054,6 +1060,22 @@ export default async function DashboardPage({
               </div>
             </section>
           )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              PLAN UPLOAD
+          ══════════════════════════════════════════════════════════════ */}
+          <section className="space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Your Plan</p>
+            <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+              <p className="text-sm font-semibold text-gray-800 mb-1">
+                {hasPlan ? "Update your training plan" : "Upload your training plan"}
+              </p>
+              <p className="text-xs text-gray-400 mb-4">
+                Upload a PDF or screenshot of your plan — Dean will reference it when coaching you after each run.
+              </p>
+              <PlanImportForm userId={user.id} />
+            </div>
+          </section>
 
           {/* ══════════════════════════════════════════════════════════════
               INJURY & LOAD
@@ -1234,6 +1256,14 @@ export default async function DashboardPage({
                               ? <HRZoneBar maxHR={zoneData.maxHREstimate} />
                               : null
                           }
+                          {storedLthrConfidence === "low" && (
+                            <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5 space-y-0.5">
+                              <p className="text-[11px] font-semibold text-amber-800">Zones are an estimate — low confidence</p>
+                              <p className="text-[11px] text-amber-700 leading-snug">
+                                Derived from a long race effort where pace and terrain reduce HR accuracy. Run a hard road 5K or 10K, or a 30-min field test at max sustainable pace, to sharpen the estimate.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

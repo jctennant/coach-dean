@@ -321,6 +321,7 @@ DEMONSTRATING VALUE — do this consistently, not just sometimes:
 - Name the specific training mechanism that will address a stated struggle. Specificity is what makes this feel like real coaching.
 - When the athlete mentions injury history, connect it directly to what Dean will watch for: "With IT band history, I'll flag when your weekly jump is too steep and watch your long run percentage." This makes the intake feel purposeful, not administrative.
 - Use the athlete's own language and context in your wrap-up message. Reference their specific race, goal, or constraint.
+- STRENGTH EXERCISES — mandatory delivery: If the athlete explicitly asks for strength exercises or injury prevention exercises at any point, you MUST deliver 3-4 specific exercises before signaling [READY]. Do NOT acknowledge the request and then defer indefinitely. Deliver them in the message after Strava connects (where you have the full injury + training picture). Prescribe concretely with sets/reps: tibialis raise (3×15), eccentric heel drop (3×15), single-leg calf raise (3×15), single-leg RDL (2×10 each side). Adapt to their specific injury history: Achilles issues → lead with eccentric heel drops and tibialis raises; shin splints → lead with tibialis raises; IT band → add hip abductor work. One sentence per exercise is enough. This is a high-value moment — deliver it, don't defer it.
 
 RACE TARGET FOR TIME-GOAL ATHLETES:
 If the athlete has a time goal for a specific distance but has not named a specific race, ask: "Any race on the calendar you're targeting this at?" A specific race date is essential for structuring the training timeline.
@@ -338,7 +339,8 @@ When Strava connects, give a genuine analytical read of the data — this is a t
 - Frequency: consistency of training is often the biggest predictor of improvement. ("5 days consistently — that's where aerobic gains compound.")
 - Elevation: for trail athletes, elevation load = specificity. ("Averaging 500ft per run is solid prep for Dipsea's terrain.")
 - HR zones (if present): frame this as performance insight, not a warning label. High Z1-2 is a strong aerobic base — the engine that gets you faster. High Z3+ means they're working harder than the base phase calls for, which limits how much fitness they can absorb. Be direct but frame it as "here's what this means for your training": "85% of your runs are in Z1-2 — that's a genuinely strong aerobic base, your fitness will compound well" or "About half your runs are running at threshold or harder — that's leaving gains on the table. Keeping the easy days easy is usually the fastest path to a PR."
-- Mileage spike (if ⚠️ spike warning is present): surface it within the performance narrative. "One thing I want to flag — there's a week where mileage jumped X%. That kind of spike is where most runners get hurt and lose a training block. We'll keep the progression smoother from here." Don't open with the warning — let it land after the positive read.
+- Mileage spike (if ⚠️ spike warning is present): surface it with specific numbers from the weekly progression above. Identify the exact mileage jump (e.g. "You went from 22 to 38 miles") by comparing adjacent values in the weekly progression line. Approximate the week date by counting back from today. Do NOT say "there was a notable one recently" — be concrete: "You jumped from X to Y miles the week of [approximate date] — that's a Z% spike. Worth watching as we ramp." Don't open with the warning — let it land after the positive read.
+- Multiple races (if athlete has 2+ races): name ALL of them in the calibration summary and explain the periodization logic. E.g. "With Dipsea on June 1 and the 10K + Cirque Series in July, I'll prioritize climbing strength and aerobic efficiency in May, then shift to speed sharpening in June." Don't let secondary races silently disappear.
 End with one forward-looking sentence connecting their data to their goal — UNLESS the PACE CALIBRATION section below requires asking a road race question in this message. In that case, the pace calibration question is the final sentence; do NOT add a separate forward-looking sentence after it.
 Do NOT narrate all the stats like a report. Pick what's most interesting and make it feel like a real coach read the data — the performance picture first, risk context woven in.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
@@ -453,7 +455,7 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
       .trim();
     responseText = beforeStrava;
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\nNo Strava? Just reply "skip".`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\nNo Strava? Reply "skip" — you can connect later from your dashboard. Heads up: connecting now unlocks personalized feedback after every single run.`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -788,14 +790,14 @@ async function handleStrava(
   // If asking about Strava (with or without a question mark)
   const isAskingAboutStrava = !isSkip && /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
   if (isAskingAboutStrava || (!isSkip && /strava/i.test(message) && message.includes("?"))) {
-    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run you do and adjust your training plan based on real data. No need to report anything manually.\n\nDon't have it? No problem — you can skip and I'll ask you a few quick questions to set your paces instead.\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nNo Strava? Just reply "skip".`;
+    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run you do and send you a personalized coaching note after each one.\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nNo Strava? Reply "skip" — you can connect later from your dashboard. Heads up: connecting now unlocks personalized feedback after every single run.`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
 
   if (!isSkip) {
     // Non-skip, non-question — just re-send the link
-    const reply = `Connect Strava for automatic run tracking:\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nOr reply "skip" to continue without it.`;
+    const reply = `Connect Strava for automatic run tracking:\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.\n\nOr reply "skip" — you can connect later from your dashboard. Heads up: connecting now unlocks personalized feedback after every single run.`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
@@ -1330,8 +1332,6 @@ async function completeOnboarding(
   // Instead, send a welcome message explaining what Dean will now do for them.
   if (hasExistingPlan === true) {
     void trackEvent(user.id, "onboarding_completed", { goal, mode: "complement" });
-    const rawFirst = (name ?? "").split(" ")[0];
-    const firstName = (rawFirst && rawFirst.toLowerCase() !== "athlete") ? rawFirst : "Hey";
     const { data: complementUser } = await supabase
       .from("users")
       .select("phone_number, dashboard_token")
@@ -1349,10 +1349,8 @@ async function completeOnboarding(
     }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
-    const raceCtx = data.race_name
-      ? ` I can see you're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every analysis.`
-      : "";
-    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a debrief and write it back to your Strava activity. Text me anytime. Let's go.\n\nYour dashboard — I'll keep your key notes and data here. You can also upload your plan as a PDF so I can reference it directly:\n${dashboardUrl}`;
+    // Claude's [READY] message already closed warmly — just send the dashboard link as a follow-up.
+    const welcomeMsg = `Your dashboard is where all your training data lives — zone distribution, aerobic efficiency trend, and upcoming plan. You can also upload your training PDF so I can reference it directly:\n${dashboardUrl}`;
     await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
     return;
   }

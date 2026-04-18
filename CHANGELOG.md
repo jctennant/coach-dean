@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Dashboard: gray zone color fix + plan upload section
+
+**Type:** Bug Fix / Feature
+**Reported by:** Jake
+**User feedback:** "maybe the gray zone should be gray in terms of coloring? Also Dean told me to upload my plan to the dash but there's no way to do that."
+**Root cause:** (1) HR zone 3 ("Gray zone") was colored amber (#fbbf24) — same as the moderate run zone — instead of gray. (2) PlanImportForm component existed but was never rendered on the dashboard page.
+**Fix / Change:** Changed zone 3 color to #9ca3af (gray). Added a "Your Plan" section to the dashboard that renders PlanImportForm, visible to all users (shows "Upload" or "Update" depending on whether a plan exists).
+**Files changed:** src/app/dashboard/page.tsx
+
+---
+
 ## 2026-04-18 — Fix PDF plan extraction: only 1 week stored for large plans
 
 **Type:** Bug Fix

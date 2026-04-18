@@ -154,6 +154,9 @@ export function buildHRZoneContext(
 ): string {
   const z = deriveZones(lthr);
   const sourceLabel = source === "race" ? "race history" : source === "manual" ? "manual entry" : "training data";
+  const lowConfNote = confidence === "low"
+    ? `\n<rule>LTHR CONFIDENCE IS LOW: This estimate came from a long race effort (130–180 min) where fueling, terrain, and pacing strategy reduce HR accuracy. Mention this uncertainty naturally when referencing HR zones — e.g. "your zones are based on an estimate from a longer race, so they may be slightly off." Suggest they do a hard road 5K or 10K effort, or a 30-min field test at max sustainable pace, to sharpen the estimate. Do NOT refuse to use the zones — use them, but flag the caveat.</rule>`
+    : "";
   return `HEART RATE ZONES (LTHR-based — threshold: ${lthr} bpm, estimated from ${sourceLabel}, confidence: ${confidence}):
 - Z1 Recovery: < ${z.z1_ceiling} bpm — very easy, fully conversational
 - Z2 Aerobic Base: ${z.z1_ceiling}–${z.z2_ceiling} bpm — easy, sentences (below LT1 aerobic threshold)
@@ -161,7 +164,7 @@ export function buildHRZoneContext(
 - Z4 Threshold: ${z.z3_ceiling + 1}–${z.z4_ceiling} bpm — uncomfortable, near race pace (at LT2)
 - Z5 VO2 Max: > ${z.z5_floor} bpm — all-out effort
 Use zone names AND bpm values in coaching copy. Never reference raw HR percentages in user-facing messages.
-<rule>LTHR GUARD: The threshold value above (${lthr} bpm) is a stored estimate computed from race history — it is NOT derived from the max_heartrate field in any activity JSON. The max_heartrate field in activity data is still a single-run peak reading only; do not use it to estimate or assert the athlete's max HR or threshold.</rule>`;
+<rule>LTHR GUARD: The threshold value above (${lthr} bpm) is a stored estimate computed from race history — it is NOT derived from the max_heartrate field in any activity JSON. The max_heartrate field in activity data is still a single-run peak reading only; do not use it to estimate or assert the athlete's max HR or threshold.</rule>${lowConfNote}`;
 }
 
 /**
