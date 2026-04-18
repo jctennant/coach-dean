@@ -26,8 +26,12 @@ function makeActivity(opts: {
   decoupling?: number;
   type?: string;
 }): ActivityForAnalytics {
-  const d = new Date();
-  d.setDate(d.getDate() - opts.daysAgo);
+  const now = new Date();
+  // Use UTC midnight to match the UTC-based week construction in computeLoadTrend /
+  // computeLongRunProgression (which use Date.UTC(now.getUTCFullYear(), ...getUTCDate() - i*7)).
+  // Using getDate() (local) causes drift when UTC has already rolled to the next day (e.g.
+  // 10pm Pacific = 05am UTC next day), making the activity land in the wrong week.
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - opts.daysAgo));
   return {
     start_date: d.toISOString(),
     activity_type: opts.type ?? "Run",

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-17 — Switched AI provider from Anthropic to OpenAI (temporary)
+
+**Type:** Infra
+**Reported by:** Jake (internal)
+**User feedback:** "I'm getting blocked by the Anthropic API because I can't move from tier 1 to tier 2"
+**Root cause:** Anthropic API tier 1 rate limits were blocking production use. Needed a temporary alternative while tier upgrade is pending.
+**Fix / Change:** Added a provider-switchable shim in `src/lib/anthropic.ts`. The shim wraps OpenAI behind the exact same `anthropic.messages.create()` interface, so zero call-site code changed. Provider is controlled by `AI_PROVIDER` env var (`openai` = default now, `anthropic` = original). Model mapping: haiku→gpt-4o-mini, sonnet→gpt-4o. Web search uses `gpt-4o-search-preview`. PDF document blocks are converted via `pdf-parse`. To switch back: set `AI_PROVIDER=anthropic` and ensure `ANTHROPIC_API_KEY` is set.
+**Files changed:** `src/lib/anthropic.ts`, `package.json` (added `openai`, `pdf-parse`)
+
+---
+
 ## 2026-04-17 — LTHR-anchored HR zone system (Phase 1 + 2 foundation)
 
 **Type:** Feature
