@@ -25,6 +25,8 @@ interface UploadRequest {
   filename?: string;
   /** Dry run — extract and return plan without saving */
   dry_run?: boolean;
+  /** Which week the user is currently on (1-indexed). Defaults to 1. */
+  currentWeek?: number;
 }
 
 interface ExtractedSession {
@@ -54,7 +56,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { userId, content, contentType, filename, dry_run = false } = body;
+  const { userId, content, contentType, filename, dry_run = false, currentWeek = 1 } = body;
 
   if (!userId || !content || !contentType) {
     return NextResponse.json({ error: "Missing required fields: userId, content, contentType" }, { status: 400 });
@@ -139,10 +141,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Failed to save plan" }, { status: 500 });
     }
 
-    // Reset training_state to week 1 so the dashboard immediately reflects the new plan.
-    // For SMS uploads: the "which week?" follow-up will adjust if the user isn't on week 1.
-    // For web dashboard uploads: this gives correct state without a follow-up question.
-    const week1 = weeks.find(w => w.week_number === 1);
+    // Set training_state to the user's current week.
+    const targetWeekNum = Math.max(1, Math.min(currentWeek, weeks.length));
+    const week1 = weeks.find(w => w.week_number === targetWeekNum);
     if (week1) {
       const DAY_OFFSETS: Record<string, number> = {
         monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
@@ -178,7 +179,7 @@ export async function POST(request: Request) {
 
       await supabase.from("training_state").upsert({
         user_id: userId,
-        current_week: 1,
+        current_week: targetWeekNum,
         current_phase: "base",
         taper_peak_miles: null,
         week1_start_date: week1StartStr,

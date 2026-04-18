@@ -26,6 +26,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
   const [pendingContentType, setPendingContentType] = useState<"image_base64" | "pdf_base64">("image_base64");
   const [pendingFilename, setPendingFilename] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [currentWeek, setCurrentWeek] = useState<number>(1);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(async (file: File) => {
@@ -33,6 +34,14 @@ export function PlanImportForm({ userId }: { userId: string }) {
     const isImage = file.type.startsWith("image/");
     if (!isPDF && !isImage) {
       setErrorMsg("Please upload a PDF or image file.");
+      setStatus("error");
+      return;
+    }
+
+    // Base64 encoding adds ~33% overhead; Vercel's body limit is 4.5MB.
+    // Block PDFs over 3MB to stay safely under that limit.
+    if (isPDF && file.size > 3 * 1024 * 1024) {
+      setErrorMsg("This PDF is too large (max 3 MB). Try a screenshot of the plan instead, or text Dean with your plan details.");
       setStatus("error");
       return;
     }
@@ -118,6 +127,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
           content: pendingContent,
           contentType: pendingContentType,
           filename: pendingFilename ?? undefined,
+          currentWeek,
         }),
       });
 
@@ -141,6 +151,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
     setErrorMsg(null);
     setPendingContent(null);
     setPendingFilename(null);
+    setCurrentWeek(1);
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -183,6 +194,22 @@ export function PlanImportForm({ userId }: { userId: string }) {
           {pendingFilename && (
             <p className="mt-2 text-[10px] text-gray-400 truncate">{pendingFilename}</p>
           )}
+        </div>
+        <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 flex items-center justify-between gap-3">
+          <label className="text-xs text-gray-600 shrink-0">Which week are you on?</label>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentWeek(w => Math.max(1, w - 1))}
+              className="w-7 h-7 rounded-full border border-gray-200 text-gray-500 text-sm leading-none"
+            >−</button>
+            <span className="w-16 text-center text-sm font-semibold tabular-nums text-gray-900">
+              Week {currentWeek} of {preview.weeks.length}
+            </span>
+            <button
+              onClick={() => setCurrentWeek(w => Math.min(preview.weeks.length, w + 1))}
+              className="w-7 h-7 rounded-full border border-gray-200 text-gray-500 text-sm leading-none"
+            >+</button>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
