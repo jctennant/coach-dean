@@ -27,7 +27,7 @@
     "lucide-react": "^0.563.0",
     "next": "16.1.6",
     "openai": "^6.34.0",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.1",
     "posthog-js": "^1.357.2",
     "posthog-node": "^5.26.2",
     "qrcode.react": "^4.2.0",
