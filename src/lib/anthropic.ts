@@ -43,7 +43,10 @@ const MODEL_MAP: Record<string, string> = {
   "claude-sonnet-4-5-20250929": "gpt-4o",
   "claude-sonnet-4-6": "gpt-4o",
 };
-const SEARCH_MODEL = "gpt-4o-search-preview";
+// gpt-4o-search-preview has a very low TPM limit (6k) at low OpenAI tiers — not enough
+// for the coaching system prompt. Fall back to gpt-4o (no live web search, but won't crash).
+// TODO: replace with a proper Tavily/Serper function-tool once on a higher tier.
+const SEARCH_MODEL = "gpt-4o";
 
 function buildOpenAIClient(): Anthropic {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
