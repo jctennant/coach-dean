@@ -74,13 +74,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    const sessions = contentType === "image_base64"
-      ? await extractFromImage(content)
-      : contentType === "pdf_url"
-      ? await extractFromPDF(content)
-      : contentType === "pdf_base64"
-      ? await extractFromPDFBase64(content)
-      : await extractFromText(content);
+    let truncated = false;
+    let sessions: ExtractedSession[];
+
+    if (contentType === "image_base64") {
+      sessions = await extractFromImage(content);
+    } else if (contentType === "pdf_url" || contentType === "pdf_base64") {
+      const result = contentType === "pdf_url"
+        ? await extractFromPDF(content)
+        : await extractFromPDFBase64(content);
+      sessions = result.sessions;
+      truncated = result.truncated;
+    } else {
+      sessions = await extractFromText(content);
+    }
 
     if (sessions.length === 0) {
       return NextResponse.json({ error: "Could not extract any training sessions from the provided content." }, { status: 422 });
@@ -112,7 +119,7 @@ export async function POST(request: Request) {
       });
 
     if (dry_run) {
-      return NextResponse.json({ ok: true, sessions, weeks, sessionCount: sessions.length });
+      return NextResponse.json({ ok: true, sessions, weeks, sessionCount: sessions.length, truncated });
     }
 
     // Store in training_plans — no unique constraint on user_id, so select+update/insert
@@ -200,8 +207,22 @@ export async function POST(request: Request) {
       ok: true,
       sessionCount: sessions.length,
       weeks: weeks.length,
+      truncated,
     });
   } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "pdf_unreadable") {
+      return NextResponse.json({
+        error: "pdf_unreadable",
+        message: "This PDF doesn't have a readable text layer — it may be a scanned image. Can you paste your plan as text, or describe it in a few sentences?",
+      }, { status: 422 });
+    }
+    if (code === "pdf_too_large") {
+      return NextResponse.json({
+        error: "pdf_too_large",
+        message: "This PDF is too large to read automatically. Can you paste your plan as text, or give me a quick description — which days you run, weekly mileage, and any key workouts?",
+      }, { status: 422 });
+    }
     console.error("[plan/upload] extraction failed:", err);
     return NextResponse.json({ error: "Plan extraction failed" }, { status: 500 });
   }
@@ -269,19 +290,21 @@ Rules:
   return [];
 }
 
-/**
- * Extract structured sessions from a base64-encoded PDF (uploaded directly from the browser).
- */
-async function extractFromPDFBase64(base64: string): Promise<ExtractedSession[]> {
+interface PDFExtractionResult {
+  sessions: ExtractedSession[];
+  truncated: boolean;
+}
+
+// 100k chars fits comfortably in gpt-4o's 128k token context.
+// 200k chars means we'd lose >50% — surface the fallback prompt instead.
+const PDF_CHAR_TRUNCATE = 100_000;
+const PDF_CHAR_TOO_LARGE = 200_000;
+
+async function extractFromPDFBase64(base64: string): Promise<PDFExtractionResult> {
   return extractFromPDFData(base64);
 }
 
-/**
- * Extract structured sessions from a PDF URL using Claude's document API + tool use.
- * Single Sonnet call — avoids the two-step approach (Sonnet text → Haiku structure)
- * that was ~88s total and often returned 0 sessions due to intermediate text bloat.
- */
-async function extractFromPDF(pdfUrl: string): Promise<ExtractedSession[]> {
+async function extractFromPDF(pdfUrl: string): Promise<PDFExtractionResult> {
   const resp = await fetch(pdfUrl);
   if (!resp.ok) throw new Error(`PDF fetch failed: ${resp.status}`);
   const buffer = await resp.arrayBuffer();
@@ -289,84 +312,37 @@ async function extractFromPDF(pdfUrl: string): Promise<ExtractedSession[]> {
   return extractFromPDFData(base64);
 }
 
-async function extractFromPDFData(base64: string): Promise<ExtractedSession[]> {
+async function extractFromPDFData(base64: string): Promise<PDFExtractionResult> {
+  // The shim (anthropic.ts) runs pdf-parse when on OpenAI. On Anthropic native, the
+  // document block is sent directly. We pre-parse here to measure size and apply limits.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pdfParse = require("pdf-parse");
+  const buffer = Buffer.from(base64, "base64");
+  const parsed = await pdfParse(buffer) as { text: string; numpages: number };
+  const rawText = parsed.text?.trim() ?? "";
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 32000,
-    system: `Extract structured training sessions from the training plan PDF. Call extract_sessions with EVERY session from ALL weeks.
+  console.log(`[plan/upload] pdf-parse: ${parsed.numpages} pages, ${rawText.length} chars`);
 
-Rules:
-- weekNumber: 1-indexed sequential week number. CRITICAL: scan the ENTIRE document and assign correct week numbers.
-  - If weeks are labeled "Week 1", "Week 2", etc. — use those numbers directly.
-  - If weeks use date ranges (e.g. "Mon Jan 6 – Sun Jan 12", "Apr 14 – Apr 20") — number them sequentially: first date range = week 1, second = week 2, etc.
-  - If weeks use phase names only (Base 1, Build 2, etc.) — still number 1, 2, 3... sequentially across the whole plan.
-  - NEVER assign weekNumber: 1 to all sessions — each week must have its own sequential number.
-- dayOfWeek: full name (Monday, Tuesday, etc.)
-- type: "easy" | "tempo" | "long" | "interval" | "recovery" | "off" | "cross"
-- Distance ranges (e.g. "4-8 miles", "6–10 km"):
-  - targetDistanceMilesMin: the low end, converted to miles
-  - targetDistanceMilesMax: the high end, converted to miles
-  - targetDistanceMiles: the midpoint ((min+max)/2), rounded to 1 decimal
-  - If a single distance is given (no range), set all three to the same value
-  - Null for cross-training and off days
-- targetPace: extract if specified (e.g. "9:30/mi", "4:30/km"). Null if not specified.
-- description: preserve range language exactly as written (e.g. "Easy 4–8mi" not "Easy 6mi"). For intervals, preserve the rep range (e.g. "6–10×800m at 5k pace").
-- Extract ALL sessions including rest days (type: "off") and cross-training.
-- If a session has a total distance AND individual segments, use the total.
-- Include sessions from every week in the document — do not stop after the first few weeks.`,
-    messages: [{
-      role: "user",
-      content: [
-        {
-          type: "document",
-          source: {
-            type: "base64",
-            media_type: "application/pdf",
-            data: base64,
-          },
-        } as unknown as { type: "text"; text: string },
-        {
-          type: "text",
-          text: "Extract all training sessions from every week in this plan. Make sure to include sessions from ALL weeks, not just the first few.",
-        },
-      ],
-    }],
-    tools: [{
-      name: "extract_sessions",
-      description: "Save the extracted training sessions",
-      input_schema: {
-        type: "object" as const,
-        properties: {
-          sessions: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                weekNumber: { type: "number" },
-                dayOfWeek: { type: "string" },
-                type: { type: "string", enum: ["easy", "tempo", "long", "interval", "recovery", "off", "cross"] },
-                targetDistanceMiles: { type: ["number", "null"] },
-                targetDistanceMilesMin: { type: ["number", "null"] },
-                targetDistanceMilesMax: { type: ["number", "null"] },
-                targetPace: { type: ["string", "null"] },
-                description: { type: "string" },
-              },
-              required: ["weekNumber", "dayOfWeek", "type", "description"],
-            },
-          },
-        },
-        required: ["sessions"],
-      },
-    }],
-    tool_choice: { type: "tool" as const, name: "extract_sessions" },
-  });
-
-  const toolBlock = response.content.find(b => b.type === "tool_use" && b.name === "extract_sessions");
-  if (toolBlock?.type === "tool_use") {
-    return (toolBlock.input as { sessions: ExtractedSession[] }).sessions ?? [];
+  if (!rawText) {
+    // Image-based / encrypted PDF — no text layer
+    throw Object.assign(new Error("pdf_unreadable"), { code: "pdf_unreadable" });
   }
-  return [];
+
+  if (rawText.length > PDF_CHAR_TOO_LARGE) {
+    // Would lose >50% of the plan — ask the user instead
+    throw Object.assign(new Error("pdf_too_large"), { code: "pdf_too_large" });
+  }
+
+  const truncated = rawText.length > PDF_CHAR_TRUNCATE;
+  const text = truncated ? rawText.slice(0, PDF_CHAR_TRUNCATE) : rawText;
+
+  if (truncated) {
+    console.log(`[plan/upload] PDF truncated: ${rawText.length} → ${PDF_CHAR_TRUNCATE} chars`);
+  }
+
+  // Send pre-extracted text via the regular text extraction path (avoids double pdf-parse in shim)
+  const sessions = await extractFromText(text);
+  return { sessions, truncated };
 }
 
 /**

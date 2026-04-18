@@ -27,6 +27,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
   const [pendingFilename, setPendingFilename] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [currentWeek, setCurrentWeek] = useState<number>(1);
+  const [truncated, setTruncated] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(async (file: File) => {
@@ -71,7 +72,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setErrorMsg(data.error ?? "Extraction failed. Try a clearer image or a text description instead.");
+        setErrorMsg(data.message ?? "Extraction failed. Try a clearer image or a text description instead.");
         setStatus("error");
         return;
       }
@@ -82,6 +83,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
         return;
       }
 
+      setTruncated(data.truncated ?? false);
       setPreview({ sessionCount: data.sessions?.length ?? data.sessionCount ?? 0, weeks: data.weeks });
       setStatus("preview");
     } catch {
@@ -193,6 +195,9 @@ export function PlanImportForm({ userId }: { userId: string }) {
           </div>
           {pendingFilename && (
             <p className="mt-2 text-[10px] text-gray-400 truncate">{pendingFilename}</p>
+          )}
+          {truncated && (
+            <p className="mt-2 text-[10px] text-amber-600">PDF was very large — only the first portion was read. Check that all your weeks imported correctly.</p>
           )}
         </div>
         <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 flex items-center justify-between gap-3">

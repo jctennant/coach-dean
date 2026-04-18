@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Graceful handling for large / unreadable PDFs
+
+**Type:** Feature / Bug Fix
+**Reported by:** User (dashboard PDF upload)
+**User feedback:** "Plan extraction from a PDF failed again when I tried to upload it to the dashboard! Max tokens issue. wondering if there are other tools for PDF extraction we could use..."
+**Root cause:** No size guards — oversized PDFs caused silent 500s; image-based PDFs with no text layer caused empty extraction with no user feedback.
+**Fix / Change:** Pre-parse PDF with `pdf-parse` in the route (not the shim) to measure text length before sending to LLM. If text >200k chars throw `pdf_too_large` (422 with user-facing fallback prompt). If text 100k–200k chars, truncate to 100k and set `truncated: true` in the response. If text is empty (scanned/encrypted PDF), throw `pdf_unreadable` (422 with user-facing fallback prompt). Frontend surfaces `data.message` (not `data.error` code) and shows an amber truncation warning when `truncated: true`.
+**Files changed:** `src/app/api/plan/upload/route.ts`, `src/app/dashboard/plan-import-form.tsx`
+
+---
+
+## 2026-04-18 — Fix PDF upload 400 error (max_tokens exceeded OpenAI limit)
+
+**Type:** Bug Fix
+**Reported by:** User (dashboard PDF upload)
+**User feedback:** "Plan extraction from a PDF failed again when I tried to upload it to the dashboard! Max tokens issue."
+**Root cause:** `extractFromPDFData` sets `max_tokens: 32000` but gpt-4o's hard output cap is 16,384. The OpenAI shim passed the value through uncapped, causing a 400 from OpenAI.
+**Fix / Change:** Added `MODEL_MAX_TOKENS` map to the OpenAI shim and clamped `max_tokens` to the model's limit before every call. Fix is in the shim so no call-site changes needed.
+**Files changed:** `src/lib/anthropic.ts`
+
+---
+
 ## 2026-04-18 — Strava annotation: replace raw metric line with colored status line
 
 **Type:** Feature

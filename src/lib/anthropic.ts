@@ -43,6 +43,13 @@ const MODEL_MAP: Record<string, string> = {
   "claude-sonnet-4-5-20250929": "gpt-4o",
   "claude-sonnet-4-6": "gpt-4o",
 };
+
+// OpenAI model max output tokens (hard limit — exceeding causes 400)
+const MODEL_MAX_TOKENS: Record<string, number> = {
+  "gpt-4o": 16384,
+  "gpt-4o-mini": 16384,
+  "gpt-4o-search-preview": 16384,
+};
 // gpt-4o-search-preview: used only for onboarding web searches (short prompts).
 // The full coaching system prompt is too large for its 6k TPM limit at low tiers.
 const SEARCH_MODEL = "gpt-4o-search-preview";
@@ -200,9 +207,10 @@ function buildOpenAIClient(): Anthropic {
       params.messages as Array<{ role: string; content: string | unknown[] }>
     );
 
+    const modelMaxTokens = MODEL_MAX_TOKENS[openAIModel] ?? 16384;
     const openAIParams: Record<string, unknown> = {
       model: openAIModel,
-      max_tokens: params.max_tokens,
+      max_tokens: Math.min(params.max_tokens ?? 4096, modelMaxTokens),
       messages: openAIMessages,
     };
 
