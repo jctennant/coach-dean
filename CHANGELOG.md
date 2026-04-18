@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Disable web search for user_message on OpenAI provider
+
+**Type:** Bug Fix
+**Reported by:** Production logs
+**User feedback:** N/A
+**Root cause:** `shouldUseWebSearch = trigger === "user_message"` unconditionally routed all user messages through `gpt-4o-search-preview`. That model has a 6000 TPM hard limit on the current OpenAI tier, but the full coaching system prompt is ~16k tokens — every request failed with a 429 "Request too large."
+**Fix / Change:** Added `AI_PROVIDER === "anthropic"` guard so web search is only enabled when running on Anthropic (no such token constraint). On OpenAI, user messages fall back to regular gpt-4o without search tools.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-18 — Dashboard strength exercises generated at plan creation; rebuild_plan regenerates insights
 
 **Type:** Feature / Bug Fix

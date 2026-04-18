@@ -1034,7 +1034,9 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     if (forecast) weatherBlock = buildWeatherBlock(forecast, userTimezone);
   }
 
-  const shouldUseWebSearch = trigger === "user_message";
+  // gpt-4o-search-preview has a 6k TPM hard limit — the full coaching system prompt (~16k tokens)
+  // always exceeds it. Only enable web search on Anthropic, which has no such constraint.
+  const shouldUseWebSearch = trigger === "user_message" && (process.env.AI_PROVIDER ?? "openai") === "anthropic";
 
   // "My plan" keyword: short-circuit before any LLM calls.
   // Must be placed here — before profile extraction — so we don't waste a Haiku call.
