@@ -1284,6 +1284,20 @@ Use this data to:
     return null;
   })();
 
+  // Inject prescribed strength routine into prompt for triggers where Dean may reference it.
+  // This lets Dean say "keep up the heel drops" after a calf-heavy run without re-inventing exercises.
+  const strengthRoutineBlock = (() => {
+    if (trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message") return "";
+    const insights = profile?.dashboard_insights as Record<string, unknown> | null;
+    const sr = insights?.strength_recovery as {
+      exercises?: Array<{ name: string; specs: string; reason?: string }>;
+      frequency?: string;
+    } | null;
+    if (!sr?.exercises?.length) return "";
+    const lines = sr.exercises.map(ex => `- ${ex.name}: ${ex.specs}`).join("\n");
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (visible on athlete's dashboard):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nReference this when naturally relevant — e.g. reinforce after a run that stressed a known injury site, or mention it in a weekly recap if they haven't acknowledged it. Don't lecture unprompted unless there's a clear injury signal.`;
+  })();
+
   const systemPrompt = buildSystemPrompt(
     user,
     profile,
@@ -1304,7 +1318,7 @@ Use this data to:
     periodization,
     upcomingRaces,
     lthrData
-  ) + aerobicTrendBlock;
+  ) + aerobicTrendBlock + strengthRoutineBlock;
 
   // For weekly_recap and user_message, fetch the stored training plan.
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
