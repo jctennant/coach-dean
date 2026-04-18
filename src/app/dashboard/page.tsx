@@ -439,7 +439,7 @@ function RunZoneStrip({ runs, weeks }: { runs: ZoneRun[]; weeks: string[] }) {
   if (runs.length === 0) return null;
 
   const ZONE_COLOR: Record<ZoneRun["zone"], string> = {
-    easy: "#22c55e", moderate: "#f59e0b", hard: "#ef4444", race: "#3b82f6",
+    easy: "#22c55e", moderate: "#f59e0b", hard: "#ef4444", race: "#8b5cf6",
   };
 
   const DOT = 10, GAP = 3, WKGAP = 8;
@@ -556,6 +556,11 @@ function HRZoneBar(props: HRZoneBarProps) {
           </div>
         ))}
       </div>
+      {"lthr" in props && (
+        <p className="text-[9px] text-gray-400 leading-snug pt-0.5">
+          LT1 = aerobic threshold (easy/conversational) · LT2 = lactate threshold (tempo effort)
+        </p>
+      )}
     </div>
   );
 }
@@ -1227,13 +1232,17 @@ export default async function DashboardPage({
 
                       <RunZoneStrip runs={zoneData.runs} weeks={zoneData.weeks} />
 
+                      <p className="text-[10px] text-gray-400">
+                        Ideal mix: mostly green with 1–2 red per week
+                      </p>
+
                       {/* Zone legend */}
                       <div className="flex items-center gap-4 flex-wrap">
                         {([
                           { zone: "easy",     color: "bg-green-400", label: "Easy" },
                           { zone: "moderate", color: "bg-amber-400",  label: "Moderate" },
                           { zone: "hard",     color: "bg-red-400",   label: "Hard" },
-                          { zone: "race",     color: "bg-blue-400",  label: "Race" },
+                          { zone: "race",     color: "bg-violet-500",  label: "Race" },
                         ] as const).map(z => (
                           <div key={z.zone} className="flex items-center gap-1.5">
                             <div className={`h-2.5 w-2.5 rounded-full ${z.color}`} />
@@ -1344,7 +1353,7 @@ export default async function DashboardPage({
                 {lastWeekRuns.map((run, i) => {
                   const zoneColor = {
                     easy: "bg-green-400", moderate: "bg-amber-400",
-                    hard: "bg-red-400", race: "bg-blue-400",
+                    hard: "bg-red-400", race: "bg-violet-500",
                   }[run.zone];
                   const zoneLabel = {
                     easy: "Easy", moderate: "Moderate", hard: "Hard", race: "Race",
