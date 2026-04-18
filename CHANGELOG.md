@@ -4,6 +4,36 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Auto-fix: conversation analysis issues 2026-04-16
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis (2026-04-16, 12 users, 61 messages)
+**User feedback:** N/A (automated analysis)
+
+### Fix 1 — Volume overrun warning firing on WeightTraining activities (P1, User b1b308cf)
+**Root cause:** `planDeviationFlag` was computed for any `post_run` trigger, regardless of activity type. A WeightTraining session (0mi) triggered the "going longer than the plan" pattern warning.
+**Fix:** Added activity type check at the top of the `planDeviationFlag` IIFE — returns null immediately for any non-running activity (WeightTraining, Yoga, Ride, etc.).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+### Fix 2 — "Postpartum" used as synonym for "post-run" (P1, User 7170bad2)
+**Root cause:** Claude used "postpartum" to mean "post-run/after the effort" with no athletic/medical context to justify it. The word specifically refers to the period after childbirth.
+**Fix:** Added a TONE rule in the system prompt: never use "postpartum" as a synonym for "post-run," "after the effort," or "after the activity."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+### Fix 3 — Specific lap index numbers cited by index on Ride activity (P0, User 0cb902da)
+**Root cause:** When lap data is present, Claude was citing laps by specific index numbers (e.g. "laps 3/6/7/8") implying a known lap ordering, which may not be meaningful to the athlete.
+**Fix:** Extended the laps data-glossary guard to also prohibit citing laps by index number; instead require effort-pattern descriptions ("the hard intervals," "the high-effort segments").
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+### Fix 4 — Direct coaching questions sometimes ignored in user_message responses (P1, User 95fd0845)
+**Root cause:** When an athlete asked a direct question ("how do I get the leg speed up"), Dean addressed a prior topic (leg tightness) and omitted the substantive answer.
+**Fix:** Added explicit DIRECT QUESTIONS instruction to the `user_message` prompt: if the athlete's message contains a direct coaching question, it MUST be answered, not skipped.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+### Fix 5 — Duplicate messages during onboarding (P1, User 95fd0845)
+**Root cause:** Same message body arriving twice within seconds (user double-send or Linq retry with new message ID) was not caught by the existing ID-based dedup, resulting in the same message being processed twice.
+**Fix:** Added content-based dedup in `handleInboundMessage`: if the exact same message body was stored for the same user within the last 30 seconds, skip processing.
+**Files changed:** `src/app/api/webhooks/linq/route.ts`, `src/__tests__/api/linq-webhook.test.ts`
 ## 2026-04-16 — Four prompt guards from 2026-04-15 conversation analysis
 
 **Type:** Bug Fix
