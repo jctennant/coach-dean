@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Dashboard strength exercises generated at plan creation; rebuild_plan regenerates insights
+
+**Type:** Feature / Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** (1) Dashboard insights (including strength exercises) were only regenerated on post_run, weekly_recap, and initial_plan — not on rebuild_plan. (2) The initial_plan closing SMS gave no indication that strength exercises were waiting on the dashboard.
+**Fix / Change:** (1) Added `generateAndStoreDashboardInsights` inside `handleRebuildPlan`'s after() block so the dashboard refreshes on every plan rebuild. (2) When `injuryNotes` is present, the initial_plan dashboard link bubble now appends "Also added strength exercises to your dashboard tailored to your injury history — worth doing 2× a week to stay healthy."
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-04-18 — Better experience for general fitness / no-race users
 
 **Type:** Improvement

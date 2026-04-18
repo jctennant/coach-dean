@@ -359,6 +359,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
           }
         );
         void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
+        await generateAndStoreDashboardInsights(userId, "rebuild_plan", planReadyNote ?? "Plan rebuilt.");
       } catch (err) {
         console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
         void trackEvent(userId, "after_error", { trigger: "rebuild_plan", error: String(err) });
@@ -2016,8 +2017,11 @@ Weekly total: ${mileageRange}
     // Send dashboard link, then "How does this look?" as a third bubble.
     // Ordering: plan description → dashboard link → "How does this look?"
     // This way the athlete sees the link first and can open the full plan before responding.
+    const strengthNote = injuryNotes
+      ? "\n\nAlso added strength exercises to your dashboard tailored to your injury history — worth doing 2× a week to stay healthy."
+      : "";
     const closingMsg = planUrl
-      ? `Your full plan is here: ${planUrl}`
+      ? `Your full plan is here: ${planUrl}${strengthNote}`
       : null;
     if (closingMsg) {
       if (!dry_run) {
