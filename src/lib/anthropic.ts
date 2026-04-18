@@ -79,11 +79,21 @@ function buildOpenAIClient(): Anthropic {
     if (type === "document") {
       const src = block.source as { media_type: string; data: string };
       if (src.media_type === "application/pdf") {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const pdfParse = require("pdf-parse").default ?? require("pdf-parse");
-        const buffer = Buffer.from(src.data, "base64");
-        const parsed = await pdfParse(buffer);
-        return { type: "text", text: `[PDF content]\n${parsed.text as string}` };
+        try {
+          // Use the core function directly to avoid pdf-parse's test-file initialization
+          // which fails in bundled environments (Vercel) because the test PDF paths don't exist.
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const pdfParse = require("pdf-parse/lib/pdf-parse.js");
+          const buffer = Buffer.from(src.data, "base64");
+          const parsed = await pdfParse(buffer) as { text: string; numpages: number };
+          const text = parsed.text?.trim() ?? "";
+          console.log(`[anthropic-shim] pdf-parse: ${parsed.numpages} pages, ${text.length} chars extracted`);
+          if (!text) throw new Error("pdf-parse returned empty text — PDF may be image-based or encrypted");
+          return { type: "text", text: `[PDF content]\n${text}` };
+        } catch (err) {
+          console.error("[anthropic-shim] pdf-parse failed:", err);
+          throw err; // propagate so plan/upload returns a proper error to the user
+        }
       }
       return { type: "text", text: `[Document: ${src.media_type}]` };
     }
