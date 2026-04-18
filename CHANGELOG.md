@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Plan arc chart on dashboard
+
+**Type:** Feature
+**Reported by:** User feedback (Jake)
+**User feedback:** "potentially could show a high level view of their projected mileage increase and races under the hero card, but need to figure out how to do this with plans that have ranges"
+**Root cause:** No visual summary of the full training plan arc existed on the dashboard.
+**Fix / Change:** Added `PlanArcChart` component (`plan-arc-chart.tsx`) — a compact SVG bar chart showing all plan weeks. Range plans (uploaded PDFs with min/max mileage) use a two-tone bar: solid fill up to the minimum, lighter extension to the maximum, so the range is visible without cluttering the chart with numbers. Past weeks are gray, current week is dark with a border outline, race weeks get a red dot + dashed stem. Header row shows "Week X of Y" and "Peak N mi · wk N". Legend shown only when ranges or races are present. Positioned between "This Week" and "Training Load" sections in the dashboard.
+**Files changed:** `src/app/dashboard/plan-arc-chart.tsx` (new), `src/app/dashboard/page.tsx`
+
 ## 2026-04-18 — Store week1_start_date on training_state for accurate plan arc anchoring
 
 **Type:** Feature / Infra

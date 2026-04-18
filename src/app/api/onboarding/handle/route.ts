@@ -1352,10 +1352,8 @@ async function completeOnboarding(
     const raceCtx = data.race_name
       ? ` I can see you're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every analysis.`
       : "";
-    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a debrief and write it back to your Strava activity. Text me anytime. Let's go.`;
+    const welcomeMsg = `${firstName}, you're all set.${raceCtx} After every Strava run I'll send you a debrief and write it back to your Strava activity. Text me anytime. Let's go.\n\nYour dashboard — I'll keep your key notes and data here. You can also upload your plan as a PDF so I can reference it directly:\n${dashboardUrl}`;
     await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
-    const dashboardMsg = `Your dashboard — I'll keep your key notes and data here. You can also upload your plan as a PDF so I can reference it directly:\n${dashboardUrl}`;
-    await sendAndStore(user.id, phone, dashboardMsg, "initial_plan");
     return;
   }
 
@@ -1383,10 +1381,8 @@ async function completeOnboarding(
     const raceCtx = data.race_name
       ? ` You're targeting ${data.race_name}${raceDate ? ` on ${new Date(raceDate + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""} — I'll factor that into every note.`
       : "";
-    const welcomeMsg = `${firstName}, you're all set.${raceCtx} No set schedule — I'll send you a coaching note after every run: effort, load, what to watch for. Text me anytime.`;
+    const welcomeMsg = `${firstName}, you're all set.${raceCtx} No set schedule — I'll send you a coaching note after every run: effort, load, what to watch for. Text me anytime.\n\nYour dashboard:\n${dashboardUrl}`;
     await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
-    const dashboardMsg = `Your dashboard:\n${dashboardUrl}`;
-    await sendAndStore(user.id, phone, dashboardMsg, "initial_plan");
     return;
   }
 

@@ -9,6 +9,7 @@ import type { DashboardInsights } from "@/lib/dashboard-insights";
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { deriveZones, lthrMethodLabel, type LTHRSource } from "@/lib/hr-zones";
 import type { PlanWeek as PlanTabWeek, PlanSession } from "./plan-tab";
+import { PlanArcChart } from "./plan-arc-chart";
 
 export const metadata: Metadata = {
   title: "Your Dashboard — Coach Dean",
@@ -879,6 +880,17 @@ export default async function DashboardPage({
     return mon.toISOString().slice(0, 10);
   })();
 
+  // Race weeks: which plan week numbers contain a race (requires week1StartDate)
+  const allRaceWeekNums = (() => {
+    if (!hasPlan || !week1StartDate || planTotalWeeks === 0) return [] as number[];
+    const w1 = new Date(week1StartDate + "T00:00:00Z");
+    return races.flatMap(r => {
+      const daysDiff = (new Date(r.race_date + "T12:00:00Z").getTime() - w1.getTime()) / (1000 * 60 * 60 * 24);
+      const weekNum = Math.floor(daysDiff / 7) + 1;
+      return weekNum >= 1 && weekNum <= planTotalWeeks ? [weekNum] : [];
+    });
+  })();
+
   // Map plan weeks to a normalised shape usable for the arc (both uploaded and Dean-generated)
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
@@ -1022,6 +1034,23 @@ export default async function DashboardPage({
                     <span className="text-sm text-gray-700 text-right leading-snug">{weekQualitySession}</span>
                   </div>
                 )}
+              </div>
+            </section>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              PLAN ARC
+          ══════════════════════════════════════════════════════════════ */}
+          {hasPlan && planWeeks.length > 0 && (
+            <section className="space-y-3">
+              <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+                <PlanArcChart
+                  weeks={planWeeks}
+                  currentWeek={planCurrentWeek}
+                  totalWeeks={planTotalWeeks}
+                  raceWeekNums={allRaceWeekNums}
+                  useMetric={useMetric}
+                />
               </div>
             </section>
           )}
