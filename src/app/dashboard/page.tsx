@@ -775,6 +775,24 @@ export default async function DashboardPage({
   const RUN_TYPES = RUN_ACTIVITY_TYPES;
   const maxHREstimate = estimateMaxHR(activities);
 
+  // Guard: easy pace only — if < 5:30/mi (330s), it was almost certainly saved as min/km.
+  // Tempo/interval are not guarded since fast runners legitimately have sub-6:00 quality paces.
+  function normalizeEasyPace(paceStr: string | null | undefined): string | null {
+    if (!paceStr) return null;
+    const m = paceStr.match(/(\d+):(\d+)/);
+    if (!m) return paceStr;
+    const totalSec = parseInt(m[1]) * 60 + parseInt(m[2]);
+    if (totalSec < 330) {
+      const converted = Math.round(totalSec * 1.60934);
+      const min = Math.floor(converted / 60);
+      const sec = converted % 60;
+      return `${min}:${String(sec).padStart(2, "0")}/mi`;
+    }
+    return paceStr;
+  }
+  const storedEasyPace = normalizeEasyPace(profileData?.current_easy_pace as string | null);
+  const storedTempoPace = (profileData?.current_tempo_pace as string | null) ?? null;
+
   // LTHR from stored profile (preferred) or fall back to estimated max HR
   const storedLthr = (profileData?.lthr_estimate as number | null) ?? null;
   const storedLthrSource = (profileData?.lthr_source as LTHRSource | null) ?? null;
@@ -788,8 +806,8 @@ export default async function DashboardPage({
   // Zone data — pass LTHR so dot classification matches the displayed zone bar
   const zoneData = buildZoneStrip(
     activities,
-    (profileData?.current_easy_pace as string | null) ?? null,
-    (profileData?.current_tempo_pace as string | null) ?? null,
+    storedEasyPace,
+    storedTempoPace,
     timezone,
     effectiveLthr,
   );
@@ -835,16 +853,14 @@ export default async function DashboardPage({
         else zone = "hard";
       } else {
         const easyPaceSec = (() => {
-          const s = (profileData?.current_easy_pace as string | null) ?? null;
-          if (!s) return null;
-          const parts = s.replace("/mi", "").replace("/km", "").split(":");
+          if (!storedEasyPace) return null;
+          const parts = storedEasyPace.replace("/mi", "").replace("/km", "").split(":");
           if (parts.length !== 2) return null;
           return parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
         })();
         const tempoPaceSec = (() => {
-          const s = (profileData?.current_tempo_pace as string | null) ?? null;
-          if (!s) return null;
-          const parts = s.replace("/mi", "").replace("/km", "").split(":");
+          if (!storedTempoPace) return null;
+          const parts = storedTempoPace.replace("/mi", "").replace("/km", "").split(":");
           if (parts.length !== 2) return null;
           return parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
         })();
@@ -867,9 +883,9 @@ export default async function DashboardPage({
       };
     });
 
-  // Paces
-  const rawEasy = (profileData?.current_easy_pace as string | null) ?? null;
-  const rawTempo = (profileData?.current_tempo_pace as string | null) ?? null;
+  // Paces (normalized above via normalizePace — guards against per-km values mislabeled as per-mile)
+  const rawEasy = storedEasyPace;
+  const rawTempo = storedTempoPace;
   const rawInterval = (profileData?.current_interval_pace as string | null) ?? null;
   const easyRange = rawEasy ? (() => {
     const parts = rawEasy.replace("/mi", "").split(":");
@@ -1058,7 +1074,10 @@ export default async function DashboardPage({
             </section>
           ) : (weeklyTargetDisplay != null || weekLongRunDisplay != null || weekQualitySession) ? (
             <section className="space-y-3">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">This Week</p>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">This Week</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">Weekly target + key sessions — fill the rest with easy miles</p>
+              </div>
               <div className="rounded-xl border border-gray-100 bg-white shadow-sm divide-y divide-gray-50">
                 {weeklyTargetDisplay != null && (
                   <div className="px-4 py-3.5 flex items-center justify-between gap-3">

@@ -5023,9 +5023,12 @@ CRITICAL — FRAME THIS AS A FULL WEEK PLAN: This IS the athlete's first complet
         : `WEEK BOUNDARY — IMPORTANT: This athlete just onboarded mid-week. Plan sessions from TODAY through this ${sundayStr} only (${daysRemainingInclToday} day${daysRemainingInclToday === 1 ? "" : "s"} remaining in this Mon-Sun week). Do NOT schedule sessions into next week (starting Monday). The Sunday recap will generate a full next-week plan automatically. If very few days remain (1-2), keep this initial plan brief — just get them started.
 
 CRITICAL — COMMUNICATE THE PARTIAL WEEK TO THE ATHLETE: In your first bubble, explicitly frame this as a short starter plan for the remaining days of the current week. Tell them you'll send a full week plan on Sunday. This is essential when the athlete has Strava data showing a high weekly average — they will otherwise think you're prescribing a dramatically lower volume than they run. Example framing: "This covers the rest of this week — on Sunday I'll send your first full week plan." or "Just a short starter through Sunday — your first full week plan lands Sunday night." Never let a partial-week plan look like a full weekly prescription.`;
+      const weekMilesBudgetNote = weekMileageSoFar > 0
+        ? `\nALREADY COMPLETED THIS WEEK: The athlete has already logged ${weekMileageSoFar.toFixed(1)} miles this week. Any additional sessions you prescribe must be feasible on top of that — do NOT prescribe a long run or quality session that would push their weekly total well beyond a safe ramp from their average. If combined miles would be excessive, keep the remaining sessions light or simply say Sunday's full plan will cover next week.`
+        : "";
       return `This athlete just finished onboarding. Send them a brief training framework — not a day-by-day schedule. The coaching relationship starts now; the framework is just context to get them started.
 
-BUBBLE 1: One short sentence acknowledging the coaching is live and what happens next — "I'll be watching every run and sending you a note after each one." Reference their specific goal or race. Keep this to 2 sentences max.
+BUBBLE 1: One concise sentence — just what happens next. Use "I" (never refer to yourself as "Dean" in the third person). No "Welcome aboard", no enthusiasm about the baseline, no "Dean is calibrated". Example: "I'll be watching every run and sending you a note after each one — let's build toward [race/goal]." 2 sentences max.
 
 BUBBLE 2: Their starting training framework — three things only:
 - Weekly mileage target (grounded in their current volume from Strava or stated mileage)
@@ -5034,6 +5037,7 @@ BUBBLE 2: Their starting training framework — three things only:
 
 Do NOT write a day-by-day schedule. Do NOT list every session of the week. The weekly recap on Sunday sends the full plan. This is just a starting framework.
 Invite them to adjust: "Text me if anything needs tweaking — this is a starting point."
+${weekMilesBudgetNote}
 
 ${weekBoundaryNote}
 ${racePreparednessFlag}

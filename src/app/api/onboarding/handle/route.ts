@@ -387,6 +387,7 @@ When searching for a trail, mountain, or ultra race: also look up the course's t
 After searching: if the search result shows the race date is within the next 6 weeks AND the user is starting a new coaching relationship (not explicitly asking for race-week prep), do NOT proceed — ask first: "That's only [X] weeks away — are you looking for race-week prep for this year, or building toward [next year]?" Do not pivot to taper mode or any race-specific framing until the user confirms the year.
 After searching: if the user has not stated a specific date (only a month or vague timeframe), confirm the search result with them before proceeding: "I found it listed as [date] — does that sound right?"
 FIRST-OF-MONTH GUARD: If the only date information you have is a month ("in June", "sometime in July", "this fall"), do NOT proceed with the 1st of that month as a placeholder. Stop and ask: "Do you know the exact date?" A first-of-month date is almost always wrong and will miscalibrate the entire training timeline.
+If no web_search tool is available to you in this context and the athlete has mentioned a race but you don't have a confirmed exact date, you MUST ask for it directly — do not proceed without it. Example: "What's the exact date of the Dipsea?" Ask this before moving on to any other question.
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
@@ -425,6 +426,8 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
       const date = await preSearchRaceDate(raceName);
       if (date) {
         raceDateInjection = `\nRACE DATE PRE-LOOKUP: "${raceName}" is on ${date}. Present this date to the athlete and confirm it sounds right. Do not search again.`;
+      } else {
+        raceDateInjection = `\nRACE DATE LOOKUP FAILED: Could not find the exact date for "${raceName}" online. You MUST ask the athlete directly: "What's the exact date of ${raceName}?" Do not proceed or signal [READY] until you have a confirmed date.`;
       }
     }
   }
@@ -1159,7 +1162,24 @@ async function completeOnboarding(
   const crosstrain = (data.crosstraining_tools as string[]) || [];
   const daysPerWeek = (data.days_per_week as number) ?? 4;
   const trainingDays = (data.training_days as string[]) || [];
-  const easyPace = (data.easy_pace as string) || null;
+  // Guard: easy pace only — if < 5:30/mi (330s), it was almost certainly stored as min/km
+  // (sub-5:30 easy requires VDOT ~80+, which is elite/professional territory).
+  // Tempo and interval are NOT guarded — fast runners legitimately have sub-6:00 quality paces.
+  function maybeConvertEasyKmToMile(paceStr: string | null): string | null {
+    if (!paceStr) return null;
+    const m = paceStr.match(/(\d+):(\d+)/);
+    if (!m) return paceStr;
+    const totalSec = parseInt(m[1]) * 60 + parseInt(m[2]);
+    if (totalSec < 330) {
+      const converted = Math.round(totalSec * 1.60934);
+      const min = Math.floor(converted / 60);
+      const sec = converted % 60;
+      console.warn(`[completeOnboarding] easy_pace ${paceStr} looks like min/km — auto-converting to ${min}:${String(sec).padStart(2, "0")}/mi`);
+      return `${min}:${String(sec).padStart(2, "0")}/mi`;
+    }
+    return paceStr;
+  }
+  const easyPace = maybeConvertEasyKmToMile((data.easy_pace as string) || null);
   const tempoPace = (data.tempo_pace as string) || null;
   const intervalPace = (data.interval_pace as string) || null;
   const injuryNotes = (data.injury_notes as string) || null;

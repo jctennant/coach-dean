@@ -4,6 +4,30 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Fix race date not collected when web search fails during onboarding
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "I expected that races would show up in my dashboard" — races weren't inserted because race_date was never extracted.
+**Root cause:** Two gaps: (1) `preSearchRaceDate` only runs if `race_name` is already in `onboarding_data`, but `race_name` isn't extracted until Haiku runs *after* Dean's response — so the search never fires on the turn the race is first mentioned. (2) When the search does run on subsequent turns but returns null, no instruction was injected telling Dean to ask for the date directly, so Dean silently moved on without collecting it.
+**Fix / Change:** (1) When `preSearchRaceDate` returns null (search failed), inject an explicit `RACE DATE LOOKUP FAILED` instruction telling Dean it must ask the athlete for the exact date before proceeding. (2) Strengthened the FIRST-OF-MONTH GUARD in the system prompt to explicitly cover the no-web_search case: if no search tool is available and a race has been mentioned without a confirmed date, Dean must ask directly.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
+## 2026-04-18 — Fix wrong paces, third-person intro, redundant bubble, and long run overage on initial plan
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "Says 'Dean is calibrated' — shouldn't be talking about himself in the 3rd person. Message one and two seem a bit redundant. Messed up my paces somehow in the dashboard — way too fast (4:52–5:22/mi easy instead of ~7:52). He's telling me to do a 12 mi long run tomorrow, but that would put me quite a bit over a 10% jump from last week."
+**Root cause (paces):** Paces stored in `training_profiles` as min/km values but labeled as `/mi` (e.g. 4:52/mi instead of 7:52/mi for a 17:50 5K runner). Root extraction trigger unclear — likely a Haiku extraction picking up a per-km pace suggestion from a Coach: line. `completeOnboarding` had no validation guard, and the dashboard read the raw DB value without sanity-checking it.
+**Root cause (third-person/redundancy):** `initial_plan` prompt didn't explicitly forbid self-reference as "Dean" or prohibit re-using "coaching is live" language in both bubbles.
+**Root cause (long run):** `initial_plan` prompt didn't inform Claude how many miles were already logged this week. Claude treated the FITNESS TIER cap as the budget for its prescriptions, ignoring the 31.1 miles already completed.
+**Fix / Change:** (1) Added `maybeConvertKmToMile` guard in `completeOnboarding` — any pace < 6:00/mi (360s) is auto-converted from min/km to min/mile before DB write. (2) Added `normalizePace` in the dashboard — same guard applied at read time so stale DB values also display correctly. (3) Tightened BUBBLE 1 instructions: forbid third-person references ("Dean is calibrated"), "Welcome aboard", and "coaching is live" duplication between bubbles. (4) Injected `ALREADY COMPLETED THIS WEEK: X miles` note into the `initial_plan` user message when `weekMileageSoFar > 0`, so Claude knows what budget remains.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-19 — Fix onboarding 500 errors from OpenAI search model TPM limit
 
 **Type:** Bug Fix
