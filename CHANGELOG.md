@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Fall back to % max HR zones when LTHR confidence is low
+
+**Type:** Improvement
+**Reported by:** Internal observation (all runs showing as Easy on dashboard)
+**User feedback:** "it says all of my runs are easy... which I don't think is right"
+**Root cause:** Low-confidence LTHR (derived from a long race effort with a 1.10× correction multiplier) was being used for both the zone bar and intensity dot classification. This inflated the LTHR estimate, raising the easy/moderate boundary to ~167 bpm, causing most runs to appear as Easy even when they weren't.
+**Fix / Change:** Introduced `effectiveLthr` — when `lthr_confidence === "low"`, treat LTHR as null for both the zone bar display and dot classification. Both fall back to % of observed max HR (Easy < 75%, Moderate 75–85%, Hard > 85%), where max HR is estimated from Strava peaks via the tiered spike-filtered `estimateMaxHR` approach. The LTHR amber callout is replaced with a prompt to run a road 5K/10K to unlock proper LTHR zones. Dean's system prompt updated: low-confidence LTHR note now explains the dashboard uses % max HR for dots, and the LTHR-absent fallback now describes the actual % max HR methodology and thresholds Dean should use.
+**Files changed:** `src/app/dashboard/page.tsx`, `src/lib/hr-zones.ts`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-18 — Fix Sunday recap accuracy across all three plan types
 
 **Type:** Bug Fix

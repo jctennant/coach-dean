@@ -780,13 +780,18 @@ export default async function DashboardPage({
   const storedLthrSource = (profileData?.lthr_source as LTHRSource | null) ?? null;
   const storedLthrConfidence = (profileData?.lthr_confidence as string | null) ?? null;
 
+  // Low-confidence LTHR (derived from long races) tends to be overestimated, which
+  // raises the easy/moderate boundary and causes most runs to appear as "easy".
+  // Fall back to % max HR classification for both dots and zone bar when confidence is low.
+  const effectiveLthr = storedLthrConfidence === "low" ? null : storedLthr;
+
   // Zone data — pass LTHR so dot classification matches the displayed zone bar
   const zoneData = buildZoneStrip(
     activities,
     (profileData?.current_easy_pace as string | null) ?? null,
     (profileData?.current_tempo_pace as string | null) ?? null,
     timezone,
-    storedLthr,
+    effectiveLthr,
   );
 
   // Last 7 days runs
@@ -1268,26 +1273,26 @@ export default async function DashboardPage({
                       </div>
 
                       {/* HR zones bar */}
-                      {(storedLthr || zoneData.maxHREstimate) && (
+                      {(effectiveLthr || zoneData.maxHREstimate) && (
                         <div className="space-y-2 pt-1 border-t border-gray-50">
                           <div className="flex items-center justify-between">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Heart Rate Zones</p>
-                            {storedLthr
-                              ? <p className="text-[10px] text-gray-400">threshold ~{storedLthr} bpm</p>
+                            {effectiveLthr
+                              ? <p className="text-[10px] text-gray-400">threshold ~{effectiveLthr} bpm</p>
                               : <p className="text-[10px] text-gray-400">est. max HR ~{Math.round(zoneData.maxHREstimate!)} bpm</p>
                             }
                           </div>
-                          {storedLthr && storedLthrSource && storedLthrConfidence
-                            ? <HRZoneBar lthr={storedLthr} source={storedLthrSource} confidence={storedLthrConfidence} />
+                          {effectiveLthr && storedLthrSource && storedLthrConfidence
+                            ? <HRZoneBar lthr={effectiveLthr} source={storedLthrSource} confidence={storedLthrConfidence} />
                             : zoneData.maxHREstimate
                               ? <HRZoneBar maxHR={zoneData.maxHREstimate} />
                               : null
                           }
-                          {storedLthrConfidence === "low" && (
+                          {storedLthr && storedLthrConfidence === "low" && (
                             <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5 space-y-0.5">
-                              <p className="text-[11px] font-semibold text-amber-800">Zones are an estimate — low confidence</p>
+                              <p className="text-[11px] font-semibold text-amber-800">Run a road 5K or 10K to unlock LTHR zones</p>
                               <p className="text-[11px] text-amber-700 leading-snug">
-                                Derived from a long race effort where pace and terrain reduce HR accuracy. Run a hard road 5K or 10K, or a 30-min field test at max sustainable pace, to sharpen the estimate.
+                                Your only race data comes from a long effort where HR accuracy is reduced. A hard road 5K/10K or 30-min field test will give Dean a precise threshold to work from.
                               </p>
                             </div>
                           )}
