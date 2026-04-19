@@ -341,10 +341,19 @@ async function handleInboundMessage(
     void supabase.from("users").update({ reengagement_sent_at: null }).eq("id", user.id);
   }
 
-  // PDF from an onboarded user: import as training plan.
-  // PDFs during onboarding are unexpected — fall through to text path.
+  // PDF from an onboarded user: import as training plan via the plan_import trigger.
   if (pdfUrl && !user.onboarding_step) {
     await handlePDFPlan(user.id, senderPhone, pdfUrl, pdfFilename, body || null, messageId, resolvedChatId);
+    return;
+  }
+
+  // PDF received mid-onboarding: parse and save the plan, mark has_existing_plan on
+  // onboarding_data, then forward a synthetic message to the onboarding handler so
+  // Dean can acknowledge the plan inline and continue the intake conversation.
+  // Without this path, PDFs were silently dropped during onboarding and Dean would
+  // hallucinate an acknowledgment from the inbound text alone.
+  if (pdfUrl && user.onboarding_step) {
+    await handlePDFDuringOnboarding(user.id, senderPhone, pdfUrl, pdfFilename, body || null, messageId, resolvedChatId);
     return;
   }
 
@@ -671,6 +680,103 @@ async function handlePDFPlan(
     console.error("[linq-webhook] PDF plan processing failed:", err);
     await sendAndStore(userId, phone, "Something went wrong reading that PDF. Try again or upload it at coachdean.ai/dashboard.", messageId);
   }
+}
+
+/**
+ * Handles a PDF training plan received while the user is still in onboarding.
+ * Parses and saves the plan, marks has_existing_plan on onboarding_data, then
+ * forwards a synthetic "[PDF plan received]" message to the onboarding handler
+ * so Dean acknowledges it inline without interrupting the intake conversation.
+ */
+async function handlePDFDuringOnboarding(
+  userId: string,
+  phone: string,
+  pdfUrl: string,
+  filename: string | null,
+  caption: string | null,
+  messageId: string | null,
+  chatId: string | null
+) {
+  console.log("[linq-webhook] onboarding PDF plan for user:", userId, "filename:", filename);
+
+  await supabase.from("conversations").insert({
+    user_id: userId,
+    role: "user",
+    content: caption
+      ? `[PDF: ${filename || "training plan"}] ${caption}`
+      : `[PDF: ${filename || "training plan"}]`,
+    message_type: "plan_upload",
+    external_message_id: messageId,
+  });
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  let weeks = 0;
+  let sessionCount = 0;
+
+  try {
+    const resp = await fetch(`${appUrl}/api/plan/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, content: pdfUrl, contentType: "pdf_url", filename: filename || undefined }),
+    });
+
+    let result: { ok?: boolean; sessionCount?: number; weeks?: number; error?: string };
+    try {
+      result = await resp.json() as typeof result;
+    } catch {
+      console.error("[linq-webhook] onboarding PDF upload non-JSON response, status:", resp.status);
+      await sendAndStore(userId, phone, "That PDF timed out on my end — try again, or just describe the plan here and I'll work alongside it.", messageId);
+      return;
+    }
+
+    if (!resp.ok || !result.ok) {
+      console.error("[linq-webhook] onboarding PDF upload failed:", result.error);
+      await sendAndStore(userId, phone, "I couldn't read that PDF — make sure it's a training plan document, or describe the plan here and I'll work alongside it.", messageId);
+      return;
+    }
+
+    weeks = result.weeks ?? 0;
+    sessionCount = result.sessionCount ?? 0;
+
+    // Merge plan metadata into onboarding_data so Dean's next prompt render sees it.
+    const { data: u } = await supabase
+      .from("users")
+      .select("onboarding_data")
+      .eq("id", userId)
+      .single();
+    const existingData = ((u?.onboarding_data as Record<string, unknown>) || {});
+    const updatedData: Record<string, unknown> = {
+      ...existingData,
+      has_existing_plan: true,
+      plan_uploaded: true,
+      plan_filename: filename ?? null,
+      plan_week_count: weeks,
+      plan_session_count: sessionCount,
+    };
+    await supabase
+      .from("users")
+      .update({ onboarding_data: updatedData as unknown as Json })
+      .eq("id", userId);
+
+    void trackEvent(userId, "plan_uploaded", { source: "sms_pdf_onboarding", weeks, sessionCount });
+  } catch (err) {
+    console.error("[linq-webhook] onboarding PDF processing failed:", err);
+    await sendAndStore(userId, phone, "Something went wrong reading that PDF. Try again, or describe the plan here and I'll work alongside it.", messageId);
+    return;
+  }
+
+  // Forward a synthetic message to onboarding/handle so Dean acknowledges the
+  // parsed plan and continues intake naturally. The label in brackets signals
+  // to Dean that this is system-injected context, not literal user text.
+  const planLabel = filename ? filename.replace(/\.pdf$/i, "") : "their training plan";
+  const captionNote = caption ? ` They also said: "${caption}".` : "";
+  const syntheticMessage = `(system: parsed the PDF "${planLabel}" — ${weeks} weeks, ${sessionCount} sessions. Acknowledge you've got the plan and briefly note you'll reference it in post-run feedback, then continue the intake with the next question.${captionNote})`;
+
+  await fetch(`${appUrl}/api/onboarding/handle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, message: syntheticMessage, chatId }),
+  });
 }
 
 async function handlePlanWeekSync(

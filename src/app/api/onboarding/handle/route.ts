@@ -275,9 +275,9 @@ WHAT TO COLLECT:
 Required before signaling [READY] — for ALL athletes:
 - Athlete's name — ask in your FIRST message, combined with the training context question. Never address the athlete as "Athlete" or use a placeholder — if you don't have their name, you must ask.
 - Training goal (specific race/event name and type, or general fitness/consistency). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
-- Injury history — REQUIRED FOR ALL ATHLETES. Must ask and receive an answer before [READY]. Frame naturally: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around before?" Even "no injuries at all" is a complete and valid answer. Ask early — after name + goal — not as an afterthought before [READY].
+- Strava — ask early, right after goal + mode are established, BEFORE injury/strength/fitness questions. Strava is the primary data channel and often answers fitness questions automatically, so it comes first.
+- Injury history — REQUIRED FOR ALL ATHLETES. Must ask and receive an answer before [READY]. Frame naturally: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around before?" Even "no injuries at all" is a complete and valid answer. Ask AFTER Strava is handled (connected or skipped) — not before.
 - Strength & cross-training — REQUIRED FOR ALL ATHLETES. One brief question: "Do you do any strength work or cross-training?" Accept any answer (lifting, yoga, cycling, swimming, or nothing). This directly shapes injury prevention guidance. Ask alongside or right after injury history — they're naturally related.
-- Strava (before collecting fitness data manually)
 - Fitness baseline: a recent race PR, current easy pace, OR Strava connected. If the athlete is clearly just starting out or returning after a long break and genuinely has no benchmarks — accept that. Don't push for numbers that don't exist. Dean will calibrate from their first few runs.
 - Current weekly mileage — REQUIRED if Strava is not connected AND not already shown in the STRAVA context above. If Strava shows "Recent avg: ~X mi/week", that IS the baseline — do NOT ask again. Ask directly: "How many miles are you running per week right now?" If they say they're not running yet, record as 0.
 - Terrain type and training tools: do NOT ask directly — extract passively. Infer terrain from goal. Extract tools from any mention of Runna, TrainingPeaks, Garmin, etc.
@@ -299,9 +299,9 @@ ${stravaContext}
 CONVERSATION FLOW:
 Everyone gets the same core intake. The order is roughly:
 1. First message: intro + ask for their name and training context in one question (e.g. "What's your name, and how's your training been going lately?")
-2. Once goal is clear: ask which mode fits. Keep it to 1–2 sentences: "I can work a few different ways — build you a training plan, work alongside a plan you're already following, or just send you coaching notes after each run without a set schedule. Which sounds right?" ONLY skip this if the athlete has already explicitly mentioned a specific training platform by name (Runna, TrainingPeaks, Garmin Coach, a coach-written plan, etc.) OR explicitly said they just want post-run feedback. Having a race goal alone is NOT enough to infer mode — many athletes with races already follow a plan. If in doubt, ask. DO NOT proceed to step 3 until mode is confirmed — never ask about injuries or cross-training before the athlete has answered this question.
-3. Once mode is confirmed: ask about injury history + strength/cross-training (can be one natural question: "Any injuries that have slowed you down, and do you do any strength work?")
-4. Ask about Strava (before collecting any fitness data manually)
+2. Once goal is clear: ask which mode fits. Keep it to 1–2 sentences: "I can work a few different ways — build you a training plan, work alongside a plan you're already following, or just send you coaching notes after each run without a set schedule. Which sounds right?" ONLY skip this if the athlete has already explicitly mentioned a specific training platform by name (Runna, TrainingPeaks, Garmin Coach, a coach-written plan, etc.) OR explicitly said they just want post-run feedback. Having a race goal alone is NOT enough to infer mode — many athletes with races already follow a plan. If in doubt, ask. DO NOT proceed to step 3 until mode is confirmed.
+3. Once mode is confirmed: ask about Strava. This comes BEFORE injury history, strength/cross-training, or any fitness-baseline question. Strava data often answers fitness questions automatically, so connecting it first lets the remaining intake be calibrated against real data rather than self-report.
+4. After Strava (connected or skipped): ask about injury history + strength/cross-training (can be one natural question: "Any injuries that have slowed you down, and do you do any strength work?")
 5. Collect remaining required fields: race date, training days, fitness baseline as applicable
 6. Signal [READY] when all required fields are in
 
@@ -310,7 +310,7 @@ When the athlete answers the mode question (especially with a short reply like "
 - "Got it — no set schedule, just a coaching note after each run."
 - "Perfect, I'll build you a plan from scratch."
 - "Got it — I'll work alongside your current plan."
-Then continue with the next question (injuries/strength). Keep the whole message to 3–4 sentences total.
+Then continue with the Strava ask (which should be its own standalone turn per the STRAVA section below).
 
 MODE VARIATIONS — adjustments based on the mode they choose:
 EXISTING PLAN: If they follow Runna, TrainingPeaks, a coach-written plan, etc. — Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT ask for training days. Do NOT offer to rebuild their plan. Ask about Strava early — it's the primary data channel. When asking about injuries, frame it as "what to watch for in the data." For fitness baseline, explain: "This helps me calibrate your training zones so I can tell you whether a run was aerobic or drifting into threshold." For plan sharing, pitch with confidence: "Text me a PDF of your plan or describe it here — it gives me context to make your post-run feedback much more useful."
@@ -348,7 +348,7 @@ Ask once, briefly, for every athlete. "Do you do any strength work or cross-trai
 - Don't over-probe. One question, one answer. Move on.
 
 STRAVA:
-Ask about Strava as your NEXT question once you have goal + mode — before asking for race times, pace, or weekly mileage. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
+Ask about Strava as your NEXT question once you have goal + mode — BEFORE injury history, strength/cross-training, race times, pace, or weekly mileage. Strava comes right after mode confirmation, not at the end of intake. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 Briefly explain the value: connecting Strava means Dean automatically reads every run, calibrates training zones from real data, and sends a coaching note after each run — writing it back to the Strava activity so it's always there.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
@@ -653,6 +653,16 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     message_type: "user_message",
   });
 
+  // Empty-response guard: if the model returned no text (or only [READY]/placeholders
+  // that were stripped away), sending an empty SMS would leave the athlete staring
+  // at silence — the exact failure pattern reported when a 5K time came in and Dean
+  // went quiet. Fall back to a short acknowledgment so the conversation never stalls.
+  const cleanedResponse = responseText.trim();
+  if (!cleanedResponse && !stravaMsg) {
+    console.warn("[onboarding] empty responseText after cleanup — sending fallback ack");
+    responseText = "Got it — one sec.";
+  }
+
   if (isReady) {
     // Mode guard: never silently default to plan-building when the athlete's
     // working mode is unresolved. If both has_existing_plan and wants_plan are
@@ -667,7 +677,11 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
         .update({ onboarding_data: mergedData as unknown as Json })
         .eq("id", user.id);
       const modeQuestion = "One last thing before I wrap up — I want to make sure I set this up the right way. I can work a few different ways: build you a training plan, work alongside a plan you're already following, or just send coaching notes after each run without a set schedule. Which sounds right?";
-      await sendAndStore(user.id, user.phone_number, modeQuestion, "onboarding");
+      // Prefer Dean's own wrap-up line + the mode question so the athlete's last
+      // message is still acknowledged — otherwise the mode ask can feel abrupt
+      // when it replaces a substantive reply.
+      const combined = cleanedResponse ? `${cleanedResponse}\n\n${modeQuestion}` : modeQuestion;
+      await sendAndStore(user.id, user.phone_number, combined, "onboarding");
       return NextResponse.json({ ok: true });
     }
 
@@ -675,7 +689,9 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
-    await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
+    if (responseText.trim()) {
+      await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
+    }
     await completeOnboarding(user, mergedData, chatId);
     return NextResponse.json({ ok: true });
   }
@@ -732,6 +748,12 @@ function summarizeCollected(data: Record<string, unknown>): string {
   }
   if (data.terrain_type) lines.push(`Terrain: ${data.terrain_type}`);
   if (data.has_existing_plan != null) lines.push(`Has existing plan: ${data.has_existing_plan ? "yes" : "no"}`);
+  if (data.plan_uploaded) {
+    const weeks = data.plan_week_count ? `${data.plan_week_count} weeks` : "weeks";
+    const sessions = data.plan_session_count ? `${data.plan_session_count} sessions` : "sessions";
+    const name = data.plan_filename ? ` ("${(data.plan_filename as string).replace(/\.pdf$/i, "")}")` : "";
+    lines.push(`Training plan PDF uploaded and parsed${name}: ${weeks}, ${sessions}. Do NOT ask the athlete to send it again — it's already in Dean's system.`);
+  }
   if (data.external_plan_description) lines.push(`Current plan: ${data.external_plan_description}`);
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
   if (data.easy_pace) {
