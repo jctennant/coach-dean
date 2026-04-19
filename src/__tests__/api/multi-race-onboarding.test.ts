@@ -126,6 +126,13 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       conversations: { data: [], error: null },
     });
 
+    // Same-turn race-name detection (Haiku): triggered by proper-noun race names
+    // in the inbound message before the main Sonnet call. Returns plain JSON text.
+    mockLLMResponse('{"races": ["Snowbird Cirque Series", "Dipsea"]}');
+    // preSearchRaceDate for "Snowbird Cirque Series" (A race)
+    mockLLMResponse("DATE: 2026-06-20");
+    // preSearchRaceDate for "Dipsea" (other race)
+    mockLLMResponse("DATE: 2026-07-12");
     // Sonnet: continues conversation naturally
     mockLLMResponse("Got it — Snowbird in June is your A race, with Dipsea in July as a tune-up. Which days work best for training?");
     // Haiku extraction (tool use): pulls out both races

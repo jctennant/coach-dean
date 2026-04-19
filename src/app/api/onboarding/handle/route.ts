@@ -144,6 +144,34 @@ async function preSearchRaceDate(raceName: string): Promise<string | null> {
   }
 }
 
+/**
+ * Lightweight Haiku pass to detect specific named races mentioned in a single
+ * inbound message. Used on the OpenAI path so the very turn an athlete first
+ * mentions a race, the date pre-search can fire — without this, race extraction
+ * only happens after the model call, leaving the first mention unsearched.
+ */
+async function detectRaceNamesInMessage(message: string): Promise<string[]> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 150,
+    system: `Extract specific named running races mentioned in the message. Only proper-noun race names (e.g. "Dipsea", "Boston Marathon", "Snowbird Cirque Series", "Hardrock 100"). Do NOT extract generic distances ("5k", "marathon"), training plans, or non-running events. Reply ONLY with a JSON object: {"races": ["Race Name 1", "Race Name 2"]} — empty array if none.`,
+    messages: [{ role: "user", content: message }],
+  });
+  const text = response.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { type: "text"; text: string }).text)
+    .join(" ");
+  const match = text.match(/\{[\s\S]*"races"\s*:\s*(\[[^\]]*\])[\s\S]*\}/);
+  if (!match) return [];
+  try {
+    const arr = JSON.parse(match[1]) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Unified conversation handler
 // ---------------------------------------------------------------------------
@@ -408,6 +436,9 @@ After searching: if the search result shows the race date is within the next 6 w
 After searching: if the user has not stated a specific date (only a month or vague timeframe), confirm the search result with them before proceeding: "I found it listed as [date] — does that sound right?"
 FIRST-OF-MONTH GUARD: If the only date information you have is a month ("in June", "sometime in July", "this fall"), do NOT proceed with the 1st of that month as a placeholder. Stop and ask: "Do you know the exact date?" A first-of-month date is almost always wrong and will miscalibrate the entire training timeline.
 If no web_search tool is available to you in this context and the athlete has mentioned a race but you don't have a confirmed exact date, you MUST ask for it directly — do not proceed without it. Example: "What's the exact date of the Dipsea?" Ask this before moving on to any other question.
+
+NEVER PROMISE ASYNC WORK YOU CAN'T DELIVER:
+You cannot say "let me pull that up", "give me a moment", "I'll check and get back to you", "one sec while I look", or anything implying you'll send a follow-up message later. There is no async loop — every reply you send is the only reply that turn. If you need information you don't have (a race date, course profile, etc.), either (a) call the web_search tool inline this turn so the answer is in this same reply, or (b) ask the athlete for it directly. Do not narrate the lookup as if it were happening in the background. The user will be left staring at silence.
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
@@ -451,12 +482,48 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   // then inject the result into the main system prompt. Main call uses gpt-4o (no search).
   let raceDateInjection = "";
   if (isOpenAI) {
-    const raceName = onboardingData.race_name as string | null;
+    const storedRaceName = onboardingData.race_name as string | null;
     // Collect B/C race names that are missing or have first-of-month placeholder dates
     const otherRaces = (onboardingData.other_races as Array<{ name?: string | null; date?: string | null; priority: string }> | null) ?? [];
     const otherRaceNames = otherRaces
       .filter((r) => r.name && (!r.date || isFirstOfMonth(r.date)))
       .map((r) => r.name as string);
+
+    // Same-turn race-name detection: scan the inbound message for race names not
+    // already in onboardingData. Without this pass, the very turn an athlete first
+    // mentions a race ("racing Dipsea in June and Snowbird in July"), no pre-search
+    // fires — the model is then tempted to promise an async lookup it can't deliver.
+    // Cheap regex pre-filter: only spend a Haiku call when the message contains a
+    // proper-noun pattern that could be a named race. Generic distance mentions
+    // ("a 5K", "marathon") do NOT trigger this — only specific race names need
+    // pre-search ("Dipsea", "Boston Marathon", "Snowbird Cirque Series"). Requires
+    // a capitalized word of length 3+ that isn't sentence-initial only.
+    const properNounMatches = message.match(/\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]+)*\b/g) ?? [];
+    const hasCandidateRaceName = properNounMatches.some((m) => {
+      if (m.includes(" ")) return true; // multi-word proper noun (e.g. "Boston Marathon")
+      const pos = message.indexOf(m);
+      return pos > 0; // skip sentence-initial single words ("I", "Hey", etc.)
+    });
+    const hasRaceContextWord = /\b(rac(?:e|ing)|marathon|ultra|half|5k|10k|15k|20k|25k|30k|50k|100k|50mi|100mi|cirque|trail|series)\b/i.test(message);
+    const looksLikeRaceMention = hasCandidateRaceName && hasRaceContextWord;
+    let firstTurnRaceName: string | null = null;
+    const firstTurnExtraNames: string[] = [];
+    if (!storedRaceName && looksLikeRaceMention) {
+      try {
+        const detected = await detectRaceNamesInMessage(message);
+        if (detected.length > 0) {
+          firstTurnRaceName = detected[0];
+          for (let i = 1; i < detected.length; i++) {
+            if (!otherRaceNames.includes(detected[i])) firstTurnExtraNames.push(detected[i]);
+          }
+        }
+      } catch (err) {
+        console.warn("[onboarding] same-turn race detection failed:", err);
+      }
+    }
+
+    const raceName = storedRaceName ?? firstTurnRaceName;
+    const allOtherNames = [...otherRaceNames, ...firstTurnExtraNames];
 
     const searchPromises: Array<Promise<void>> = [];
 
@@ -472,7 +539,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       );
     }
 
-    for (const name of otherRaceNames) {
+    for (const name of allOtherNames) {
       searchPromises.push(
         preSearchRaceDate(name).then((date) => {
           if (date) {
