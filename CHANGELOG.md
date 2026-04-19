@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Onboarding: greetings, no early exercises, introduce working modes
+
+**Type:** Improvement
+**Reported by:** Jake (internal observation during onboarding conversation)
+**User feedback:** "He doesn't ever really say hi back or hi Jake. We shouldn't be prescribing exercises on message 2 or 3 — focus on getting context first. We're not laying out the different ways you can work with Dean."
+**Root cause:** (1) "Nice to meet you" strip was too aggressive, removing warm name acknowledgment on Dean's second message. (2) Exercise prescription instruction said "explicitly asks" but Claude over-interpreted injury mentions as requests. (3) Plan-preference question only implied two options, never introduced all three modes.
+**Fix / Change:** Removed the "Nice to meet you" text strip (now only strips full re-introduction). Added instruction to acknowledge athlete's name warmly when first provided. Added explicit guard: injury mentions are context, not exercise requests — don't prescribe unless athlete directly asks. Updated plan-preference question to introduce all three modes (build a plan, work alongside existing plan, post-run feedback only) before asking.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-04-18 — Fall back to % max HR zones when LTHR confidence is low
 
 **Type:** Improvement
