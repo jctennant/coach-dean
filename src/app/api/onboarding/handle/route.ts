@@ -144,34 +144,6 @@ async function preSearchRaceDate(raceName: string): Promise<string | null> {
   }
 }
 
-/**
- * Lightweight Haiku pass to detect specific named races mentioned in a single
- * inbound message. Used on the OpenAI path so the very turn an athlete first
- * mentions a race, the date pre-search can fire — without this, race extraction
- * only happens after the model call, leaving the first mention unsearched.
- */
-async function detectRaceNamesInMessage(message: string): Promise<string[]> {
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 150,
-    system: `Extract specific named running races mentioned in the message. Only proper-noun race names (e.g. "Dipsea", "Boston Marathon", "Snowbird Cirque Series", "Hardrock 100"). Do NOT extract generic distances ("5k", "marathon"), training plans, or non-running events. Reply ONLY with a JSON object: {"races": ["Race Name 1", "Race Name 2"]} — empty array if none.`,
-    messages: [{ role: "user", content: message }],
-  });
-  const text = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b as { type: "text"; text: string }).text)
-    .join(" ");
-  const match = text.match(/\{[\s\S]*"races"\s*:\s*(\[[^\]]*\])[\s\S]*\}/);
-  if (!match) return [];
-  try {
-    const arr = JSON.parse(match[1]) as unknown;
-    if (!Array.isArray(arr)) return [];
-    return arr.filter((s): s is string => typeof s === "string" && s.trim().length > 0);
-  } catch {
-    return [];
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Unified conversation handler
 // ---------------------------------------------------------------------------
@@ -220,20 +192,75 @@ async function handleConversation(
     (m) => m.role === "assistant" && /road\s+(5k|10k|half marathon)/i.test(m.content)
   );
 
+  // ---- EXTRACT FIRST -------------------------------------------------------
+  // Run Haiku extraction on the conversation including the user's current message
+  // BEFORE building the system prompt or doing race-date pre-search. This lets the
+  // OpenAI pre-search loop see freshly-extracted race names this same turn (without
+  // it, the very turn an athlete first names a race, no pre-search fires and the
+  // model is tempted to promise an async lookup it can't deliver). On Anthropic,
+  // it also keeps "WHAT YOU ALREADY KNOW" current so Dean doesn't re-ask.
+  // Trade-off: assistant-derived fields (race elevation/altitude from Dean's web
+  // search results) get captured on the NEXT turn when the assistant reply lands
+  // in history — acceptable since these influence later turns, not this one.
+  const extracted = await extractFields([
+    ...history,
+    { role: "user", content: message },
+  ]);
+  const mergedData: Record<string, unknown> = { ...onboardingData };
+  for (const [k, v] of Object.entries(extracted)) {
+    if (v !== null && v !== undefined) {
+      if (Array.isArray(v) && (v as unknown[]).length === 0) continue;
+      mergedData[k] = v;
+    }
+  }
+  if (mergedData.goal && !VALID_GOAL_BUCKETS.has(mergedData.goal as string)) {
+    delete mergedData.goal;
+  }
+  if (mergedData.race_date) {
+    const dateStr = mergedData.race_date as string;
+    const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(Date.parse(dateStr));
+    if (!isValidDate) {
+      console.warn(`[onboarding] discarding invalid race_date: "${dateStr}"`);
+      delete mergedData.race_date;
+    }
+  }
+  // VDOT paces from a freshly-extracted road race PR — same logic as before,
+  // moved here so paces are available to the system prompt this turn.
+  {
+    const extractedDist = mergedData.recent_race_distance_km as number | undefined;
+    const stravaBestIsTrail = mergedData.strava_best_race_is_trail === true;
+    const stravaBestKm = mergedData.strava_best_race_km as number | undefined;
+    const likelyTrailSlipthrough = extractedDist != null
+      && stravaBestIsTrail
+      && stravaBestKm != null
+      && Math.abs(extractedDist - stravaBestKm) < 1;
+
+    if (mergedData.recent_race_distance_km && mergedData.recent_race_time_minutes && !likelyTrailSlipthrough) {
+      const paces = calculateVDOTPaces(
+        mergedData.recent_race_distance_km as number,
+        mergedData.recent_race_time_minutes as number
+      );
+      if (paces.easy) mergedData.easy_pace = paces.easy;
+      if (paces.tempo) mergedData.tempo_pace = paces.tempo;
+      if (paces.interval) mergedData.interval_pace = paces.interval;
+    }
+  }
+  // -------------------------------------------------------------------------
+
   // Build Strava context (best race for pace suggestion, if available)
   let stravaContext = "";
-  if (onboardingData.strava_connected) {
+  if (mergedData.strava_connected) {
     const sbr = await lookupBestStravaRace(user.id);
     // Build analytics lines from stored data (computed at Strava connect time)
-    const avgWeeklyMiles = onboardingData.strava_avg_weekly_miles as number | null ?? null;
-    const mileageTrend = onboardingData.strava_mileage_trend as string | null ?? null;
-    const avgElevFtPerRun = onboardingData.strava_avg_elev_ft_per_run as number | null ?? null;
-    const longestRunMiles = onboardingData.strava_longest_run_miles as number | null ?? null;
-    const avgRunsPerWeek = onboardingData.strava_avg_runs_per_week as number | null ?? null;
-    const recent4Weeks = onboardingData.strava_recent_4_weeks as number[] | null ?? null;
-    const hrZonePct = onboardingData.strava_hr_zone_pct as { z1: number; z2: number; z3: number; z4: number; z5: number } | null ?? null;
-    const estimatedMaxHR = onboardingData.strava_estimated_max_hr as number | null ?? null;
-    const maxWeeklySpikePct = onboardingData.strava_max_weekly_spike_pct as number | null ?? null;
+    const avgWeeklyMiles = mergedData.strava_avg_weekly_miles as number | null ?? null;
+    const mileageTrend = mergedData.strava_mileage_trend as string | null ?? null;
+    const avgElevFtPerRun = mergedData.strava_avg_elev_ft_per_run as number | null ?? null;
+    const longestRunMiles = mergedData.strava_longest_run_miles as number | null ?? null;
+    const avgRunsPerWeek = mergedData.strava_avg_runs_per_week as number | null ?? null;
+    const recent4Weeks = mergedData.strava_recent_4_weeks as number[] | null ?? null;
+    const hrZonePct = mergedData.strava_hr_zone_pct as { z1: number; z2: number; z3: number; z4: number; z5: number } | null ?? null;
+    const estimatedMaxHR = mergedData.strava_estimated_max_hr as number | null ?? null;
+    const maxWeeklySpikePct = mergedData.strava_max_weekly_spike_pct as number | null ?? null;
 
     const weeklyLine = avgWeeklyMiles != null
       ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
@@ -266,30 +293,30 @@ async function handleConversation(
       // Store trail-race flag so completeOnboarding can guard the VDOT recalculation.
       // This prevents Haiku from accidentally extracting the trail race distance/time
       // (visible in coach conversation history) and producing wrong pace zones.
-      onboardingData.strava_best_race_is_trail = sbr.is_trail;
-      onboardingData.strava_best_race_km = sbr.dist_km;
+      mergedData.strava_best_race_is_trail = sbr.is_trail;
+      mergedData.strava_best_race_km = sbr.dist_km;
       // Store VDOT-derived paces from the Strava best race so completeOnboarding
       // can use them as the authoritative source rather than Haiku-extracted paces
       // (which can accidentally come from Coach lines and be in wrong units).
       if (!sbr.is_trail) {
-        onboardingData.strava_vdot_tempo_pace = sbr.tempo_pace;
-        onboardingData.strava_vdot_interval_pace = sbr.interval_pace;
+        mergedData.strava_vdot_tempo_pace = sbr.tempo_pace;
+        mergedData.strava_vdot_interval_pace = sbr.interval_pace;
       }
     } else {
-      const hasRaceData = !!(onboardingData.recent_race_distance_km && onboardingData.recent_race_time_minutes);
-      const hasPaceData = !!onboardingData.easy_pace;
+      const hasRaceData = !!(mergedData.recent_race_distance_km && mergedData.recent_race_time_minutes);
+      const hasPaceData = !!mergedData.easy_pace;
       const paceNote = hasRaceData || hasPaceData
         ? " No race activity found on Strava — using pace data already collected from conversation."
         : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
       stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine}${paceNote}`;
     }
-  } else if (onboardingData.strava_skipped) {
+  } else if (mergedData.strava_skipped) {
     stravaContext = "\nSTRAVA: User skipped Strava. Collect mileage + pace data manually.";
   } else {
     stravaContext = "\nSTRAVA: Not connected yet.";
   }
 
-  const collected = summarizeCollected(onboardingData);
+  const collected = summarizeCollected(mergedData);
 
   const systemPrompt = `${!isFirstResponse ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.
 
@@ -469,61 +496,27 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   const isFirstOfMonth = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-01$/.test(d);
   // Lookup is needed if the A race has no confirmed date OR any named B/C race
   // is missing a date — both must be confirmed before [READY].
+  // mergedData reflects the just-extracted race names from this turn's user message,
+  // so a freshly-mentioned race triggers pre-search this same turn (no async loop).
   const otherRacesNeedingDate = (
-    (onboardingData.other_races as Array<{ name?: string | null; date?: string | null }> | null) ?? []
+    (mergedData.other_races as Array<{ name?: string | null; date?: string | null }> | null) ?? []
   ).some((r) => r?.name && (!r.date || isFirstOfMonth(r.date)));
   const needsRaceDateLookup =
-    !onboardingData.race_date || isFirstOfMonth(onboardingData.race_date) || otherRacesNeedingDate;
+    !mergedData.race_date || isFirstOfMonth(mergedData.race_date) || otherRacesNeedingDate;
   const isOpenAI = (process.env.AI_PROVIDER ?? "openai") === "openai";
 
   // On OpenAI, gpt-4o-search-preview has a 6000 TPM hard limit — far too small for
   // the full onboarding system prompt + conversation history. Instead, run a minimal
-  // pre-search call (~100 tokens) to look up the race date once the race name is known,
-  // then inject the result into the main system prompt. Main call uses gpt-4o (no search).
+  // pre-search call (~100 tokens) to look up the race date using race names from the
+  // just-extracted mergedData. Main call uses gpt-4o (no search).
   let raceDateInjection = "";
   if (isOpenAI) {
-    const storedRaceName = onboardingData.race_name as string | null;
+    const raceName = mergedData.race_name as string | null;
     // Collect B/C race names that are missing or have first-of-month placeholder dates
-    const otherRaces = (onboardingData.other_races as Array<{ name?: string | null; date?: string | null; priority: string }> | null) ?? [];
+    const otherRaces = (mergedData.other_races as Array<{ name?: string | null; date?: string | null; priority: string }> | null) ?? [];
     const otherRaceNames = otherRaces
       .filter((r) => r.name && (!r.date || isFirstOfMonth(r.date)))
       .map((r) => r.name as string);
-
-    // Same-turn race-name detection: scan the inbound message for race names not
-    // already in onboardingData. Without this pass, the very turn an athlete first
-    // mentions a race ("racing Dipsea in June and Snowbird in July"), no pre-search
-    // fires — the model is then tempted to promise an async lookup it can't deliver.
-    // Cheap regex pre-filter: only spend a Haiku call when the message contains a
-    // proper-noun pattern that could be a named race. Generic distance mentions
-    // ("a 5K", "marathon") do NOT trigger this — only specific race names need
-    // pre-search ("Dipsea", "Boston Marathon", "Snowbird Cirque Series"). Requires
-    // a capitalized word of length 3+ that isn't sentence-initial only.
-    const properNounMatches = message.match(/\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]+)*\b/g) ?? [];
-    const hasCandidateRaceName = properNounMatches.some((m) => {
-      if (m.includes(" ")) return true; // multi-word proper noun (e.g. "Boston Marathon")
-      const pos = message.indexOf(m);
-      return pos > 0; // skip sentence-initial single words ("I", "Hey", etc.)
-    });
-    const hasRaceContextWord = /\b(rac(?:e|ing)|marathon|ultra|half|5k|10k|15k|20k|25k|30k|50k|100k|50mi|100mi|cirque|trail|series)\b/i.test(message);
-    const looksLikeRaceMention = hasCandidateRaceName && hasRaceContextWord;
-    let firstTurnRaceName: string | null = null;
-    const firstTurnExtraNames: string[] = [];
-    if (!storedRaceName && looksLikeRaceMention) {
-      try {
-        const detected = await detectRaceNamesInMessage(message);
-        if (detected.length > 0) {
-          firstTurnRaceName = detected[0];
-          for (let i = 1; i < detected.length; i++) {
-            if (!otherRaceNames.includes(detected[i])) firstTurnExtraNames.push(detected[i]);
-          }
-        }
-      } catch (err) {
-        console.warn("[onboarding] same-turn race detection failed:", err);
-      }
-    }
-
-    const raceName = storedRaceName ?? firstTurnRaceName;
-    const allOtherNames = [...otherRaceNames, ...firstTurnExtraNames];
 
     const searchPromises: Array<Promise<void>> = [];
 
@@ -539,7 +532,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       );
     }
 
-    for (const name of allOtherNames) {
+    for (const name of otherRaceNames) {
       searchPromises.push(
         preSearchRaceDate(name).then((date) => {
           if (date) {
@@ -614,7 +607,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   let responseText: string;
   let stravaMsg: string | null = null;
 
-  if (wantsStravaLink && !onboardingData.strava_connected && !onboardingData.strava_skipped) {
+  if (wantsStravaLink && !mergedData.strava_connected && !mergedData.strava_skipped) {
     const paragraphs = rawText.split(/\n{2,}/);
     const stravaParaIdx = paragraphs.findIndex(p => /\[STRAVA_LINK\]/i.test(p));
     const beforeStrava = paragraphs
@@ -660,69 +653,11 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   responseText = responseText.replace(/\s*\(https?:\/\/[^)]+\)/g, "");
   responseText = responseText.trim();
 
-  // Extract structured fields from the full conversation using Haiku
-  const extracted = await extractFields([
-    ...history,
-    { role: "user", content: message },
-    { role: "assistant", content: responseText },
-  ]);
-
-  // Merge new fields into onboarding_data (don't overwrite with nulls)
-  const mergedData = { ...onboardingData };
-  for (const [k, v] of Object.entries(extracted)) {
-    if (v !== null && v !== undefined) {
-      // For arrays, only overwrite if the new value is non-empty
-      if (Array.isArray(v) && (v as unknown[]).length === 0) continue;
-      mergedData[k] = v;
-    }
-  }
-
-  // Validate goal bucket — discard if invalid
-  if (mergedData.goal && !VALID_GOAL_BUCKETS.has(mergedData.goal as string)) {
-    delete mergedData.goal;
-  }
-
-  // Validate race_date — discard anything that isn't a real YYYY-MM-DD date
-  // (Claude sometimes returns "<UNKNOWN>" or other placeholder strings)
-  if (mergedData.race_date) {
-    const dateStr = mergedData.race_date as string;
-    const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(Date.parse(dateStr));
-    if (!isValidDate) {
-      console.warn(`[onboarding] discarding invalid race_date: "${dateStr}"`);
-      delete mergedData.race_date;
-    }
-  }
-
-  // Calculate VDOT paces whenever race time data is present.
-  // Always recalculate — race-derived paces are more reliable than a pace extracted
-  // from conversation text (e.g. one mentioned in the Strava insight message).
-  // This ensures that if a user provides a better/corrected race time later in the
-  // conversation, the VDOT updates rather than being blocked by a stale easy_pace.
-  //
-  // Guard: skip if the extracted distance matches the Strava trail race distance.
-  // Haiku can accidentally extract the trail race from coach conversation history
-  // (the coach mentions "Dipsea 30K in 3:45") — this produces a systematically
-  // slow easy pace. We only skip if the distance matches the trail race within 1km;
-  // if the user provides a different (road) race distance, VDOT still runs correctly.
-  {
-    const extractedDist = mergedData.recent_race_distance_km as number | undefined;
-    const stravaBestIsTrail = mergedData.strava_best_race_is_trail === true;
-    const stravaBestKm = mergedData.strava_best_race_km as number | undefined;
-    const likelyTrailSlipthrough = extractedDist != null
-      && stravaBestIsTrail
-      && stravaBestKm != null
-      && Math.abs(extractedDist - stravaBestKm) < 1;
-
-    if (mergedData.recent_race_distance_km && mergedData.recent_race_time_minutes && !likelyTrailSlipthrough) {
-      const paces = calculateVDOTPaces(
-        mergedData.recent_race_distance_km as number,
-        mergedData.recent_race_time_minutes as number
-      );
-      if (paces.easy) mergedData.easy_pace = paces.easy;
-      if (paces.tempo) mergedData.tempo_pace = paces.tempo;
-      if (paces.interval) mergedData.interval_pace = paces.interval;
-    }
-  }
+  // Note: extraction + VDOT calculation already ran at the top of this function
+  // on [history + current user message] so race names could feed the OpenAI
+  // pre-search loop. Assistant-introduced fields (race elevation/altitude from
+  // Dean's web search) get captured next turn when the assistant reply lands in
+  // history.
 
   // Store user's inbound message
   await supabase.from("conversations").insert({
@@ -775,7 +710,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     return NextResponse.json({ ok: true });
   }
 
-  if (wantsStravaLink && !onboardingData.strava_connected && !onboardingData.strava_skipped) {
+  if (wantsStravaLink && !mergedData.strava_connected && !mergedData.strava_skipped) {
     // Claude asked about Strava — pause conversation until user connects or skips
     await supabase.from("users")
       .update({

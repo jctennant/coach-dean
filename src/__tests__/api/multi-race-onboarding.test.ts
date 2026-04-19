@@ -126,16 +126,10 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       conversations: { data: [], error: null },
     });
 
-    // Same-turn race-name detection (Haiku): triggered by proper-noun race names
-    // in the inbound message before the main Sonnet call. Returns plain JSON text.
-    mockLLMResponse('{"races": ["Snowbird Cirque Series", "Dipsea"]}');
-    // preSearchRaceDate for "Snowbird Cirque Series" (A race)
-    mockLLMResponse("DATE: 2026-06-20");
-    // preSearchRaceDate for "Dipsea" (other race)
-    mockLLMResponse("DATE: 2026-07-12");
-    // Sonnet: continues conversation naturally
-    mockLLMResponse("Got it — Snowbird in June is your A race, with Dipsea in July as a tune-up. Which days work best for training?");
-    // Haiku extraction (tool use): pulls out both races
+    // Extract-first ordering: Haiku extraction runs BEFORE the main Sonnet call so
+    // race names feed the OpenAI pre-search loop this same turn. Both race dates
+    // are returned from extraction here, so needsRaceDateLookup is false and no
+    // preSearchRaceDate calls fire.
     mockToolResponse("save_training_fields", {
       name: "Jake",
       goal: "50k",
@@ -147,6 +141,8 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       training_days: null,
       timezone: null,
     });
+    // Sonnet: continues conversation naturally
+    mockLLMResponse("Got it — Snowbird in June is your A race, with Dipsea in July as a tune-up. Which days work best for training?");
 
     await POST(makeRequest({ userId: "user-001", message: "I'm training for Snowbird 50k in June and Dipsea in July" }));
 
@@ -183,14 +179,15 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       },
     });
 
-    // Sonnet sees goal in system prompt "what you already know" and asks for schedule
-    mockLLMResponse("Great! Which days of the week work best for training?");
+    // Extract-first: Haiku extraction first
     mockToolResponse("save_training_fields", {
       goal: "marathon",
       race_name: "Boston Marathon",
       race_date: "2026-04-20",
       training_days: null,
     });
+    // Sonnet sees goal in system prompt "what you already know" and asks for schedule
+    mockLLMResponse("Great! Which days of the week work best for training?");
 
     await POST(makeRequest({ userId: "user-001", message: "Monday, Wednesday, Friday, Sunday" }));
 
@@ -207,8 +204,8 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       conversations: { data: [], error: null },
     });
 
-    mockLLMResponse("Nice — a 22:30 5K is solid fitness! Which days do you prefer to train?");
-    // Haiku extracts race time → triggers VDOT calculation (tool use)
+    // Extract-first: Haiku extracts race time before main Sonnet call
+    // → triggers VDOT calculation immediately, paces feed system prompt
     mockToolResponse("save_training_fields", {
       name: null,
       goal: "half_marathon",
@@ -216,6 +213,7 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       recent_race_time_minutes: 22.5,
       training_days: null,
     });
+    mockLLMResponse("Nice — a 22:30 5K is solid fitness! Which days do you prefer to train?");
 
     await POST(makeRequest({ userId: "user-001", message: "I ran a 22:30 5K last month" }));
 
@@ -250,9 +248,7 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       training_profiles: { data: { preferred_units: "imperial" }, error: null },
     });
 
-    // Sonnet: sends [READY]
-    mockLLMResponse("Perfect, I have everything I need to build your plan!\n[READY]");
-    // Haiku: extraction with all data (tool use)
+    // Extract-first: Haiku extraction (tool use) runs before Sonnet [READY]
     mockToolResponse("save_training_fields", {
       goal: "50k",
       race_name: "Snowbird 50K",
@@ -265,6 +261,8 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       has_existing_plan: false,
       wants_plan: true,
     });
+    // Sonnet: sends [READY]
+    mockLLMResponse("Perfect, I have everything I need to build your plan!\n[READY]");
 
     await POST(makeRequest({ userId: "user-001", message: "Denver, CO" }));
 
@@ -284,12 +282,12 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       conversations: { data: [], error: null },
     });
 
-    mockLLMResponse("What distance are you targeting?");
-    // Haiku returns an invalid goal bucket (tool use) — "sprint_tri" is no longer valid
+    // Extract-first: Haiku returns an invalid goal bucket (tool use) — "sprint_tri" is no longer valid
     mockToolResponse("save_training_fields", {
       goal: "sprint_tri",  // not in VALID_GOAL_BUCKETS
       race_name: null,
     });
+    mockLLMResponse("What distance are you targeting?");
 
     await POST(makeRequest({ userId: "user-001", message: "I want to do a triathlon" }));
 
@@ -325,8 +323,9 @@ describe("Strava-connected onboarding", () => {
       training_profiles: { data: { preferred_units: "imperial" }, error: null },
     });
 
-    mockLLMResponse("Great pace for a half marathon build! Which days work best?");
+    // Extract-first ordering
     mockToolResponse("save_training_fields", { goal: "half_marathon", training_days: null });
+    mockLLMResponse("Great pace for a half marathon build! Which days work best?");
 
     await POST(makeRequest({ userId: "user-001", message: "I want to run a sub-2 half" }));
 

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Onboarding: extract-first reorder for OpenAI race-date pre-search
+
+**Type:** Refactor + Bug Fix
+**Reported by:** Jake (live test) — "He didn't search the actual race dates or confirm what dates either in that convo."
+**Root cause:** On the OpenAI provider path, `gpt-4o-search-preview` exceeds the 6000 TPM limit when given the full onboarding system prompt, so we strip the inline `web_search` tool and rely on a `preSearchRaceDate` loop that reads `onboardingData.race_name` / `other_races`. But `extractFields` ran AFTER the main model call, so on the very turn an athlete first names a race ("racing Dipsea in June and Snowbird in July"), `onboardingData` was still empty and no pre-search fired. Earlier patch added a same-turn `detectRaceNamesInMessage` Haiku call gated behind a regex heuristic — works for common cases but misses single-word race names without a context word ("I'm doing Hardrock") and adds a duplicate extraction pass.
+**Fix / Change:** Reordered `handleConversation` to run `extractFields` on `[history + current user message]` BEFORE the main model call. The merged data feeds `summarizeCollected` (so "WHAT YOU ALREADY KNOW" is current), the OpenAI pre-search loop (so freshly-extracted race names get date lookups this same turn), and `calculateVDOTPaces` (so paces from a just-mentioned PR appear in the system prompt this turn). Removed the dedicated `detectRaceNamesInMessage` helper and its regex heuristic — the main extraction now serves both purposes. Removed the post-call extraction block since it was redundant. Trade-off: assistant-introduced fields (race elevation/altitude from Dean's web-search results) get captured one turn later when the assistant reply lands in history — acceptable since those fields influence later turns.
+**Test rule compliance:** Updated mock ordering across `onboarding-handle.test.ts` and `multi-race-onboarding.test.ts` to reflect the new call sequence (Haiku extraction → optional pre-search → main Sonnet/GPT). All 405 tests pass.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/__tests__/api/onboarding-handle.test.ts, src/__tests__/api/multi-race-onboarding.test.ts
+
+---
+
 ## 2026-04-19 — Onboarding: PDF-during-onboarding, no-silent-drop, Strava-first ordering, race-date confirmation
 
 **Type:** Bug Fix + Improvement

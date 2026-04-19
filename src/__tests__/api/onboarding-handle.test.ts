@@ -153,10 +153,11 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       training_profiles: { data: null, error: null },
     });
 
-    // Sonnet call: normal response (no signals)
-    mockLLMResponse("Great! What days of the week work best for training?");
-    // Haiku call: field extraction (tool use)
+    // Extract-first ordering: Haiku extraction runs BEFORE the main Sonnet call
+    // so race names feed the OpenAI pre-search loop this same turn.
     mockToolResponse("save_training_fields", { name: "Jake", goal: null, training_days: null });
+    // Sonnet: normal response (no signals)
+    mockLLMResponse("Great! What days of the week work best for training?");
 
     await POST(makeRequest({ userId: "user-001", message: "I want to run a 5K" }));
 
@@ -178,10 +179,10 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       training_profiles: { data: { preferred_units: "imperial" }, error: null },
     });
 
+    // Extract-first: Haiku extraction (tool use) runs first
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: ["tuesday","thursday","saturday"], timezone: "America/New_York", has_existing_plan: false, wants_plan: true });
     // Sonnet: includes [READY] signal
     mockLLMResponse("Awesome, I have everything I need! Let's build your plan.\n[READY]");
-    // Haiku extraction (tool use)
-    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: ["tuesday","thursday","saturday"], timezone: "America/New_York", has_existing_plan: false, wants_plan: true });
 
     await POST(makeRequest({ userId: "user-001", message: "NYC, Monday Wednesday Friday" }));
 
@@ -200,10 +201,10 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       conversations: { data: [], error: null },
     });
 
+    // Extract-first: Haiku extraction (tool use) runs first
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "marathon" });
     // Sonnet: includes [STRAVA_LINK] placeholder
     mockLLMResponse("Do you use Strava? Tap here to connect: [STRAVA_LINK]");
-    // Haiku extraction (tool use)
-    mockToolResponse("save_training_fields", { name: "Jake", goal: "marathon" });
 
     await POST(makeRequest({ userId: "user-001", message: "I run marathons" }));
 
@@ -228,8 +229,9 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       conversations: { data: [], error: null },
     });
 
-    mockLLMResponse("Which days work for you?");
+    // Extract-first ordering: Haiku extraction runs before main Sonnet call
     mockToolResponse("save_training_fields", {});
+    mockLLMResponse("Which days work for you?");
 
     await POST(makeRequest({ userId: "user-001", message: "5K goal", dry_run: true }));
 
@@ -242,13 +244,14 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       conversations: { data: [], error: null },
     });
 
-    mockLLMResponse("Got it — I'll work alongside your Runna plan, not replace it. You can also upload the PDF to the dashboard and I'll reference it directly. Which days are you running?");
+    // Extract-first ordering: Haiku extraction runs before main Sonnet call
     mockToolResponse("save_training_fields", {
       name: "Chris",
       goal: "half_marathon",
       has_existing_plan: true,
       external_plan_description: "Runna 16-week half marathon plan, week 6, ~35mi/week",
     });
+    mockLLMResponse("Got it — I'll work alongside your Runna plan, not replace it. You can also upload the PDF to the dashboard and I'll reference it directly. Which days are you running?");
 
     await POST(makeRequest({ userId: "user-001", message: "I'm already on a Runna plan, just want coaching support" }));
 
@@ -286,12 +289,13 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       conversations: { data: [], error: null },
     });
 
-    // 1st call: preSearchRaceDate (Haiku + search) → returns "DATE: 2026-04-20"
+    // Extract-first ordering: extraction runs first. Returns null for race_date so
+    // needsRaceDateLookup stays true and the pre-search fires for the stored race_name.
+    mockToolResponse("save_training_fields", { race_date: null });
+    // preSearchRaceDate (Haiku + search) → returns "DATE: 2026-04-20"
     mockLLMResponse("DATE: 2026-04-20");
-    // 2nd call: Sonnet main response
+    // Sonnet main response, sees the pre-lookup result in raceDateInjection
     mockLLMResponse("Boston Marathon is April 20, 2026 — that gives us a solid 18-week build.");
-    // 3rd call: Haiku field extraction
-    mockToolResponse("save_training_fields", { race_date: "2026-04-20" });
 
     await POST(makeRequest({ userId: "user-001", message: "So when exactly is Boston?" }));
 
@@ -300,7 +304,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       "+12025551234",
       expect.stringContaining("April 20, 2026")
     );
-    // 3 LLM calls total: pre-search + Sonnet + Haiku
+    // 3 LLM calls total: extraction + pre-search + Sonnet
     expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(3);
   });
 
@@ -320,13 +324,13 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       conversations: { data: [], error: null },
     });
 
-    mockLLMResponse("Got it, Tuesday, Thursday, Saturday and Sunday. Which race are you targeting?");
-    // Haiku returns null for has_existing_plan on this turn (didn't re-extract it)
+    // Extract-first: Haiku returns null for has_existing_plan on this turn (didn't re-extract it)
     mockToolResponse("save_training_fields", {
       training_days: ["tuesday", "thursday", "saturday", "sunday"],
       has_existing_plan: null,
       external_plan_description: null,
     });
+    mockLLMResponse("Got it, Tuesday, Thursday, Saturday and Sunday. Which race are you targeting?");
 
     await POST(makeRequest({ userId: "user-001", message: "I run Tues, Thurs, Sat, Sun" }));
 
@@ -347,10 +351,10 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
       conversations: { data: [], error: null },
     });
 
+    // Extract-first ordering: Haiku extraction (tool use) runs before Sonnet
+    mockToolResponse("save_training_fields", {});
     // Sonnet: conversation response after skip
     mockLLMResponse("No worries! Which days of the week work best for training?");
-    // Haiku: field extraction (tool use)
-    mockToolResponse("save_training_fields", {});
 
     await POST(makeRequest({ userId: "user-001", message: "skip" }));
 
