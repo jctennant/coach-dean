@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { PlanArcChart, type ArcWeek } from "./plan-arc-chart";
 import { PlanImportForm } from "./plan-import-form";
 
 type CurrentWeekData = {
@@ -14,14 +13,21 @@ type CurrentWeekData = {
   phase: string;
 };
 
-type PlanCardProps = {
+export type PlanCardProps = {
   userId: string;
   currentWeek: number;
   totalWeeks: number;
   currentWeekData: CurrentWeekData | null;
-  allWeeks: ArcWeek[];
-  raceWeekNums: number[];
   useMetric: boolean;
+  // Actual progress this week (from Strava)
+  actualDisplay: number;
+  targetDisplay: number | null;
+  distUnit: string;
+  progressPct: number;
+};
+
+const PHASE_LABELS: Record<string, string> = {
+  build: "Build", peak: "Peak", taper: "Taper", deload: "Deload", base: "Base",
 };
 
 function fmtDist(miles: number, useMetric: boolean): string {
@@ -30,7 +36,8 @@ function fmtDist(miles: number, useMetric: boolean): string {
 }
 
 export function PlanCard({
-  userId, currentWeek, totalWeeks, currentWeekData, allWeeks, raceWeekNums, useMetric,
+  userId, currentWeek, totalWeeks, currentWeekData, useMetric,
+  actualDisplay, targetDisplay, distUnit, progressPct,
 }: PlanCardProps) {
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -64,92 +71,75 @@ export function PlanCard({
     );
   }
 
+  const phase = currentWeekData?.phase;
+  const showPhase = phase && phase !== "base" && PHASE_LABELS[phase];
+
   const hasMileageRange =
     currentWeekData?.mileage_target_min != null &&
     currentWeekData?.mileage_target_max != null &&
     currentWeekData.mileage_target_max > currentWeekData.mileage_target_min;
 
-  const mileageDisplay = hasMileageRange
-    ? `${fmtDist(currentWeekData!.mileage_target_min!, useMetric)}–${fmtDist(currentWeekData!.mileage_target_max!, useMetric)}`
-    : currentWeekData?.mileage_target
-      ? `~${fmtDist(currentWeekData.mileage_target, useMetric)}`
+  const targetLabel = hasMileageRange
+    ? `${fmtDist(currentWeekData!.mileage_target_min!, useMetric)}–${fmtDist(currentWeekData!.mileage_target_max!, useMetric)} target`
+    : targetDisplay != null
+      ? `${targetDisplay} ${distUnit} target`
       : null;
 
   const longRunDisplay = currentWeekData?.long_run_target && currentWeekData.long_run_target > 0
-    ? `~${fmtDist(currentWeekData.long_run_target, useMetric)}`
+    ? fmtDist(currentWeekData.long_run_target, useMetric)
     : null;
 
   const keyWorkout = currentWeekData?.key_workout || null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Week header */}
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-base font-bold text-gray-900">Week {currentWeek} of {totalWeeks}</p>
-          {currentWeekData?.phase && currentWeekData.phase !== "base" && (
-            <p className="text-xs text-gray-400 mt-0.5 capitalize">{currentWeekData.phase} phase</p>
-          )}
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-gray-400 tabular-nums">
-            {Math.round((currentWeek / totalWeeks) * 100)}% complete
+        <p className="text-sm font-semibold text-gray-800">Week {currentWeek} of {totalWeeks}</p>
+        {showPhase && (
+          <span className="text-xs text-gray-400">{PHASE_LABELS[phase!]} phase</span>
+        )}
+      </div>
+
+      {/* Mileage progress */}
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-3xl font-bold tabular-nums text-gray-900">{actualDisplay}</span>
+            <span className="text-sm text-gray-400">{distUnit} done</span>
           </div>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="w-full bg-gray-100 rounded-full h-1">
-        <div
-          className="bg-indigo-500 h-1 rounded-full transition-all"
-          style={{ width: `${Math.min(100, (currentWeek / totalWeeks) * 100)}%` }}
-        />
-      </div>
-
-      {/* Key metrics */}
-      {(mileageDisplay || longRunDisplay) && (
-        <div className={`grid gap-3 ${mileageDisplay && longRunDisplay ? "grid-cols-2" : "grid-cols-1"}`}>
-          {mileageDisplay && (
-            <div className="rounded-xl bg-gray-50 px-4 py-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Mileage</p>
-              <p className="text-xl font-bold text-gray-900 leading-none">{mileageDisplay}</p>
-              <p className="text-[10px] text-gray-400 mt-1">this week</p>
-            </div>
-          )}
-          {longRunDisplay && (
-            <div className="rounded-xl bg-gray-50 px-4 py-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Long Run</p>
-              <p className="text-xl font-bold text-gray-900 leading-none">{longRunDisplay}</p>
-              <p className="text-[10px] text-gray-400 mt-1">target</p>
-            </div>
+          {targetLabel && (
+            <span className="text-sm text-gray-400 shrink-0">{targetLabel}</span>
           )}
         </div>
-      )}
-
-      {/* Quality session */}
-      {keyWorkout && (
-        <div className="rounded-xl bg-gray-50 px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Quality Session</p>
-          <p className="text-sm text-gray-700 leading-snug">{keyWorkout}</p>
-        </div>
-      )}
-
-      {/* Arc chart */}
-      {allWeeks.length > 0 && (
-        <div className="pt-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">Plan Arc</p>
-          <PlanArcChart
-            weeks={allWeeks}
-            currentWeek={currentWeek}
-            totalWeeks={totalWeeks}
-            raceWeekNums={raceWeekNums}
-            useMetric={useMetric}
+        <div className="w-full bg-gray-100 rounded-full h-1.5">
+          <div
+            className="bg-green-500 h-1.5 rounded-full transition-all"
+            style={{ width: `${Math.min(100, progressPct)}%` }}
           />
         </div>
+      </div>
+
+      {/* Key sessions */}
+      {(longRunDisplay || keyWorkout) && (
+        <div className="divide-y divide-gray-50 border-t border-gray-50 pt-1">
+          {longRunDisplay && (
+            <div className="flex items-center justify-between py-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Long run</span>
+              <span className="text-sm font-semibold text-gray-800">~{longRunDisplay}</span>
+            </div>
+          )}
+          {keyWorkout && (
+            <div className="py-2.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Quality</p>
+              <p className="text-sm text-gray-700 leading-snug">{keyWorkout}</p>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center justify-center gap-4 pt-1">
+      {/* Plan actions */}
+      <div className="flex items-center justify-center gap-4 pt-1 border-t border-gray-50">
         <button
           onClick={() => setReplacing(true)}
           className="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
@@ -160,17 +150,11 @@ export function PlanCard({
         {confirmRemove ? (
           <span className="text-xs text-gray-500">
             Remove?{" "}
-            <button
-              onClick={handleRemove}
-              disabled={removing}
-              className="text-red-500 font-medium hover:text-red-700"
-            >
+            <button onClick={handleRemove} disabled={removing} className="text-red-500 font-medium hover:text-red-700">
               {removing ? "Removing…" : "Yes, remove"}
             </button>
             {" · "}
-            <button onClick={() => setConfirmRemove(false)} className="hover:text-gray-700">
-              Cancel
-            </button>
+            <button onClick={() => setConfirmRemove(false)} className="hover:text-gray-700">Cancel</button>
           </span>
         ) : (
           <button

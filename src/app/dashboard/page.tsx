@@ -1014,9 +1014,26 @@ export default async function DashboardPage({
           </section>
 
           {/* ══════════════════════════════════════════════════════════════
-              THIS WEEK
+              THIS WEEK — combined plan context + mileage progress
           ══════════════════════════════════════════════════════════════ */}
-          {(weeklyTargetDisplay != null || weekLongRunDisplay != null || weekQualitySession) && (
+          {(hasPlan && planWeeks.length > 0) ? (
+            <section className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">This Week</p>
+              <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+                <PlanCard
+                  userId={user.id}
+                  currentWeek={planCurrentWeek}
+                  totalWeeks={planTotalWeeks}
+                  currentWeekData={planWeeks.find(w => w.week_number === planCurrentWeek) ?? null}
+                  useMetric={useMetric}
+                  actualDisplay={currentWeekDisplay}
+                  targetDisplay={weeklyTargetDisplay}
+                  distUnit={distUnit}
+                  progressPct={progressPct}
+                />
+              </div>
+            </section>
+          ) : (weeklyTargetDisplay != null || weekLongRunDisplay != null || weekQualitySession) ? (
             <section className="space-y-3">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">This Week</p>
               <div className="rounded-xl border border-gray-100 bg-white shadow-sm divide-y divide-gray-50">
@@ -1047,35 +1064,23 @@ export default async function DashboardPage({
                 )}
               </div>
             </section>
-          )}
+          ) : null}
 
           {/* ══════════════════════════════════════════════════════════════
-              YOUR PLAN
+              YOUR PLAN — only shown when no plan uploaded yet
           ══════════════════════════════════════════════════════════════ */}
-          <section className="space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Your Plan</p>
-            <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
-              {hasPlan && planWeeks.length > 0 ? (
-                <PlanCard
-                  userId={user.id}
-                  currentWeek={planCurrentWeek}
-                  totalWeeks={planTotalWeeks}
-                  currentWeekData={planWeeks.find(w => w.week_number === planCurrentWeek) ?? null}
-                  allWeeks={planWeeks}
-                  raceWeekNums={allRaceWeekNums}
-                  useMetric={useMetric}
-                />
-              ) : (
-                <>
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Following a training plan?</p>
-                  <p className="text-xs text-gray-400 mb-4">
-                    If you&apos;re following a plan from Runna, TrainingPeaks, or anywhere else, upload it here — Dean will reference it after each run. No plan? Post-run coaching works great without one.
-                  </p>
-                  <PlanImportForm userId={user.id} />
-                </>
-              )}
-            </div>
-          </section>
+          {!hasPlan && (
+            <section className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Your Plan</p>
+              <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+                <p className="text-sm font-semibold text-gray-800 mb-1">Following a training plan?</p>
+                <p className="text-xs text-gray-400 mb-4">
+                  If you&apos;re following a plan from Runna, TrainingPeaks, or anywhere else, upload it here — Dean will reference it after each run. No plan? Post-run coaching works great without one.
+                </p>
+                <PlanImportForm userId={user.id} />
+              </div>
+            </section>
+          )}
 
           {/* ══════════════════════════════════════════════════════════════
               INJURY & LOAD
