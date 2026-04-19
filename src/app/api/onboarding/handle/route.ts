@@ -379,13 +379,15 @@ If Strava is connected and the STRAVA note says "this is a trail race", you MUST
 Do NOT use vague phrases like "your best Strava effort" without naming the specific race. Do NOT state the suggested easy pace as settled or confident — frame it as preliminary until the calibration question is answered.
 Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).`}`;
 
-  // Call Claude Sonnet — web_search handles race date lookups automatically
+  // Only enable web search when we still need a race date — avoids routing non-race
+  // messages (injuries, training tools, etc.) through the verbose search model.
+  const needsRaceDateLookup = !onboardingData.race_date;
   const claudeResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 600,
     system: systemPrompt,
     messages: [...history, { role: "user", content: message }],
-    tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
+    ...(needsRaceDateLookup ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" }] } : {}),
   });
 
   // Extract final text (post-search text blocks only, discarding pre-search reasoning)
@@ -477,6 +479,9 @@ Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREA
     while (firstOk < paras.length - 1 && /^⚠️/.test(paras[firstOk].trim())) firstOk++;
     if (firstOk > 0) responseText = paras.slice(firstOk).join("\n\n").trim();
   }
+
+  // Strip markdown links inserted by web search citations (e.g. "[text](url)") — SMS doesn't render them
+  responseText = responseText.replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1").trim();
 
   // Extract structured fields from the full conversation using Haiku
   const extracted = await extractFields([
