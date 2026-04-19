@@ -392,6 +392,12 @@ End with one forward-looking sentence connecting their data to their goal — UN
 Do NOT narrate all the stats like a report. Pick what's most interesting and make it feel like a real coach read the data — the performance picture first, risk context woven in.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
 
+NEVER NAME A RACE WITHOUT A CONFIRMED DATE:
+Before referencing any specific race by name in your reply (e.g. "Dipsea", "Snowbird", "Boston"), that race's date must already appear under "WHAT YOU ALREADY KNOW" above OR be confirmed in the conversation. If you're about to mention a race whose date you don't know, STOP — instead ask the athlete directly: "Is [race name] still on your calendar? What's the date?" Then call web_search to verify the date once they confirm. Casually mentioning a named race without a date — even in a supportive aside ("perfect for trail races like Dipsea and Snowbird") — is a hard error: it implies you've already incorporated those races into the plan when you haven't.
+
+MULTI-RACE CALENDARS — confirm every race:
+If the athlete mentions more than one race (an A race plus B/C tune-ups), each race needs a confirmed date before [READY]. Do not signal [READY] with any race date missing or first-of-month. If a B/C race date is unknown, ask: "What's the date of [race name]?" — one question, one answer, then continue.
+
 RACE RESPONSE RULE — NO WIKIPEDIA RECAPS:
 When an athlete mentions a race they're doing, do NOT describe the race back to them (distances, elevation stats, location details). They already know the race — they signed up for it. Instead, respond with ONE coaching insight about what the race demands and why it matters for their training. Be specific and useful: e.g. "Dipsea's stairs and Snowbird's vert reward the same thing — strong hiking and climbing legs. Good double-header." Use the course data from your search to inform your insight, not to narrate it back.
 
@@ -430,7 +436,13 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
 
   // Treat a stored first-of-month date as suspect (month-only guess) and re-search.
   const isFirstOfMonth = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-01$/.test(d);
-  const needsRaceDateLookup = !onboardingData.race_date || isFirstOfMonth(onboardingData.race_date);
+  // Lookup is needed if the A race has no confirmed date OR any named B/C race
+  // is missing a date — both must be confirmed before [READY].
+  const otherRacesNeedingDate = (
+    (onboardingData.other_races as Array<{ name?: string | null; date?: string | null }> | null) ?? []
+  ).some((r) => r?.name && (!r.date || isFirstOfMonth(r.date)));
+  const needsRaceDateLookup =
+    !onboardingData.race_date || isFirstOfMonth(onboardingData.race_date) || otherRacesNeedingDate;
   const isOpenAI = (process.env.AI_PROVIDER ?? "openai") === "openai";
 
   // On OpenAI, gpt-4o-search-preview has a 6000 TPM hard limit — far too small for
@@ -814,7 +826,8 @@ Rules:
 - recent_race_time_minutes: ONLY from lines labeled "Athlete:" — never from "Coach:" lines. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5. Use the most recent road race time (not trail, not Strava coach summaries). If only a trail time is mentioned by the athlete, leave null.
 - easy_pace: the athlete's stated easy running pace — "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile). ONLY from lines labeled "Athlete:" — never from "Coach:" lines, training plan content, PDF attachments, or pace suggestions the coach provides. If Dean says "your easy pace is 9:30/mi" but the athlete never stated it themselves, leave null.
 - timezone: IANA string from location ("Provo, UT" → "America/Denver").
-- other_races: B/C secondary races only, not the main A race. Same date rule as race_date: if only a month was given with no specific day, omit the item or leave date null — do NOT default to the 1st of the month.
+- race_name: extract the named target race when the athlete names one (e.g. "Dipsea", "Boston Marathon", "Snowbird Cirque Series"). Capture the name as stated, even if no date is given — the system will look up the date separately. If the athlete names multiple races, race_name is the primary/A race; the rest go into other_races.
+- other_races: B/C secondary races only, not the main A race. Always include named races the athlete mentions even if the date isn't given (use null date) — capturing the name lets the system pre-search the date next turn. Same date rule as race_date: if only a month was given with no specific day, omit the date or leave it null — do NOT default to the 1st of the month.
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
 - injury_history: summarize any historical injuries the athlete has had (past injuries they've recovered from, recurring issues, injury-prone areas). Extract from the athlete's own words only. Null if not mentioned.
 - current_niggles: any current aches, pain, or issues the athlete is managing right now (distinct from past injury history). Null if not mentioned.

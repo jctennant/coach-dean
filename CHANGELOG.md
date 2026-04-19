@@ -4,11 +4,11 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
-## 2026-04-19 — Onboarding: PDF-during-onboarding, no-silent-drop, Strava-first ordering
+## 2026-04-19 — Onboarding: PDF-during-onboarding, no-silent-drop, Strava-first ordering, race-date confirmation
 
 **Type:** Bug Fix + Improvement
 **Reported by:** Jake (live onboarding test)
-**User feedback:** "1) PDF extraction from the text message didn't work 2) He didn't respond after I gave him my 5k time 3) I think we should try to have strava connected earlier and use that as a starting point for understanding someone's fitness vs connecting it at the end."
+**User feedback:** "1) PDF extraction from the text message didn't work 2) He didn't respond after I gave him my 5k time 3) I think we should try to have strava connected earlier and use that as a starting point for understanding someone's fitness vs connecting it at the end ... also there was no search of the actual race dates or confirmation of what dates either in that convo."
 **Root cause:**
 1. **PDF dropped during onboarding.** `linq/route.ts:346` gated PDF processing on `!user.onboarding_step`, so PDFs sent mid-onboarding fell through to the text path. Dean saw the text mention of a PDF in history and hallucinated an acknowledgment — the actual file was never parsed.
 2. **Silent failure after 5K time.** In `onboarding/handle/route.ts`, `sendAndStore` was called unconditionally with `responseText.trimEnd()`. When Claude's response cleaned down to an empty string (e.g. only `[READY]`/`[STRAVA_LINK]` placeholders remained, or the model emitted no post-tool text), an empty SMS was sent — invisible to the athlete. Additionally, the [READY]+mode-unresolved branch replaced Dean's actual reply with a hard-coded mode question, losing the acknowledgment of the athlete's last message.
@@ -17,6 +17,7 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 1. Added `handlePDFDuringOnboarding` in `linq/route.ts` that parses the PDF via `/api/plan/upload`, marks `has_existing_plan`, `plan_uploaded`, `plan_week_count`, `plan_session_count` on `onboarding_data`, then forwards a synthetic system message to `/api/onboarding/handle` so Dean acknowledges the parsed plan inline and continues intake. `summarizeCollected` was updated to surface the uploaded plan so Dean sees it under "WHAT YOU ALREADY KNOW" and never re-asks for the PDF.
 2. Added an empty-response guard in `handleConversation`: if `responseText` is empty after cleanup, fall back to a brief ack. Wrapped the [READY] path's `sendAndStore` in a truthy check, and in the [READY]+mode-unresolved branch, concatenate Dean's reply with the mode question instead of dropping it.
 3. Reordered the CONVERSATION FLOW block and the STRAVA/MODE CONFIRMATION sections so Strava is step 3 (right after mode confirmation) and injury/strength moves to step 4 — matching the documented intent in CLAUDE.md.
+4. Added a "NEVER NAME A RACE WITHOUT A CONFIRMED DATE" rule + a "MULTI-RACE CALENDARS" rule to Dean's system prompt: any named race in his reply must already have a confirmed date in onboarding_data, otherwise he must ask first. Strengthened the Haiku extraction prompt to capture `race_name` and `other_races` entries even when the date isn't given (so the system can pre-search next turn). Expanded `needsRaceDateLookup` to also fire when any B/C race in `other_races` is missing a date — without this, the OpenAI pre-search and Anthropic web_search tool wouldn't activate for secondary races.
 **Files changed:** src/app/api/webhooks/linq/route.ts, src/app/api/onboarding/handle/route.ts
 
 ---
