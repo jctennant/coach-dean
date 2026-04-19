@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — No exercise lists during onboarding; defer to dashboard
+
+**Type:** Improvement
+**Reported by:** User feedback (internal)
+**User feedback:** "I don't think we should give long lists of exercises before the plan (they should go in the dashboard) unless the user asks explicitly"
+**Root cause:** The onboarding instruction said to "mandatorily deliver" exercises if the athlete explicitly asked, but also set up a flow where Dean would proactively promise exercises ("once you connect Strava, I can give you exercises") — then fulfill that promise after Strava connected, even when the athlete never explicitly asked. The injury-mention guard existed but wasn't preventing this promise-then-deliver pattern.
+**Fix / Change:** Rewrote the exercise instruction in onboarding/handle to: (1) never proactively offer or promise exercises, (2) if explicitly asked, acknowledge and defer to the dashboard ("I'll add tailored exercises to your dashboard once your plan is ready"), (3) never list exercises in the onboarding conversation. Exercise recommendations are already added to the dashboard during initial_plan generation.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-04-18 — Fix race date not collected when web search fails during onboarding
 
 **Type:** Bug Fix
