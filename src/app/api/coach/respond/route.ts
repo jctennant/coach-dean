@@ -1332,6 +1332,7 @@ Use this data to:
   let storedNextPlanWeek: StoredPlanWeek | null = null;
   let storedPlanAllWeeks: StoredPlanWeek[] = [];
   let uploadedPlanAllWeeks: UploadedPlanWeek[] = [];
+  let uploadedCurrentWeek: UploadedPlanWeek | null = null;
   let uploadedNextWeek: UploadedPlanWeek | null = null;
   let isUploadedPlan = false;
   let storedPlanId: string | null = null;
@@ -1349,6 +1350,7 @@ Use this data to:
       storedPlanId = planData.id as string;
       if (isUploadedPlan) {
         uploadedPlanAllWeeks = planData.weeks as UploadedPlanWeek[];
+        uploadedCurrentWeek = uploadedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
         uploadedNextWeek = uploadedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
       } else {
         storedPlanAllWeeks = planData.weeks as StoredPlanWeek[];
@@ -1582,7 +1584,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return sessions.length === 0;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length);
 
   // For uploaded plans in weekly_recap and user_message: inject next week's sessions directly
   // from the stored plan rather than relying on the periodization engine's inferred values.
@@ -4493,6 +4495,9 @@ function buildUserMessage(
   nightlyNoSessions = false,
   skippedNonRunSession: string | null = null,
   planDeviationFlag: string | null = null,
+  isUploadedPlan = false,
+  uploadedCurrentWeek: { week_number: number; sessions: Array<{ dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null }>; total_miles: number; total_miles_min?: number; total_miles_max?: number } | null = null,
+  uploadedTotalWeeks = 0,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -4846,6 +4851,22 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       const recapMi = (miles: number) => recapIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const storedPlanContext = storedPlanWeek
         ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${recapMi(storedPlanWeek.mileage_target)} | Long run: ~${recapMi(storedPlanWeek.long_run_target)}\nKey workout: ${storedPlanWeek.key_workout || "n/a"}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
+        : isUploadedPlan && uploadedCurrentWeek
+        ? (() => {
+            const mileageRange = uploadedCurrentWeek.total_miles_min != null && uploadedCurrentWeek.total_miles_max != null
+              ? `${recapMi(uploadedCurrentWeek.total_miles_min)}–${recapMi(uploadedCurrentWeek.total_miles_max)}`
+              : `~${recapMi(uploadedCurrentWeek.total_miles)}`;
+            const sessionLines = uploadedCurrentWeek.sessions
+              .filter(s => s.type !== "off")
+              .map(s => {
+                const distPart = s.targetDistanceMilesMin != null && s.targetDistanceMilesMax != null
+                  ? ` (${recapMi(s.targetDistanceMilesMin)}–${recapMi(s.targetDistanceMilesMax)})`
+                  : s.targetDistanceMiles ? ` (${recapMi(s.targetDistanceMiles)})` : "";
+                return `  - ${s.dayOfWeek}: ${s.description}${distPart}`;
+              })
+              .join("\n");
+            return `UPLOADED PLAN — WHAT WAS SCHEDULED THIS WEEK (week ${uploadedCurrentWeek.week_number} of ${uploadedTotalWeeks}):\n${sessionLines}\nWeekly total: ${mileageRange}\n\nYour job: recap how actual training compared to these prescribed sessions — what did they complete, what did they adjust or skip? The <uploaded_plan_next_week> block below contains next week's sessions; use those exactly — do not invent different sessions.\n\n`;
+          })()
         : "";
       const isMetric = preferredUnits === "metric";
       const weekVolumeVal = isMetric ? (weekMileageSoFar * 1.60934).toFixed(1) : weekMileageSoFar.toFixed(1);
@@ -4858,7 +4879,7 @@ Keep the whole thing under 480 characters. No markdown, no bullet points. Sound 
       const weekMileageContext = noStravaMileageData
         ? `<rule>MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.</rule>\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
         : `<rule>THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.</rule>\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
-      // Injury hold overrides normal progression entirely.
+      // Injury hold overrides normal progression entirely — applies regardless of plan type.
       const injuryHoldInstruction = injuryHoldSince
         ? `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
 Do NOT prescribe running sessions this week. The athlete is on an injury hold.
@@ -4867,6 +4888,26 @@ Second text: prescribe cross-training and rest only. Include 1–2 gentle test-r
 If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST] with running sessions — only cross-training and test-run probe sessions.
 Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
+        // Uploaded plan: next week's sessions come from <uploaded_plan_next_week> appended below.
+        // Do NOT inject periodization overrides — the uploaded plan owns its own week structure.
+        // A "RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION" block would conflict with
+        // whatever the external plan has scheduled (e.g. a peak week with tempo + long run).
+        : isUploadedPlan
+        ? ""
+        // Dean-generated plan: prefer the arc's stored next-week entry when available.
+        // More accurate than re-deriving from periodization math — matches what the dashboard shows.
+        : storedNextPlanWeek
+        ? (() => {
+          const nwt = storedNextPlanWeek.mileage_target;
+          const compLabel = weekMileageSoFar > 0
+            ? (nwt / weekMileageSoFar < 0.85
+              ? ` — LIGHTER than last week (${recapMi(weekMileageSoFar)}; planned pullback — do NOT say 'stepping up')`
+              : nwt / weekMileageSoFar > 1.08
+              ? ` — HEAVIER than last week (${recapMi(weekMileageSoFar)}; progressive step up)`
+              : ` — SIMILAR to last week (${recapMi(weekMileageSoFar)})`)
+            : "";
+          return `\nNEXT WEEK — ARC DATA (week ${storedNextPlanWeek.week_number}): ~${recapMi(nwt)}${compLabel} | Phase: ${storedNextPlanWeek.phase} | Long run: ~${recapMi(storedNextPlanWeek.long_run_target)} | Key workout: ${storedNextPlanWeek.key_workout || "n/a"}\nUse the arc data above as the anchor for next week's plan — match the mileage target, include the long run, and build in the key workout. Do not invent a different progression.\n`;
+        })()
         : periodization?.isDeloadWeek
         ? `\n<rule>RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. CRITICAL: Do NOT add extra rest days to hit this target — keep the same number of running days. If the athlete mentioned soreness or tightness, annotate the affected runs (e.g. "(softer surface, stop if pain)") rather than canceling them. The mileage reduction is the recovery — not fewer running days. Recovery weeks are not optional — skipping them is how athletes break down.</rule>\n`
         : periodization?.suggestedWeeklyMiles != null

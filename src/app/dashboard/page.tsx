@@ -207,7 +207,8 @@ function buildZoneStrip(
   activities: ActivityRow[],
   easyPaceStr: string | null,
   tempoPaceStr: string | null,
-  timezone: string
+  timezone: string,
+  lthr: number | null = null,
 ): { runs: ZoneRun[]; weeks: string[]; maxHREstimate: number | null } {
   const RUN = RUN_ACTIVITY_TYPES;
 
@@ -252,21 +253,37 @@ function buildZoneStrip(
     if (a.workout_type === 3) { runs.push({ date: wk, zone: "hard", signal: "workout_type" }); continue; }
     if (a.workout_type === 2) { runs.push({ date: wk, zone: "easy", signal: "workout_type" }); continue; }
 
-    if (maxHREstimate && a.average_heartrate) {
-      const avgPct = a.average_heartrate / maxHREstimate;
-      const maxPct = a.max_heartrate ? a.max_heartrate / maxHREstimate : null;
+    if (a.average_heartrate && (lthr || maxHREstimate)) {
+      if (lthr) {
+        // LTHR-based: thresholds mirror the zone bar displayed to the user.
+        // easy = Z1+Z2 (below LT1, < 89% LTHR)
+        // moderate = Z3 gray zone (LT1–LT2, 89–95% LTHR)
+        // hard = Z4+Z5 (at/above LT2, > 95% LTHR)
+        // Interval proxy: avg clears LT2 boundary OR (peak > 95% LTHR AND avg > 89%)
+        const avgBpm = a.average_heartrate;
+        const maxBpm = a.max_heartrate ?? null;
+        const lt1 = lthr * 0.89;  // top of Z2 / bottom of gray zone
+        const lt2 = lthr * 0.95;  // top of Z3 / bottom of Z4 (threshold)
+        if (maxBpm != null && maxBpm > lt2 && avgBpm > lt1) {
+          runs.push({ date: wk, zone: "hard", signal: "hr" });
+        } else if (avgBpm < lt1) {
+          runs.push({ date: wk, zone: "easy", signal: "hr" });
+        } else if (avgBpm < lt2) {
+          runs.push({ date: wk, zone: "moderate", signal: "hr" });
+        } else {
+          runs.push({ date: wk, zone: "hard", signal: "hr" });
+        }
+        continue;
+      }
 
-      // Interval/threshold proxy: peak HR cleared the hard zone AND avg HR was
-      // elevated enough (>72%) to rule out a single brief spike on an easy run.
-      // 72% sits just below the moderate boundary (75%) — an interval session
-      // with recovery jogs will land there; a genuinely easy run with one hill
-      // spike will have a much lower avg HR.
-      // Threshold is 0.83 (not 0.85) because recovery jogs between reps suppress
-      // peak HR slightly vs sustained efforts — 800s at race effort typically top
-      // out around 83–88% rather than clearing 85% cleanly.
-      // avgPct threshold is 0.78 (not 0.72): easy runs on hilly terrain regularly
-      // hit a momentary max above 83% while averaging only 73–74% — the original
-      // 0.72 cutoff was too low and incorrectly flagged those as hard.
+      // % max HR fallback (no LTHR): zones align with the max HR zone bar.
+      // easy = Z1+Z2 (< 75% max HR), moderate = Z3 (75–85%), hard = Z4+Z5 (> 85%)
+      const avgPct = a.average_heartrate / maxHREstimate!;
+      const maxPct = a.max_heartrate ? a.max_heartrate / maxHREstimate! : null;
+
+      // Interval proxy: peak cleared Z3 (> 83%) AND avg above easy boundary (> 0.78).
+      // 0.83 not 0.85: recovery jogs suppress peak HR on interval sessions.
+      // 0.78 not 0.75: hilly easy runs can spike momentarily but keep avg low.
       if (maxPct != null && maxPct > 0.83 && avgPct > 0.78) {
         runs.push({ date: wk, zone: "hard", signal: "hr" });
         continue;
@@ -763,12 +780,13 @@ export default async function DashboardPage({
   const storedLthrSource = (profileData?.lthr_source as LTHRSource | null) ?? null;
   const storedLthrConfidence = (profileData?.lthr_confidence as string | null) ?? null;
 
-  // Zone data
+  // Zone data — pass LTHR so dot classification matches the displayed zone bar
   const zoneData = buildZoneStrip(
     activities,
     (profileData?.current_easy_pace as string | null) ?? null,
     (profileData?.current_tempo_pace as string | null) ?? null,
-    timezone
+    timezone,
+    storedLthr,
   );
 
   // Last 7 days runs

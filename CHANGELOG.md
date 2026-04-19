@@ -4,6 +4,30 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Fix Sunday recap accuracy across all three plan types
+
+**Type:** Bug Fix
+**Reported by:** Internal audit
+**User feedback:** N/A
+**Root cause:** Three gaps in the `weekly_recap` trigger:
+1. **Uploaded plan users** got no "what was planned this week" context — `storedPlanContext` was always empty for them, so Dean couldn't compare planned vs actual.
+2. **Uploaded plan users** received the periodization `RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION` and `NEXT WEEK TARGET` blocks, which directly conflicted with the `<uploaded_plan_next_week>` sessions. A plan with a peak week (long run + tempo) could be overridden by the deload rule.
+3. **Dean-generated plan users** had `storedNextPlanWeek` fetched (the arc's specific Week N+1 data) but it was only used in `user_message`, not `weekly_recap`. The recap generated next week from generic periodization math instead of the arc — potentially diverging from what the dashboard shows.
+**Fix / Change:**
+- Added `uploadedCurrentWeek` lookup (current week's uploaded plan sessions) and injected it as a "WHAT WAS SCHEDULED THIS WEEK" context block in the recap.
+- Added `isUploadedPlan` param to `buildUserMessage`; when true, suppresses all periodization overrides in the recap (injury hold still fires — it's always relevant).
+- For Dean-generated plans, the recap now uses `storedNextPlanWeek` arc data (phase, mileage target, long run, key workout) as the next-week anchor instead of re-deriving from periodization math.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-04-18 — Replace plan → Remove plan; fix run intensity zone alignment
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** (1) "Replace plan" and "Remove plan" as dual CTAs was redundant — the empty state already shows the import form naturally after removal. (2) When LTHR data is available, the run intensity dots (easy/moderate/hard) were classified using % of estimated max HR, while the zone bar displayed LTHR-relative thresholds — the two weren't aligned.
+**Fix / Change:** (1) Replaced `ReplacePlanSection` with a simple "Remove plan" inline confirm link that calls `/api/plan/remove` and reloads to the empty state. (2) `buildZoneStrip` now accepts an `lthr` parameter; when present it classifies runs using LTHR-relative thresholds (easy < 89% LTHR, moderate 89–95% LTHR, hard > 95% LTHR) that directly mirror the displayed zone bar boundaries (LT1, LT2). Falls back to % max HR when no LTHR.
+**Files changed:** `src/app/dashboard/plan-tab.tsx`, `src/app/dashboard/page.tsx`
+
 ## 2026-04-18 — Admin changelog broadcast endpoint
 
 **Type:** Feature

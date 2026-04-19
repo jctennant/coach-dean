@@ -445,28 +445,47 @@ export function PlanTab({
         </div>
       </div>
 
-      <ReplacePlanSection userId={userId} />
+      <RemovePlanSection userId={userId} />
     </div>
   );
 }
 
-function ReplacePlanSection({ userId }: { userId: string }) {
-  const [open, setOpen] = useState(false);
+function RemovePlanSection({ userId }: { userId: string }) {
+  const [confirm, setConfirm] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  async function handleRemove() {
+    setRemoving(true);
+    await fetch("/api/plan/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    window.location.reload();
+  }
+
   return (
-    <div className="pb-4">
-      {open ? (
-        <div className="rounded-xl border border-gray-100 bg-white p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold text-gray-600">Replace plan</p>
-            <button onClick={() => setOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-          </div>
-          <PlanImportForm userId={userId} />
-        </div>
+    <div className="pb-4 text-center">
+      {confirm ? (
+        <p className="text-xs text-gray-400">
+          Remove your plan?{" "}
+          <button
+            onClick={handleRemove}
+            disabled={removing}
+            className="text-red-500 underline underline-offset-2 hover:text-red-700 disabled:opacity-50"
+          >
+            {removing ? "Removing…" : "Yes, remove"}
+          </button>
+          {" · "}
+          <button onClick={() => setConfirm(false)} className="underline underline-offset-2 hover:text-gray-600">
+            Cancel
+          </button>
+        </p>
       ) : (
-        <p className="text-center text-xs text-gray-400">
+        <p className="text-xs text-gray-400">
           Text Dean anytime to discuss your plan.{" "}
-          <button onClick={() => setOpen(true)} className="underline underline-offset-2 hover:text-gray-600">
-            Replace plan
+          <button onClick={() => setConfirm(true)} className="underline underline-offset-2 hover:text-gray-600">
+            Remove plan
           </button>
         </p>
       )}
