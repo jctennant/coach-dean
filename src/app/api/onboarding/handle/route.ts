@@ -134,8 +134,8 @@ async function preSearchRaceDate(raceName: string): Promise<string | null> {
       tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
     });
     const text = response.content
-      .filter((b): b is { type: "text"; text: string } => b.type === "text")
-      .map((b) => b.text)
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { type: "text"; text: string }).text)
       .join(" ");
     const match = text.match(/DATE:\s*(\d{4}-\d{2}-\d{2})/);
     return match ? match[1] : null;
