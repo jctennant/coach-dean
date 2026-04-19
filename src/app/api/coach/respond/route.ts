@@ -2054,20 +2054,8 @@ Weekly total: ${mileageRange}
         message_type: "initial_plan_link",
       });
 
-      // Third bubble: invite feedback and mention the default reminder cadence.
-      // Include location from Strava so the athlete can confirm the timezone is right.
-      // If no city was available from Strava, ask for it and park on awaiting_timezone
-      // so their reply gets routed to handleTimezone in onboarding/handle.
-      const locationStr = stravaCity && stravaState
-        ? `${stravaCity}, ${stravaState}`
-        : stravaCity ?? null;
-      const howDoesItLookMsg = locationStr
-        ? `How does this look? Happy to adjust anything. I've got your location as ${locationStr} — let me know if that needs correcting.`
-        : "How does this look? Happy to adjust anything. One quick thing — what city are you in? I want to make sure I have the right timezone for you.";
-      if (!locationStr) {
-        // Park user on awaiting_timezone so their next reply is handled by handleTimezone
-        await supabase.from("users").update({ onboarding_step: "awaiting_timezone" }).eq("id", userId);
-      }
+      // Third bubble: invite feedback.
+      const howDoesItLookMsg = "How does this look? Happy to adjust anything.";
       if (!dry_run) {
         if (chatId) await startTyping(chatId);
         await new Promise((r) => setTimeout(r, 1200));

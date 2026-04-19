@@ -609,11 +609,9 @@ describe("coach/respond — initial_plan closing message", () => {
     });
   });
 
-  it("calls generateAndSaveFullPlan with skipLinkSms=true and asks for city when no strava_city", async () => {
+  it("calls generateAndSaveFullPlan with skipLinkSms=true and sends closing message", async () => {
     // The dashboard link is now included in our own closing message (not sent from
     // generateAndSaveFullPlan), so skipLinkSms must be true to avoid a duplicate link SMS.
-    // When no strava_city is available, the closing message asks for the user's city
-    // so reminders fire at the right local time.
     const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
     const { sendSMS } = await import("@/lib/linq");
 
@@ -633,13 +631,12 @@ describe("coach/respond — initial_plan closing message", () => {
     const opts = gpCalls[0][4] as Record<string, unknown>;
     expect(opts.skipLinkSms).toBe(true);
 
-    // Without a city from Strava, the closing message asks what city they're in
-    // so reminders can fire at the right local time.
+    // Closing message invites feedback
     const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
       (c: unknown[]) => c[1] as string
     );
     const combined = allTexts.join("\n");
-    expect(combined).toMatch(/what city are you in/i);
+    expect(combined).toMatch(/how does this look/i);
   });
 });
 
