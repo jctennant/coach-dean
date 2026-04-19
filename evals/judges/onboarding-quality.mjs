@@ -17,9 +17,9 @@ export function buildOnboardingJudgePrompt(fixture, deanResponse) {
    - false = jumps straight to questions with no self-introduction at all
    - null = N/A (not first message)
 
-2. asks_name: Does the response ask for the athlete's name?
-   - true = explicitly asks for name
-   - false = does not ask for name
+2. asks_name: Does the response ask for the athlete's name in a combined question with their goal?
+   - true = asks for name AND goal/training context in one combined question (e.g. "What's your name, and what are you working toward?")
+   - false = does not ask for name, OR asks for name and goal as two separate questions
    - null = name already collected` : `
 1. has_intro: null (not first message)
 
