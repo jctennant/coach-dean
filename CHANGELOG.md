@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Fix: B/C race dates defaulting to first-of-month placeholder
+
+**Type:** Bug Fix
+**Reported by:** User feedback (observed in DB — races for Dipsea and Cirque Series Snowbird stored as June 1 and July 1)
+**User feedback:** "looks like it just assumes race date first of the month"
+**Root cause:** Two issues: (1) `other_races` date field in Haiku extraction schema had no "don't default to first of month" instruction unlike the primary `race_date` field; (2) On OpenAI path, `preSearchRaceDate` only looked up the A race — B/C races with no date (or a first-of-month placeholder) were never pre-searched; (3) `needsRaceDateLookup` only checked `!race_date`, so a wrong first-of-month date in `onboarding_data` prevented re-search on subsequent turns.
+**Fix / Change:** Added no-first-of-month instruction to `other_races` item date description and extraction prompt. Changed `needsRaceDateLookup` to treat day=01 dates as suspect. Extended OpenAI pre-search to also look up B/C race names that have missing or first-of-month dates, running all lookups in parallel and injecting results into the system prompt.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-04-18 — Fix: PR paces not saved to profile when extracted as manual_pr_updates
 
 **Type:** Bug Fix

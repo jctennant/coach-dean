@@ -421,7 +421,9 @@ Do NOT use vague phrases like "your best Strava effort" without naming the speci
 Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).
 IMPORTANT: Because this is a question, do NOT include [READY] in this same message. Wait for the athlete's response — even "I don't have one" is sufficient — then signal [READY] in the next turn.`}`;
 
-  const needsRaceDateLookup = !onboardingData.race_date;
+  // Treat a stored first-of-month date as suspect (month-only guess) and re-search.
+  const isFirstOfMonth = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-01$/.test(d);
+  const needsRaceDateLookup = !onboardingData.race_date || isFirstOfMonth(onboardingData.race_date);
   const isOpenAI = (process.env.AI_PROVIDER ?? "openai") === "openai";
 
   // On OpenAI, gpt-4o-search-preview has a 6000 TPM hard limit — far too small for
@@ -429,16 +431,41 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   // pre-search call (~100 tokens) to look up the race date once the race name is known,
   // then inject the result into the main system prompt. Main call uses gpt-4o (no search).
   let raceDateInjection = "";
-  if (isOpenAI && needsRaceDateLookup) {
+  if (isOpenAI) {
     const raceName = onboardingData.race_name as string | null;
-    if (raceName) {
-      const date = await preSearchRaceDate(raceName);
-      if (date) {
-        raceDateInjection = `\nRACE DATE PRE-LOOKUP: "${raceName}" is on ${date}. Present this date to the athlete and confirm it sounds right. Do not search again.`;
-      } else {
-        raceDateInjection = `\nRACE DATE LOOKUP FAILED: Could not find the exact date for "${raceName}" online. You MUST ask the athlete directly: "What's the exact date of ${raceName}?" Do not proceed or signal [READY] until you have a confirmed date.`;
-      }
+    // Collect B/C race names that are missing or have first-of-month placeholder dates
+    const otherRaces = (onboardingData.other_races as Array<{ name?: string | null; date?: string | null; priority: string }> | null) ?? [];
+    const otherRaceNames = otherRaces
+      .filter((r) => r.name && (!r.date || isFirstOfMonth(r.date)))
+      .map((r) => r.name as string);
+
+    const searchPromises: Array<Promise<void>> = [];
+
+    if (raceName && needsRaceDateLookup) {
+      searchPromises.push(
+        preSearchRaceDate(raceName).then((date) => {
+          if (date) {
+            raceDateInjection += `\nRACE DATE PRE-LOOKUP: "${raceName}" is on ${date}. Present this date to the athlete and confirm it sounds right. Do not search again.`;
+          } else {
+            raceDateInjection += `\nRACE DATE LOOKUP FAILED: Could not find the exact date for "${raceName}" online. You MUST ask the athlete directly: "What's the exact date of ${raceName}?" Do not proceed or signal [READY] until you have a confirmed date.`;
+          }
+        })
+      );
     }
+
+    for (const name of otherRaceNames) {
+      searchPromises.push(
+        preSearchRaceDate(name).then((date) => {
+          if (date) {
+            raceDateInjection += `\nSECONDARY RACE PRE-LOOKUP: "${name}" is on ${date}. Confirm with athlete: "I found ${name} listed as ${date} — does that sound right?"`;
+          } else {
+            raceDateInjection += `\nSECONDARY RACE LOOKUP FAILED: Could not find exact date for "${name}". Ask the athlete: "What's the exact date of ${name}?"`;
+          }
+        })
+      );
+    }
+
+    if (searchPromises.length > 0) await Promise.all(searchPromises);
   }
 
   const claudeResponse = await anthropic.messages.create({
@@ -741,7 +768,7 @@ Rules:
 - recent_race_time_minutes: ONLY from lines labeled "Athlete:" — never from "Coach:" lines. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5. Use the most recent road race time (not trail, not Strava coach summaries). If only a trail time is mentioned by the athlete, leave null.
 - easy_pace: the athlete's stated easy running pace — "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile). ONLY from lines labeled "Athlete:" — never from "Coach:" lines, training plan content, PDF attachments, or pace suggestions the coach provides. If Dean says "your easy pace is 9:30/mi" but the athlete never stated it themselves, leave null.
 - timezone: IANA string from location ("Provo, UT" → "America/Denver").
-- other_races: B/C secondary races only, not the main A race.
+- other_races: B/C secondary races only, not the main A race. Same date rule as race_date: if only a month was given with no specific day, omit the item or leave date null — do NOT default to the 1st of the month.
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
 - injury_history: summarize any historical injuries the athlete has had (past injuries they've recovered from, recurring issues, injury-prone areas). Extract from the athlete's own words only. Null if not mentioned.
 - current_niggles: any current aches, pain, or issues the athlete is managing right now (distinct from past injury history). Null if not mentioned.
@@ -797,7 +824,7 @@ Rules:
                 items: {
                   type: "object",
                   properties: {
-                    date: { type: "string", description: "YYYY-MM-DD" },
+                    date: { type: "string", description: "YYYY-MM-DD. If only a month was given with no specific day, do NOT default to the 1st — leave null or omit. Only use first-of-month if the athlete explicitly said so." },
                     name: { type: ["string", "null"] },
                     goal: { type: ["string", "null"] },
                     priority: { type: "string", enum: ["B", "C"] },
