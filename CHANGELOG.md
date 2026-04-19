@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Hard-gate mode question before injury/cross-training in onboarding
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "Not seeing the different ways you can work with Dean laid out in onboarding — Dean jumped straight to asking about injuries without asking which mode I wanted."
+**Root cause:** Step 2 of the conversation flow said "Once goal is clear, ask which mode fits" but lacked a hard gate preventing Dean from proceeding to step 3 (injuries/cross-training) before mode was confirmed. Dean inferred "two race goals = wants a plan built" and skipped the mode question entirely.
+**Fix / Change:** Added explicit DO NOT gate to step 2: "DO NOT proceed to step 3 until mode is confirmed — never ask about injuries or cross-training before the athlete has answered this question."
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
 ## 2026-04-18 — Fix wrong tempo/interval paces, long run overage, cross-training day label, third-person intro
 
 **Type:** Bug Fix
