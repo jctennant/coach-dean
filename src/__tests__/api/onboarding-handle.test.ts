@@ -275,6 +275,35 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     expect(usersUpdates.length).toBeGreaterThan(0);
   });
 
+  it("pre-search: injects race date when race_name is known and race_date is missing", async () => {
+    mockTables({
+      users: {
+        data: onboardingUser({
+          onboarding_data: { race_name: "Boston Marathon", goal: "marathon" },
+        }),
+        error: null,
+      },
+      conversations: { data: [], error: null },
+    });
+
+    // 1st call: preSearchRaceDate (Haiku + search) → returns "DATE: 2026-04-20"
+    mockLLMResponse("DATE: 2026-04-20");
+    // 2nd call: Sonnet main response
+    mockLLMResponse("Boston Marathon is April 20, 2026 — that gives us a solid 18-week build.");
+    // 3rd call: Haiku field extraction
+    mockToolResponse("save_training_fields", { race_date: "2026-04-20" });
+
+    await POST(makeRequest({ userId: "user-001", message: "So when exactly is Boston?" }));
+
+    // SMS should include the race date from the pre-lookup
+    expect(sendSMS).toHaveBeenCalledWith(
+      "+12025551234",
+      expect.stringContaining("April 20, 2026")
+    );
+    // 3 LLM calls total: pre-search + Sonnet + Haiku
+    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(3);
+  });
+
   it("existing plan: null has_existing_plan is not overwritten by subsequent turns", async () => {
     // Once has_existing_plan is set to true, a follow-up turn where Haiku returns null
     // should NOT overwrite it (the null-skip merge logic must hold)

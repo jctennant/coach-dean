@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Fix onboarding 500 errors from OpenAI search model TPM limit
+
+**Type:** Bug Fix
+**Reported by:** Vercel runtime logs
+**User feedback:** N/A
+**Root cause:** `gpt-4o-search-preview` has a 6000 TPM hard limit. The full onboarding system prompt + conversation history (~6114 tokens) exceeded it on every message where `race_date` was not yet set, returning 429 → 500.
+**Fix / Change:** Replaced inline web search on the main Sonnet call with a dedicated `preSearchRaceDate()` function. When `AI_PROVIDER=openai` and `race_name` is already extracted (from a prior Haiku turn), it makes a minimal ~100-token call to `gpt-4o-search-preview`, injects the result into the main prompt, and the main Sonnet call uses `gpt-4o` (no search tools). On Anthropic, the original inline search behavior is unchanged.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-04-18 — Onboarding: strip all web search citation links + introduce modes early
 
 **Type:** Bug Fix + Improvement

@@ -116,6 +116,35 @@ export async function POST(request: Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Race date pre-search (OpenAI path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Looks up a race date using a minimal prompt that stays under gpt-4o-search-preview's
+ * 6000 TPM limit. Only called when AI_PROVIDER=openai and race_name is already known.
+ */
+async function preSearchRaceDate(raceName: string): Promise<string | null> {
+  const year = new Date().getFullYear();
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 100,
+      system: "Race date lookup. Search for the exact date. Reply ONLY with: DATE: YYYY-MM-DD — or NONE if not found.",
+      messages: [{ role: "user", content: `Exact date of ${raceName} in ${year} or ${year + 1}?` }],
+      tools: [{ type: "web_search_20250305" as const, name: "web_search" }],
+    });
+    const text = response.content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join(" ");
+    const match = text.match(/DATE:\s*(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Unified conversation handler
 // ---------------------------------------------------------------------------
 
@@ -382,15 +411,32 @@ If Strava is connected and the STRAVA note says "this is a trail race", you MUST
 Do NOT use vague phrases like "your best Strava effort" without naming the specific race. Do NOT state the suggested easy pace as settled or confident — frame it as preliminary until the calibration question is answered.
 Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).`}`;
 
-  // Only enable web search when we still need a race date — avoids routing non-race
-  // messages (injuries, training tools, etc.) through the verbose search model.
   const needsRaceDateLookup = !onboardingData.race_date;
+  const isOpenAI = (process.env.AI_PROVIDER ?? "openai") === "openai";
+
+  // On OpenAI, gpt-4o-search-preview has a 6000 TPM hard limit — far too small for
+  // the full onboarding system prompt + conversation history. Instead, run a minimal
+  // pre-search call (~100 tokens) to look up the race date once the race name is known,
+  // then inject the result into the main system prompt. Main call uses gpt-4o (no search).
+  let raceDateInjection = "";
+  if (isOpenAI && needsRaceDateLookup) {
+    const raceName = onboardingData.race_name as string | null;
+    if (raceName) {
+      const date = await preSearchRaceDate(raceName);
+      if (date) {
+        raceDateInjection = `\nRACE DATE PRE-LOOKUP: "${raceName}" is on ${date}. Present this date to the athlete and confirm it sounds right. Do not search again.`;
+      }
+    }
+  }
+
   const claudeResponse = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 600,
-    system: systemPrompt,
+    system: systemPrompt + raceDateInjection,
     messages: [...history, { role: "user", content: message }],
-    ...(needsRaceDateLookup ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" }] } : {}),
+    // On OpenAI: search tools omitted — pre-search above handles race date lookup.
+    // On Anthropic: pass web_search so Claude can search inline (no TPM constraint).
+    ...(needsRaceDateLookup && !isOpenAI ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" }] } : {}),
   });
 
   // Extract final text (post-search text blocks only, discarding pre-search reasoning)
