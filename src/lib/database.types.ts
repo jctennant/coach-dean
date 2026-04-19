@@ -467,8 +467,8 @@ export type Database = {
           taper_peak_miles: number | null
           updated_at: string | null
           user_id: string
-          week1_start_date: string | null
           week_mileage_so_far: number | null
+          week1_start_date: string | null
           weekly_long_run_miles: number | null
           weekly_mileage_target: number | null
           weekly_plan_sessions: Json | null
@@ -487,8 +487,8 @@ export type Database = {
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id: string
-          week1_start_date?: string | null
           week_mileage_so_far?: number | null
+          week1_start_date?: string | null
           weekly_long_run_miles?: number | null
           weekly_mileage_target?: number | null
           weekly_plan_sessions?: Json | null
@@ -507,8 +507,8 @@ export type Database = {
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id?: string
-          week1_start_date?: string | null
           week_mileage_so_far?: number | null
+          week1_start_date?: string | null
           weekly_long_run_miles?: number | null
           weekly_mileage_target?: number | null
           weekly_plan_sessions?: Json | null
@@ -540,6 +540,7 @@ export type Database = {
           onboarding_step: string | null
           payment_link_sent_at: string | null
           phone_number: string
+          plan_update_sent_at: string | null
           reengagement_sent_at: string | null
           strava_access_token: string | null
           strava_athlete_id: number | null
@@ -568,6 +569,7 @@ export type Database = {
           onboarding_step?: string | null
           payment_link_sent_at?: string | null
           phone_number: string
+          plan_update_sent_at?: string | null
           reengagement_sent_at?: string | null
           strava_access_token?: string | null
           strava_athlete_id?: number | null
@@ -596,6 +598,7 @@ export type Database = {
           onboarding_step?: string | null
           payment_link_sent_at?: string | null
           phone_number?: string
+          plan_update_sent_at?: string | null
           reengagement_sent_at?: string | null
           strava_access_token?: string | null
           strava_athlete_id?: number | null

@@ -322,14 +322,23 @@ export function computeLongRunProgression(
     }
   }
 
+  // Peek at current week's longest run separately — needed for overreach detection
+  // but excluded from stagnation detection (week may be incomplete).
+  const currentWeekLongest = Math.round((longestByWeek[thisWeekKey] ?? 0) * 10) / 10;
+
   const nonZero = weeks.filter(m => m > 0);
   if (nonZero.length < 3) {
     return { weeklyLongestRuns: weeks, trend: "insufficient_data", summary: "Insufficient data for long run progression." };
   }
 
-  // Overreach: last long run jumped >25% vs prior
+  // Overreach: current week's long run jumped >25% vs most recent completed week.
+  // Also catches jumps within completed weeks (lastTwo of nonZero).
+  const lastCompletedLong = nonZero[nonZero.length - 1] ?? 0;
+  const currentWeekJump = currentWeekLongest > 0 && lastCompletedLong > 0
+    && currentWeekLongest > lastCompletedLong * 1.25 && currentWeekLongest > 8;
   const lastTwo = nonZero.slice(-2);
-  const jumpDetected = lastTwo.length === 2 && lastTwo[1] > lastTwo[0] * 1.25 && lastTwo[1] > 8;
+  const completedJump = lastTwo.length === 2 && lastTwo[1]! > lastTwo[0]! * 1.25 && lastTwo[1]! > 8;
+  const jumpDetected = currentWeekJump || completedJump;
 
   // Stagnation: recent 4 long runs within 1 mile of each other (flat plateau)
   const recent4 = weeks.slice(-4).filter(m => m > 0);

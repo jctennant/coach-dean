@@ -27,6 +27,8 @@ interface UploadRequest {
   dry_run?: boolean;
   /** Which week the user is currently on (1-indexed). Defaults to 1. */
   currentWeek?: number;
+  /** Pre-extracted weeks from a prior dry_run — skips LLM extraction on save */
+  preExtractedWeeks?: PlanWeek[];
 }
 
 interface ExtractedSession {
@@ -56,9 +58,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { userId, content, contentType, filename, dry_run = false, currentWeek = 1 } = body;
+  const { userId, content, contentType, filename, dry_run = false, currentWeek = 1, preExtractedWeeks } = body;
 
-  if (!userId || !content || !contentType) {
+  if (!userId || (!preExtractedWeeks && (!content || !contentType))) {
     return NextResponse.json({ error: "Missing required fields: userId, content, contentType" }, { status: 400 });
   }
 
@@ -75,48 +77,55 @@ export async function POST(request: Request) {
 
   try {
     let truncated = false;
+    let weeks: PlanWeek[];
     let sessions: ExtractedSession[];
 
-    if (contentType === "image_base64") {
-      sessions = await extractFromImage(content);
-    } else if (contentType === "pdf_url" || contentType === "pdf_base64") {
-      const result = contentType === "pdf_url"
-        ? await extractFromPDF(content)
-        : await extractFromPDFBase64(content);
-      sessions = result.sessions;
-      truncated = result.truncated;
+    if (preExtractedWeeks) {
+      // Reuse already-extracted data from dry_run — no LLM call needed
+      weeks = preExtractedWeeks;
+      sessions = weeks.flatMap(w => w.sessions);
     } else {
-      sessions = await extractFromText(content);
-    }
+      if (contentType === "image_base64") {
+        sessions = await extractFromImage(content);
+      } else if (contentType === "pdf_url" || contentType === "pdf_base64") {
+        const result = contentType === "pdf_url"
+          ? await extractFromPDF(content)
+          : await extractFromPDFBase64(content);
+        sessions = result.sessions;
+        truncated = result.truncated;
+      } else {
+        sessions = await extractFromText(content);
+      }
 
-    if (sessions.length === 0) {
-      return NextResponse.json({ error: "Could not extract any training sessions from the provided content." }, { status: 422 });
-    }
+      if (sessions.length === 0) {
+        return NextResponse.json({ error: "Could not extract any training sessions from the provided content." }, { status: 422 });
+      }
 
-    // Group sessions into weeks
-    const weekMap: Record<number, ExtractedSession[]> = {};
-    for (const session of sessions) {
-      if (!weekMap[session.weekNumber]) weekMap[session.weekNumber] = [];
-      weekMap[session.weekNumber].push(session);
-    }
+      // Group sessions into weeks
+      const weekMap: Record<number, ExtractedSession[]> = {};
+      for (const session of sessions) {
+        if (!weekMap[session.weekNumber]) weekMap[session.weekNumber] = [];
+        weekMap[session.weekNumber].push(session);
+      }
 
-    const weeks: PlanWeek[] = Object.entries(weekMap)
-      .sort(([a], [b]) => parseInt(a) - parseInt(b))
-      .map(([weekNum, weekSessions]) => {
-        const midpointMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMiles ?? 0), 0);
-        const minMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMilesMin ?? s.targetDistanceMiles ?? 0), 0);
-        const maxMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMilesMax ?? s.targetDistanceMiles ?? 0), 0);
-        const hasRange = Math.abs(maxMiles - minMiles) > 0.5;
-        return {
-          week_number: parseInt(weekNum),
-          sessions: weekSessions,
-          total_miles: Math.round(midpointMiles * 10) / 10,
-          ...(hasRange ? {
-            total_miles_min: Math.round(minMiles * 10) / 10,
-            total_miles_max: Math.round(maxMiles * 10) / 10,
-          } : {}),
-        };
-      });
+      weeks = Object.entries(weekMap)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .map(([weekNum, weekSessions]) => {
+          const midpointMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMiles ?? 0), 0);
+          const minMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMilesMin ?? s.targetDistanceMiles ?? 0), 0);
+          const maxMiles = weekSessions.reduce((sum, s) => sum + (s.targetDistanceMilesMax ?? s.targetDistanceMiles ?? 0), 0);
+          const hasRange = Math.abs(maxMiles - minMiles) > 0.5;
+          return {
+            week_number: parseInt(weekNum),
+            sessions: weekSessions,
+            total_miles: Math.round(midpointMiles * 10) / 10,
+            ...(hasRange ? {
+              total_miles_min: Math.round(minMiles * 10) / 10,
+              total_miles_max: Math.round(maxMiles * 10) / 10,
+            } : {}),
+          };
+        });
+    }
 
     if (dry_run) {
       return NextResponse.json({ ok: true, sessions, weeks, sessionCount: sessions.length, truncated });

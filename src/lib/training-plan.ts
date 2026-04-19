@@ -706,17 +706,39 @@ No other text.`,
 export async function syncWeekFromArc(userId: string, weekNum: number): Promise<void> {
   const { data: plan } = await supabase
     .from("training_plans")
-    .select("weeks")
+    .select("weeks, plan_source")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(1)
     .single();
   if (!plan?.weeks || !Array.isArray(plan.weeks)) return;
-  const weeks = plan.weeks as Array<{ week_number: number; long_run_target: number; key_workout: string }>;
-  const week = weeks.find(w => w.week_number === weekNum);
-  if (!week) return;
-  await supabase.from("training_state").update({
-    weekly_long_run_miles: week.long_run_target ?? null,
-    weekly_quality_session: week.key_workout || null,
-  }).eq("user_id", userId);
+
+  type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null };
+  type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
+  type DeanWeek = { week_number: number; long_run_target: number; key_workout: string };
+
+  if (plan.plan_source === "uploaded") {
+    const weeks = plan.weeks as UploadedWeek[];
+    const week = weeks.find(w => w.week_number === weekNum);
+    if (!week) return;
+    const longRun = week.sessions.find(s => s.type === "long");
+    const quality = week.sessions.find(s => s.type === "tempo" || s.type === "interval");
+    const qualitySessions = week.sessions
+      .filter(s => s.type === "tempo" || s.type === "interval")
+      .map(s => s.description)
+      .join("; ") || null;
+    await supabase.from("training_state").update({
+      weekly_long_run_miles: longRun?.targetDistanceMiles ?? null,
+      weekly_quality_session: qualitySessions,
+      weekly_mileage_target: week.total_miles || null,
+    }).eq("user_id", userId);
+  } else {
+    const weeks = plan.weeks as DeanWeek[];
+    const week = weeks.find(w => w.week_number === weekNum);
+    if (!week) return;
+    await supabase.from("training_state").update({
+      weekly_long_run_miles: week.long_run_target ?? null,
+      weekly_quality_session: week.key_workout || null,
+    }).eq("user_id", userId);
+  }
 }

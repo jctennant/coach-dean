@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Admin changelog broadcast endpoint
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** No way to send a broadcast SMS update to all active users (beyond the one-off dashboard-announcement route).
+**Fix / Change:** Added `/api/admin/changelog` route — sends 3-bubble SMS to all active onboarded users (active in last 30 days, not opted out, not already sent). Covers: new plan format (mileage target + long run + 1-2 quality sessions, no day-by-day), Strava annotations, and dashboard. Tracked via `plan_update_sent_at` column on users. Supports `dry_run` and single-user `userId` for testing. Requires DB migration: `ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_update_sent_at timestamptz;` then `npm run gen:types`.
+**Files changed:** `src/app/api/admin/changelog/route.ts`
+
+---
+
 ## 2026-04-18 — Graceful handling for large / unreadable PDFs
 
 **Type:** Feature / Bug Fix

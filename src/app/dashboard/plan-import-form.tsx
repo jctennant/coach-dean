@@ -117,7 +117,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
   }
 
   async function handleSave() {
-    if (!pendingContent) return;
+    if (!preview) return;
     setStatus("saving");
 
     try {
@@ -126,10 +126,11 @@ export function PlanImportForm({ userId }: { userId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId,
-          content: pendingContent,
+          content: "",
           contentType: pendingContentType,
           filename: pendingFilename ?? undefined,
           currentWeek,
+          preExtractedWeeks: preview.weeks,
         }),
       });
 
@@ -196,6 +197,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
           {pendingFilename && (
             <p className="mt-2 text-[10px] text-gray-400 truncate">{pendingFilename}</p>
           )}
+          <p className="mt-1 text-[10px] text-gray-400">Values are approximate — ranges in the plan may vary slightly each read.</p>
           {truncated && (
             <p className="mt-2 text-[10px] text-amber-600">PDF was very large — only the first portion was read. Check that all your weeks imported correctly.</p>
           )}
@@ -207,7 +209,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
               onClick={() => setCurrentWeek(w => Math.max(1, w - 1))}
               className="w-7 h-7 rounded-full border border-gray-200 text-gray-500 text-sm leading-none"
             >−</button>
-            <span className="w-16 text-center text-sm font-semibold tabular-nums text-gray-900">
+            <span className="w-24 text-center text-sm font-semibold tabular-nums text-gray-900 whitespace-nowrap">
               Week {currentWeek} of {preview.weeks.length}
             </span>
             <button
@@ -222,7 +224,7 @@ export function PlanImportForm({ userId }: { userId: string }) {
             disabled={status === "saving"}
             className="flex-1 rounded-full bg-gray-900 py-2.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            {status === "saving" ? "Saving…" : "Save to Dean"}
+            {status === "saving" ? "Saving…" : "Share with Coach Dean"}
           </button>
           <button
             onClick={handleReset}
@@ -241,8 +243,15 @@ export function PlanImportForm({ userId }: { userId: string }) {
   return (
     <div className="mt-4">
       {status === "extracting" && (
-        <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-center">
-          <p className="text-sm text-gray-500">Reading your plan…</p>
+        <div className="rounded-lg border border-gray-100 bg-gray-50 p-6 text-center">
+          <div className="flex justify-center mb-3">
+            <svg className="animate-spin h-6 w-6 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+          <p className="text-sm font-medium text-gray-600">Reading your plan…</p>
+          <p className="mt-1 text-xs text-gray-400">This usually takes 10–20 seconds</p>
         </div>
       )}
 

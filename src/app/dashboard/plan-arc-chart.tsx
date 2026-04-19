@@ -72,16 +72,6 @@ export function PlanArcChart({
 
   return (
     <div className="space-y-2">
-      {/* Header row */}
-      <div className="flex items-baseline justify-between">
-        <p className="text-sm font-semibold text-gray-800">
-          Week {currentWeek} of {totalWeeks}
-        </p>
-        <p className="text-[11px] text-gray-400">
-          Peak {peakMi} · wk {peakWeek.week_number}
-        </p>
-      </div>
-
       {/* Arc chart */}
       <div className="overflow-x-auto">
         <svg
@@ -113,8 +103,8 @@ export function PlanArcChart({
             const maxH = hasRange ? toH(week.mileage_target_max!) : midH;
             const tallH = Math.max(midH, maxH);
 
-            const fill = isPast ? "#d1d5db" : isCurrent ? "#111827" : "#6b7280";
-            const rangeFill = isPast ? "#e5e7eb" : isCurrent ? "#374151" : "#9ca3af";
+            const fill = isPast ? "#d1d5db" : isCurrent ? "#111827" : "#818cf8";
+            const rangeFill = isPast ? "#e5e7eb" : isCurrent ? "#374151" : "#c7d2fe";
             const rangeOpacity = 0.35;
 
             const showLabel =
