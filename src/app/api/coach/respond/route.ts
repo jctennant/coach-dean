@@ -2039,7 +2039,7 @@ Weekly total: ${mileageRange}
       ? "\n\nAlso added strength exercises to your dashboard tailored to your injury history — worth doing 2× a week to stay healthy."
       : "";
     const closingMsg = planUrl
-      ? `Your full plan is here: ${planUrl}${strengthNote}`
+      ? `Your full plan is here: ${planUrl}${strengthNote}\n\nHow does this look? Happy to adjust anything.`
       : null;
     if (closingMsg) {
       if (!dry_run) {
@@ -2051,20 +2051,6 @@ Weekly total: ${mileageRange}
         user_id: userId,
         role: "assistant",
         content: closingMsg,
-        message_type: "initial_plan_link",
-      });
-
-      // Third bubble: invite feedback.
-      const howDoesItLookMsg = "How does this look? Happy to adjust anything.";
-      if (!dry_run) {
-        if (chatId) await startTyping(chatId);
-        await new Promise((r) => setTimeout(r, 1200));
-        await sendSMS(user.phone_number, howDoesItLookMsg);
-      }
-      await supabase.from("conversations").insert({
-        user_id: userId,
-        role: "assistant",
-        content: howDoesItLookMsg,
         message_type: "initial_plan_link",
       });
     }
@@ -5023,9 +5009,9 @@ CRITICAL — COMMUNICATE THE PARTIAL WEEK TO THE ATHLETE: In your first bubble, 
 
 BUBBLE 1: One concise sentence — just what happens next. Use "I" (first person only). No "Welcome aboard", no enthusiasm about the baseline. Example: "I'll be watching every run and sending you a note after each one — let's build toward [race/goal]." 2 sentences max.
 
-BUBBLE 2: Their starting training framework — ${weekBudgetExhausted ? `two things only (no long run — budget already met this week):
-- What Sunday's full plan will look like (weekly mileage target)
-- One note on what to expect in week 1` : `three things only:
+BUBBLE 2: Their starting training framework — ${weekBudgetExhausted ? `two things only. The week is essentially over — do NOT mention a long run or quality session for this week, not even as a description of "what week 1 looks like." Instead:
+- Acknowledge the miles already done this week
+- What the first FULL week (starting Monday) will look like: weekly mileage target and rough structure` : `three things only:
 - Weekly mileage target (grounded in their current volume from Strava or stated mileage)
 - One quality session this week: just the type and rough structure (e.g. "a tempo run — 20 min at a comfortably hard effort" or "strides at the end of one easy run"), not a full schedule
 - Long run target for this week`}

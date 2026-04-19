@@ -4,6 +4,32 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Stop asking pace calibration question and sending plan simultaneously
+
+**Type:** Bug Fix
+**Reported by:** Jake (user)
+**User feedback:** "looks like Dean didn't wait in this case for me to actually respond before sending his next questions - this is too much in a row"
+**Root cause:** Two issues compounding. (1) When Strava connects mid-onboarding with a trail race as the best activity, the system prompt told Claude to ask the road race calibration question AND signal [READY] in the same message — which immediately fires initial_plan without waiting for the user's answer. (2) initial_plan sends 4 messages in sequence (2 plan bubbles + dashboard link + "How does this look?"), making the wall of messages even longer.
+**Fix / Change:** Added explicit instruction in the SIGNALING READY section: pace calibration question and [READY] are mutually exclusive — if you're asking the road race question, hold off on [READY] until the user responds. Also merged "How does this look? Happy to adjust anything." into the dashboard link message, reducing initial_plan from 4 messages to 3.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts
+
+## 2026-04-18 — Three onboarding fixes: third person, Saturday-night plan, race logging
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal testing)
+**User feedback:** "1) Dean does fill in a long run and quality session for this week (which I won't do) - is this the right approach? Week 1 of 12. 2) seems one race date got saved properly in the dashboard but the second race didn't. 3) Dean still talked about himself in 3rd person — 'Dean's got everything set'"
+**Root cause:**
+1. The BUBBLE 2 instructions for `weekBudgetExhausted` said "One note on what to expect in week 1" — Claude interpreted this as permission to describe week 1 structure including long run + quality session, even when the week was already 98% complete.
+2. The onboarding [READY] prompt included an example phrase "Dean is calibrated" which Claude used as a template, producing third-person self-reference.
+3. `other_races` items had no date validation or logging, so silently dropped races gave no signal to diagnose why a secondary race didn't save.
+**Fix / Change:**
+1. Tightened `weekBudgetExhausted` BUBBLE 2: now explicitly says "do NOT mention a long run or quality session for this week, not even as a description" and redirects to first full week starting Monday.
+2. Changed the [READY] example in `onboarding/handle` from "Dean is calibrated" to "I've got everything I need" + added explicit first-person-only rule.
+3. Added date validation and console.warn logging for each dropped `other_races` item; added insert-count log so missing races are visible in Vercel logs.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-18 — Fix TypeScript build error: avgWeeklyMileage not in scope in buildUserMessage
 
 **Type:** Bug Fix

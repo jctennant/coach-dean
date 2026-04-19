@@ -405,7 +405,8 @@ For race goals: you MUST confirm the athlete's working mode before signaling [RE
 3. They don't have a plan and prefer to train without a set schedule — Dean just gives post-run feedback.
 The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
-When you signal [READY], do not ask any more questions in that message. Wrap up warmly — focus on what starts now, not on plan delivery. Frame it as the coaching relationship kicking off: "Dean is calibrated, your first coaching note lands after your next run." Use the athlete's specific goal or race to make it personal. The system will follow up automatically.
+CRITICAL — [READY] means zero open questions: [READY] can only appear in a message that contains NO questions of any kind — required or optional, soft or hard. The moment you add a question mark to a message, [READY] is off the table for that turn, no matter how minor the question seems. If you realize you still need to ask something (pace calibration, goal time, any follow-up), ask it in this message WITHOUT [READY] and wait for the athlete's response. Then wrap up and signal [READY] in your next turn. Signaling [READY] while an unanswered question is in the same message fires the plan immediately — the athlete never gets to respond.
+When you signal [READY], wrap up warmly — focus on what starts now, not on plan delivery. Use first person only — never refer to yourself as "Dean". Example: "I've got everything I need — your first coaching note lands after your next run." Use the athlete's specific goal or race to make it personal. The system will follow up automatically.
 
 ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
@@ -417,7 +418,8 @@ You already asked about road race times earlier in this conversation. Do NOT ask
   : `PACE CALIBRATION — trail race on Strava:
 If Strava is connected and the STRAVA note says "this is a trail race", you MUST ask about road race times in THIS message — do not defer it to a later turn. Trail paces are slower than road paces due to elevation, so the suggested easy pace from Strava is only a rough estimate until we get a road benchmark. Reference the specific race from the STRAVA note by its label and date (e.g. "I can see a [label] from [date] in your Strava history"). Then explain that since it was a trail race, elevation makes trail paces slower than road paces, so you'd love a recent road 5K, 10K, or half marathon time for more accurate training zones — but no worries if they don't have one.
 Do NOT use vague phrases like "your best Strava effort" without naming the specific race. Do NOT state the suggested easy pace as settled or confident — frame it as preliminary until the calibration question is answered.
-Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).`}`;
+Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).
+IMPORTANT: Because this is a question, do NOT include [READY] in this same message. Wait for the athlete's response — even "I don't have one" is sufficient — then signal [READY] in the next turn.`}`;
 
   const needsRaceDateLookup = !onboardingData.race_date;
   const isOpenAI = (process.env.AI_PROVIDER ?? "openai") === "openai";
@@ -1380,7 +1382,18 @@ async function completeOnboarding(
           goal_distance_miles?: number | null;
         }> | null
       ) ?? [])
-        .filter((r) => r.date)
+        .filter((r) => {
+          if (!r.date) {
+            console.warn(`[onboarding] other_races item dropped — missing date: ${JSON.stringify(r)}`);
+            return false;
+          }
+          const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(r.date) && !isNaN(Date.parse(r.date));
+          if (!isValidDate) {
+            console.warn(`[onboarding] other_races item dropped — invalid date "${r.date}": ${JSON.stringify(r)}`);
+            return false;
+          }
+          return true;
+        })
         .map((r) => ({
           user_id: user.id,
           race_date: r.date,
@@ -1391,6 +1404,7 @@ async function completeOnboarding(
           goal_distance_miles: r.goal_distance_miles ?? null,
         })),
     ];
+    console.log(`[onboarding] inserting ${racesToInsert.length} race(s):`, racesToInsert.map(r => `${r.race_name ?? "unnamed"} (${r.priority})`).join(", "));
 
     const { error: racesError } = await supabase
       .from("races")
