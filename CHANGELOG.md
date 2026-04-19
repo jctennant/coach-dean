@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Onboarding: strip all web search citation links + introduce modes early
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Jake (internal observation during onboarding conversation)
+**User feedback:** "(dipsea.org)" and "(cirqueseries.com)" appearing in SMS. Three working modes should be introduced right after goal is established, before injury questions.
+**Root cause:** Link strip only handled `[text](url)` markdown format. Web search also outputs bare domain citations `(domain.com)` and full URL citations `(https://...)`. Mode introduction was buried at the plan-preference step near the end of onboarding.
+**Fix / Change:** Added two additional strip passes for bare-domain and full-URL parenthetical citations. Moved working-mode introduction to step 2 of the conversation flow (immediately after goal is clear), before injury history and Strava questions.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
 ## 2026-04-18 — Onboarding: greetings, no early exercises, introduce working modes
 
 **Type:** Improvement
