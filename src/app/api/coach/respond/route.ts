@@ -637,7 +637,7 @@ async function handlePostRunOnboarding(
   const [userResult, activityResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id, phone_number, name, onboarding_step, linq_chat_id, messaging_opted_out")
+      .select("id, phone_number, name, onboarding_step, onboarding_data, linq_chat_id, messaging_opted_out")
       .eq("id", userId)
       .single(),
     activityId
@@ -660,8 +660,16 @@ async function handlePostRunOnboarding(
   const activity = activityResult.data as Record<string, unknown> | null;
   const onboardingStep = user.onboarding_step as string | null;
   const pendingQuestion = onboardingStep ? (ONBOARDING_STEP_QUESTIONS[onboardingStep] ?? null) : null;
+  const collectedData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
+  const collectedSummary = Object.keys(collectedData).length > 0
+    ? `\n\nALREADY COLLECTED (do NOT re-ask for any of these — the athlete has told you already):\n${JSON.stringify(collectedData, null, 2)}`
+    : "";
 
-  const systemPrompt = `You are Coach Dean, an AI running coach. A user just finished a run but hasn't finished setting up their coaching profile yet. React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable). Then pivot naturally to continue their onboarding with the question below. Keep the whole message under 4 sentences. No lists, no markdown, no bullet points.${pendingQuestion ? `\n\nAfter your brief reaction, ask: "${pendingQuestion}"` : "\n\nAfter your brief reaction, let them know you're excited to get their plan together."}`;
+  const closingInstruction = pendingQuestion
+    ? `After your brief reaction, ask: "${pendingQuestion}"`
+    : "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
+
+  const systemPrompt = `You are Coach Dean, an AI running coach. A user just finished a run but hasn't finished setting up their coaching profile yet. React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable). Keep the whole message under 4 sentences. No lists, no markdown, no bullet points.${collectedSummary}\n\n${closingInstruction}`;
 
   const activityDetails = activity
     ? {

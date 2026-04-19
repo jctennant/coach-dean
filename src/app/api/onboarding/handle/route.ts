@@ -354,7 +354,7 @@ ${stravaContext}
 CONVERSATION FLOW:
 Everyone gets the same core intake. The order is roughly:
 1. First message: intro + ask for their name and training context in one question (e.g. "What's your name, and how's your training been going lately?")
-2. Once goal is clear: ask which mode fits. Keep it to 1–2 sentences: "I can work a few different ways — build you a training plan, work alongside a plan you're already following, or just send you coaching notes after each run without a set schedule. Which sounds right?" ONLY skip this if the athlete has already explicitly mentioned a specific training platform by name (Runna, TrainingPeaks, Garmin Coach, a coach-written plan, etc.) OR explicitly said they just want post-run feedback. Having a race goal alone is NOT enough to infer mode — many athletes with races already follow a plan. If in doubt, ask. DO NOT proceed to step 3 until mode is confirmed.
+2. Once goal is clear AND any race dates are confirmed (see "RACE DATE CONFIRMATION COMES FIRST" below), ask which mode fits. Use this EXACT wording — do not paraphrase, do not merge the options, do not invent a fourth "build your own with support" option: "I can work three different ways — (1) I build you a training plan from scratch, (2) I work alongside a plan you're already following (Runna, TrainingPeaks, a coach, etc.) and give you feedback after each run, or (3) no set schedule — I just send a coaching note after each run you log. Which sounds right?" Number the options (1/2/3) so the athlete can reply "1" or "option 2" without ambiguity. ONLY skip this question if the athlete has already explicitly mentioned a specific training platform by name (Runna, TrainingPeaks, Garmin Coach, a coach-written plan, etc.) OR explicitly said they just want post-run feedback. Having a race goal alone is NOT enough to infer mode — many athletes with races already follow a plan. If in doubt, ask. DO NOT proceed to step 3 until mode is confirmed.
 3. Once mode is confirmed: ask about Strava. This comes BEFORE injury history, strength/cross-training, or any fitness-baseline question. Strava data often answers fitness questions automatically, so connecting it first lets the remaining intake be calibrated against real data rather than self-report.
 4. After Strava (connected or skipped): ask about injury history + strength/cross-training (can be one natural question: "Any injuries that have slowed you down, and do you do any strength work?")
 5. Collect remaining required fields: race date, training days, fitness baseline as applicable
@@ -447,6 +447,9 @@ End with one forward-looking sentence connecting their data to their goal — UN
 Do NOT narrate all the stats like a report. Pick what's most interesting and make it feel like a real coach read the data — the performance picture first, risk context woven in.
 If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
 
+RACE DATE CONFIRMATION COMES FIRST:
+Whenever a "RACE DATE PRE-LOOKUP" or "RACE DATE LOOKUP FAILED" line appears anywhere in this prompt (injected at the end), your VERY NEXT message MUST address those race dates before anything else — before the mode question, before Strava, before any other step in the flow. Read the pre-lookup result back to the athlete and confirm it (e.g. "I'm finding Dipsea 2026 listed for June 14 and the Snowbird Cirque Series for July 18 — do those sound right?"). If the lookup failed for any race, ask the athlete directly for that race's exact date. Do not move on to mode/Strava/anything else until every race date is confirmed in the conversation. This is because every downstream step (training weeks, taper, periodization) depends on those dates being correct.
+
 NEVER NAME A RACE WITHOUT A CONFIRMED DATE:
 Before referencing any specific race by name in your reply (e.g. "Dipsea", "Snowbird", "Boston"), that race's date must already appear under "WHAT YOU ALREADY KNOW" above OR be confirmed in the conversation. If you're about to mention a race whose date you don't know, STOP — instead ask the athlete directly: "Is [race name] still on your calendar? What's the date?" Then call web_search to verify the date once they confirm. Casually mentioning a named race without a date — even in a supportive aside ("perfect for trail races like Dipsea and Snowbird") — is a hard error: it implies you've already incorporated those races into the plan when you haven't.
 
@@ -470,14 +473,14 @@ After searching: if the athlete stated a specific date (day + month) and the sea
 
 SIGNALING READY:
 When you have name + goal + injury history + at least one of (pace/PR data OR Strava connected OR confirmed they are just starting out / returning with no benchmarks yet) + confirmed plan preference (for race goals), end your final message with [READY] on its own line.
-For race goals: you MUST confirm the athlete's working mode before signaling [READY]. Per the flow above, this should have been asked in message 2. If it somehow hasn't come up yet, introduce all three options before asking: "I can work a few different ways — build you a training plan, work alongside a plan you're already following, or just send coaching notes after each run without a set schedule. Which sounds right?" There are three valid answers:
+For race goals: you MUST confirm the athlete's working mode before signaling [READY]. Per the flow above, this should have been asked in message 2. If it somehow hasn't come up yet, introduce all three options before asking, using this EXACT wording: "I can work three different ways — (1) I build you a training plan from scratch, (2) I work alongside a plan you're already following (Runna, TrainingPeaks, a coach, etc.) and give you feedback after each run, or (3) no set schedule — I just send a coaching note after each run you log. Which sounds right?" There are three valid answers:
 1. They already follow a plan (Runna, TrainingPeaks, coach-written, spreadsheet, etc.) — Dean works alongside it as a post-run analyst.
 2. They don't have a plan and want Dean to build one.
 3. They don't have a plan and prefer to train without a set schedule — Dean just gives post-run feedback.
 The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
 CRITICAL — [READY] means zero open questions: [READY] can only appear in a message that contains NO questions of any kind — required or optional, soft or hard. The moment you add a question mark to a message, [READY] is off the table for that turn, no matter how minor the question seems. If you realize you still need to ask something (pace calibration, goal time, any follow-up), ask it in this message WITHOUT [READY] and wait for the athlete's response. Then wrap up and signal [READY] in your next turn. Signaling [READY] while an unanswered question is in the same message fires the plan immediately — the athlete never gets to respond.
-When you signal [READY], wrap up warmly — focus on what starts now, not on plan delivery. Use first person only — never refer to yourself as "Dean". Example: "I've got everything I need — your first coaching note lands after your next run." Use the athlete's specific goal or race to make it personal. The system will follow up automatically.
+When you signal [READY], wrap up warmly AND orient the athlete to what happens next. Two pieces: (1) what to expect from you next — usually a coaching note after their next Strava run, or their plan landing shortly — and (2) a natural mention of their dashboard as the home for their training data (upcoming plan, zone distribution, aerobic efficiency trend, uploaded training PDFs). Include [DASHBOARD_LINK] on its own line as a placeholder — the system replaces it with the URL. Use first person only — never refer to yourself as "Dean". Tie the wrap-up to the athlete's specific goal or race. Example: "I've got everything I need — your first coaching note lands after your next run. I'll keep your dashboard updated with your plan, zone trends, and aerobic efficiency as new runs come in from Strava. You can access it any time here:\n[DASHBOARD_LINK]" You have freedom in phrasing — skip the dashboard mention only when it clearly doesn't fit the moment. The system will follow up automatically after this message.
 
 ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
@@ -545,6 +548,13 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     }
 
     if (searchPromises.length > 0) await Promise.all(searchPromises);
+
+    // If any lookups ran, wrap in a <rule> tag so Dean treats this as a hard
+    // directive rather than soft guidance. Per the "RACE DATE CONFIRMATION
+    // COMES FIRST" section, race date confirmation must precede mode/Strava.
+    if (raceDateInjection) {
+      raceDateInjection = `\n\n<rule>RACE DATE CONFIRMATION REQUIRED — address ALL of the below in your NEXT reply before moving to mode/Strava/anything else:${raceDateInjection}\n</rule>`;
+    }
   }
 
   const claudeResponse = await anthropic.messages.create({
@@ -599,6 +609,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   // Parse signals
   const isReady = /\[READY\]/i.test(rawText);
   const wantsStravaLink = /\[STRAVA_LINK\]/i.test(rawText);
+  const wantsDashboardLink = /\[DASHBOARD_LINK\]/i.test(rawText);
 
   // Build responseText and (when Strava is requested) a separate stravaMsg.
   // Split at the paragraph containing [STRAVA_LINK] so:
@@ -629,6 +640,30 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       .trim();
   }
 
+  // Substitute [DASHBOARD_LINK] with the athlete's dashboard URL. Generate a
+  // dashboard_token if one doesn't exist yet so the link is usable immediately.
+  if (wantsDashboardLink) {
+    const { data: dashUser } = await supabase
+      .from("users")
+      .select("dashboard_token")
+      .eq("id", user.id)
+      .single();
+    let dashboardToken = dashUser?.dashboard_token as string | null;
+    if (!dashboardToken) {
+      dashboardToken = crypto.randomUUID();
+      await supabase.from("users")
+        .update({ dashboard_token: dashboardToken })
+        .eq("id", user.id);
+    }
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
+    responseText = responseText.replace(/\[DASHBOARD_LINK\]/gi, dashboardUrl);
+  } else {
+    // Safety net: if Dean mentioned [DASHBOARD_LINK] but got split into stravaMsg,
+    // or if it slipped through any other path, strip the raw placeholder.
+    responseText = responseText.replace(/\[DASHBOARD_LINK\]/gi, "").trim();
+  }
+
   // Strip any ⚠️-prefixed reasoning preamble Claude may have output (e.g. "⚠️ CRITICAL …\n\n")
   // and "RESPONSE:" label separators — these are internal directives that must never reach the athlete.
   if (/^RESPONSE:\s*/im.test(responseText)) {
@@ -643,6 +678,11 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     while (firstOk < paras.length - 1 && /^⚠️/.test(paras[firstOk].trim())) firstOk++;
     if (firstOk > 0) responseText = paras.slice(firstOk).join("\n\n").trim();
   }
+
+  // Safety net: strip any <rule>...</rule> blocks that leaked into the output.
+  // The raceDateInjection wraps pre-search results in <rule> tags; Dean is
+  // instructed not to echo them but this enforces it at runtime.
+  responseText = responseText.replace(/<rule>[\s\S]*?<\/rule>/gi, "").trim();
 
   // Strip all web search citation artifacts — SMS doesn't render links
   // 1. Markdown links: [text](url) → text
@@ -690,7 +730,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       await supabase.from("users")
         .update({ onboarding_data: mergedData as unknown as Json })
         .eq("id", user.id);
-      const modeQuestion = "One last thing before I wrap up — I want to make sure I set this up the right way. I can work a few different ways: build you a training plan, work alongside a plan you're already following, or just send coaching notes after each run without a set schedule. Which sounds right?";
+      const modeQuestion = "One last thing before I wrap up — I want to make sure I set this up the right way. I can work three different ways: (1) I build you a training plan from scratch, (2) I work alongside a plan you're already following (Runna, TrainingPeaks, a coach, etc.) and give you feedback after each run, or (3) no set schedule — I just send a coaching note after each run you log. Which sounds right?";
       // Prefer Dean's own wrap-up line + the mode question so the athlete's last
       // message is still acknowledged — otherwise the mode ask can feel abrupt
       // when it replaces a substantive reply.
@@ -706,7 +746,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     if (responseText.trim()) {
       await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
     }
-    await completeOnboarding(user, mergedData, chatId);
+    await completeOnboarding(user, mergedData, chatId, { dashboardLinkSentInWrapUp: wantsDashboardLink });
     return NextResponse.json({ ok: true });
   }
 
@@ -1249,7 +1289,7 @@ async function completeOnboarding(
   user: { id: string },
   data: Record<string, unknown>,
   chatId?: string | null,
-  opts?: { skipInitialPlan?: boolean }
+  opts?: { skipInitialPlan?: boolean; dashboardLinkSentInWrapUp?: boolean }
 ): Promise<void> {
   const goal = (data.goal as string) || "general_fitness";
   const raceDate = (data.race_date as string) || null;
@@ -1549,9 +1589,11 @@ async function completeOnboarding(
     }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
-    // Claude's [READY] message already closed warmly — just send the dashboard link as a follow-up.
-    const welcomeMsg = `Your dashboard is where all your training data lives — zone distribution, aerobic efficiency trend, and upcoming plan. You can also upload your training PDF so I can reference it directly:\n${dashboardUrl}`;
-    await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
+    if (!opts?.dashboardLinkSentInWrapUp) {
+      // Dean's [READY] message didn't include the dashboard link — send it as a follow-up.
+      const welcomeMsg = `Your dashboard is where all your training data lives — zone distribution, aerobic efficiency trend, and upcoming plan. You can also upload your training PDF so I can reference it directly:\n${dashboardUrl}`;
+      await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
+    }
     return;
   }
 
@@ -1574,9 +1616,11 @@ async function completeOnboarding(
     }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
-    // Claude's [READY] message already closed warmly — just send the dashboard link as a follow-up.
-    const welcomeMsg = `Your dashboard is where your coaching notes and training data will live:\n${dashboardUrl}`;
-    await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
+    if (!opts?.dashboardLinkSentInWrapUp) {
+      // Dean's [READY] message didn't include the dashboard link — send it as a follow-up.
+      const welcomeMsg = `Your dashboard is where your coaching notes and training data will live:\n${dashboardUrl}`;
+      await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
+    }
     return;
   }
 

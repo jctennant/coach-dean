@@ -163,7 +163,7 @@ describe("POST /api/webhooks/strava", () => {
   });
 
   it("fires post_run_onboarding coaching for new activity from user still in onboarding", async () => {
-    setupSupabase({ user: mockUser({ onboarding_step: "awaiting_schedule" }), existingActivity: null });
+    setupSupabase({ user: mockUser({ onboarding_step: "onboarding" }), existingActivity: null });
 
     const req = mockRequest({ object_type: "activity", aspect_type: "create", owner_id: 12345, object_id: 999 });
     await POST(req);

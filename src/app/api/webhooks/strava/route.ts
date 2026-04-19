@@ -311,7 +311,15 @@ async function processStravaEvent(body: {
       // Fire coaching response for new activities. Fully onboarded users get the full
       // post_run analysis; users mid-onboarding get a brief reaction + segue to finish setup.
       if (isNew && !suppressCoaching) {
-        const trigger = user.onboarding_step === null ? "post_run" : "post_run_onboarding";
+        // Post-[READY] users (awaiting_timezone) have a plan generated, so full post_run
+        // coaching works. Pre-[READY] states ("onboarding", "awaiting_strava") have no
+        // plan yet and fall back to the lightweight nudge.
+        // NOTE: once billing is live, add "awaiting_payment" to the nudge list so the
+        // full annotation is gated behind trial signup.
+        const preReadyStates = new Set(["onboarding", "awaiting_strava", "awaiting_payment"]);
+        const trigger = user.onboarding_step && preReadyStates.has(user.onboarding_step)
+          ? "post_run_onboarding"
+          : "post_run";
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

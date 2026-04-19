@@ -4,6 +4,43 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Post-run annotation fires during post-[READY] onboarding + fix redundant goal question
+
+**Type:** Bug Fix
+**Reported by:** Jake (live test)
+**User feedback:** "This question about your fitness goals felt a bit redundant since I already said I was training for Dipsea and Cirque Series Snowbird ... Also ... does the strava annotation work if the user isn't completely done with onboarding? I don't think I got mine today."
+**Root cause:**
+1. The Strava webhook routed every user with a non-null `onboarding_step` to the lightweight `post_run_onboarding` nudge — including post-[READY] users (`awaiting_timezone`) who already have a generated plan and should have received the full post-run coaching annotation.
+2. `handlePostRunOnboarding` built its prompt with no knowledge of what the athlete had already shared. When `onboarding_step === "onboarding"` (not in `ONBOARDING_STEP_QUESTIONS`), the prompt told Claude to "let them know you're excited to get their plan together" — and Claude improvised a generic "tell me about your fitness goals" question instead, re-asking something the athlete had already covered in the main onboarding thread.
+**Fix / Change:**
+1. Webhook now routes to `post_run_onboarding` only for pre-[READY] states (`onboarding`, `awaiting_strava`, `awaiting_payment`) where no plan exists yet. Post-[READY] users (`awaiting_timezone`, null) get the full `post_run` annotation. `awaiting_payment` is pre-wired into the nudge list so the full annotation is gated behind trial signup once billing goes live.
+2. `handlePostRunOnboarding` now pulls `onboarding_data` and injects it as an "ALREADY COLLECTED — do NOT re-ask" block in the system prompt. When there's no pending onboarding step question, the prompt explicitly tells Claude not to ask any question — the next onboarding question will come through the main conversation handler on the athlete's next reply.
+**Files changed:** src/app/api/webhooks/strava/route.ts, src/app/api/coach/respond/route.ts, src/__tests__/api/strava-webhook.test.ts
+
+---
+
+## 2026-04-19 — Onboarding: Dean orients athlete to dashboard in [READY] wrap-up
+
+**Type:** Improvement
+**Reported by:** Jake (live test)
+**User feedback:** "Is Dean required to send the dashboard at the end? Feels like he really needs to orient the user around the next touch point and how to use the dashboard in the meantime."
+**Root cause:** The [READY] wrap-up instruction focused narrowly on "what starts now" ("your first coaching note lands after your next run") without pointing the athlete to their dashboard or framing the next touchpoint. Dashboard URL was sent only as a separate follow-up SMS in complement/no-plan paths; billing-gated users never saw it.
+**Fix / Change:** Updated the SIGNALING READY instruction to require two pieces in the wrap-up: (1) what to expect next from Dean, and (2) a natural mention of the dashboard as the home for training data (plan, zone trends, aerobic efficiency, uploaded training PDFs). Introduced a `[DASHBOARD_LINK]` placeholder that Dean can include on its own line; the system substitutes it with the athlete's dashboard URL (generating a `dashboard_token` if one doesn't exist yet). The model has freedom to skip the dashboard mention when it doesn't fit. To avoid duplicate links, `completeOnboarding` now receives a `dashboardLinkSentInWrapUp` flag — when Dean included the link, the complement/no-plan follow-up SMS is skipped. Updated eval system prompts (`run-simulation-evals.mjs`, `run-onboarding-evals.mjs`) to mirror the new SIGNALING READY instruction.
+**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-simulation-evals.mjs, evals/run-onboarding-evals.mjs
+
+---
+
+## 2026-04-19 — Onboarding: clearer mode question + forced race-date confirmation before mode
+
+**Type:** Bug Fix
+**Reported by:** Jake (live test)
+**User feedback:** "The phrasing of the three options here was a bit confusing and not sure if he actually looked up the dates properly here?" — Dean paraphrased the three options as "set plan / build your own with support from me / coaching notes" ("build your own with support" is NOT one of the real options) and skipped race-date confirmation despite pre-search almost certainly having run.
+**Root cause:** (1) The mode-question prompt was a single run-on sentence with no numbering, so the model was free to paraphrase and reshape the options — in one live test it invented a "build your own with support" fourth option. (2) When pre-search returned dates, the injection lived at the bottom of the prompt as a soft instruction ("Present this date to the athlete..."). The model could — and did — skip past it straight to the next flow step.
+**Fix / Change:** (1) Rewrote the mode-question prompt to require EXACT wording with numbered (1)(2)(3) options and distinct, unambiguous descriptions. Applied in three places: CONVERSATION FLOW step 2, the SIGNALING READY fallback, and the `modeQuestion` fallback string inside `handleConversation`. (2) Added a "RACE DATE CONFIRMATION COMES FIRST" block to the system prompt and made gate explicit in CONVERSATION FLOW step 2 ("Once goal is clear AND any race dates are confirmed..."). (3) When any pre-search runs, the `raceDateInjection` is now wrapped in a `<rule>...</rule>` XML tag (the same convention `coach/respond` uses for hard directives) so Dean treats it as a non-negotiable instruction. Also added a safety-net `<rule>` stripper to the onboarding response-cleanup pipeline so any echoed tag content never reaches the athlete.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-04-19 — Onboarding: extract-first reorder for OpenAI race-date pre-search
 
 **Type:** Refactor + Bug Fix
