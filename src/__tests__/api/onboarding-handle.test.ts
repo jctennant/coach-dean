@@ -181,7 +181,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     // Sonnet: includes [READY] signal
     mockLLMResponse("Awesome, I have everything I need! Let's build your plan.\n[READY]");
     // Haiku extraction (tool use)
-    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: ["tuesday","thursday","saturday"], timezone: "America/New_York" });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: ["tuesday","thursday","saturday"], timezone: "America/New_York", has_existing_plan: false, wants_plan: true });
 
     await POST(makeRequest({ userId: "user-001", message: "NYC, Monday Wednesday Friday" }));
 

@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Fix: onboarding silently defaults to plan-building when mode is unresolved
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing the "coaching notes only" mode)
+**User feedback:** "I think in this conversation it was unclear what mode he was trying to get the user in. ... It seemed like Coach Dean decided to create a plan here anyways, but I was playing the user that didn't want a plan and just wanted a coaching note."
+**Root cause:** Three-mode selection (build plan / alongside existing plan / coaching notes only) was embedded in prose and relied solely on Haiku to map short replies like "Coaching notes" to `wants_plan=false`. When extraction missed it, `has_existing_plan` and `wants_plan` both remained null and `completeOnboarding` fell through to `initial_plan` generation by default — quietly building a plan for a user who had explicitly chosen notes only.
+**Fix / Change:** (1) Added a MODE CONFIRMATION block to Dean's system prompt requiring a one-sentence reflect-back of the chosen mode before moving on (catches misreads on terse answers). (2) Added a guard in `handleConversation`: when [READY] fires but both `has_existing_plan` and `wants_plan` are null, we no longer call `completeOnboarding` — instead we re-ask the three-option mode question explicitly. This ensures we never silently default to plan-building when the athlete's intent is unknown.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/__tests__/api/onboarding-handle.test.ts, src/__tests__/api/multi-race-onboarding.test.ts
+
 ## 2026-04-19 — Fix: B/C race dates defaulting to first-of-month placeholder
 
 **Type:** Bug Fix

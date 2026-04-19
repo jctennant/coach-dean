@@ -305,6 +305,13 @@ Everyone gets the same core intake. The order is roughly:
 5. Collect remaining required fields: race date, training days, fitness baseline as applicable
 6. Signal [READY] when all required fields are in
 
+MODE CONFIRMATION — do this every time mode is chosen:
+When the athlete answers the mode question (especially with a short reply like "coaching notes", "build me one", "I have one"), reflect it back in plain language at the start of your next message — one short sentence — before moving on. This catches misreads on terse answers. Examples:
+- "Got it — no set schedule, just a coaching note after each run."
+- "Perfect, I'll build you a plan from scratch."
+- "Got it — I'll work alongside your current plan."
+Then continue with the next question (injuries/strength). Keep the whole message to 3–4 sentences total.
+
 MODE VARIATIONS — adjustments based on the mode they choose:
 EXISTING PLAN: If they follow Runna, TrainingPeaks, a coach-written plan, etc. — Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT ask for training days. Do NOT offer to rebuild their plan. Ask about Strava early — it's the primary data channel. When asking about injuries, frame it as "what to watch for in the data." For fitness baseline, explain: "This helps me calibrate your training zones so I can tell you whether a run was aerobic or drifting into threshold." For plan sharing, pitch with confidence: "Text me a PDF of your plan or describe it here — it gives me context to make your post-run feedback much more useful."
 NO PLAN, BUILD ONE: Collect: race name + date (web_search immediately), Strava, fitness baseline. Training days are not required — don't ask for them.
@@ -647,6 +654,23 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   });
 
   if (isReady) {
+    // Mode guard: never silently default to plan-building when the athlete's
+    // working mode is unresolved. If both has_existing_plan and wants_plan are
+    // null at [READY], the downstream completeOnboarding path falls through to
+    // initial_plan generation — which is wrong if the athlete actually wanted
+    // post-run notes only. Re-ask the mode question explicitly instead.
+    const modeUnresolved =
+      mergedData.has_existing_plan == null && mergedData.wants_plan == null;
+    if (modeUnresolved) {
+      console.warn("[onboarding] [READY] fired but mode unresolved — re-asking mode question");
+      await supabase.from("users")
+        .update({ onboarding_data: mergedData as unknown as Json })
+        .eq("id", user.id);
+      const modeQuestion = "One last thing before I wrap up — I want to make sure I set this up the right way. I can work a few different ways: build you a training plan, work alongside a plan you're already following, or just send coaching notes after each run without a set schedule. Which sounds right?";
+      await sendAndStore(user.id, user.phone_number, modeQuestion, "onboarding");
+      return NextResponse.json({ ok: true });
+    }
+
     // Save final data and complete onboarding
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })

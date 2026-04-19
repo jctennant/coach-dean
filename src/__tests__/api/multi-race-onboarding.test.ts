@@ -255,6 +255,8 @@ describe("Multi-race onboarding — extraction and data merging", () => {
       other_races: [
         { name: "Dipsea Race", date: "2026-07-12", priority: "B", goal: null }
       ],
+      has_existing_plan: false,
+      wants_plan: true,
     });
 
     await POST(makeRequest({ userId: "user-001", message: "Denver, CO" }));
