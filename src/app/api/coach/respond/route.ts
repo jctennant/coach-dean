@@ -1584,7 +1584,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return sessions.length === 0;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length, avgWeeklyMileage);
 
   // For uploaded plans in weekly_recap and user_message: inject next week's sessions directly
   // from the stored plan rather than relying on the periodization engine's inferred values.
@@ -4486,6 +4486,7 @@ function buildUserMessage(
   isUploadedPlan = false,
   uploadedCurrentWeek: { week_number: number; sessions: Array<{ dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null }>; total_miles: number; total_miles_min?: number; total_miles_max?: number } | null = null,
   uploadedTotalWeeks = 0,
+  avgWeeklyMileage: number | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
