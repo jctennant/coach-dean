@@ -5023,17 +5023,23 @@ CRITICAL — FRAME THIS AS A FULL WEEK PLAN: This IS the athlete's first complet
         : `WEEK BOUNDARY — IMPORTANT: This athlete just onboarded mid-week. Plan sessions from TODAY through this ${sundayStr} only (${daysRemainingInclToday} day${daysRemainingInclToday === 1 ? "" : "s"} remaining in this Mon-Sun week). Do NOT schedule sessions into next week (starting Monday). The Sunday recap will generate a full next-week plan automatically. If very few days remain (1-2), keep this initial plan brief — just get them started.
 
 CRITICAL — COMMUNICATE THE PARTIAL WEEK TO THE ATHLETE: In your first bubble, explicitly frame this as a short starter plan for the remaining days of the current week. Tell them you'll send a full week plan on Sunday. This is essential when the athlete has Strava data showing a high weekly average — they will otherwise think you're prescribing a dramatically lower volume than they run. Example framing: "This covers the rest of this week — on Sunday I'll send your first full week plan." or "Just a short starter through Sunday — your first full week plan lands Sunday night." Never let a partial-week plan look like a full weekly prescription.`;
+      // If the athlete has already logged most of their weekly budget, skip the long run.
+      const weekBudgetExhausted = weekMileageSoFar > 0 && avgWeeklyMileage != null && weekMileageSoFar >= avgWeeklyMileage * 0.75;
       const weekMilesBudgetNote = weekMileageSoFar > 0
-        ? `\nALREADY COMPLETED THIS WEEK: The athlete has already logged ${weekMileageSoFar.toFixed(1)} miles this week. Any additional sessions you prescribe must be feasible on top of that — do NOT prescribe a long run or quality session that would push their weekly total well beyond a safe ramp from their average. If combined miles would be excessive, keep the remaining sessions light or simply say Sunday's full plan will cover next week.`
+        ? `\n<rule>ALREADY COMPLETED THIS WEEK: The athlete has already logged ${weekMileageSoFar.toFixed(1)} miles this week. ${weekBudgetExhausted ? `Their weekly budget is essentially met — do NOT prescribe a long run or quality session today. Acknowledge the miles already done and tell them Sunday's full plan will kick off their first complete training week.` : `Any additional sessions you prescribe must be feasible on top of that — do NOT prescribe a long run or quality session that would push their weekly total well beyond a safe ramp from their average. If combined miles would be excessive, keep the remaining sessions light or simply say Sunday's full plan will cover next week.`}</rule>`
         : "";
       return `This athlete just finished onboarding. Send them a brief training framework — not a day-by-day schedule. The coaching relationship starts now; the framework is just context to get them started.
 
-BUBBLE 1: One concise sentence — just what happens next. Use "I" (never refer to yourself as "Dean" in the third person). No "Welcome aboard", no enthusiasm about the baseline, no "Dean is calibrated". Example: "I'll be watching every run and sending you a note after each one — let's build toward [race/goal]." 2 sentences max.
+<rule>NEVER refer to yourself as "Dean" in any part of this response. Never write "Dean is calibrated", "Dean will", "Dean has been", etc. You are the coach — always use "I".</rule>
 
-BUBBLE 2: Their starting training framework — three things only:
+BUBBLE 1: One concise sentence — just what happens next. Use "I" (first person only). No "Welcome aboard", no enthusiasm about the baseline. Example: "I'll be watching every run and sending you a note after each one — let's build toward [race/goal]." 2 sentences max.
+
+BUBBLE 2: Their starting training framework — ${weekBudgetExhausted ? `two things only (no long run — budget already met this week):
+- What Sunday's full plan will look like (weekly mileage target)
+- One note on what to expect in week 1` : `three things only:
 - Weekly mileage target (grounded in their current volume from Strava or stated mileage)
 - One quality session this week: just the type and rough structure (e.g. "a tempo run — 20 min at a comfortably hard effort" or "strides at the end of one easy run"), not a full schedule
-- Long run target for this week
+- Long run target for this week`}
 
 Do NOT write a day-by-day schedule. Do NOT list every session of the week. The weekly recap on Sunday sends the full plan. This is just a starting framework.
 Invite them to adjust: "Text me if anything needs tweaking — this is a starting point."

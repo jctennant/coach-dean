@@ -4,6 +4,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Fix wrong tempo/interval paces, long run overage, cross-training day label, third-person intro
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "Prescribed Paces: Easy 7:50–8:20/mi, Tempo 3:54/mi, Intervals 3:30/mi — prescribed paces are way off for interval and tempo - maybe the extraction isn't working correctly. Dean is still prescribing a long run on Sunday when I've already hit roughly what my mileage should be for the week. No idea why the easy bike cross training option says thursday...we don't need that day label. Still says 'Dean is calibrated' in third person."
+**Root cause (paces):** `completeOnboarding` used Haiku-extracted `tempo_pace` / `interval_pace` as the source of truth. Haiku has no "ONLY from Athlete: lines" restriction for these fields (unlike `easy_pace`), so it extracted them from Dean's Coach messages where paces may have been stated in min/km. The Strava VDOT-derived paces (`sbr.tempo_pace`, `sbr.interval_pace`) were computed in `lookupBestStravaRace` but never stored in `onboardingData` for `completeOnboarding` to use. Additionally, there was no km→mi conversion guard for tempo/interval.
+**Root cause (long run):** BUBBLE 2 unconditionally instructed Dean to include a "Long run target for this week" even when `weekMileageSoFar` was already ≥ 75% of the weekly average — directly conflicting with the `ALREADY COMPLETED THIS WEEK` warning.
+**Root cause (cross-training label):** The `cross_training.name` schema description said "Activity + day, e.g. 'Easy bike — Thursday'" — explicitly telling Haiku to include a day name.
+**Root cause (third person):** BUBBLE 1 instruction said "no 'Dean is calibrated'" but didn't have a strong enough rule-format prohibition on third-person self-reference throughout the response.
+**Fix / Change:**
+1. In `handleConversation`, store `sbr.tempo_pace` and `sbr.interval_pace` as `strava_vdot_tempo_pace` / `strava_vdot_interval_pace` in `onboardingData` when Strava best race is a road race.
+2. In `completeOnboarding`, prefer `strava_vdot_*` paces over Haiku-extracted ones. Applied km→mi conversion guard to all three paces (easy: <5:30, tempo: <5:00, interval: <4:30).
+3. Made BUBBLE 2 conditional: if `weekMileageSoFar ≥ 75% of avgWeeklyMileage`, skip the long run bullet and tell Dean to acknowledge the completed miles and defer to Sunday's plan.
+4. Changed `cross_training.name` description to "Activity type and intensity only — NO day label."
+5. Added a `<rule>NEVER refer to yourself as "Dean"</rule>` block above BUBBLE 1 with explicit examples of forbidden patterns.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/lib/dashboard-insights.ts`
+
+---
+
 ## 2026-04-18 — No exercise lists during onboarding; defer to dashboard
 
 **Type:** Improvement

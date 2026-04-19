@@ -240,6 +240,13 @@ async function handleConversation(
       // (visible in coach conversation history) and producing wrong pace zones.
       onboardingData.strava_best_race_is_trail = sbr.is_trail;
       onboardingData.strava_best_race_km = sbr.dist_km;
+      // Store VDOT-derived paces from the Strava best race so completeOnboarding
+      // can use them as the authoritative source rather than Haiku-extracted paces
+      // (which can accidentally come from Coach lines and be in wrong units).
+      if (!sbr.is_trail) {
+        onboardingData.strava_vdot_tempo_pace = sbr.tempo_pace;
+        onboardingData.strava_vdot_interval_pace = sbr.interval_pace;
+      }
     } else {
       const hasRaceData = !!(onboardingData.recent_race_distance_km && onboardingData.recent_race_time_minutes);
       const hasPaceData = !!onboardingData.easy_pace;
@@ -1162,26 +1169,40 @@ async function completeOnboarding(
   const crosstrain = (data.crosstraining_tools as string[]) || [];
   const daysPerWeek = (data.days_per_week as number) ?? 4;
   const trainingDays = (data.training_days as string[]) || [];
-  // Guard: easy pace only — if < 5:30/mi (330s), it was almost certainly stored as min/km
-  // (sub-5:30 easy requires VDOT ~80+, which is elite/professional territory).
-  // Tempo and interval are NOT guarded — fast runners legitimately have sub-6:00 quality paces.
-  function maybeConvertEasyKmToMile(paceStr: string | null): string | null {
+  // Guard: if pace < threshold, it was almost certainly stored as min/km, auto-convert.
+  // Easy: threshold 5:30/mi (330s) — sub-5:30 easy requires VDOT ~80+ (elite/pro).
+  // Tempo: threshold 5:00/mi (300s) — sub-5:00 tempo requires VDOT ~65+ (world-class).
+  // Interval: threshold 4:30/mi (270s) — sub-4:30 intervals require VDOT ~70+ (elite).
+  function maybeConvertKmToMile(paceStr: string | null, thresholdSec: number, label: string): string | null {
     if (!paceStr) return null;
     const m = paceStr.match(/(\d+):(\d+)/);
     if (!m) return paceStr;
     const totalSec = parseInt(m[1]) * 60 + parseInt(m[2]);
-    if (totalSec < 330) {
+    if (totalSec < thresholdSec) {
       const converted = Math.round(totalSec * 1.60934);
       const min = Math.floor(converted / 60);
       const sec = converted % 60;
-      console.warn(`[completeOnboarding] easy_pace ${paceStr} looks like min/km — auto-converting to ${min}:${String(sec).padStart(2, "0")}/mi`);
+      console.warn(`[completeOnboarding] ${label} ${paceStr} looks like min/km — auto-converting to ${min}:${String(sec).padStart(2, "0")}/mi`);
       return `${min}:${String(sec).padStart(2, "0")}/mi`;
     }
     return paceStr;
   }
-  const easyPace = maybeConvertEasyKmToMile((data.easy_pace as string) || null);
-  const tempoPace = (data.tempo_pace as string) || null;
-  const intervalPace = (data.interval_pace as string) || null;
+  const easyPace = maybeConvertKmToMile((data.easy_pace as string) || null, 330, "easy_pace");
+  // Priority for tempo/interval paces:
+  // 1. If the athlete gave a road race time during onboarding, VDOT ran in handleConversation
+  //    and stored the correct paces in data.tempo_pace / data.interval_pace — use those.
+  // 2. If no athlete-stated race was extracted (VDOT didn't run), fall back to the Strava
+  //    VDOT paces stored at Strava-connect time — always in correct min/mile format.
+  // 3. Conversion guard catches any remaining km-stored-as-miles values.
+  const athleteRaceRan = !!(data.recent_race_distance_km && data.recent_race_time_minutes);
+  const rawTempoPace = athleteRaceRan
+    ? (data.tempo_pace as string) || (data.strava_vdot_tempo_pace as string) || null
+    : (data.strava_vdot_tempo_pace as string) || (data.tempo_pace as string) || null;
+  const rawIntervalPace = athleteRaceRan
+    ? (data.interval_pace as string) || (data.strava_vdot_interval_pace as string) || null
+    : (data.strava_vdot_interval_pace as string) || (data.interval_pace as string) || null;
+  const tempoPace = maybeConvertKmToMile(rawTempoPace, 300, "tempo_pace");
+  const intervalPace = maybeConvertKmToMile(rawIntervalPace, 270, "interval_pace");
   const injuryNotes = (data.injury_notes as string) || null;
   const name = (data.name as string) || null;
 

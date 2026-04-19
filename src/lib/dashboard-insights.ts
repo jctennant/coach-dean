@@ -27,7 +27,7 @@ export type StrengthExercise = {
 
 export type CrossTraining = {
   emoji: string;
-  name: string;    // e.g. "Easy bike — Thursday"
+  name: string;    // e.g. "Easy bike"
   desc: string;    // e.g. "45–60 min easy. Replaces your easy run…"
 };
 
@@ -122,7 +122,7 @@ export async function generateAndStoreDashboardInsights(
             description: "Optional cross-training alternative for one easy run",
             properties: {
               emoji: { type: "string", description: "Single emoji for the activity" },
-              name: { type: "string", description: "Activity + day, e.g. 'Easy bike — Thursday'" },
+              name: { type: "string", description: "Activity type and intensity only — NO day label. E.g. 'Easy bike' not 'Easy bike — Thursday'" },
               desc: { type: "string", description: "1–2 sentence description of benefit" },
             },
             required: ["emoji", "name", "desc"],
