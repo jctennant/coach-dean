@@ -4184,6 +4184,31 @@ async function persistProfileUpdates(
       if (p.easy) computedPaces = { easy: p.easy, tempo: p.tempo ?? "", interval: p.interval ?? "" };
     }
 
+    // Fall back to manual PRs for VDOT computation if no recent race data was extracted.
+    // "My 5k is 17:50" is often extracted as manual_pr_updates rather than recent_race_distance_km.
+    if (!computedPaces && hasManualPRs) {
+      const PR_DIST_KM: Record<string, number> = {
+        "5K": 5, "10K": 10, "Half-Marathon": 21.0975, "Marathon": 42.195,
+        "15K": 15, "20K": 20, "10 mile": 16.093, "2 mile": 3.219, "1 mile": 1.609,
+      };
+      const PREF_ORDER = ["5K", "10K", "Half-Marathon", "Marathon", "15K", "20K", "10 mile", "2 mile", "1 mile"];
+      const manualPrs = extracted.manual_pr_updates as Array<{ distance: string; time_seconds: number }>;
+      for (const dist of PREF_ORDER) {
+        const pr = manualPrs.find(p => p.distance === dist);
+        if (pr && pr.time_seconds > 0) {
+          const distKm = PR_DIST_KM[dist];
+          if (distKm) {
+            const timeMin = pr.time_seconds / 60;
+            const impliedPace = timeMin / (distKm / 1.60934);
+            if (impliedPace >= 4.0 && impliedPace <= 20.0) {
+              computedPaces = calculateVDOTPaces(distKm, timeMin);
+              break;
+            }
+          }
+        }
+      }
+    }
+
     // Build profile update
     const profileUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (hasInjury) profileUpdate.injury_notes = extracted.injury_notes;

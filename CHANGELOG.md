@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-18 — Fix: PR paces not saved to profile when extracted as manual_pr_updates
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake)
+**User feedback:** "Didn't see my paces updated in the dashboard after this... when is it supposed to update?"
+**Root cause:** "My 5k is a 17:50" was extracted by Haiku as `manual_pr_updates` (a lifetime PR) rather than `recent_race_distance_km`/`recent_race_time_minutes`. VDOT pace computation only ran on the latter, so `current_easy_pace`, `current_tempo_pace`, `current_interval_pace`, and `current_vdot` were never written to `training_profiles`.
+**Fix / Change:** After the existing race-data and easy-pace VDOT blocks, fall back to computing VDOT from `manual_pr_updates` if `computedPaces` is still null. Uses a preference order (5K → 10K → Half → Marathon → …) and the same sanity-check (4:00–20:00/mi implied pace).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-18 — Stop asking pace calibration question and sending plan simultaneously
 
 **Type:** Bug Fix
