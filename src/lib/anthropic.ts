@@ -198,9 +198,9 @@ function buildOpenAIClient(): Anthropic {
 
     const tools = (params.tools as Array<Record<string, unknown>> | undefined) ?? [];
     const hasWebSearch = tools.some((t) => (t.type as string) === "web_search_20250305");
-    const openAIModel = hasWebSearch
-      ? SEARCH_MODEL
-      : (MODEL_MAP[params.model] ?? "gpt-4o");
+    // gpt-4o-search-preview does web search automatically — no tools array needed
+    const nonSearchTools = tools.filter((t) => (t.type as string) !== "web_search_20250305");
+    const openAIModel = hasWebSearch ? SEARCH_MODEL : (MODEL_MAP[params.model] ?? "gpt-4o");
 
     const openAIMessages = await convertMessages(
       params.system as string | undefined,
@@ -214,7 +214,7 @@ function buildOpenAIClient(): Anthropic {
       messages: openAIMessages,
     };
 
-    const regularTools = convertTools(tools);
+    const regularTools = convertTools(nonSearchTools);
     if (regularTools.length > 0) {
       openAIParams.tools = regularTools;
 
