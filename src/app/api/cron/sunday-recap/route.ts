@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getAthleteStats } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
@@ -40,8 +41,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, sent: 0 });
   }
 
-  let sent = 0;
-  for (const user of users) {
+  // Return 200 immediately so cron-job.org doesn't hit its 30s HTTP timeout.
+  // The loop below does a Strava API call + awaited fetch per user, which blows
+  // the budget once we have more than a handful of Strava-connected users.
+  // Vercel keeps the function alive to finish `after()` work post-response.
+  after(async () => {
+    let sent = 0;
+    for (const user of users) {
     // Refresh YTD stats from Strava before generating the recap so Dean has
     // accurate year-to-date mileage for milestone callouts ("500 miles this year!").
     // Non-fatal — if this fails we proceed with whatever is cached.
@@ -101,7 +107,9 @@ export async function GET(request: Request) {
     } catch (err) {
       console.error(`Failed to send weekly recap to user ${user.id}:`, err);
     }
-  }
+    }
+    console.log(`[sunday-recap] completed — sent ${sent}/${users.length}`);
+  });
 
-  return NextResponse.json({ ok: true, sent });
+  return NextResponse.json({ ok: true, queued: users.length });
 }

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Sunday recap cron: return early, run work via `after()`
+
+**Type:** Bug Fix
+**Reported by:** Jake (observed via cron-job.org dashboard)
+**User feedback:** "looks like my sunday recap cron failed; is there a way to see why? it says timeout"
+**Root cause:** `/api/cron/sunday-recap` awaited a Strava stats refresh + fetch-to-coach/respond sequentially per user inside the request handler. cron-job.org's HTTP client times out at 30s, so the handler was killed before the loop progressed past the first (possibly hung) Strava call — zero `weekly_recap` rows landed in `conversations`.
+**Fix / Change:** Wrap the per-user loop in `after()` so the handler returns 200 immediately with `{ queued: N }`. Work continues post-response on Vercel, matching the pattern used in `coach/respond`. Does not add a Strava-call timeout (separate concern) but removes the HTTP-timeout failure mode.
+**Files changed:** `src/app/api/cron/sunday-recap/route.ts`
+
+---
+
 ## 2026-04-19 — Onboarding wrap-up polish: whitespace, "aerobic" wording, PDF upload prompt
 
 **Type:** Bug Fix
