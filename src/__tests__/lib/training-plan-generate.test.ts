@@ -506,3 +506,75 @@ describe("generateAndSaveFullPlan — plan / text alignment", () => {
     expect((insertedPlan as Record<string, unknown>).race_date).toBe(RACE_18W);
   });
 });
+
+// -----------------------------------------------------------------------
+// Beginner mileage cap — stale Strava history
+//
+// A user who self-identifies as a beginner may have old Strava activity from
+// a previous fitness phase. Without the cap, their plan arc would be anchored
+// to the historical average (e.g. 16mi) instead of the 8mi beginner default.
+// -----------------------------------------------------------------------
+
+describe("generateAndSaveFullPlan — beginner mileage cap", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("caps week 1 target at 8mi for explicit beginner with high Strava avg", async () => {
+    let capturedUpdate: Record<string, unknown> | null = null;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_state") {
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+          capturedUpdate = payload;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ fitness_level: "beginner" }),
+      16,  // avgWeeklyMileage — stale Strava history; should be ignored for beginners
+      { skipLinkSms: true },
+    );
+
+    // Plan arc must start at the beginner default (8mi), not the Strava average (16mi)
+    expect(capturedUpdate).toMatchObject({ weekly_mileage_target: 8 });
+  });
+
+  it("does NOT cap baseMileage when fitness_level is null (legacy profile without explicit level)", async () => {
+    let capturedUpdate: Record<string, unknown> | null = null;
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const c = chain({ data: null, error: null });
+      if (table === "training_state") {
+        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+          capturedUpdate = payload;
+          return c;
+        });
+      }
+      return c;
+    });
+
+    await generateAndSaveFullPlan(
+      "user-1",
+      "+12025551234",
+      baseProfile({ fitness_level: null }),
+      16,
+      { skipLinkSms: true },
+    );
+
+    // Legacy profiles (no explicit fitness_level) use the Strava avg as-is
+    expect(capturedUpdate).toMatchObject({ weekly_mileage_target: 16 });
+  });
+});

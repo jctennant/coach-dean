@@ -3178,6 +3178,13 @@ function buildSystemPrompt(
   const isPostRun = trigger === "post_run";
   // Sections that are only useful when the athlete might raise a capability/philosophy question
   const isConversational = trigger === "user_message";
+  // For initial_plan: if the athlete explicitly self-identifies as a beginner but Strava
+  // shows historical mileage > 8mi/week, that history is likely stale (old account, past
+  // fitness). Force the beginner-no-history tier so the coach prescribes run/walk-level
+  // volume instead of "MODERATE VOLUME (avg 16mi)" treatment.
+  const forceBeginnerTier = trigger === "initial_plan" &&
+    (profile?.fitness_level as string | null) === "beginner" &&
+    (avgWeeklyMileage ?? 0) > 8;
   // Sections useful when reviewing a completed run
   const isRunReview = isPostRun || isConversational;
   // Unit helpers — available throughout buildSystemPrompt
@@ -3687,7 +3694,7 @@ ${dateContext}
 CALIBRATE TO ATHLETE'S ACTUAL FITNESS FIRST:
 Before applying any training philosophy, anchor the plan to what the data shows. The athlete's recent weekly mileage, pace distribution, and workout history in RECENT WORKOUTS are ground truth. The philosophy principles below are defaults — they yield to observed fitness. An athlete already running 40+ miles/week with quality sessions in their history does not need to earn intensity; they need a plan that matches where they actually are. Apply conservative defaults only where the data is thin, the athlete is clearly new to consistent training, or injury history warrants it.
 ${
-  avgWeeklyMileage == null
+  (avgWeeklyMileage == null || forceBeginnerTier)
     ? (() => {
         const fl = (profile?.fitness_level as string | null) ?? "beginner";
         const isIntermediate = fl === "intermediate";
@@ -3699,7 +3706,10 @@ ${
           return `FITNESS TIER: No Strava history yet, but athlete self-reports as INTERMEDIATE. Treat as an athlete with an established aerobic base — do not apply beginner volume defaults.
 <rule>WEEK 1 VOLUME CAP (no history, intermediate): Start at ${spMi(15)}–${spMi(25)} for the week. Spread across ${profile?.days_per_week ?? 4}+ days. Include at least 1 easy quality session (strides or short tempo). Do not prescribe fewer than ${spMi(12)} — that is inconsistent with intermediate fitness.</rule>`;
         } else {
-          return `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
+          return forceBeginnerTier
+            ? `FITNESS TIER: Beginner self-report. Strava shows ${spMi(avgWeeklyMileage ?? 0)} avg but athlete self-identifies as a current beginner — historical Strava data reflects past fitness, not current ability. Default to a conservative, base-building approach.
+<rule>WEEK 1 VOLUME CAP (beginner, stale history): Week 1 must not exceed ${spMi(10)} total. Start extremely conservatively — 3–4 short sessions of ${spMi(2)}–${spMi(3)} each is appropriate. Do NOT use the Strava historical average to set this week's volume. It is much easier to add volume next week than to walk back an injury in week one.</rule>`
+            : `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
 <rule>WEEK 1 VOLUME CAP (no history, beginner): Since no mileage data exists and this is a beginner, Week 1 must not exceed ${spMi(10)} total. Start extremely conservatively — 3 short sessions of ${spMi(2)}–${spMi(3)} each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.</rule>`;
         }
       })()
