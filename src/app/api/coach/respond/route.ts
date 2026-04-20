@@ -3918,6 +3918,8 @@ STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSAT
 - Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine repeatedly, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
 
+<rule>SAME-NEXT-DAY INTENSITY GATE: If the athlete reported pain, tightness, or soreness during or at the end of a recent run (visible in conversation history), and they ask about doing a harder session (tempo, intervals, race-pace effort) on the following day (i.e., within ~24 hours of the symptomatic run), do NOT offer a conditional green-light. The correct answer: easy-only at most the next day; defer quality sessions to at least 2 days out when symptoms have been fully absent. Example: "Given the tightness today, tomorrow should be easy-only at best — loading a tissue that flagged this morning isn't worth the risk. If tomorrow feels completely symptom-free, do an easy jog and save the tempo for when you're clear." This applies even if the athlete is asking about a planned session.</rule>
+
 ${weatherBlock || ""}${coachingSignals ? buildCoachingSignalsBlock(coachingSignals) : ""}
 ${isConversational ? `ATHLETE-STATED PHILOSOPHIES — when an athlete mentions a coach, book, or training system they follow:
 1. Recognize it — acknowledge naturally, not robotically
@@ -4608,7 +4610,7 @@ function buildUserMessage(
       const isRunActivity = ["Run", "TrailRun", "VirtualRun"].includes((activityData?.type as string) ?? "");
       const weekMileageContext = isRunActivity
         ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
-        : `\n<rule>WEEK-TO-DATE RUNNING: ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
+        : `\n<rule>This is a non-run activity. Do NOT cite the week's running mileage total in your response — leave weekly mileage commentary for post-run messages. Keep your response to 2–3 sentences focused on the cross-training session itself.</rule>\n`;
 
       const activitySemanticGuard = buildActivityDataGuard(activityForClaude as Record<string, unknown> | null);
 
@@ -4639,6 +4641,7 @@ INSIGHT RULES:
 - If aerobic efficiency or cardiac drift is improving: name the specific trend. Specific progress is more motivating than "you're doing great."
 - If the athlete has a goal race: connect at least one insight to race prep.
 - GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if the activity's avg_heartrate is actually in Z3 (the gray zone band shown in HEART RATE ZONES above). If avg_heartrate is in Z2 (Aerobic Base) or lower, today's effort was appropriate and well-executed — do not call it gray zone. If you want to comment on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it clearly as a training trend ("your recent runs have been trending toward moderate effort") — never apply it to today's run when today was Z2 or below.
+- If any lap or split shows a pace more than ~90 sec/mi faster than the run's average pace, flag it explicitly rather than presenting it neutrally — e.g. "Your final segment shows [X pace] — that's likely a short burst or GPS artifact. If intentional, keep in mind [recovery/easy] runs should stay fully aerobic." Do NOT describe an outlier sub-5:30 pace on an easy or recovery run as a normal "sprint finish" without comment.
 
 COACHING FORWARD — tell them what it means, not just what happened:
 - Connect the run to where they're going. If they've been building volume for weeks: is it time for a quality session?

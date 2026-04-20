@@ -34,6 +34,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Non-run mileage suppression, sprint outlier flag, same-next-day intensity gate
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (users b1b308cf, a56bc698, ac0ab080) — original PR #10
+**User feedback:** Concurrent WeightTraining + run synced and both messages reported the same "9 mi this week"; a 5:23/mi final segment on a recovery run was described as part of a "solid recovery effort" without flagging the anomaly; conditional tempo green-light issued the day after reported tightness.
+**Root cause:** (1) Non-run `post_run` prompts injected a numeric weekly running mileage that could double-count a concurrently-stored run. (2) `INSIGHT RULES` had no guard for outlier lap/split paces vs. run average. (3) No `PROACTIVE INJURY` rule prevented a same-next-day intensity green-light after reported pain/tightness.
+**Fix / Change:** All three are prompt-only edits in `coach/respond/route.ts`. (1) Non-run branch of `weekMileageContext` now instructs Dean not to cite the week's running mileage in the response. (2) Added `INSIGHT RULES` bullet: flag any lap/split >~90 sec/mi faster than the run's average. (3) Added `SAME-NEXT-DAY INTENSITY GATE` to PROACTIVE INJURY: easy-only the day after reported pain; defer quality sessions ≥2 days out.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-19 — Sunday recap cron: return early, run work via `after()`
 
 **Type:** Bug Fix
