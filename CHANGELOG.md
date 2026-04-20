@@ -66,6 +66,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Cap beginner plan base mileage when Strava history is stale
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user bcf3ffa5 "Pookie") — original PR #5
+**User feedback:** "Why does it say I'm running 16 miles this week" / "I've never run continuously, how can I do a 5 mile long run?"
+**Root cause:** A self-identified beginner with old Strava activity (e.g. occasional jogs from a prior fitness phase) was getting plans anchored to that 16mi/week historical average. Two compounding code paths used the raw Strava number with no `fitness_level` check: `generateAndSaveFullPlan` set `baseMileage = 16`, and `buildSystemPrompt` selected the "MODERATE VOLUME" tier so Claude prescribed ~16mi week 1 with fartlek/quality from week 2.
+**Fix / Change:** (1) `training-plan.ts`: when `fitness_level === "beginner"` (strict equality, so legacy `null` profiles unaffected), cap Strava-derived `avgWeeklyMileage` at `noHistoryDefault` (8mi) before computing `baseMileage`. (2) `respond/route.ts`: added `forceBeginnerTier` flag — on `initial_plan`, when `fitness_level === "beginner"` and `avgWeeklyMileage > 8`, the fitness tier block uses the beginner-stale-history treatment ("do not use Strava avg") instead of MODERATE VOLUME. Caps week 1 at 10mi. Tests added in `training-plan-generate.test.ts` and `coach-respond.test.ts`.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-plan-generate.test.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-04-19 — Sunday recap cron: return early, run work via `after()`
 
 **Type:** Bug Fix

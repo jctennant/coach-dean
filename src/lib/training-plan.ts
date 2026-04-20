@@ -351,9 +351,19 @@ export async function generateAndSaveFullPlan(
   // Beginner lowered from 15 → 8: a true zero-to-runner does 3-6mi/week on run/walk
   // plans; 15mi caused the arc to start at 15mi even when sessions were 24-min intervals.
   const noHistoryDefault = fitnessLevel === "advanced" ? 30 : fitnessLevel === "intermediate" ? 20 : 8;
+  // For users who explicitly self-identify as beginners, cap the Strava-derived base at
+  // noHistoryDefault (8mi). Historical Strava data may not reflect current fitness — a
+  // "never run before" user whose account has old running activity would otherwise start
+  // at 16+ mi/week when they can only manage run/walk intervals.
+  // Uses strict equality (not the ?? "beginner" default) so legacy profiles without a
+  // fitness_level set are not affected.
+  const isExplicitlyBeginner = (profile?.fitness_level as string | null) === "beginner";
+  const effectiveAvgMileage = isExplicitlyBeginner && avgWeeklyMileage != null && avgWeeklyMileage > noHistoryDefault
+    ? noHistoryDefault
+    : avgWeeklyMileage;
   const baseMileage = prescribedWeek1Miles
     ? Math.max(5, prescribedWeek1Miles)
-    : Math.max(5, Math.round((avgWeeklyMileage ?? noHistoryDefault) * 2) / 2);
+    : Math.max(5, Math.round((effectiveAvgMileage ?? noHistoryDefault) * 2) / 2);
 
   // Compute a race-type-aware peak with both a floor (low-mileage runners still get
   // a plan sufficient for the target distance) and a hard cap (no 100+ mpw marathon
