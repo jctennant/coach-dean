@@ -242,23 +242,39 @@ async function processStravaEvent(body: {
         }
       }
 
-      // Second dedup guard: Strava sometimes sends two webhook events for the same
-      // activity within seconds. The isNew check above has a race condition if both
-      // events arrive before either stores the activity. A recent post_run message
-      // in the conversations table is a reliable late-stage gate.
+      // Second dedup guard: Strava can fire multiple webhook events for the same
+      // activity ID hours apart (not just seconds). Check conversations by exact
+      // strava_activity_id first — this is a permanent per-activity guard that
+      // catches re-sends at any time interval.
       if (isNew && !suppressCoaching) {
-        const recentCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-        const { data: recentPostRun } = await supabase
+        const { data: existingPostRunConv } = await supabase
           .from("conversations")
           .select("id")
           .eq("user_id", user.id)
+          .eq("strava_activity_id", activity.id)
           .eq("message_type", "post_run")
-          .gte("created_at", recentCutoff)
           .limit(1)
           .maybeSingle();
-        if (recentPostRun) {
-          console.log(`[strava-webhook] post_run sent in last 5min for user ${user.id}, suppressing duplicate`);
+        if (existingPostRunConv) {
+          console.log(`[strava-webhook] post_run already sent for activity ${activity.id} for user ${user.id}, suppressing duplicate`);
           suppressCoaching = true;
+        } else {
+          // Fallback time-based guard for race conditions where the conversation
+          // row for this activity hasn't been stored yet (e.g., two events arrive
+          // within seconds before either completes its coach/respond call).
+          const recentCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+          const { data: recentPostRun } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("user_id", user.id)
+            .eq("message_type", "post_run")
+            .gte("created_at", recentCutoff)
+            .limit(1)
+            .maybeSingle();
+          if (recentPostRun) {
+            console.log(`[strava-webhook] post_run sent in last 10min for user ${user.id}, suppressing duplicate`);
+            suppressCoaching = true;
+          }
         }
       }
 

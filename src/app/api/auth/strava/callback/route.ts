@@ -90,16 +90,22 @@ export async function GET(request: Request) {
     console.error("[strava-callback] stats fetch failed (non-fatal):", err);
   }
 
-  // Fetch current user state to merge onboarding_data and check if already onboarded
+  // Fetch current user state to merge onboarding_data and check if already onboarded.
+  // Also fetch strava_access_token so we can detect re-auth flows and skip the
+  // "Strava connected" welcome message when Strava was already connected.
   const { data: currentUser } = await supabase
     .from("users")
-    .select("onboarding_data, onboarding_step, name, linq_chat_id")
+    .select("onboarding_data, onboarding_step, name, linq_chat_id, strava_access_token")
     .eq("id", userId)
     .single();
 
   const onboardingData =
     (currentUser?.onboarding_data as Record<string, unknown>) || {};
   const alreadyOnboarded = currentUser?.onboarding_step === null;
+  // If Strava was already connected (token existed before this callback), skip
+  // the welcome message — it's a re-auth and the user knows Strava is connected.
+  // This prevents the "Strava connected" message from firing on every re-auth click.
+  const stravaWasAlreadyConnected = !!currentUser?.strava_access_token;
 
   // Don't overwrite a name already captured during onboarding (e.g. "Hi, I'm Shaun")
   // with the Strava athlete profile name (e.g. "Spicy") — only fall back to Strava
@@ -376,15 +382,22 @@ export async function GET(request: Request) {
     ? `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`
     : `Strava connected${firstName}! Give me a moment to pull in your history.`;
 
-  await Promise.all([
-    sendSMS(user.phone_number, smsMsg),
-    supabase.from("conversations").insert({
-      user_id: user.id,
-      role: "assistant",
-      content: smsMsg,
-      message_type: "coach_response",
-    }),
-  ]);
+  // Only send "Strava connected" the first time — skip on re-auth flows where
+  // the token was already present. This prevents duplicate messages when users
+  // click the Strava button multiple times or re-authorize for write scope.
+  if (!stravaWasAlreadyConnected) {
+    await Promise.all([
+      sendSMS(user.phone_number, smsMsg),
+      supabase.from("conversations").insert({
+        user_id: user.id,
+        role: "assistant",
+        content: smsMsg,
+        message_type: "coach_response",
+      }),
+    ]);
+  } else {
+    console.log(`[strava-callback] strava was already connected for user ${user.id}, skipping welcome SMS`);
+  }
 
   // If the user unchecked "View activity data", Dean can't see their runs.
   // Send a follow-up explaining what's broken and how to fix it.

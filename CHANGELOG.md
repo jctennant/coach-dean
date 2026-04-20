@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Strava re-auth dedup, post-run activity-id dedup, projected week total rule
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user 5e1535c3, 2e5a7e92 / Maddy) — original PR #6
+**User feedback:** Ghost "Strava connected" SMS firing 4× mid-conversation; duplicate post-run messages for the same activity hours apart; "That brings you to 14 mi for the week" when athlete had already logged 36 mi.
+**Root cause:** (1) `/api/auth/strava/callback` sent the "Strava connected" SMS on every callback — re-auth flows (write-scope upgrade, repeated link clicks) each fired the message. (2) The post-run dedup guard only looked back 10 minutes; Strava can re-fire the same `activity_id` event over a 40+ minute spread, slipping past the window. (3) No prompt rule required Dean to project full weekly mileage as `existing + new` when an athlete reports mid-week miles.
+**Fix / Change:** (1) `auth/strava/callback`: query `strava_access_token` before sending — skip SMS if already set (first-time connects unaffected). (2) `webhooks/strava`: primary dedup is now a permanent `conversations` lookup matching `strava_activity_id` → `post_run`. The 10-min time-based guard remains as a race-condition fallback. (3) `coach/respond`: added `PROJECTED WEEK TOTAL` `<rule>` block to the `user_message` prompt — Dean must always state full projected weekly total when the athlete reports existing mileage.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`, `src/app/api/webhooks/strava/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-19 — Sunday recap cron: return early, run work via `after()`
 
 **Type:** Bug Fix
