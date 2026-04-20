@@ -4,6 +4,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Plans go day-agnostic + deterministic session completion status
+
+**Type:** Feature
+**Reported by:** Jake
+**User feedback:** "Dean is sending a plan in sunday recap with days specified - but the new approach to plans is to give a long run, quality session or two, and then total mileage target for the week. We aren't even collecting days the user likes to workout in onboarding." Follow-up: "yeah let's do [auto-detect session completion] - how does it work, is it a haiku call to understand if it matched the quality or long run sessions?"
+**Root cause:** Prompts for `initial_plan`, `weekly_recap`, and downstream triggers still instructed Dean to emit day-by-day scheduled sessions (`Mon 4/20 · Easy 5mi…`), enforced training-day counts, and referenced a `SCHEDULE CONSTRAINT` block tied to a `training_days` field that is not reliably collected. Storage had already moved to week-level (`weekly_long_run_miles`, `weekly_quality_session`), but the coach prompts hadn't caught up. Separately, post-run and reminder triggers had no structured signal for "has the athlete already done the long run / quality session this week" — Dean had to infer from RECENT WORKOUTS every time.
+**Fix / Change:**
+  • Rewrote `weekly_recap` and `initial_plan` prompt blocks in `coach/respond/route.ts`: second bubble is now weekly mileage target + long run + 1–2 quality sessions (with structure, paces, and "why" clause) + spacing guidance ("leave at least one easy or rest day between hard sessions; fit easy miles wherever works"). No dated lines, no day-by-day lists.
+  • Removed `SCHEDULE CONSTRAINT`, `TRAINING DAY COUNT VALIDATION`, `SESSION DAY LABELING`, and the dated-session example blocks. Strength/cross-training surfaced as weekly counts, not assigned to days.
+  • Updated `morning_plan`, `morning_reminder`, `nightly_reminder`, and `missedRunCheckin` prompts to reference `THIS WEEK'S PLAN` (target + long run + quality) and describe what's still outstanding, rather than prescribing "today's workout" or "tomorrow's workout."
+  • Disabled `[WEEK_OVERRIDE]` / `[SKIP_DAY]` tag guidance in `user_message` — ad-hoc day swaps don't apply when plans are day-agnostic.
+  • Onboarding (`onboarding/handle/route.ts`): removed the `training_days` collection step from `CONVERSATION FLOW`, removed "Training days" from `summarizeCollected` (kept `days_per_week` as rough count), removed "which days" follow-up rule. DB column + extraction schema preserved (harmless if an athlete volunteers days).
+  • **Session completion status (new):** added `computeSessionsStatus(activities, timezone, plannedLongRun, plannedQuality)` helper (deterministic, no LLM call). Long run "done" if any week run ≥ 85% of planned distance. Quality "done" if any week run has `workout_type === 3`, or its name matches tempo/threshold/interval/repeat/fartlek/hill/strides/NxM patterns, or contains the planned session's first word. Result is injected into the `FACTS` block as `WEEK SESSIONS STATUS: - Long run … DONE/PENDING` / `- Quality … DONE/PENDING` so every post-run, reminder, and user_message reply has a clean structured signal.
+  • Added `workout_type` and `name` to the activities SELECT and `ActivityRow` interface.
+  • Updated `run-evals.mjs` plan-generation instruction to prohibit dated session lines.
+  • Updated two unit tests in `coach-respond.test.ts` that asserted on the removed `SESSION DAY LABELING` guard and the old nightly-no-sessions copy.
+  • Added `sessions-status.test.ts` — 7 cases covering long-run threshold, quality keyword matches, `workout_type=3` detection, rep-pattern detection, and non-run exclusion.
+  • Restored four PR-10/12 prompt guards that were clobbered during a stash conflict: `SAME-NEXT-DAY INTENSITY GATE`, `LAP PACE SANITY CHECK`, the 90-sec/mi outlier flag, `PROJECTED vs TARGET DIRECTION`, `MANUALLY-REPORTED ACTIVITY`, and the `Ride` speed-unit guard.
+**Follow-ups:** Eval fixture ground-truths that assert on dated session formats (plan-*, format-*, date-*) need re-baselining — prior baseline is pre-change.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/coach-respond.test.ts`, `src/__tests__/lib/sessions-status.test.ts` (new), `evals/run-evals.mjs`
+
+---
+
 ## 2026-04-19 — Tag-driven mode selection + DASHBOARD_LINK as implicit READY
 
 **Type:** Bug Fix

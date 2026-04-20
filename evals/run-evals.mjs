@@ -443,7 +443,7 @@ ATHLETE HISTORY:
 - Strava: ${user.strava_connected ? "connected" : "not connected"}
 - Goal: ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}${user.goal_race_distance ? ` — ${user.goal_race_distance}` : ""}
 - Experience: ${user.experience_level || "not specified"}
-- Training days: ${(user.training_days || []).join(", ")}${user.training_days && user.training_days.length > 0 ? `\n- <rule>TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${user.training_days.length} running session${user.training_days.length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${user.training_days.length <= 3 ? ` With only ${user.training_days.length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${user.training_days.length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}</rule>` : ""}
+- Runs per week (approximate): ${(user.training_days || []).length || "—"}${user.training_days && user.training_days.length > 0 && user.training_days.length <= 3 ? `\n- <rule>With only ${user.training_days.length} runs per week, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${user.training_days.length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week is too much for this volume.</rule>` : ""}
 - Injury / constraints: ${user.injury_notes || "None reported"}
 - Preferred units: ${user.preferred_units || "imperial"} — use ${user.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 ${user.notes ? `- Athlete notes: ${user.notes}` : ""}${timeConstraintBlock}${strengthConstraintBlock}
@@ -495,7 +495,7 @@ ${(() => {
 })()}
 
 LENGTH:
-- This is a plan generation request. Provide a full structured overview: Week 1 day-by-day sessions, week-by-week mileage arc, peak week description, and taper structure.
+- This is a plan generation request. Plans are day-agnostic: give a weekly mileage target, long run, 1–2 quality sessions with structure/paces and a "why" clause, plus a short line on leaving a gap between hard sessions. Then a brief week-by-week mileage arc, peak week description, and taper structure. Do NOT prescribe sessions on specific days (no "Mon 3/2 · Easy 5mi" lines).
 - Be specific about distances and paces for Week 1. Approximate mileage targets for remaining weeks.
 - Separate sections with a blank line. Up to 1200 characters is appropriate here.` : `LENGTH:
 - Keep responses under 480 characters. Most replies should be a single short text.

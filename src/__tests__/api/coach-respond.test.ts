@@ -453,15 +453,13 @@ describe("coach/respond — prompt content guards", () => {
     afterQueue.splice(0);
   });
 
-  it("includes SESSION DAY LABELING instruction in user_message system prompt", async () => {
+  it("includes day-agnostic SESSION REFERENCES guard in user_message system prompt", async () => {
     setupSupabase({
       user: baseUser(),
       profile: baseProfile(),
       state: baseState({
-        weekly_plan_sessions: [
-          { day: "Wed", date: "4/1", label: "Easy 3mi" },
-          { day: "Thu", date: "4/2", label: "Tempo 4mi" },
-        ],
+        weekly_long_run_miles: 9,
+        weekly_quality_session: "Tempo 5mi (1mi WU + 3mi @ 7:50/mi + 1mi CD)",
       }),
       conversations: [
         { role: "user", content: "What's on tap today?", created_at: "2026-04-01T20:00:00Z" },
@@ -474,14 +472,13 @@ describe("coach/respond — prompt content guards", () => {
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
     // user_message makes 2 Claude calls: extraction (call 0, Haiku) then coaching (call 1, Sonnet).
-    // SESSION DAY LABELING lives in the user message (buildUserMessage), not the system prompt.
     expect(calls.length).toBeGreaterThanOrEqual(2);
     const coachingUserMsg = calls[1][0].messages[0].content as string;
 
-    // The SESSION DAY LABELING guard must be passed to Claude so Dean knows to
-    // cross-check stored session dates against today rather than inferring from list order.
-    expect(coachingUserMsg).toContain("SESSION DAY LABELING");
-    expect(coachingUserMsg).toContain("cross-check the session");
+    // The SESSION REFERENCES guard must be passed so Dean doesn't prescribe
+    // specific workouts to specific days — plans are now day-agnostic.
+    expect(coachingUserMsg).toContain("SESSION REFERENCES");
+    expect(coachingUserMsg).toContain("day-agnostic");
   });
 });
 
@@ -904,10 +901,10 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
     expect(calls.length).toBeGreaterThanOrEqual(1);
     const userMsg = calls[0][0].messages[0].content as string;
 
-    // Guard must be present — Claude must not guess tomorrow's workout
-    expect(userMsg).toContain("Do NOT mention a specific workout");
+    // Guard must be present — Claude must not prescribe a specific workout
+    expect(userMsg).toContain("Do NOT prescribe a specific workout");
     // Normal reminder instruction must NOT be the active branch
-    expect(userMsg).not.toContain("Tomorrow's workout:");
+    expect(userMsg).not.toContain("Heads up —");
   });
 
   it("does NOT activate the guard when a week-level plan exists", async () => {
