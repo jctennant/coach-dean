@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Five fixes from 2026-04-16 conversation analysis
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (users b1b308cf, 7170bad2, 0cb902da, 95fd0845) — original PR #15 (superset of PR #14)
+**User feedback:** "Going longer than the plan all week — 17.1mi vs 6mi planned" fired after a 0-mile WeightTraining session; Dean said "How did your body feel postpartum on this one?"; Dean cited "laps 3/6/7/8 averaged 155-164 bpm" on a Ride; athlete asked "how do I get the leg speed up" and Dean answered only the tightness context; every onboarding message processed twice.
+**Root cause:** (1) `planDeviationFlag` only gated on `trigger === "post_run"` without checking activity type. (2) No prompt-level guard against the word "postpartum." (3) Lap data guard didn't prohibit specific lap-index references. (4) No instruction requiring direct coaching questions to be answered when paired with contextual statements. (5) Content-based dedup was missing — only ID-based dedup existed in `webhooks/linq`.
+**Fix / Change:** (1) `planDeviationFlag` now returns `null` when `activity_type` is not in `["Run","TrailRun","VirtualRun","Treadmill"]`. (2) Added TONE rule: never use "postpartum" as a synonym for post-run. (3) Extended laps data-glossary guard to prohibit citing laps by index — require effort-pattern descriptions instead. (4) Added `DIRECT QUESTIONS — MUST ANSWER` block to `user_message` prompt. (5) Added 30-second content-based dedup in `handleInboundMessage` (queries `conversations` for same user + same body within last 30s). All 405 tests pass.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/webhooks/linq/route.ts`, `src/__tests__/api/linq-webhook.test.ts`
+
+---
+
 ## 2026-04-19 — Sunday recap cron: return early, run work via `after()`
 
 **Type:** Bug Fix
