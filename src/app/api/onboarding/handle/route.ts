@@ -367,6 +367,13 @@ When the athlete answers the mode question (especially with a short reply like "
 - "Got it — I'll work alongside your current plan."
 Then continue with the Strava ask (which should be its own standalone turn per the STRAVA section below).
 
+MODE TAG — REQUIRED, on the same turn you reflect mode back:
+In the same message where you confirm the athlete's mode, emit ONE of these tags on its own line at the end of the message — the system reads the tag to set the athlete's plan type. Without this tag, the system cannot route the plan correctly.
+- [MODE:FROM_SCRATCH] — athlete picked option (1): Dean builds their plan from scratch
+- [MODE:COMPLEMENT] — athlete picked option (2): they already follow a plan (Runna, TrainingPeaks, coach, etc.) and Dean works alongside it
+- [MODE:NO_PLAN] — athlete picked option (3): no plan, post-run feedback only
+The tag is stripped before the message is sent — do not mention or explain it. Emit exactly one tag, only when the athlete has just confirmed their mode (answered "1"/"option 2"/"build me one"/"I have a plan"/"just feedback"/etc.). Never emit it speculatively. If the athlete has explicitly named a specific plan platform (Runna, TrainingPeaks, coach-written), emit [MODE:COMPLEMENT] in the same turn you acknowledge their plan — even if they didn't explicitly pick option 2.
+
 MODE VARIATIONS — adjustments based on the mode they choose:
 EXISTING PLAN: If they follow Runna, TrainingPeaks, a coach-written plan, etc. — Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT ask for training days. Do NOT offer to rebuild their plan. Ask about Strava early — it's the primary data channel. When asking about injuries, frame it as "what to watch for in the data." For fitness baseline, explain: "This helps me calibrate your training zones so I can tell you whether a run was aerobic or drifting into threshold." For plan sharing, pitch with confidence: "Text me a PDF of your plan or describe it here — it gives me context to make your post-run feedback much more useful."
 NO PLAN, BUILD ONE: Collect: race name + date (web_search immediately), Strava, fitness baseline. Training days are not required — don't ask for them.
@@ -478,6 +485,7 @@ For race goals: you MUST confirm the athlete's working mode before signaling [RE
 2. They don't have a plan and want Dean to build one.
 3. They don't have a plan and prefer to train without a set schedule — Dean just gives post-run feedback.
 The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
+[READY] IS REQUIRED ON ANY WRAP-UP: If your message contains [DASHBOARD_LINK], or says anything like "you're all set", "ready to kick off", "we're good to go", or otherwise signs off without a question, you MUST include [READY] on its own line. Sending a wrap-up without [READY] leaves the athlete stuck in onboarding with no plan generated. (Safety net: the system treats [DASHBOARD_LINK] as implicit [READY], but you should always include both explicitly.)
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
 CRITICAL — [READY] means zero open questions: [READY] can only appear in a message that contains NO questions of any kind — required or optional, soft or hard. The moment you add a question mark to a message, [READY] is off the table for that turn, no matter how minor the question seems. If you realize you still need to ask something (pace calibration, goal time, any follow-up), ask it in this message WITHOUT [READY] and wait for the athlete's response. Then wrap up and signal [READY] in your next turn. Signaling [READY] while an unanswered question is in the same message fires the plan immediately — the athlete never gets to respond.
 When you signal [READY], wrap up warmly AND orient the athlete to what happens next. Two pieces: (1) what to expect from you next — usually a coaching note after their next Strava run, or their plan landing shortly — and (2) a natural mention of their dashboard as the home for their training data (upcoming plan, zone distribution, aerobic efficiency trend, uploaded training PDFs). Include [DASHBOARD_LINK] on its own line as a placeholder — the system replaces it with the URL. Use first person only — never refer to yourself as "Dean". Tie the wrap-up to the athlete's specific goal or race. Example: "I've got everything I need — your first coaching note lands after your next run. I'll keep your dashboard updated with your plan, zone trends, and aerobic efficiency as new runs come in from Strava. You can access it any time here:\n[DASHBOARD_LINK]" You have freedom in phrasing — skip the dashboard mention only when it clearly doesn't fit the moment. The system will follow up automatically after this message.
@@ -610,9 +618,31 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   }
 
   // Parse signals
-  const isReady = /\[READY\]/i.test(rawText);
   const wantsStravaLink = /\[STRAVA_LINK\]/i.test(rawText);
   const wantsDashboardLink = /\[DASHBOARD_LINK\]/i.test(rawText);
+  // [DASHBOARD_LINK] implies wrap-up — Dean only emits it at the final signoff.
+  // Treat it as implicit [READY] so a missing [READY] on a terminal message
+  // doesn't leave the athlete stuck in "onboarding" with no plan generated.
+  const isReady = /\[READY\]/i.test(rawText) || wantsDashboardLink;
+
+  // Parse deterministic working-mode tag. Dean emits [MODE:FROM_SCRATCH|COMPLEMENT|NO_PLAN]
+  // the moment the athlete confirms their working mode. This replaces Haiku
+  // inference for has_existing_plan / wants_plan — those are downstream of a
+  // single explicit choice, so a free-text extraction is the wrong tool.
+  const modeMatch = rawText.match(/\[MODE:(FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/i);
+  if (modeMatch) {
+    const mode = modeMatch[1].toUpperCase();
+    if (mode === "FROM_SCRATCH") {
+      mergedData.has_existing_plan = false;
+      mergedData.wants_plan = true;
+    } else if (mode === "COMPLEMENT") {
+      mergedData.has_existing_plan = true;
+      mergedData.wants_plan = false;
+    } else if (mode === "NO_PLAN") {
+      mergedData.has_existing_plan = false;
+      mergedData.wants_plan = false;
+    }
+  }
 
   // Build responseText and (when Strava is requested) a separate stravaMsg.
   // Split at the paragraph containing [STRAVA_LINK] so:
@@ -628,10 +658,12 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       .slice(0, stravaParaIdx)
       .join("\n\n")
       .replace(/\[READY\]/gi, "")
+      .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
       .trim();
     const stravaParagraph = paragraphs[stravaParaIdx]
       .replace(/\[STRAVA_LINK\]/gi, "")
       .replace(/\[READY\]/gi, "")
+      .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
       .trim();
     responseText = beforeStrava;
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
@@ -640,6 +672,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     responseText = rawText
       .replace(/\[READY\]/gi, "")
       .replace(/\[STRAVA_LINK\]/gi, "")
+      .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
       .trim();
   }
 
@@ -872,7 +905,7 @@ Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess. Use null for anything not mentioned.
 - name: NEVER extract "Athlete" as the name — that is a transcript label, not the person's name. Only extract a name if the user explicitly stated it (e.g. "I'm Jake", "My name is Sarah").
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
-- has_existing_plan / external_plan_description: ALWAYS extract these when the athlete mentions a training plan. Examples that must set has_existing_plan=true: "I'm already on a Runna plan", "I follow a TrainingPeaks plan", "my coach gave me a plan", "I'm using a Hal Higdon program". For any of these, also capture external_plan_description as a brief factual summary: plan source/name, current week if mentioned, weekly mileage if mentioned. E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Set has_existing_plan=false only if the athlete explicitly says they have no plan or are self-directed without one.
+- external_plan_description: capture a brief factual summary when the athlete describes a training plan they're currently following (plan source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan. Do NOT capture a plan Dean is going to build ("custom plan from Dean", "new plan Dean will make") — only current external plans. (has_existing_plan and wants_plan are NOT extracted here — they come from Dean's [MODE:...] tag, which is the source of truth.)
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: the athlete's explicit goal finish time for their TARGET race (e.g. "I want to break 4 hours", "sub-20 5K"). Do NOT use a past PR or best time as the goal time unless the athlete says it IS their goal (e.g. "my goal is to beat my 17:50 PR"). A statement like "my fastest 5K is 17:50" or "my PR is 3:45" is a fitness baseline — extract it as recent_race_time_minutes, NOT as goal_time_minutes. Total float minutes: "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0.
 - race_date: use whichever date is stated in the conversation — athlete's or Dean's. If both are stated and differ by 1–2 days, prefer the athlete's. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if the athlete explicitly said "the 1st" or "June 1st". Today is ${today}.
@@ -960,9 +993,7 @@ Rules:
             description: "Tools the athlete uses: 'runna', 'trainingpeaks', 'garmin', 'self_directed', 'other', etc."
           },
           terrain_type: { type: ["string", "null"], enum: ["road", "trail", "mixed", null], description: "Primary running terrain" },
-          has_existing_plan: { type: ["boolean", "null"], description: "True if athlete currently follows a training plan (Runna, TP, etc.)" },
-          wants_plan: { type: ["boolean", "null"], description: "When has_existing_plan is false: true if athlete wants Dean to build a training plan, false if they prefer to train without a set schedule (post-run feedback only). Null if not yet discussed." },
-          external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'." },
+          external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current external plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'. Null if no current plan — NEVER capture a plan Dean is going to build." },
           other_notes: { type: ["string", "null"] },
           race_elevation_gain_feet: { type: ["number", "null"], description: "Total elevation gain of the goal race course in feet. Extract from Dean's web search results if mentioned in the transcript." },
           race_elevation_loss_feet: { type: ["number", "null"], description: "Total elevation loss (descent) of the goal race course in feet." },

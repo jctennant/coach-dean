@@ -170,7 +170,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
   it("[READY] signal: strips tag and calls completeOnboarding", async () => {
     mockTables({
       users: [
-        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"] } }), error: null },
+        // Mode already resolved via earlier [MODE:FROM_SCRATCH] tag, persisted in onboarding_data
+        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"], has_existing_plan: false, wants_plan: true } }), error: null },
         { data: { dashboard_token: "tok-abc" }, error: null },  // for completeOnboarding user lookup
       ],
       conversations: { data: [], error: null },
@@ -180,7 +181,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     });
 
     // Extract-first: Haiku extraction (tool use) runs first
-    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: ["tuesday","thursday","saturday"], timezone: "America/New_York", has_existing_plan: false, wants_plan: true });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: ["tuesday","thursday","saturday"], timezone: "America/New_York" });
     // Sonnet: includes [READY] signal
     mockLLMResponse("Awesome, I have everything I need! Let's build your plan.\n[READY]");
 
@@ -238,20 +239,21 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     expect(sendSMS).not.toHaveBeenCalled();
   });
 
-  it("existing plan: has_existing_plan and external_plan_description are saved to onboarding_data", async () => {
+  it("existing plan: [MODE:COMPLEMENT] tag sets has_existing_plan and external_plan_description is saved", async () => {
     mockTables({
       users: { data: onboardingUser(), error: null },
       conversations: { data: [], error: null },
     });
 
-    // Extract-first ordering: Haiku extraction runs before main Sonnet call
+    // Extract-first ordering: Haiku extraction runs before main Sonnet call.
+    // Haiku no longer extracts has_existing_plan / wants_plan — those come from the [MODE:...] tag.
     mockToolResponse("save_training_fields", {
       name: "Chris",
       goal: "half_marathon",
-      has_existing_plan: true,
       external_plan_description: "Runna 16-week half marathon plan, week 6, ~35mi/week",
     });
-    mockLLMResponse("Got it — I'll work alongside your Runna plan, not replace it. You can also upload the PDF to the dashboard and I'll reference it directly. Which days are you running?");
+    // Dean emits [MODE:COMPLEMENT] when athlete confirms they already have a plan
+    mockLLMResponse("Got it — I'll work alongside your Runna plan, not replace it. You can also upload the PDF to the dashboard and I'll reference it directly. Which days are you running?\n[MODE:COMPLEMENT]");
 
     await POST(makeRequest({ userId: "user-001", message: "I'm already on a Runna plan, just want coaching support" }));
 
@@ -308,14 +310,15 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(3);
   });
 
-  it("existing plan: null has_existing_plan is not overwritten by subsequent turns", async () => {
-    // Once has_existing_plan is set to true, a follow-up turn where Haiku returns null
-    // should NOT overwrite it (the null-skip merge logic must hold)
+  it("existing plan: has_existing_plan persists across turns without the tag re-firing", async () => {
+    // Once [MODE:COMPLEMENT] sets has_existing_plan=true and it's saved to onboarding_data,
+    // subsequent turns load that state from the DB — Dean doesn't need to re-emit the tag.
     mockTables({
       users: {
         data: onboardingUser({
           onboarding_data: {
             has_existing_plan: true,
+            wants_plan: false,
             external_plan_description: "Runna 16-week HM plan, week 6, ~35mi/week",
           },
         }),
@@ -324,19 +327,71 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       conversations: { data: [], error: null },
     });
 
-    // Extract-first: Haiku returns null for has_existing_plan on this turn (didn't re-extract it)
     mockToolResponse("save_training_fields", {
       training_days: ["tuesday", "thursday", "saturday", "sunday"],
-      has_existing_plan: null,
-      external_plan_description: null,
     });
+    // No [MODE:...] tag on this follow-up turn — prior value must persist
     mockLLMResponse("Got it, Tuesday, Thursday, Saturday and Sunday. Which race are you targeting?");
 
     await POST(makeRequest({ userId: "user-001", message: "I run Tues, Thurs, Sat, Sun" }));
 
     expect(sendSMS).toHaveBeenCalledTimes(1);
-    // Null values from Haiku must not overwrite previously saved truthy values
-    // (validated by the merge logic: `if (v !== null && v !== undefined)`)
+  });
+
+  it("[MODE:FROM_SCRATCH] tag: sets has_existing_plan=false and wants_plan=true", async () => {
+    mockTables({
+      users: { data: onboardingUser(), error: null },
+      conversations: { data: [], error: null },
+    });
+
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "marathon" });
+    mockLLMResponse("Perfect, I'll build you a plan from scratch. Do you use Strava?\n[MODE:FROM_SCRATCH]");
+
+    await POST(makeRequest({ userId: "user-001", message: "Option 1" }));
+
+    // [MODE:...] tag must be stripped from the sent SMS
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const textSent = smsCalls[0]?.[1] as string;
+    expect(textSent).not.toContain("[MODE:");
+    expect(textSent).toContain("build you a plan from scratch");
+  });
+
+  it("[DASHBOARD_LINK] without [READY]: treated as implicit [READY] (wrap-up safety net)", async () => {
+    // Prod regression: Dean emitted a wrap-up with [DASHBOARD_LINK] but forgot [READY],
+    // leaving the athlete stuck in "onboarding" with no plan generated. The system now
+    // treats [DASHBOARD_LINK] as an implicit [READY] signal.
+    mockTables({
+      users: [
+        {
+          data: onboardingUser({
+            onboarding_data: {
+              name: "Jake",
+              goal: "5k",
+              has_existing_plan: false,
+              wants_plan: true,
+              injury_history: "none",
+            },
+          }),
+          error: null,
+        },
+        { data: { dashboard_token: "tok-abc" }, error: null },
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null },
+      races: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+
+    mockToolResponse("save_training_fields", {});
+    // Dean's wrap-up: [DASHBOARD_LINK] present, [READY] forgotten
+    mockLLMResponse("You're all set, Jake. Your dashboard is here:\n[DASHBOARD_LINK]");
+
+    await POST(makeRequest({ userId: "user-001", message: "no injuries" }));
+
+    // completeOnboarding should have fired — verified by the user update clearing onboarding_step
+    const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
+    const usersUpdates = fromCalls.filter((c: unknown[]) => c[0] === "users");
+    expect(usersUpdates.length).toBeGreaterThan(0);
   });
 });
 

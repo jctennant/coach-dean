@@ -4,6 +4,36 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Tag-driven mode selection + DASHBOARD_LINK as implicit READY
+
+**Type:** Bug Fix
+**Reported by:** Jake (user 3e5e4853) — onboarded as a from-scratch athlete but never received a plan.
+**User feedback:** "I didn't actually get a plan from Dean here. I also still see the 'upload your plan' pattern."
+**Root cause:** Two compounding failures in the unified-conversation onboarding flow.
+  (1) Haiku was asked to extract `has_existing_plan` / `wants_plan` from free-form conversation — a field whose value is downstream of a single explicit "option 1/2/3" answer. On Jake's transcript, Haiku invented `has_existing_plan=true` and `external_plan_description="Custom plan from Dean"` (a plan Dean had promised to *build* — mistaken for a pre-existing external plan). That would have routed `completeOnboarding` down the complement branch, sending the "upload your plan PDF" pdfHint and skipping plan generation entirely.
+  (2) Dean's terminal wrap-up message included `[DASHBOARD_LINK]` but forgot the `[READY]` tag. Without `[READY]`, `completeOnboarding` never fired; `onboarding_step` stayed `"onboarding"`, no `initial_plan` trigger ever ran, and the athlete was stuck with no plan.
+**Fix / Change:**
+  • Added deterministic tag: Dean emits `[MODE:FROM_SCRATCH]` / `[MODE:COMPLEMENT]` / `[MODE:NO_PLAN]` the moment the athlete confirms their working mode. Route parses the tag and sets `has_existing_plan` + `wants_plan` directly — no more Haiku inference for these fields.
+  • Removed `has_existing_plan` and `wants_plan` from the Haiku extraction schema + prompt. Tightened `external_plan_description` to explicitly reject plans Dean is going to build.
+  • Treat `[DASHBOARD_LINK]` as an implicit `[READY]` signal in the route — safety net so a forgotten `[READY]` tag on a terminal message doesn't strand the athlete.
+  • Strengthened `[READY]` prompt rule: any wrap-up language ("you're all set", `[DASHBOARD_LINK]`, sign-off without a question) MUST include `[READY]`.
+  • Updated eval parity: `run-onboarding-evals.mjs` and `run-simulation-evals.mjs` now include the MODE tag prompt + parse the tag into `collected`.
+  • Updated `onboarding-handle.test.ts`: the `[READY]` test now seeds mode in `onboarding_data`; added tests for `[MODE:FROM_SCRATCH]` tag-stripping and `[DASHBOARD_LINK]` as implicit `[READY]`.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`, `evals/run-simulation-evals.mjs`, `evals/run-onboarding-evals.mjs`
+
+---
+
+## 2026-04-19 — Strava re-auth dedup, post-run activity-id dedup, projected week total rule
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (user 5e1535c3, 2e5a7e92 / Maddy) — original PR #6
+**User feedback:** Ghost "Strava connected" SMS firing 4× mid-conversation; duplicate post-run messages for the same activity hours apart; "That brings you to 14 mi for the week" when athlete had already logged 36 mi.
+**Root cause:** (1) `/api/auth/strava/callback` sent the "Strava connected" SMS on every callback — re-auth flows (write-scope upgrade, repeated link clicks) each fired the message. (2) The post-run dedup guard only looked back 10 minutes; Strava can re-fire the same `activity_id` event over a 40+ minute spread, slipping past the window. (3) No prompt rule required Dean to project full weekly mileage as `existing + new` when an athlete reports mid-week miles.
+**Fix / Change:** (1) `auth/strava/callback`: query `strava_access_token` before sending — skip SMS if already set (first-time connects unaffected). (2) `webhooks/strava`: primary dedup is now a permanent `conversations` lookup matching `strava_activity_id` → `post_run`. The 10-min time-based guard remains as a race-condition fallback. (3) `coach/respond`: added `PROJECTED WEEK TOTAL` `<rule>` block to the `user_message` prompt — Dean must always state full projected weekly total when the athlete reports existing mileage.
+**Files changed:** `src/app/api/auth/strava/callback/route.ts`, `src/app/api/webhooks/strava/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-19 — Sunday recap cron: return early, run work via `after()`
 
 **Type:** Bug Fix

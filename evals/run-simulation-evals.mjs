@@ -175,10 +175,18 @@ After searching: if the user has not stated a specific date (only a month or vag
 FIRST-OF-MONTH GUARD: If the only date information you have is a month ("in June", "sometime in July", "this fall"), do NOT proceed with the 1st of that month as a placeholder. Stop and ask: "Do you know the exact date?" A first-of-month date is almost always wrong and will miscalibrate the entire training timeline.
 After searching: always use the date from your search result, not the date the athlete stated. If they differ, note it (e.g. "I found it listed as [search date] — does that sound right?") rather than silently overriding in either direction.
 
+MODE TAG — REQUIRED once the athlete confirms their working mode:
+When the athlete answers which mode fits (option 1/2/3, "build me one", "I have a plan", "just feedback", etc.), emit ONE of these tags on its own line in the same message that acknowledges their mode — the system reads the tag to set has_existing_plan / wants_plan.
+- [MODE:FROM_SCRATCH] — athlete picked option (1): Dean builds their plan from scratch
+- [MODE:COMPLEMENT] — athlete picked option (2): they already follow a plan and Dean works alongside it
+- [MODE:NO_PLAN] — athlete picked option (3): no plan, post-run feedback only
+The tag is stripped before the message is sent. Never emit the tag speculatively.
+
 SIGNALING READY:
 When you have name + goal + training_days + at least one of (pace/PR data OR Strava connected), end your final message with [READY] on its own line. The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
 When you signal [READY], do not ask any more questions in that message. Wrap up warmly and orient the athlete to what's next — a coaching note after their next run or their plan landing shortly — and mention their dashboard as the home for their training data (plan, zone trends, aerobic efficiency, uploaded training PDFs). Include [DASHBOARD_LINK] on its own line as a placeholder — the system replaces it with the URL. You have freedom in phrasing; skip the dashboard mention only when it clearly doesn't fit.
+[READY] IS REQUIRED ON ANY WRAP-UP: If your message contains [DASHBOARD_LINK] or otherwise signs off without a question, you MUST include [READY] on its own line. (Safety net: the system treats [DASHBOARD_LINK] as implicit [READY], but you should always include both.)
 
 ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
@@ -230,7 +238,7 @@ Output format (include only fields that are clearly stated — use null for anyt
 Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess.
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets only for road races at those distances. IMPORTANT: if the athlete says they have no committed race — only aspirational/eventual talk ("maybe a marathon someday", "thinking about eventually") — use "return_to_running" or "general_fitness", NOT the race distance. The goal must reflect what they are actually training for right now, not what they might do later.
-- has_existing_plan / external_plan_description: ALWAYS extract these when the athlete mentions a training plan. Examples that must set has_existing_plan=true: "I'm already on a Runna plan", "I follow a TrainingPeaks plan", "my coach gave me a plan", "I'm using a Hal Higdon program". For any of these, also capture external_plan_description as a brief factual summary: plan source/name, current week if mentioned, weekly mileage if mentioned. E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Set has_existing_plan=false only if the athlete explicitly says they have no plan or are self-directed without one.
+- external_plan_description: capture a brief factual summary when the athlete describes a training plan they're currently following (plan source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan. Do NOT capture a plan Dean is going to build. (has_existing_plan / wants_plan are NOT extracted here — they come from Dean's [MODE:...] tag, which the runner parses separately.)
 - training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"])
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:05:00" → 125.0
 - race_date: use the most specific date mentioned. If a specific date (day + month) was stated by either participant, use that exact date. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if someone explicitly said "the 1st" or "June 1st". Today is ${today}.
@@ -341,13 +349,26 @@ async function runSimulation(fixture, verbose) {
     // Get Dean's response
     const rawDeanResponse = await getDeanResponse(collected, stravaContext, history, isFirstResponse);
 
-    const isReady = /\[READY\]/i.test(rawDeanResponse);
     const wantsStravaLink = /\[STRAVA_LINK\]/i.test(rawDeanResponse);
+    const wantsDashboardLink = /\[DASHBOARD_LINK\]/i.test(rawDeanResponse);
+    // [DASHBOARD_LINK] is implicit [READY] — matches route.ts parity.
+    const isReady = /\[READY\]/i.test(rawDeanResponse) || wantsDashboardLink;
+
+    // Parse [MODE:...] tag — tag-driven, matches route.ts parity.
+    const modeMatch = rawDeanResponse.match(/\[MODE:(FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/i);
+    if (modeMatch) {
+      const mode = modeMatch[1].toUpperCase();
+      if (mode === "FROM_SCRATCH") collected = mergeCollected(collected, { has_existing_plan: false, wants_plan: true });
+      else if (mode === "COMPLEMENT") collected = mergeCollected(collected, { has_existing_plan: true, wants_plan: false });
+      else if (mode === "NO_PLAN") collected = mergeCollected(collected, { has_existing_plan: false, wants_plan: false });
+    }
 
     // Clean signals from displayed text
     let deanText = rawDeanResponse
       .replace(/\[READY\]/gi, "")
       .replace(/\[STRAVA_LINK\]/gi, "")
+      .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
+      .replace(/\[DASHBOARD_LINK\]/gi, "https://coachdean.ai/dashboard?token=sim")
       .trim();
 
     if (wantsStravaLink) {
