@@ -86,31 +86,28 @@ export function computeLoadTrend(
     byWeek[k] = (byWeek[k] ?? 0) + a.distance_meters / 1609.34;
   }
 
-  // Build the last 8 complete weeks (exclude the current partial week)
+  // Build the last 8 complete weeks (exclude the current partial week).
+  // Anchor at the start of this week in the target TZ, then step back 7-day
+  // increments from that Monday. (Stepping back from `now` in UTC and then
+  // re-converting via weekKey skipped the most recent completed week whenever
+  // UTC had rolled to Monday but the local TZ had not — or vice versa.)
   const now = new Date();
-  const thisWeekKey = weekKey(now, timezone);
+  const currentWeekStart = getWeekStart(now, timezone);
+  const thisWeekKey = currentWeekStart.toISOString().slice(0, 10);
   const weeks: Array<{ key: string; miles: number }> = [];
   for (let i = 8; i >= 1; i--) {
     const d = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() - i * 7
+      currentWeekStart.getUTCFullYear(),
+      currentWeekStart.getUTCMonth(),
+      currentWeekStart.getUTCDate() - i * 7
     ));
-    const k = weekKey(d, timezone);
+    const k = d.toISOString().slice(0, 10);
     if (k !== thisWeekKey) {
       weeks.push({ key: k, miles: Math.round((byWeek[k] ?? 0) * 10) / 10 });
     }
   }
 
-  // Remove trailing duplicate keys
-  const seen = new Set<string>();
-  const dedupedWeeks = weeks.filter(w => {
-    if (seen.has(w.key)) return false;
-    seen.add(w.key);
-    return true;
-  });
-
-  const weeklyMiles = dedupedWeeks.map(w => w.miles);
+  const weeklyMiles = weeks.map(w => w.miles);
 
   if (weeklyMiles.length < 2) {
     return { weeklyMiles, weekOverWeekChangePct: null, flagged: false, summary: "Insufficient weekly data for load trend." };
@@ -311,12 +308,19 @@ export function computeLongRunProgression(
     if (!longestByWeek[k] || miles > longestByWeek[k]) longestByWeek[k] = miles;
   }
 
+  // Anchor at the start of this week in the target TZ, then step back 7-day
+  // increments from that Monday — same fix as computeLoadTrend.
   const now = new Date();
-  const thisWeekKey = weekKey(now, timezone);
+  const currentWeekStart = getWeekStart(now, timezone);
+  const thisWeekKey = currentWeekStart.toISOString().slice(0, 10);
   const weeks: number[] = [];
   for (let i = 8; i >= 1; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i * 7));
-    const k = weekKey(d, timezone);
+    const d = new Date(Date.UTC(
+      currentWeekStart.getUTCFullYear(),
+      currentWeekStart.getUTCMonth(),
+      currentWeekStart.getUTCDate() - i * 7
+    ));
+    const k = d.toISOString().slice(0, 10);
     if (k !== thisWeekKey) {
       weeks.push(Math.round((longestByWeek[k] ?? 0) * 10) / 10);
     }

@@ -26,12 +26,14 @@ function makeActivity(opts: {
   decoupling?: number;
   type?: string;
 }): ActivityForAnalytics {
-  const now = new Date();
-  // Use UTC midnight to match the UTC-based week construction in computeLoadTrend /
-  // computeLongRunProgression (which use Date.UTC(now.getUTCFullYear(), ...getUTCDate() - i*7)).
-  // Using getDate() (local) causes drift when UTC has already rolled to the next day (e.g.
-  // 10pm Pacific = 05am UTC next day), making the activity land in the wrong week.
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - opts.daysAgo));
+  // Anchor in the target TZ's current date (not UTC), since computeLoadTrend /
+  // computeLongRunProgression group weeks in the target TZ. Using UTC midnight
+  // caused drift at day boundaries (e.g. NY Sun 23:00 = UTC Mon 03:00 meant
+  // daysAgo:7 landed in the wrong ISO week). Anchoring at noon in the TZ avoids
+  // any time-of-day drift.
+  const nowLocal = new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date());
+  const [ly, lm, ld] = nowLocal.split("-").map(Number);
+  const d = new Date(Date.UTC(ly, lm - 1, ld - opts.daysAgo, 12, 0, 0));
   return {
     start_date: d.toISOString(),
     activity_type: opts.type ?? "Run",
