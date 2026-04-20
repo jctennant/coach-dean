@@ -4594,6 +4594,10 @@ function buildUserMessage(
       // max_heartrate is this activity's single-run peak, NOT the athlete's physiological maximum.
       // Do not multiply it by ~1.02 or otherwise derive a "true max HR" estimate from it.
       dataGuards.push("The `max_heartrate` field in the activity JSON is this run's single-activity peak reading, NOT the athlete's physiological maximum heart rate. Do NOT use it to estimate or state the athlete's max HR (e.g. do NOT say 'your max is around X based on today's peak'). If you need to reference HR zones, describe them in relative terms (e.g. 'zone 4-5', 'high aerobic effort') without asserting a specific max HR figure.");
+      // Ride speed guard: outdoor bike rides use mph/km/h, not running pace notation.
+      if ((activityData?.type as string) === "Ride") {
+        dataGuards.push("RIDE SPEED UNITS: This is an outdoor Ride (not a VirtualRide). Strava reports cycling speed in mph or km/h — do NOT express it as min/mile or min/km pace (those are running-pace units). Report speed as mph for imperial athletes or km/h for metric athletes (e.g. '18.2 mph avg' or '29.3 km/h avg').");
+      }
       // splits_standard gives one split per mile, so splitCount ≈ ceil(runDistanceMiles).
       // Guard: if splits look like km data (far more splits than miles), warn Claude.
       // This handles legacy activities stored before the switch to splits_standard.
@@ -4631,6 +4635,7 @@ If TODAY'S PLANNED SESSION is shown in CURRENT TRAINING STATE above, check wheth
 - The middle segment(s) = the main effort. Compare these against the prescribed pace.
 - The closing slower segment = cooldown. Do NOT describe it as "backing off" or "fading" — it is intentional.
 Read the planned structure first, then interpret the splits against it. If no plan is stored, describe the split pattern as observed (e.g. "your first mile was a touch slower, then you settled into a strong rhythm") without inferring intent.
+- LAP PACE SANITY CHECK: If lap data is available and the FINAL lap is faster than the middle (main effort) laps, do NOT confidently label it a "cooldown" — a cooldown is by definition slower than the main set. If the paces contradict the expected warmup→main effort→cooldown structure, flag the anomaly instead of asserting the wrong label: e.g. "Your last lap was actually your fastest — was that intentional, or did the structure shift?" Never apply a workout structure label that contradicts the pace data.
 
 Provide post-run feedback in 3–5 sentences. Surface exactly 2 insights — no more, no less — and both must be actionable. A stat without a "so what" is noise, not coaching.
 
@@ -4649,6 +4654,8 @@ COACHING FORWARD — tell them what it means, not just what happened:
 Keep it tight — 3–5 sentences total for the whole message.
 
 MILEAGE ACCURACY — CRITICAL: The WEEK-TO-DATE figure in CURRENT TRAINING STATE is what the athlete has ALREADY RUN this week — it already includes the activity shown above. Use it as the current/completed figure. If you mention a projected end-of-week total, always add the word "on track for" or "projected" to make clear it's not yet achieved. Never say "you're at X miles this week" when X includes future sessions.
+
+PROJECTED vs TARGET DIRECTION: When comparing a projected total to the weekly target (e.g. "on track for ~X — slightly [lighter/heavier] than Y target"), verify the arithmetic before writing: if projected X > target Y, say "above target" or "over target" — NEVER "lighter than target." If projected X < target Y, say "slightly under" or "below target" — NEVER "above target." Getting the direction backwards gives contradictory coaching advice and confuses the athlete about whether they are on track.
 
 PLAN CONSISTENCY RULES — follow these exactly:
 - Week-to-date mileage: use the WEEK-TO-DATE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
@@ -4735,6 +4742,8 @@ INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
 
 LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and offer cross-training (easy bike, elliptical, swim) as an option for any days they'd otherwise skip. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
+
+MANUALLY-REPORTED ACTIVITY: If earlier in RECENT CONVERSATION you told the athlete you could NOT see a specific activity in Strava, and they then provided the details manually (distance, pace, time, etc.) in a follow-up message — those numbers are athlete-reported, NOT Strava-confirmed. Do NOT say "that matches what I saw from the sync" or any phrasing that implies Strava confirmed the data. Acknowledge it as manually noted: e.g. "Got it — I've noted that manually. If it eventually syncs from Strava, I'll reconcile it then." Falsely attributing athlete-provided data to a Strava sync that never happened damages trust.
 
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 
