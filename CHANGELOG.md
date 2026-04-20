@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Four prompt guards: ride units, lap sanity, projected/target direction, manual sync
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis (users b8795d1e, ae993f7b, 7f356c80) — original PR #12
+**User feedback:** Cyclist's lap reported as "4:03/mi avg pace" (running unit applied to a Ride); "cooldown" lap was actually faster than the main set; "on track for 33.3 mi — slightly lighter than the 24.5 mi target" (33 is 36% above 24, not lighter); Dean said "that matches what I saw from the sync" 3 minutes after telling the athlete it didn't see their run in Strava.
+**Root cause:** No prompt-level guards existed for any of the four cases.
+**Fix / Change:** Four prompt-only edits in `coach/respond/route.ts`. (1) `RIDE SPEED UNITS` data guard — when `activityData.type === "Ride"`, report speed in mph/km/h, never min/mi. (2) `LAP PACE SANITY CHECK` in WORKOUT STRUCTURE — if the final lap is faster than middle laps, flag the anomaly instead of confidently labeling it a cooldown. (3) `PROJECTED vs TARGET DIRECTION` rule in MILEAGE ACCURACY — if projected > target, say "above target" (never "lighter than target"). (4) `MANUALLY-REPORTED ACTIVITY` rule in `user_message` — if Dean previously said it couldn't see an activity, do not later say its details "match what I saw from the sync."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-19 — Sunday recap cron: return early, run work via `after()`
 
 **Type:** Bug Fix
