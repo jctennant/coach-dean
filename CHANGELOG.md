@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-19 — Onboarding wrap-up polish: whitespace, "aerobic" wording, PDF upload prompt
+
+**Type:** Bug Fix
+**Reported by:** Jake (live test)
+**User feedback:** "1) didn't do web search for race dates, but at least confirmed with me 2) last message had extra spaces at the bottom 3) last message said 'aerodynamic efficiency' but I think it meant aerobic? 4) Not critical but dean didn't ask me to send the plan via PDF - if he doesn't he should say that I can upload it to the dashboard via PDF to give him proper context on what I'm doing"
+**Root cause:**
+1. Claude sometimes emits extra blank lines / leading spaces around `[DASHBOARD_LINK]`, and the onboarding path sends the raw text straight to SMS (no `splitIntoMessages` normalization like `coach/respond`).
+2. The wrap-up prompt's example said "aerobic efficiency" but Claude still hallucinated "aerodynamic efficiency" — no explicit guard against the wrong word.
+3. For complement-mode users (existing plan), the PDF-upload hint only appeared in the follow-up welcome message, which was skipped entirely whenever Dean included `[DASHBOARD_LINK]` in his own wrap-up. So users with existing plans who got a nice wrap-up from Dean never heard they could upload their plan as a PDF.
+**Fix / Change:**
+1. After `[DASHBOARD_LINK]` substitution, normalize whitespace: strip leading spaces per line and collapse 3+ newlines to 2.
+2. Added explicit WORD ACCURACY guard to the wrap-up prompt ("the term is 'aerobic'… never write 'aerodynamic'") and a FORMATTING note about `[DASHBOARD_LINK]` placement.
+3. Added a conditional PDF-upload reminder at the end of `completeOnboarding` for complement mode: if Dean already sent the dashboard link in wrap-up, still send a short follow-up telling the athlete they can upload their plan PDF (skipped if a PDF is already attached).
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-19 — Post-run annotation fires during post-[READY] onboarding + fix redundant goal question
 
 **Type:** Bug Fix

@@ -481,6 +481,9 @@ The [READY] tag is stripped before sending — do not reference or explain it. D
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
 CRITICAL — [READY] means zero open questions: [READY] can only appear in a message that contains NO questions of any kind — required or optional, soft or hard. The moment you add a question mark to a message, [READY] is off the table for that turn, no matter how minor the question seems. If you realize you still need to ask something (pace calibration, goal time, any follow-up), ask it in this message WITHOUT [READY] and wait for the athlete's response. Then wrap up and signal [READY] in your next turn. Signaling [READY] while an unanswered question is in the same message fires the plan immediately — the athlete never gets to respond.
 When you signal [READY], wrap up warmly AND orient the athlete to what happens next. Two pieces: (1) what to expect from you next — usually a coaching note after their next Strava run, or their plan landing shortly — and (2) a natural mention of their dashboard as the home for their training data (upcoming plan, zone distribution, aerobic efficiency trend, uploaded training PDFs). Include [DASHBOARD_LINK] on its own line as a placeholder — the system replaces it with the URL. Use first person only — never refer to yourself as "Dean". Tie the wrap-up to the athlete's specific goal or race. Example: "I've got everything I need — your first coaching note lands after your next run. I'll keep your dashboard updated with your plan, zone trends, and aerobic efficiency as new runs come in from Strava. You can access it any time here:\n[DASHBOARD_LINK]" You have freedom in phrasing — skip the dashboard mention only when it clearly doesn't fit the moment. The system will follow up automatically after this message.
+WORD ACCURACY: The term is "aerobic" (related to oxygen use / endurance). Never write "aerodynamic" — that's about airflow over a bike or car, not running physiology. Double-check this word before sending.
+FORMATTING: Place [DASHBOARD_LINK] on its own line with exactly one blank line above it and nothing after it. No leading spaces, no extra blank lines, no indentation.
+IF THE ATHLETE HAS AN EXISTING PLAN (working-mode option 2): in your wrap-up, explicitly tell them they can upload their training plan PDF to the dashboard so you can reference its specific workouts when giving feedback. This is important — without the PDF you're guessing at what their plan prescribes. Example add-on: "If you upload your plan as a PDF on the dashboard, I can reference the exact workouts your coach prescribed when I give you feedback."
 
 ULTRA AND INJURY GOALS — extra required fields:
 For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
@@ -663,6 +666,15 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     // or if it slipped through any other path, strip the raw placeholder.
     responseText = responseText.replace(/\[DASHBOARD_LINK\]/gi, "").trim();
   }
+
+  // Normalize whitespace — Claude occasionally wraps URLs with extra blank lines
+  // or leading indent, which renders as awkward gaps in SMS.
+  responseText = responseText
+    .split("\n")
+    .map((line) => line.replace(/^[ \t]+/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 
   // Strip any ⚠️-prefixed reasoning preamble Claude may have output (e.g. "⚠️ CRITICAL …\n\n")
   // and "RESPONSE:" label separators — these are internal directives that must never reach the athlete.
@@ -1589,10 +1601,19 @@ async function completeOnboarding(
     }
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const dashboardUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
+    const hasPlanPdf = Boolean(data.plan_filename);
     if (!opts?.dashboardLinkSentInWrapUp) {
       // Dean's [READY] message didn't include the dashboard link — send it as a follow-up.
-      const welcomeMsg = `Your dashboard is where all your training data lives — zone distribution, aerobic efficiency trend, and upcoming plan. You can also upload your training PDF so I can reference it directly:\n${dashboardUrl}`;
+      const pdfLine = hasPlanPdf
+        ? ""
+        : " You can also upload your training PDF so I can reference it directly.";
+      const welcomeMsg = `Your dashboard is where all your training data lives — zone distribution, aerobic efficiency trend, and upcoming plan.${pdfLine}\n${dashboardUrl}`;
       await sendAndStore(user.id, phone, welcomeMsg, "initial_plan");
+    } else if (!hasPlanPdf) {
+      // Dean already shared the dashboard link in his wrap-up, but the athlete
+      // hasn't uploaded their plan PDF yet — make sure they know they can.
+      const pdfHint = `One more thing — if you upload your training plan as a PDF on the dashboard, I can reference the exact workouts your coach prescribed when giving you feedback. No PDF is fine too, I'll work off what I see in Strava.`;
+      await sendAndStore(user.id, phone, pdfHint, "initial_plan");
     }
     return;
   }
