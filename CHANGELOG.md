@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-21 — Strengthen HR and power data guards to prevent effort-inference hallucinations
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis email (2026-04-20)
+**User feedback:** "Although 'power/watts data: NO' was indicated, the transcript erroneously includes it" / "Coach Dean refers to pace consistency and terrain variations despite not having HR data to validate physical performance and exertion feedback"
+**Root cause:** The `!hasHR` data guard only blocked "specific HR values" — leaving Dean free to make HR-implied effort inferences like "you stayed aerobic", "it looked like a zone 2 effort", or "your heart rate seemed controlled" without citing a number. The `!hasWatts` guard told Dean to fall back to "HR, elapsed time, and pace-equivalent language" even when HR data was also unavailable, which was contradictory.
+**Fix / Change:**
+1. Strengthened the `!hasHR` guard from "Do NOT reference specific HR values" to "Do NOT reference HR values, heart rate, specific BPM figures, aerobic zone labels (Zone 1/2/3/4/5), or make any effort-level inference that requires HR data." This closes the loophole where Dean could still imply cardiac/zone assessment without citing a number.
+2. Made the `!hasWatts` guard's effort-language fallback conditional: when HR data is also unavailable, the fallback now correctly says "elapsed time and pace-equivalent language only" instead of "HR, elapsed time, and pace-equivalent language."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-20 — Dashboard This Week card: hide plan CTAs for Dean plans, add easy-miles breakdown
 
 **Type:** Improvement
