@@ -1433,9 +1433,13 @@ export default async function DashboardPage({
                 <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-orange-100">
                   <span className="text-base font-bold text-[#FC4C02]">S</span>
                 </div>
-                <p className="text-sm font-semibold text-gray-800">Connect Strava to unlock your dashboard</p>
+                <p className="text-sm font-semibold text-gray-800">
+                  {hasPlan ? "Connect Strava for post-run feedback" : "Connect Strava to unlock your dashboard"}
+                </p>
                 <p className="mt-1 text-xs text-gray-400 max-w-xs mx-auto">
-                  Dean analyzes your runs automatically. Connect Strava and your training insights will appear here.
+                  {hasPlan
+                    ? "Your plan is ready above. Connect Strava and Dean will analyze every run automatically and send you a coaching note."
+                    : "Dean analyzes your runs automatically. Connect Strava and your training insights will appear here."}
                 </p>
                 <a
                   href={`/api/auth/strava?userId=${user.id}`}

@@ -79,11 +79,19 @@ export function PlanCard({
     currentWeekData?.mileage_target_max != null &&
     currentWeekData.mileage_target_max > currentWeekData.mileage_target_min;
 
+  // Prefer the training_state-derived targetDisplay (reflects any in-week adjustments),
+  // but fall back to the plan's own week mileage_target when state hasn't been written yet
+  // (e.g. brand-new plan, or edge cases where training_state is missing).
+  const planWeekTarget = currentWeekData?.mileage_target && currentWeekData.mileage_target > 0
+    ? currentWeekData.mileage_target
+    : null;
   const targetLabel = hasMileageRange
     ? `${fmtDist(currentWeekData!.mileage_target_min!, useMetric)}–${fmtDist(currentWeekData!.mileage_target_max!, useMetric)} target`
     : targetDisplay != null
       ? `${targetDisplay} ${distUnit} target`
-      : null;
+      : planWeekTarget != null
+        ? `${fmtDist(planWeekTarget, useMetric)} target`
+        : null;
 
   const longRunDisplay = currentWeekData?.long_run_target && currentWeekData.long_run_target > 0
     ? fmtDist(currentWeekData.long_run_target, useMetric)

@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-20 — Dashboard shows no weekly target / long run / quality when training_state row missing
+
+**Type:** Bug Fix
+**Reported by:** Eli (via Jake) — dashboard vs. SMS mismatch
+**User feedback:** "A few notes on the dashboard: It doesn't seem to show a total mileage target 2) long run says 1.5 mi but in the text it says 3 mi long run (total mileage should be 6 mi) 3) It doesn't show any of the quality focus e.g. strides on the dashboard"
+**Root cause:** For Eli the `training_state` row was never created (his `completeOnboarding` path didn't run to completion — `training_profiles` is also null). `generateAndSaveFullPlan` and the `initial_plan` trigger both wrote Week 1 via `.update().eq("user_id", …)`, which silently no-ops when the row doesn't exist. So `weekly_mileage_target`, `weekly_long_run_miles`, and `weekly_quality_session` stayed null and the dashboard had nothing to render. The PlanCard also didn't fall back to the plan's own `mileage_target` when `training_state` was empty, so even recovering the row wasn't sufficient for plans without a mileage range.
+**Fix / Change:**
+1. `src/lib/training-plan.ts` — swap `training_state` `.update()` → `.upsert({ user_id, ... }, { onConflict: "user_id" })` so missing rows are created, not silently skipped. Mid-plan rebuilds (no `resetToWeek1`, no `week1Reset`) now skip the write entirely (previously wrote an empty object).
+2. `src/app/api/coach/respond/route.ts` — same upsert change in the `initial_plan` handler.
+3. `src/app/dashboard/plan-card.tsx` — when the plan week has no min/max range and `training_state.weekly_mileage_target` is null, fall back to the plan's own `mileage_target` so the target always shows.
+4. Backfilled Eli's `training_state` from his stored plan Week 1 so his current dashboard renders correctly.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/plan-card.tsx`, `src/__tests__/lib/training-plan-generate.test.ts` (mock `.upsert` instead of `.update` for training_state writes).
+**Follow-ups not in this fix:** (a) investigate why `completeOnboarding` didn't persist Eli's `training_profiles`/`training_state` in the first place — likely a silent Linq retry/dupe interaction given his convo shows every user message duplicated; (b) for beginner mile-goal plans, Haiku often falls back to `key_workout: "Long run Xmi"` instead of prescribing strides — worth a deterministic fallback.
+
+---
+
 ## 2026-04-20 — Fix onboarding loop when Dean skips [MODE:...] tag
 
 **Type:** Bug Fix

@@ -655,24 +655,30 @@ No other text.`,
   // completed/missed before today) so historical context isn't lost.
   const week1ArcMileage = planWeeks[0]?.mileage_target ?? null;
   const week1MileageTarget = prescribedWeek1Miles ?? week1ArcMileage;
-  await supabase.from("training_state")
-    .update({
-      ...(resetToWeek1 ? {
-        current_week: 1,
-        ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
-        weekly_plan_sessions: null,
-        weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
-        weekly_quality_session: planWeeks[0]?.key_workout || null,
-      } : {}),
-      ...(!resetToWeek1 && week1Reset ? {
-        // Week-1 mid-plan rebuild: update mileage target + clear future sessions (preserve past).
-        ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
-        weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json,
-        weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
-        weekly_quality_session: planWeeks[0]?.key_workout || null,
-      } : {}),
-    })
-    .eq("user_id", userId);
+  // Use upsert so a missing training_state row (e.g. completeOnboarding didn't run cleanly)
+  // gets created instead of silently no-oping. Without this, the dashboard shows no weekly
+  // target / long run / quality.
+  if (resetToWeek1) {
+    await supabase.from("training_state").upsert({
+      user_id: userId,
+      current_week: 1,
+      ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
+      weekly_plan_sessions: null,
+      weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
+      weekly_quality_session: planWeeks[0]?.key_workout || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+  } else if (week1Reset) {
+    // Week-1 mid-plan rebuild: update mileage target + clear future sessions (preserve past).
+    await supabase.from("training_state").upsert({
+      user_id: userId,
+      ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
+      weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json,
+      weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
+      weekly_quality_session: planWeeks[0]?.key_workout || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+  }
 
   // Reuse the existing dashboard token so old links remain valid.
   // Only generate a new UUID (and stamp trial_started_at) if the user has never had one.

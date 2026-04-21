@@ -2021,13 +2021,16 @@ Weekly total: ${mileageRange}
 
     // Persist week counter, phase, and computed target. Clear taper_peak_miles so the
     // next taper window re-locks the peak from scratch.
-    await supabase.from("training_state").update({
+    // Upsert (not update): if completeOnboarding didn't create the training_state row,
+    // an update silently no-ops and the dashboard shows no weekly target.
+    await supabase.from("training_state").upsert({
+      user_id: userId,
       current_week: periodization.effectiveWeek,
       current_phase: periodization.phase,
       taper_peak_miles: null,
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
-    }).eq("user_id", userId);
+    }, { onConflict: "user_id" });
     // Generate and save the full multi-week training arc.
     // skipLinkSms=true — we'll include the dashboard URL inline in the cadence question below
     // so the user gets one closing message instead of two back-to-back.

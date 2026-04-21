@@ -219,7 +219,7 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
           stateUpdateArgs.push(args);
           return c;
         });
@@ -247,7 +247,7 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
           capturedUpdate = payload;
           return c;
         });
@@ -279,7 +279,7 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
           capturedUpdate = payload;
           return c;
         });
@@ -295,9 +295,8 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       { skipLinkSms: true, prescribedWeek1Miles: 20, resetToWeek1: false },
     );
 
-    expect(capturedUpdate).not.toHaveProperty("current_week");
-    expect(capturedUpdate).not.toHaveProperty("weekly_mileage_target");
-    expect(capturedUpdate).not.toHaveProperty("weekly_plan_sessions");
+    // Mid-plan rebuild (neither resetToWeek1 nor week1Reset) must not write to training_state.
+    expect(capturedUpdate).toBeNull();
   });
 
   it("updates weekly_mileage_target and clears future sessions (keeps preserved) when week1Reset is true", async () => {
@@ -309,7 +308,7 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
           capturedUpdate = payload;
           return c;
         });
@@ -342,13 +341,13 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
   });
 
   it("scopes the training_state update to the correct user_id", async () => {
-    let capturedEqUserId: unknown;
+    let capturedPayload: Record<string, unknown> | null = null;
 
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.eq as ReturnType<typeof vi.fn>).mockImplementation((col: string, val: unknown) => {
-          if (col === "user_id") capturedEqUserId = val;
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+          capturedPayload = payload;
           return c;
         });
       }
@@ -363,7 +362,7 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       { skipLinkSms: true, prescribedWeek1Miles: 35 },
     );
 
-    expect(capturedEqUserId).toBe("user-abc");
+    expect(capturedPayload).toMatchObject({ user_id: "user-abc" });
   });
 });
 
@@ -452,7 +451,7 @@ describe("generateAndSaveFullPlan — plan / text alignment", () => {
         });
       }
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((args: unknown) => {
           stateUpdateArgs.push(args);
           return c;
         });
@@ -532,7 +531,7 @@ describe("generateAndSaveFullPlan — beginner mileage cap", () => {
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
           capturedUpdate = payload;
           return c;
         });
@@ -558,7 +557,7 @@ describe("generateAndSaveFullPlan — beginner mileage cap", () => {
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const c = chain({ data: null, error: null });
       if (table === "training_state") {
-        (c.update as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
+        (c.upsert as ReturnType<typeof vi.fn>).mockImplementation((payload: Record<string, unknown>) => {
           capturedUpdate = payload;
           return c;
         });
