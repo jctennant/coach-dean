@@ -20,6 +20,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-20 — Plan quality session no longer echoes the long run
+
+**Type:** Bug Fix
+**Reported by:** Eli (via Jake) — same dashboard report as prior entry
+**User feedback:** "It doesn't show any of the quality focus e.g. strides on the dashboard"
+**Root cause:** For low-mileage beginner weeks (e.g. mile goal, 5mi target, 1.5mi long run), Haiku interpreted the week as "low-volume deload" and set `key_workout: "Long run 1.5mi"` — echoing the long run that's already shown separately on the dashboard. The athlete got no quality/form stimulus and the Quality row on the dashboard duplicated the Long Run row. The prompt's CRITICAL RULE had an exception for "pure long-run-only weeks" that Haiku overused.
+**Fix / Change:**
+1. `src/lib/training-plan.ts` — tightened the Haiku prompt: key_workout must ALWAYS be a quality/form session; never echo the long run. Beginner/base/recovery/deload weeks should default to strides ("Easy 2mi + 4×20sec strides") since they're low-impact and valuable from week 1.
+2. Added a deterministic post-process fallback: if Haiku still returns empty or a "Long run Xmi" echo, substitute `Easy 2mi + 4×20sec strides` automatically. Guarantees the dashboard never shows a duplicate Long Run / no-quality state.
+3. Patched Eli's stored plan in place (9 weeks had the echo) so his dashboard reflects the fix immediately.
+**Follow-ups:** the SMS initial_plan message is still generated free-form by Claude and can drift from the saved plan numbers (e.g. Dean texted 6mi total / 3mi long while the arc stored 5mi / 1.5mi). Separate fix — align the SMS generation to the saved Week 1.
+
+---
+
 ## 2026-04-20 — Fix onboarding loop when Dean skips [MODE:...] tag
 
 **Type:** Bug Fix
