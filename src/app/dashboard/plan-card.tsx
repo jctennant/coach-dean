@@ -24,6 +24,9 @@ export type PlanCardProps = {
   targetDisplay: number | null;
   distUnit: string;
   progressPct: number;
+  isUploadedPlan: boolean;
+  // Remaining easy miles after long run + quality session (null if unparseable)
+  easyMilesRemaining: number | null;
 };
 
 const PHASE_LABELS: Record<string, string> = {
@@ -38,6 +41,7 @@ function fmtDist(miles: number, useMetric: boolean): string {
 export function PlanCard({
   userId, currentWeek, totalWeeks, currentWeekData, useMetric,
   actualDisplay, targetDisplay, distUnit, progressPct,
+  isUploadedPlan, easyMilesRemaining,
 }: PlanCardProps) {
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -143,10 +147,22 @@ export function PlanCard({
               <p className="text-sm text-gray-700 leading-snug">{keyWorkout}</p>
             </div>
           )}
+          {easyMilesRemaining != null && easyMilesRemaining > 0 && (
+            <div className="flex items-center justify-between py-2.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Easy miles</span>
+              <span className="text-sm font-semibold text-gray-800">~{fmtDist(easyMilesRemaining, useMetric)}</span>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Plan actions */}
+      {/* Guidance */}
+      <p className="text-[11px] text-gray-400 leading-snug">
+        Hit the target with easy-effort runs across your training days — the long run and quality session are the only structured pieces.
+      </p>
+
+      {/* Plan actions — only for imported plans. Dean-generated plans are managed via SMS. */}
+      {isUploadedPlan && (
       <div className="flex items-center justify-center gap-4 pt-1 border-t border-gray-50">
         <button
           onClick={() => setReplacing(true)}
@@ -173,6 +189,7 @@ export function PlanCard({
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }

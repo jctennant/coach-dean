@@ -4,6 +4,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-20 — Dashboard This Week card: hide plan CTAs for Dean plans, add easy-miles breakdown
+
+**Type:** Improvement
+**Reported by:** Jake (internal review)
+**User feedback:** "not sure if we should keep the remove plan CTA or replace plan CTA here if it's Dean generated - let's remove in this case. Is it ultra clear the guidance on getting easy miles except the long run + quality sessions to hit the target? Can we make this even more clear?"
+**Root cause:** PlanCard always rendered Replace / Remove actions, but those flows only make sense for imported plans — Dean-generated plans are managed via SMS. Card also showed target / long run / quality without making it explicit that the remaining volume is meant to be filled with easy-effort miles.
+**Fix / Change:**
+1. `plan-card.tsx` — gate the Replace/Remove action row behind a new `isUploadedPlan` prop; only imported plans see the CTAs.
+2. `plan-card.tsx` — add an "Easy miles" row (the remainder after long run + quality) and a one-line helper under the card reinforcing that easy-effort runs fill the target across training days.
+3. `page.tsx` — parse the first distance (mi or km) from the week's `key_workout`, subtract long run + quality from weekly target, and pass the remainder in miles. When quality distance can't be parsed (e.g. "6×800m @ 5K pace") the row is hidden rather than shown with an inaccurate number.
+**Files changed:** src/app/dashboard/plan-card.tsx, src/app/dashboard/page.tsx
+
+---
+
 ## 2026-04-20 — Dashboard shows no weekly target / long run / quality when training_state row missing
 
 **Type:** Bug Fix

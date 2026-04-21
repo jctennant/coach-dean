@@ -1069,6 +1069,19 @@ export default async function DashboardPage({
                   targetDisplay={weeklyTargetDisplay}
                   distUnit={distUnit}
                   progressPct={progressPct}
+                  isUploadedPlan={isUploadedPlan}
+                  easyMilesRemaining={(() => {
+                    const week = planWeeks.find(w => w.week_number === planCurrentWeek);
+                    if (!week) return null;
+                    const target = week.mileage_target;
+                    const longRun = week.long_run_target ?? 0;
+                    if (!target || target <= 0) return null;
+                    // Parse first distance (mi or km) from key_workout. Km values convert to miles.
+                    const m = week.key_workout?.match(/(\d+(?:\.\d+)?)\s*(mi|km)(?!n)/i);
+                    const qualityMiles = m ? (m[2].toLowerCase() === "km" ? parseFloat(m[1]) / 1.60934 : parseFloat(m[1])) : null;
+                    if (qualityMiles == null) return null;
+                    return Math.max(0, Math.round((target - longRun - qualityMiles) * 10) / 10);
+                  })()}
                 />
               </div>
             </section>
