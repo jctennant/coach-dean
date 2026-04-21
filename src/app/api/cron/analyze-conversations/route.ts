@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import Anthropic from "@anthropic-ai/sdk";
+import { anthropic } from "@/lib/anthropic";
 import { Resend } from "resend";
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 /** Strip markdown code fences (```html ... ``` or ``` ... ```) that Claude sometimes wraps around HTML output. */
 function stripMarkdownFences(text: string): string {
