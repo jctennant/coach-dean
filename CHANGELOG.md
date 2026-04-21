@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-20 — Fix onboarding loop when Dean skips [MODE:...] tag
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal observation on Eli's onboarding transcript)
+**User feedback:** "seems like Dean may have repeated himself a lot in this onboarding instance?" — athlete answered "1" four times in a row ("1", "Build from scratch", "Build me a plan from scratch") and Dean re-asked the three-options question every turn.
+**Root cause:** The `[MODE:FROM_SCRATCH|COMPLEMENT|NO_PLAN]` tag is the only signal that sets `has_existing_plan` / `wants_plan` (Haiku inference was removed). When Dean reflected the mode in prose but forgot the tag, `modeUnresolved` at `onboarding/handle/route.ts:770` re-asked the mode question. With no deterministic fallback, subsequent replies hit the same path — infinite loop.
+**Fix / Change:**
+1. Added `parseModeFallback()` — when the tag is missing AND the previous assistant message asked the three-options question, parse the athlete's reply for unambiguous signals ("1"/"one"/"build from scratch", "2"/Runna/TrainingPeaks/"follow a plan", "3"/"no plan"/"just feedback") and set the fields directly. Runs every turn, not just at [READY].
+2. Strengthened the prompt: added a pre-send self-check listing the prose phrases that REQUIRE a [MODE:...] tag, plus a concrete example showing the tag placement.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `CHANGELOG.md`
+
+---
+
 ## 2026-04-19 — Plans go day-agnostic + deterministic session completion status
 
 **Type:** Feature

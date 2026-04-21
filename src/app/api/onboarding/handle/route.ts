@@ -13,6 +13,47 @@ export const maxDuration = 60;
 // Tracks userIds currently in a dry_run onboarding request.
 const dryRunUsers = new Set<string>();
 
+/**
+ * Fallback parser for working mode when Dean fails to emit [MODE:...].
+ * Only fires when the last assistant message asked the three-options question —
+ * otherwise a "1" reply could mean anything. This is a safety net for model
+ * tag-compliance failures; the tag emission in the prompt is still the primary path.
+ */
+function parseModeFallback(
+  userMessage: string,
+  lastAssistantMessage: string | null
+): "FROM_SCRATCH" | "COMPLEMENT" | "NO_PLAN" | null {
+  if (!lastAssistantMessage) return null;
+  const askedMode =
+    /three different ways/i.test(lastAssistantMessage) ||
+    (/\(1\)/.test(lastAssistantMessage) &&
+      /\(2\)/.test(lastAssistantMessage) &&
+      /\(3\)/.test(lastAssistantMessage));
+  if (!askedMode) return null;
+
+  const msg = userMessage.trim().toLowerCase();
+
+  if (/^(1|one|option\s*1|first|#1|\(1\))[.!\s]*$/i.test(msg)) return "FROM_SCRATCH";
+  if (/^(2|two|option\s*2|second|#2|\(2\))[.!\s]*$/i.test(msg)) return "COMPLEMENT";
+  if (/^(3|three|option\s*3|third|#3|\(3\))[.!\s]*$/i.test(msg)) return "NO_PLAN";
+
+  if (/\bfrom scratch\b|\bbuild (me )?(a |one|it)|\bbuild one\b/i.test(msg)) return "FROM_SCRATCH";
+  if (
+    /\b(runna|trainingpeaks|training peaks|garmin coach)\b/i.test(msg) ||
+    /\b(i (have|follow|use|am on|'?m on)|already (have|follow|using))\b.*\b(plan|coach|program)\b/i.test(msg) ||
+    /\bwork alongside\b|\balongside (my|a) plan\b/i.test(msg)
+  )
+    return "COMPLEMENT";
+  if (
+    /\bno (set )?(plan|schedule)\b|\bjust (coaching )?(notes|feedback)\b|\bpost.run (notes?|feedback) only\b|\bfeedback only\b/i.test(
+      msg
+    )
+  )
+    return "NO_PLAN";
+
+  return null;
+}
+
 interface OnboardingRequest {
   userId: string;
   message: string;
@@ -374,6 +415,15 @@ In the same message where you confirm the athlete's mode, emit ONE of these tags
 - [MODE:NO_PLAN] — athlete picked option (3): no plan, post-run feedback only
 The tag is stripped before the message is sent — do not mention or explain it. Emit exactly one tag, only when the athlete has just confirmed their mode (answered "1"/"option 2"/"build me one"/"I have a plan"/"just feedback"/etc.). Never emit it speculatively. If the athlete has explicitly named a specific plan platform (Runna, TrainingPeaks, coach-written), emit [MODE:COMPLEMENT] in the same turn you acknowledge their plan — even if they didn't explicitly pick option 2.
 
+SELF-CHECK BEFORE SENDING: If the message you're about to send contains ANY of these phrases — "I'll build you a plan from scratch", "build you a training plan", "work alongside your plan", "I'll be your post-run analyst", "no set schedule", "just send a coaching note", "feedback after each run" — the matching [MODE:...] tag MUST be on its own line at the end of the message. No exceptions. If you reflected mode back in prose but forgot the tag, the system cannot route the athlete's plan and onboarding loops. The tag is invisible to the athlete — there is zero downside to including it whenever you acknowledge the mode.
+
+EXAMPLE (athlete answers "1"):
+Your reply:
+Perfect, I'll build you a plan from scratch. Let's get you set up with Strava so I can track your progress automatically.
+
+[STRAVA_LINK]
+[MODE:FROM_SCRATCH]
+
 MODE VARIATIONS — adjustments based on the mode they choose:
 EXISTING PLAN: If they follow Runna, TrainingPeaks, a coach-written plan, etc. — Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT offer to rebuild their plan. Ask about Strava early — it's the primary data channel. When asking about injuries, frame it as "what to watch for in the data." For fitness baseline, explain: "This helps me calibrate your training zones so I can tell you whether a run was aerobic or drifting into threshold." For plan sharing, pitch with confidence: "Text me a PDF of your plan or describe it here — it gives me context to make your post-run feedback much more useful."
 NO PLAN, BUILD ONE: Collect: race name + date (web_search immediately), Strava, fitness baseline. Plans are day-agnostic — do NOT ask which days of the week they want to train.
@@ -640,6 +690,28 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     } else if (mode === "NO_PLAN") {
       mergedData.has_existing_plan = false;
       mergedData.wants_plan = false;
+    }
+  } else if (mergedData.has_existing_plan == null && mergedData.wants_plan == null) {
+    // Safety net: Dean occasionally forgets the [MODE:...] tag even after
+    // reflecting the mode back in prose. Parse the athlete's reply against the
+    // previous assistant message if it was the three-options question.
+    const lastAssistantMsg =
+      [...history].reverse().find((m) => m.role === "assistant")?.content ?? null;
+    const inferred = parseModeFallback(message, lastAssistantMsg);
+    if (inferred) {
+      console.warn(
+        `[onboarding] [MODE] tag missing — inferred ${inferred} from athlete reply`
+      );
+      if (inferred === "FROM_SCRATCH") {
+        mergedData.has_existing_plan = false;
+        mergedData.wants_plan = true;
+      } else if (inferred === "COMPLEMENT") {
+        mergedData.has_existing_plan = true;
+        mergedData.wants_plan = false;
+      } else if (inferred === "NO_PLAN") {
+        mergedData.has_existing_plan = false;
+        mergedData.wants_plan = false;
+      }
     }
   }
 
