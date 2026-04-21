@@ -4730,11 +4730,11 @@ function buildUserMessage(
       }
       if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
       if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead. CRITICAL: Do NOT state how many intervals, repeats, or reps were completed (e.g. '5x800m', '6 repeats', '4 strides'). Without lap data you cannot know the rep count — the athlete knows their own workout and will immediately notice if you get it wrong. Describe the workout structure generically (e.g. 'your interval session showed strong pace variation') without citing a specific count.");
-      if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference specific HR values.");
+      if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference HR values, heart rate, specific BPM figures, aerobic zone labels (Zone 1/2/3/4/5), or make any effort-level inference that requires HR data (e.g. 'your heart rate seemed controlled', 'you stayed aerobic', 'it looked like a zone 2 effort'). Describe effort using pace, splits, and elapsed time only.");
       // Power/watt guard: only present when there's no actual power data in the DB record.
       // If average_watts is populated (power meter, Zwift, etc.) Claude can reference the overall average.
       const hasWatts = !!(activityData?.average_watts != null);
-      if (!hasWatts) dataGuards.push("No power data is available for this activity. Do NOT reference wattage, watts, or power output — not even as a range or estimate. Describe effort using HR, elapsed time, and pace-equivalent language only.");
+      if (!hasWatts) dataGuards.push(`No power data is available for this activity. Do NOT reference wattage, watts, or power output — not even as a range or estimate. Describe effort using ${hasHR ? "HR, " : ""}elapsed time, and pace-equivalent language only.`);
       // Cadence guard: only reference cadence when it's stored in the activity record.
       const hasCadence = !!(activityData?.average_cadence != null);
       if (!hasCadence) dataGuards.push("No cadence data is available for this activity. Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, or range.");
