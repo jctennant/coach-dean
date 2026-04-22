@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-21 — Fix long run mismatch between SMS and dashboard at onboarding, and "0 miles" phrasing
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "1) we could probably say you have no miles this week more eloquently 2) the long run in my dashboard and message were different (8 vs 11 miles)"
+**Root cause:**
+1. For Strava users with 0 miles at onboarding, `tsMileageLine` reported "0 mi done so far this week (0 runs)" which Claude echoed as "You've already got 0 miles this week" — unhelpful and awkward.
+2. `generateAndSaveFullPlan` was called AFTER the Claude SMS call in the `initial_plan` trigger. Claude computed its own long run independently (8mi), then the arc stored a different value (11mi) in `training_state.weekly_long_run_miles`, causing the dashboard to show a different number than the SMS.
+**Fix / Change:**
+1. Added special case in `tsMileageLine` for `initial_plan` + 0 miles: now says "no runs recorded yet this week — do NOT mention this in your response" so Dean skips the awkward zero-mention entirely.
+2. Moved `generateAndSaveFullPlan` to execute BEFORE the Claude call for `initial_plan`. After the arc is saved, reads back `weekly_long_run_miles`, `weekly_quality_session`, and `weekly_mileage_target` from `training_state` and injects them as hard constraints into the user message so Claude's SMS matches what the dashboard shows. Captured the returned dashboard token in `preGeneratedDashboardToken` so the post-processing block doesn't need a second DB fetch.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-21 — Strengthen HR and power data guards to prevent effort-inference hallucinations
 
 **Type:** Bug Fix

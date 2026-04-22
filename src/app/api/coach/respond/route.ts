@@ -1670,6 +1670,38 @@ Weekly total: ${mileageRange}
     userMessage = userMessage + "\n" + weatherContextBlock;
   }
 
+  // For initial_plan: generate the training arc BEFORE the Claude call so the SMS and
+  // dashboard show the same long run and quality session. Without this, Claude computes
+  // its own values independently and they diverge from what the arc stores.
+  let initialPlanArcConstraint = "";
+  let preGeneratedDashboardToken: string | null = null;
+  if (trigger === "initial_plan") {
+    const { data: fpForArc } = await supabase.from("training_profiles").select("*").eq("user_id", userId).single();
+    if (fpForArc) profile = fpForArc;
+    const bCRacesForArc = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
+    preGeneratedDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, {
+      skipLinkSms: true,
+      bRaces: bCRacesForArc.length > 0 ? bCRacesForArc : undefined,
+      resetToWeek1: true,
+      wantsSpeedWork,
+    });
+    const { data: arcState } = await supabase.from("training_state").select("weekly_long_run_miles, weekly_quality_session, weekly_mileage_target").eq("user_id", userId).single();
+    const arcLongRun = (arcState?.weekly_long_run_miles as number | null) ?? null;
+    const arcQuality = (arcState?.weekly_quality_session as string | null) ?? null;
+    const arcTarget = (arcState?.weekly_mileage_target as number | null) ?? null;
+    const isMetricArc = (profile?.preferred_units as string | null) === "metric";
+    const fmtArcMi = (mi: number) => isMetricArc ? `${(mi * 1.60934).toFixed(1)} km` : `${mi} mi`;
+    const arcLines: string[] = [];
+    if (arcTarget) arcLines.push(`Weekly mileage target: ${fmtArcMi(arcTarget)}`);
+    if (arcLongRun) arcLines.push(`Long run this week: ${fmtArcMi(arcLongRun)}`);
+    if (arcQuality) arcLines.push(`Quality session this week: ${arcQuality}`);
+    if (arcLines.length > 0) {
+      initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES (the dashboard already shows them — mismatches confuse athletes):\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.</arc_values>`;
+    }
+    console.log("[initial_plan] arc pre-generated — token:", preGeneratedDashboardToken, "longRun:", arcLongRun, "quality:", arcQuality, "target:", arcTarget);
+  }
+  if (initialPlanArcConstraint) userMessage += initialPlanArcConstraint;
+
   // Prefer chatId passed directly in the request (avoids a DB round-trip and
   // works even before linq_chat_id is persisted). Fall back to the stored value.
   const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
@@ -2031,23 +2063,12 @@ Weekly total: ${mileageRange}
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
-    // Generate and save the full multi-week training arc.
-    // skipLinkSms=true — we'll include the dashboard URL inline in the cadence question below
-    // so the user gets one closing message instead of two back-to-back.
-    const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
-    // New plan from scratch at the end of onboarding — always start at week 1.
-    // Re-fetch training_profiles here so generateAndSaveFullPlan sees any profile writes
-    // that happened during the onboarding conversation (paces, training_days, race_date, etc.).
-    // The copy loaded at the top of processCoachRequest may predate those writes.
-    const { data: freshProfile } = await supabase.from("training_profiles").select("*").eq("user_id", userId).single();
-    if (freshProfile) profile = freshProfile;
-    const _preGenMs = Date.now() - _ipStart;
-    console.log(`[initial_plan] ${_preGenMs}ms elapsed before generateAndSaveFullPlan — budget remaining: ~${10000 - _preGenMs}ms`);
-    if (_preGenMs > 6000) console.warn(`[initial_plan] ⚠️ already ${_preGenMs}ms in — generateAndSaveFullPlan may exceed 10s Hobby cap`);
-    const newDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, { skipLinkSms: true, bRaces: bCRaces.length > 0 ? bCRaces : undefined, resetToWeek1: true, wantsSpeedWork });
-    console.log(`[initial_plan] generateAndSaveFullPlan done — total elapsed: ${Date.now() - _ipStart}ms`);
+    // The training arc was already generated before the Claude call (see pre-generation block above).
+    // Use the token returned by generateAndSaveFullPlan at that point.
+    const newDashboardToken = preGeneratedDashboardToken;
+    console.log(`[initial_plan] using pre-generated dashboard token: ${newDashboardToken ? "ok" : "missing"}`);
 
-    // Build the dashboard URL from the token generateAndSaveFullPlan just created/returned.
+    // Build the dashboard URL from the pre-generated token.
     const planToken = newDashboardToken ?? dashboardToken;
     const planUrl = planToken ? `${appUrl}/dashboard?token=${planToken}` : null;
 
@@ -3687,6 +3708,9 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     const hasStrava = !!(user.strava_athlete_id as number | null);
     if (!hasStrava && weekMileageSoFar === 0 && weekRunCount === 0) {
       return `not tracked (athlete not on Strava) — refer to RECENT CONVERSATION for what was reported`;
+    }
+    if (trigger === "initial_plan" && weekMileageSoFar === 0 && weekRunCount === 0) {
+      return `no runs recorded yet this week — do NOT mention this in your response`;
     }
     const done = `${tsMi(weekMileageSoFar)} done so far this week (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`;
     if (trigger === "post_run") return `${done} (includes today's synced run — do NOT add it again)`;
