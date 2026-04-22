@@ -134,31 +134,32 @@ export function PlanCard({
 
       {/* Key sessions */}
       {(longRunDisplay || keyWorkout) && (
-        <div className="divide-y divide-gray-50 border-t border-gray-50 pt-1">
-          {longRunDisplay && (
-            <div className="flex items-center justify-between py-2.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Long run</span>
-              <span className="text-sm font-semibold text-gray-800">~{longRunDisplay}</span>
-            </div>
-          )}
-          {keyWorkout && (
-            <div className="py-2.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Quality</p>
-              <p className="text-sm text-gray-700 leading-snug">{keyWorkout}</p>
-            </div>
-          )}
-          {easyMilesRemaining != null && easyMilesRemaining > 0 && (
-            <div className="flex items-center justify-between py-2.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Easy miles</span>
-              <span className="text-sm font-semibold text-gray-800">~{fmtDist(easyMilesRemaining, useMetric)}</span>
-            </div>
-          )}
+        <div className="border-t border-gray-50 pt-3 space-y-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Key sessions</p>
+          <div className="space-y-3">
+            {longRunDisplay && (
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-sm text-gray-500">Long run</span>
+                <span className="text-sm font-semibold text-gray-900 shrink-0">~{longRunDisplay}</span>
+              </div>
+            )}
+            {keyWorkout && (
+              <div className="flex items-baseline justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="text-sm text-gray-500">Quality session</span>
+                  <p className="text-sm font-medium text-gray-800 leading-snug mt-0.5">{keyWorkout}</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Guidance */}
-      <p className="text-[11px] text-gray-400 leading-snug">
-        Hit the target with easy-effort runs across your training days — the long run and quality session are the only structured pieces.
+      {/* Guidance + easy miles */}
+      <p className="text-[11px] text-gray-400 leading-snug border-t border-gray-50 pt-3">
+        {easyMilesRemaining != null && easyMilesRemaining > 0
+          ? `Fill the rest of the week with ~${fmtDist(easyMilesRemaining, useMetric)} of easy running.`
+          : "Fill the rest of the week with easy-effort runs across your training days."}
       </p>
 
       {/* Plan actions — only for imported plans. Dean-generated plans are managed via SMS. */}
