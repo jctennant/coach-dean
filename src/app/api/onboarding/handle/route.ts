@@ -460,7 +460,7 @@ Ask once, briefly, for every athlete. "Do you do any strength work or cross-trai
 
 STRAVA:
 Ask about Strava as your NEXT question once you have goal + mode — BEFORE injury history, strength/cross-training, race times, pace, or weekly mileage. Strava comes right after mode confirmation, not at the end of intake. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-Briefly explain the value: connecting Strava means Dean automatically reads every run, calibrates training zones from real data, and sends a coaching note after each run — writing it back to the Strava activity so it's always there.
+Briefly explain the value: connecting Strava means Dean automatically reads every run, calibrates training zones from real data, and writes a short coaching note directly to each activity description — like "🟢 Easy zone nailed — 92% Z1-Z2" — so feedback is always there in their Strava feed. Mention that Strava will show an "Upload your activities" checkbox on the permissions screen — that's what controls the write-back — and they can uncheck it if they'd prefer not to have notes added.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -738,7 +738,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       .trim();
     responseText = beforeStrava;
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\nNo Strava? Reply "skip" — you can connect later from your dashboard. Heads up: connecting now unlocks personalized feedback after every single run.`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\nStrava will ask to allow "Upload your activities" — that's me writing a short coaching note to each activity description (like "🟢 Easy zone nailed — 92% Z1-Z2"). You can uncheck it if you'd prefer not.\n\nNo Strava? Reply "skip" — you can connect later from your dashboard.`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
