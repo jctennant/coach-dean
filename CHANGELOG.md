@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-21 — Fix weekly_mileage_target drift for Dean-generated plans after weekly recap
+
+**Type:** Bug Fix
+**Reported by:** Internal — Plan Health audit (13 of 35 active users affected)
+**User feedback:** N/A
+**Root cause:** `syncWeekFromArc()` in `training-plan.ts` syncs `weekly_long_run_miles` and `weekly_quality_session` from the plan arc after every weekly recap, but for Dean-generated plans (the `else` branch) it omitted `weekly_mileage_target`. The `DeanWeek` local type was also missing the `mileage_target` field. This meant `training_state.weekly_mileage_target` stayed at the periodization engine's estimate (written at line 2109 of coach/respond) rather than being overwritten with the plan arc's actual value — causing state/plan divergence over time.
+**Fix / Change:** Added `mileage_target?: number` to the `DeanWeek` local type, and added `weekly_mileage_target: week.mileage_target || null` to the update in the `else` branch of `syncWeekFromArc()`. Manually regenerated plans for all 13 affected users via `/api/admin/regenerate-plan`.
+**Files changed:** `src/lib/training-plan.ts`
+
 ## 2026-04-21 — Fix long run mismatch between SMS and dashboard at onboarding, and "0 miles" phrasing
 
 **Type:** Bug Fix

@@ -742,7 +742,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number): Promise<
 
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
-  type DeanWeek = { week_number: number; long_run_target: number; key_workout: string };
+  type DeanWeek = { week_number: number; long_run_target: number; key_workout: string; mileage_target?: number };
 
   if (plan.plan_source === "uploaded") {
     const weeks = plan.weeks as UploadedWeek[];
@@ -766,6 +766,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number): Promise<
     await supabase.from("training_state").update({
       weekly_long_run_miles: week.long_run_target ?? null,
       weekly_quality_session: week.key_workout || null,
+      weekly_mileage_target: week.mileage_target || null,
     }).eq("user_id", userId);
   }
 }
