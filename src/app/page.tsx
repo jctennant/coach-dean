@@ -584,26 +584,31 @@ export default function Home() {
 
       {/* Testimonials */}
       <section className="border-t px-6 py-16 md:py-24">
-        <div className="mx-auto max-w-3xl text-center">
+        <div className="mx-auto max-w-4xl text-center">
           <p className="mb-8 text-xs uppercase tracking-widest text-muted-foreground">From the athletes</p>
-          <div className="flex flex-col items-center gap-8">
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
             {[
               {
                 quote: "Coach Dean made all the difference in my most recent ultra race. He helped me strategize mileage build, nutrition, apparel, and so much more — and kept me organized and motivated throughout.",
                 name: "Luke S.",
                 detail: "Ultramarathon finisher",
               },
+              {
+                quote: "I'm training for a half marathon and Coach Dean has truly been so helpful! He's kept me motivated and helped to work in cross training and proper pacing. It feels like I'm talking to an actual coach with a consistent personality.",
+                name: "Madie D.",
+                detail: "Training for a half marathon",
+              },
             ].map(({ quote, name, detail }) => (
-              <figure key={name} className="flex flex-col items-center gap-6">
-                <span className="font-serif text-6xl leading-none text-gray-200" aria-hidden="true">&ldquo;</span>
-                <blockquote className="font-serif text-xl font-normal leading-relaxed text-gray-800 md:text-2xl" style={{ marginTop: "-1.5rem" }}>
+              <figure key={name} className="flex flex-col items-center gap-4">
+                <span className="font-serif text-5xl leading-none text-gray-200" aria-hidden="true">&ldquo;</span>
+                <blockquote className="font-serif text-base font-normal leading-relaxed text-gray-800 md:text-lg" style={{ marginTop: "-1.25rem" }}>
                   {quote}
                 </blockquote>
                 <figcaption className="flex items-center gap-3">
                   <div
                     style={{
-                      width: 36,
-                      height: 36,
+                      width: 32,
+                      height: 32,
                       borderRadius: "50%",
                       background: "#1a5c35",
                       display: "flex",
@@ -612,7 +617,7 @@ export default function Home() {
                       flexShrink: 0,
                     }}
                   >
-                    <span style={{ fontFamily: SYS_FONT, fontSize: 13, fontWeight: 600, color: "#ffffff" }}>
+                    <span style={{ fontFamily: SYS_FONT, fontSize: 12, fontWeight: 600, color: "#ffffff" }}>
                       {name.charAt(0)}
                     </span>
                   </div>
