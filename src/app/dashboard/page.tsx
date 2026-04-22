@@ -1066,9 +1066,13 @@ export default async function DashboardPage({
                   currentWeekData={planWeeks.find(w => w.week_number === planCurrentWeek) ?? null}
                   useMetric={useMetric}
                   actualDisplay={currentWeekDisplay}
-                  targetDisplay={weeklyTargetDisplay}
+                  targetDisplay={null}
                   distUnit={distUnit}
-                  progressPct={progressPct}
+                  progressPct={(() => {
+                    const pw = planWeeks.find(w => w.week_number === planCurrentWeek);
+                    const planMiles = pw?.mileage_target && pw.mileage_target > 0 ? pw.mileage_target : null;
+                    return planMiles ? Math.min(100, (currentWeekMiles / planMiles) * 100) : progressPct;
+                  })()}
                   isUploadedPlan={isUploadedPlan}
                   easyMilesRemaining={(() => {
                     const week = planWeeks.find(w => w.week_number === planCurrentWeek);
