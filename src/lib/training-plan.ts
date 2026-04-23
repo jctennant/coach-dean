@@ -602,13 +602,18 @@ No other text.`,
     console.error("[generateAndSaveFullPlan] Haiku enrichment failed (non-fatal):", err);
   }
 
-  // Post-process: if Haiku echoed the long run as key_workout (e.g. "Long run 1.5mi") or
-  // returned an empty string, substitute a strides session. The dashboard already shows
-  // the long run separately, so "Long run Xmi" in key_workout produces a duplicate and
-  // leaves the athlete with no form/quality stimulus for the week — strides fix both.
+  // Post-process: if Haiku echoed the long run as key_workout (e.g. "Long run 1.5mi"),
+  // returned an empty string, or produced a pure easy-run label with no quality component
+  // (e.g. "Easy 6km"), substitute a strides session. The dashboard already shows the long
+  // run separately; a pure easy key_workout leaves the athlete with no form/quality
+  // stimulus. Strides are appropriate from week 1 and fix both issues.
   const isLongRunEcho = (s: string) => /^\s*long\s*run\b/i.test(s);
+  // Matches "Easy 5km", "Easy run", "Easy 4mi easy", "easy aerobic miles", etc. — a label
+  // that contains nothing beyond easy distance/effort with no quality marker.
+  const isPureEasyLabel = (s: string) =>
+    /^\s*easy\b[^+×x()\n]*(run|miles?|km|kilometers?|aerobic\s+miles?)?\s*$/i.test(s);
   for (const w of planWeeks) {
-    if (!w.key_workout || !w.key_workout.trim() || isLongRunEcho(w.key_workout)) {
+    if (!w.key_workout || !w.key_workout.trim() || isLongRunEcho(w.key_workout) || isPureEasyLabel(w.key_workout)) {
       w.key_workout = `Easy ${miToDisplay(2)}${unitLabel} + 4×20sec strides`;
     }
   }

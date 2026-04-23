@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-22 — Fix quality session labeled as pure easy run
+
+**Type:** Bug Fix
+**Reported by:** Conversation data analysis — user 29207ad0 complained "5.6km isn't really a long run right?" and had a quality session labeled "Easy 6km"
+**User feedback:** "5.6km isn't really a long run right?"
+**Root cause:** Post-processing in `generateAndSaveFullPlan` only caught empty strings and "Long run..." echoes when substituting the strides fallback. Haiku occasionally generates `key_workout: "Easy 6km"` (a pure easy-run label with no quality component) for beginner base-building weeks, which slipped through the check and left the athlete with two identical-intensity sessions and no form work.
+**Fix / Change:** Added `isPureEasyLabel` regex to the post-processing guard in `training-plan.ts`. Any `key_workout` that matches "Easy Xkm/mi" or "easy aerobic miles" (without a quality marker like strides, `+`, `×`) is now replaced with the standard `Easy 2mi + 4×20sec strides` fallback, matching what the prompt already instructs Haiku to generate at minimum.
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
 ## 2026-04-22 — Interval pattern detection from Strava lap data
 
 **Type:** Feature
