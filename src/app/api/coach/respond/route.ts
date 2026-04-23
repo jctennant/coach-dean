@@ -3559,7 +3559,12 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     if (target) lines.push(`Target: ${tsMi(target)}`);
     if (longRun) lines.push(`Long run: ~${tsMi(longRun)} (fit it wherever works)`);
     if (qualitySession) lines.push(`Quality session: ${qualitySession}`);
-    return lines.length > 0 ? `\nTHIS WEEK'S PLAN:\n${lines.map(l => `- ${l}`).join("\n")}` : "";
+    const planBlock = lines.length > 0 ? `\nTHIS WEEK'S PLAN:\n${lines.map(l => `- ${l}`).join("\n")}` : "";
+    const hasKeySessionsAndTarget = target && (longRun || qualitySession);
+    const easyMilesNote = hasKeySessionsAndTarget
+      ? `\n<rule>MILEAGE MATH: The key sessions listed above (long run + quality session) are NOT the full week. The remaining miles to reach the ${tsMi(target)} target come from easy/recovery runs not individually listed. When discussing the plan, never state or imply that the listed key sessions sum to the weekly target — always make clear that easy runs fill the rest. If the athlete asks why the sessions don't add up to the target, explain that easy runs account for the difference.</rule>`
+      : "";
+    return planBlock + easyMilesNote;
   })();
   const sessionRows = thisWeekPlan; // referenced in system prompt sections below
   const projectedWeekMiles = weekMileageSoFar;

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-23 — Fix mileage math confusion: clarify easy runs fill remaining weekly miles
+
+**Type:** Bug Fix
+**Reported by:** User feedback (conversation analysis 2026-04-22)
+**User feedback:** "That doesn't add to 25." (after Dean listed an 8mi long run + 6mi tempo as the week's plan with a 25mi target)
+**Root cause:** The `THIS WEEK'S PLAN` block in the system prompt lists only the key sessions (long run + quality session). Claude was sometimes presenting these to the athlete without making clear that the remaining miles come from easy/recovery runs, leading the athlete to (correctly) notice that 8 + 6 ≠ 25.
+**Fix / Change:** Added a `MILEAGE MATH` `<rule>` tag appended to the `thisWeekPlan` block whenever a target exists alongside at least one key session. The rule explicitly states the listed sessions are not the full week and that easy/recovery runs fill the gap to the target. Also clarifies how to respond if the athlete asks why the sessions don't add up.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-17 — Switched AI provider from Anthropic to OpenAI (temporary)
 
 **Type:** Infra
