@@ -554,6 +554,156 @@ export function computeElevationLoadTrend(
   return { weeklyVertFeet: weeks, trend, avgWeeklyVertFeet, summary };
 }
 
+// ─── Interval pattern detection ──────────────────────────────────────────────
+
+interface RawLap {
+  distance: number;       // meters
+  moving_time: number;    // seconds
+  average_speed: number;  // m/s
+  pace_zone?: number;     // 1–5 (Strava zone)
+}
+
+/**
+ * Detect structured interval workouts from Strava lap data.
+ *
+ * Returns a plain-English summary string for injection into the coaching prompt,
+ * or null if no clear interval structure is found.
+ *
+ * Handles two patterns:
+ *   1. Alternating intervals — short laps flip between hard (zone 4–5) and easy (zone 1–2)
+ *   2. Single tempo block — one or more consecutive long hard laps bookended by easy laps
+ *
+ * Warmup/cooldown laps are detected as long-distance laps (>400m AND >2min) that appear
+ * at the start or end of the session.
+ */
+export function detectIntervalPattern(laps: RawLap[]): string | null {
+  if (!laps || laps.length < 4) return null;
+
+  const fmtPaceStr = (speedMs: number): string => {
+    if (speedMs <= 0) return "?";
+    const minPerMile = 1609.34 / speedMs / 60;
+    const totalSec = Math.round(minPerMile * 60);
+    return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, "0")}/mi`;
+  };
+
+  const fmtDur = (seconds: number): string => {
+    if (seconds < 60) return `${Math.round(seconds)}sec`;
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return s > 0 ? `${m}min ${s}sec` : `${m}min`;
+  };
+
+  // Classify each lap as "long" (likely warmup/cooldown) or "short" (likely interval press)
+  const isLong = (lap: RawLap) => lap.distance > 400 && lap.moving_time > 120;
+
+  // Peel warmup laps from the front and cooldown laps from the back
+  let start = 0;
+  while (start < laps.length && isLong(laps[start])) start++;
+  let end = laps.length - 1;
+  while (end > start && isLong(laps[end])) end--;
+
+  const warmupLaps = laps.slice(0, start);
+  const cooldownLaps = laps.slice(end + 1);
+  const middleLaps = laps.slice(start, end + 1);
+
+  if (middleLaps.length < 2) return null;
+
+  // ── Pattern 1: Alternating intervals ─────────────────────────────────────
+  // Hard laps: pace_zone >= 4 OR significantly faster than the median pace
+  // Recovery laps: pace_zone <= 2 OR significantly slower than median
+
+  const speeds = middleLaps.map(l => l.average_speed).filter(s => s > 0).sort((a, b) => a - b);
+  const medianSpeed = speeds[Math.floor(speeds.length / 2)] ?? 0;
+  // "Hard" = top 40% of speeds observed; "easy" = bottom 40%
+  const hardThreshold = speeds[Math.floor(speeds.length * 0.6)] ?? medianSpeed;
+  const easyThreshold = speeds[Math.floor(speeds.length * 0.4)] ?? medianSpeed;
+
+  const classify = (lap: RawLap): "hard" | "easy" | "mixed" => {
+    if (lap.pace_zone != null) {
+      if (lap.pace_zone >= 4) return "hard";
+      if (lap.pace_zone <= 2) return "easy";
+    }
+    if (lap.average_speed >= hardThreshold) return "hard";
+    if (lap.average_speed <= easyThreshold) return "easy";
+    return "mixed";
+  };
+
+  const classified = middleLaps.map(classify);
+
+  // Count alternating pairs: consecutive hard→easy or easy→hard transitions
+  let transitions = 0;
+  for (let i = 1; i < classified.length; i++) {
+    if (classified[i] !== classified[i - 1] && classified[i] !== "mixed" && classified[i - 1] !== "mixed") {
+      transitions++;
+    }
+  }
+  const isAlternating = transitions >= Math.floor(middleLaps.length * 0.6);
+
+  if (isAlternating) {
+    const hardLaps = middleLaps.filter((_, i) => classified[i] === "hard");
+    const easyLaps = middleLaps.filter((_, i) => classified[i] === "easy");
+
+    if (hardLaps.length < 2) return null;
+
+    const avgHardSpeed = hardLaps.reduce((s, l) => s + l.average_speed, 0) / hardLaps.length;
+    const avgEasySpeed = easyLaps.length > 0
+      ? easyLaps.reduce((s, l) => s + l.average_speed, 0) / easyLaps.length
+      : null;
+    const medianHardDur = [...hardLaps].sort((a, b) => a.moving_time - b.moving_time)[Math.floor(hardLaps.length / 2)].moving_time;
+    const medianEasyDur = easyLaps.length > 0
+      ? [...easyLaps].sort((a, b) => a.moving_time - b.moving_time)[Math.floor(easyLaps.length / 2)].moving_time
+      : null;
+
+    const totalWarmupMi = warmupLaps.reduce((s, l) => s + l.distance, 0) / 1609.34;
+    const warmupDesc = warmupLaps.length > 0
+      ? `${totalWarmupMi.toFixed(1)}mi warmup, then `
+      : "";
+    const totalCooldownMi = cooldownLaps.reduce((s, l) => s + l.distance, 0) / 1609.34;
+    const cooldownDesc = cooldownLaps.length > 0
+      ? `, then ${totalCooldownMi.toFixed(1)}mi cooldown`
+      : "";
+    const recoveryDesc = avgEasySpeed != null && medianEasyDur != null
+      ? ` alternating with ~${fmtDur(medianEasyDur)} recoveries (~${fmtPaceStr(avgEasySpeed)})`
+      : "";
+
+    return `INTERVAL WORKOUT DETECTED: ${warmupDesc}${hardLaps.length}×~${fmtDur(medianHardDur)} hard efforts (~${fmtPaceStr(avgHardSpeed)})${recoveryDesc}${cooldownDesc}. Focus your feedback on the interval execution — do NOT describe this run primarily by its overall average pace, and do NOT call it a continuous easy run or tempo run.`;
+  }
+
+  // ── Pattern 2: Single tempo block ────────────────────────────────────────
+  // One or more consecutive hard laps in the middle, bookended by easy laps
+  const hardIndices = classified.map((c, i) => (c === "hard" ? i : -1)).filter(i => i >= 0);
+  if (hardIndices.length >= 1 && hardLaps(classified)) {
+    const tempoLaps = middleLaps.filter((_, i) => classified[i] === "hard");
+    const totalTempoMeters = tempoLaps.reduce((s, l) => s + l.distance, 0);
+    const avgTempoSpeed = tempoLaps.reduce((s, l) => s + l.average_speed, 0) / tempoLaps.length;
+    const tempoMiles = (totalTempoMeters / 1609.34).toFixed(1);
+
+    const warmupDesc = warmupLaps.length > 0
+      ? `${(warmupLaps.reduce((s, l) => s + l.distance, 0) / 1609.34).toFixed(1)}mi warmup, then `
+      : "";
+    const cooldownMi = (cooldownLaps.reduce((s, l) => s + l.distance, 0) / 1609.34).toFixed(1);
+    const cooldownDesc = cooldownLaps.length > 0
+      ? `, then ${cooldownMi}mi cooldown`
+      : "";
+
+    return `TEMPO/THRESHOLD WORKOUT DETECTED: ${warmupDesc}${tempoMiles}mi at sustained hard effort (~${fmtPaceStr(avgTempoSpeed)})${cooldownDesc}. Treat this as a threshold run — do NOT describe it as an easy run.`;
+  }
+
+  return null;
+}
+
+// Helper: checks that hard laps form a contiguous block (not scattered)
+function hardLaps(classified: ("hard" | "easy" | "mixed")[]): boolean {
+  const firstHard = classified.indexOf("hard");
+  const lastHard = classified.lastIndexOf("hard");
+  if (firstHard === -1) return false;
+  // All laps between first and last hard should be hard or mixed (no easy gaps)
+  for (let i = firstHard; i <= lastHard; i++) {
+    if (classified[i] === "easy") return false;
+  }
+  return true;
+}
+
 // ─── Run execution quality ────────────────────────────────────────────────────
 
 interface StravaSplit {

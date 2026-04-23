@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-22 — Interval pattern detection from Strava lap data
+
+**Type:** Feature
+**Reported by:** Jake (internal observation)
+**User feedback:** "I did 16×1 min but he didn't say anything about that — seems he's just looking at the mile splits"
+**Root cause:** Dean receives all lap data from Strava but had no pre-processing to surface interval structure. With 36 raw laps, Claude defaulted to the mile-split negative-split narrative instead of recognizing the workout as 16×1min intervals.
+**Fix / Change:** Added `detectIntervalPattern()` to `training-analytics.ts`. Pure heuristic (no LLM): classifies laps as long (warmup/cooldown) vs short (interval presses), checks for alternating high/low `pace_zone` among short laps, and counts hard efforts + median duration. Result injected into the coaching system prompt as a plain-English "INTERVAL WORKOUT DETECTED" block that anchors Claude's response. Also handles single tempo blocks (contiguous hard laps).
+**Files changed:** `src/lib/training-analytics.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-21 — Fix weekly_mileage_target drift for Dean-generated plans after weekly recap
 
 **Type:** Bug Fix
