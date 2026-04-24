@@ -147,7 +147,7 @@ export async function GET(request: Request) {
       strava_access_token: access_token,
       strava_refresh_token: refresh_token,
       strava_token_expires_at: new Date(expires_at * 1000).toISOString(),
-      ...(hasWriteScope ? { strava_write_enabled: true } : {}),
+      strava_write_enabled: hasWriteScope,
       name: resolvedName,
       ...(shouldAdvanceToSchedule ? { onboarding_step: "onboarding" } : {}),
       ...(timezone ? { timezone } : {}),

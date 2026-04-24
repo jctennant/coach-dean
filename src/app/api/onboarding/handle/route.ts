@@ -1789,6 +1789,8 @@ async function completeOnboarding(
         });
       } catch (err) {
         console.error("[onboarding] coach trigger failed:", err);
+        const { captureException } = await import("@sentry/nextjs");
+        captureException(err, { tags: { trigger: "initial_plan" } });
       }
     });
   }

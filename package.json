@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "@sentry/nextjs": "^10.50.0",
     "@supabase/supabase-js": "^2.95.3",
     "@types/pdf-parse": "^1.1.5",
     "class-variance-authority": "^0.7.1",

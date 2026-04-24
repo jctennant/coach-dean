@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-24 — Added Sentry error monitoring
+
+**Type:** Infra
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Errors in `after()` blocks were silently swallowed — only visible in Vercel logs with no alerting.
+**Fix / Change:** Installed `@sentry/nextjs`, added `sentry.{client,server,edge}.config.ts`, wrapped `next.config.ts` with `withSentryConfig`. Added `captureException` to every top-level `after()` catch block across `coach/respond`, `onboarding/handle`, `webhooks/strava`, and `webhooks/linq`. Also wrapped the bare `generateAndStoreDashboardInsights` after() call that had no error handling. Each capture includes a `trigger` tag for filtering in Sentry.
+**Files changed:** `next.config.ts`, `sentry.client.config.ts` (new), `sentry.server.config.ts` (new), `sentry.edge.config.ts` (new), `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/webhooks/strava/route.ts`, `src/app/api/webhooks/linq/route.ts`
+
+---
+
 ## 2026-04-22 — Fix quality session labeled as pure easy run
 
 **Type:** Bug Fix

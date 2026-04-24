@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   // Prevent Next.js from bundling these packages — they use dynamic requires
@@ -7,4 +8,11 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pdf-parse"],
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: "jake-tennant",
+  project: "coach-dean",
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  disableLogger: true,
+  automaticVercelMonitors: false,
+});

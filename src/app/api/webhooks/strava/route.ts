@@ -36,6 +36,8 @@ export async function POST(request: Request) {
       await processStravaEvent(body);
     } catch (err) {
       console.error("[strava-webhook] unhandled error in after():", err);
+      const { captureException } = await import("@sentry/nextjs");
+      captureException(err);
     }
   });
 

@@ -167,6 +167,8 @@ export async function POST(request: Request) {
       await handleInboundMessage(senderPhone, body, imageUrl, pdfUrl, pdfFilename, messageId, payloadChatId);
     } catch (err) {
       console.error("[linq-webhook] async processing error:", err);
+      const { captureException } = await import("@sentry/nextjs");
+      captureException(err);
     }
   });
 
@@ -477,12 +479,21 @@ async function handleInboundMessage(
     return;
   }
 
-  // Detect "connect strava" / "add strava" intent from fully-onboarded users
+  // Detect "strava connection" keyword — re-auth link so users can add or remove write permission.
+  const isStravaConnectionKeyword = /^strava connection$/i.test(body.trim());
+  if (isStravaConnectionKeyword) {
+    const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
+    await sendAndStore(user.id, senderPhone, `Here's a link to update your Strava connection:\n${writeUrl}\n\nOn the Strava screen, the "Upload activities" checkbox controls whether I add a coaching note to each run. Check it to enable, uncheck to remove.`, messageId);
+    return;
+  }
+
+  // Detect "connect strava" / "add strava" / "reconnect strava" intent from fully-onboarded users
   const isStravaIntent = /\bstrava\b/i.test(body) &&
-    /\b(connect|add|link|attach|setup|sync|integrate)\b/i.test(body);
+    /\b(connect|reconnect|add|link|attach|setup|sync|integrate)\b/i.test(body);
   if (isStravaIntent) {
     if (user.strava_athlete_id) {
-      await sendAndStore(user.id, senderPhone, "Your Strava is already connected — I'm syncing your activities automatically.", messageId);
+      const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
+      await sendAndStore(user.id, senderPhone, `Your Strava is already connected. If you want to update your permissions (e.g. add or remove coaching notes on activities), tap here:\n${writeUrl}`, messageId);
     } else {
       const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
       await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start pulling in your activities:\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.`, messageId);

@@ -88,6 +88,8 @@ export async function POST(request: Request) {
       } catch (err) {
         console.error("[coach/respond] unhandled error in after():", err);
         void trackEvent(body.userId, "after_error", { trigger: body.trigger, error: String(err) });
+        const { captureException } = await import("@sentry/nextjs");
+        captureException(err, { tags: { trigger: body.trigger } });
       }
     });
     return NextResponse.json({ ok: true });
@@ -365,6 +367,8 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
       } catch (err) {
         console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
         void trackEvent(userId, "after_error", { trigger: "rebuild_plan", error: String(err) });
+        const { captureException } = await import("@sentry/nextjs");
+        captureException(err, { tags: { trigger: "rebuild_plan" } });
         // Send fallback SMS so the user isn't left waiting for a link that never arrives
         try {
           await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"dashboard\" to see your current version.");
@@ -2163,6 +2167,8 @@ Weekly total: ${mileageRange}
       } catch (err) {
         console.error("[coach/respond] weekly_recap after() failed:", err);
         void trackEvent(userId, "after_error", { trigger: "weekly_recap_after", error: String(err) });
+        const { captureException } = await import("@sentry/nextjs");
+        captureException(err, { tags: { trigger: "weekly_recap" } });
       }
     });
   }
@@ -2198,6 +2204,8 @@ Weekly total: ${mileageRange}
           } catch (err) {
             console.error("[coach/respond] rebuild_plan trigger failed:", err);
             void trackEvent(userId, "after_error", { trigger: "rebuild_plan_trigger", error: String(err) });
+            const { captureException } = await import("@sentry/nextjs");
+            captureException(err, { tags: { trigger: "rebuild_plan_trigger" } });
           }
         });
       }
@@ -2214,6 +2222,8 @@ Weekly total: ${mileageRange}
           } catch (err) {
             console.error("[coach/respond] injury_hold trigger failed:", err);
             void trackEvent(userId, "after_error", { trigger: "injury_hold_trigger", error: String(err) });
+            const { captureException } = await import("@sentry/nextjs");
+            captureException(err, { tags: { trigger: "injury_hold_trigger" } });
           }
         });
       }
@@ -2229,6 +2239,8 @@ Weekly total: ${mileageRange}
           } catch (err) {
             console.error("[coach/respond] injury_clear trigger failed:", err);
             void trackEvent(userId, "after_error", { trigger: "injury_clear_trigger", error: String(err) });
+            const { captureException } = await import("@sentry/nextjs");
+            captureException(err, { tags: { trigger: "injury_clear_trigger" } });
           }
         });
       }
@@ -2244,6 +2256,8 @@ Weekly total: ${mileageRange}
           } catch (err) {
             console.error("[coach/respond] lighter_week trigger failed:", err);
             void trackEvent(userId, "after_error", { trigger: "lighter_week_trigger", error: String(err) });
+            const { captureException } = await import("@sentry/nextjs");
+            captureException(err, { tags: { trigger: "lighter_week_trigger" } });
           }
         });
       }
@@ -2349,7 +2363,13 @@ Weekly total: ${mileageRange}
   // Regenerate dashboard insights after runs and weekly/initial plans — async, non-blocking.
   if (trigger === "post_run" || trigger === "weekly_recap" || trigger === "initial_plan") {
     after(async () => {
-      await generateAndStoreDashboardInsights(userId, trigger, coachMessage);
+      try {
+        await generateAndStoreDashboardInsights(userId, trigger, coachMessage);
+      } catch (err) {
+        console.error("[coach/respond] generateAndStoreDashboardInsights failed:", err);
+        const { captureException } = await import("@sentry/nextjs");
+        captureException(err, { tags: { trigger } });
+      }
     });
   }
 
@@ -4059,6 +4079,7 @@ MEMORY AND DATA LIMITATIONS:
 ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports:
 - Activity tracking: Strava only. If an athlete has connected Strava, their activities sync automatically. No Garmin, Apple Watch, Wahoo, or other platform sync.
 - If an athlete asks how to connect Strava, tell them to text "connect strava" and you'll send them the link.
+- If an athlete asks how to update their Strava permissions, reconnect Strava, or add/remove the activity notes feature, tell them to text "strava connection" and they'll get a re-auth link.
 - If an athlete asks how to connect Garmin, Apple Health, or any other service, tell them clearly: "I only have Strava sync right now — just text me after your workouts and I'll track from there."
 - Communication: SMS only. Athletes can text "dashboard" at any time to receive a link to their full week-by-week training plan dashboard. There is no separate app, calendar export, or email — but the plan link is always available on request. When an athlete asks to see their plan, tell them to text "dashboard" and they'll get the link immediately — do NOT say you cannot send it.
 - Proactive messages: weekly Sunday recap and post-run coaching notes after every Strava activity. Athletes can text at any time for Q&A and Dean will respond.

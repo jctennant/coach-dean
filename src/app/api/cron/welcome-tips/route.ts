@@ -8,6 +8,7 @@ export const maxDuration = 60;
 const TIPS_MESSAGE =
   "Hey — now that you're all set up, a couple shortcuts worth knowing: " +
   "DASHBOARD → your training dashboard, " +
+  "STRAVA CONNECTION → update your Strava permissions (add/remove activity notes), " +
   "FEEDBACK → reaches the team directly, " +
   "UNSUBSCRIBE → cancel your subscription, " +
   "STOP → stop all messages (we'll also send a cancellation link). " +
