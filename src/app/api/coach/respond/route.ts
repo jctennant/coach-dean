@@ -4717,6 +4717,10 @@ function buildUserMessage(
       // Also transform splits and laps: Strava always returns distance in meters, speed in m/s,
       // and elevation in meters regardless of split type — convert all to imperial/readable units.
       const rawSummary = activityData?.summary as { splits?: unknown[]; laps?: unknown[] } | null;
+      // Compute hasHR here — before activityForClaude — so we can strip HR fields from the JSON
+      // when no monitor was used. The text guard alone isn't enough: Claude reads the raw JSON
+      // and will cite values it finds there even if instructed not to.
+      const hasHR = !!(activityData?.average_heartrate != null);
       const activityForClaude = activityData
         ? {
             ...activityData,
@@ -4724,6 +4728,10 @@ function buildUserMessage(
             // to infer "breaks were built in" when the athlete just forgot to stop their watch.
             // moving_time_seconds is the meaningful figure for coaching.
             elapsed_time_seconds: undefined,
+            // Strip HR fields when no monitor was worn — keeps the raw JSON honest so
+            // Claude cannot read a value that contradicts the "no HR data" guard.
+            average_heartrate: hasHR ? activityData.average_heartrate : undefined,
+            max_heartrate: hasHR ? (activityData as Record<string, unknown>).max_heartrate : undefined,
             elevation_gain_feet: activityData.elevation_gain != null
               ? Math.round((activityData.elevation_gain as number) * 3.28084)
               : null,
@@ -4766,7 +4774,6 @@ function buildUserMessage(
       const intervalPattern = hasLaps
         ? detectIntervalPattern(rawSummary!.laps as Parameters<typeof detectIntervalPattern>[0])
         : null;
-      const hasHR = !!(activityData?.average_heartrate != null);
       const runDistanceMiles = activityData?.distance_meters != null
         ? (activityData.distance_meters as number) / 1609.34
         : null;

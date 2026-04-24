@@ -39,7 +39,9 @@ const CHANGELOG_MESSAGES = [
 
 I don't map out every day anymore. Each week I give you three anchors: a mileage target, a long run, and one or two quality sessions — tempo, intervals, or strides depending on where you are in training. You fill in easy runs around those. Keeps things flexible when life gets in the way, and puts the decision-making back with you.`,
 
-  `Two things on the dashboard at coachdean.ai/dashboard worth checking: race readiness, training load trends, and fitness projections are all there now. And if you haven't connected Strava yet, you can do it from the dashboard — once connected, I'll start adding a note to each activity after you finish with effort verdict, zone context, and how the run fits the week.`,
+  `Also, the dashboard at coachdean.ai/dashboard now has training load trends and fitness projections. It will show up as long as you have Strava connected.`,
+
+  `Finally, I can now write a coaching note to each Strava activity - it will look something like this, changing depending on the type of workout you are doing: 🟢 Easy zone nailed — 92% Z1-Z2. If you want to opt in, just send me STRAVA CONNECTION and you can add write permissions to your strava connection!`,
 ];
 
 export async function POST(request: Request) {
