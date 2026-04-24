@@ -606,6 +606,7 @@ export default function Home() {
                     <ul className="mt-3 space-y-2">
                       <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Coach Dean got wrong.</li>
                       <li><span className="font-mono font-semibold text-foreground">DASHBOARD</span> — get a link to your training dashboard, where you can see your current week and upcoming schedule.</li>
+                      <li><span className="font-mono font-semibold text-foreground">STRAVA CONNECTION</span> — get a link to update your Strava permissions, including adding or removing the coaching notes that appear on each activity.</li>
                       <li><span className="font-mono font-semibold text-foreground">UNSUBSCRIBE</span> — get a link to cancel your subscription at any time.</li>
                       <li><span className="font-mono font-semibold text-foreground">STOP</span> — stop all messages immediately. You&apos;ll also receive a link to cancel billing. Text START to resume at any time.</li>
                     </ul>
@@ -615,7 +616,7 @@ export default function Home() {
               },
               {
                 q: "Is my data private?",
-                a: "Your training data, pace information, and conversations with Coach Dean are used solely to power your coaching experience — nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is read-only and only used to pull your workout history into Coach Dean. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
+                a: "Your training data, pace information, and conversations with Coach Dean are used solely to power your coaching experience — nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is only used to pull your workout history into Coach Dean and optionally add a coaching note to each activity — you control the notes permission during setup. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
               },
             ].map(({ q, a }) => (
               <details key={q} className="group py-4">

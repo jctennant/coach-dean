@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-24 — STRAVA CONNECTION keyword and write-permission re-auth flow
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** No way for users to add or remove the Strava activity-notes permission after initial onboarding. "Reconnect strava" also silently fell through to the LLM instead of sending a link. Callback only set `strava_write_enabled: true` but never cleared it to `false` when a user re-authed without write scope.
+**Fix / Change:** Added exact-match keyword `STRAVA CONNECTION` that sends a `/api/auth/strava/write` re-auth link (with explanation of the "Upload activities" checkbox). Fixed `isStravaIntent` to match "reconnect" and send the write link instead of "already connected" for connected users. Callback now always writes `strava_write_enabled: hasWriteScope` so unchecking the permission actually takes effect. Added the keyword to the welcome-tips message, the landing page FAQ, and Dean's system prompt. Also corrected a stale "read-only" claim in the landing page privacy answer.
+**Files changed:** `webhooks/linq/route.ts`, `auth/strava/callback/route.ts`, `cron/welcome-tips/route.ts`, `coach/respond/route.ts`, `app/page.tsx`
+
 ## 2026-04-24 — Added Sentry error monitoring
 
 **Type:** Infra
