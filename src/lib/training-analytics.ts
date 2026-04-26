@@ -707,9 +707,11 @@ function hardLaps(classified: ("hard" | "easy" | "mixed")[]): boolean {
 // ─── Run execution quality ────────────────────────────────────────────────────
 
 interface StravaSplit {
-  average_speed: number;  // m/s
-  moving_time: number;    // seconds
-  distance: number;       // meters
+  average_speed: number;                    // m/s (raw)
+  moving_time: number;                      // seconds
+  distance: number;                         // meters
+  elevation_difference?: number;            // meters (positive = gain, negative = loss)
+  average_grade_adjusted_speed?: number;   // m/s (GAP from Strava)
 }
 
 export interface RunExecutionResult {
@@ -736,14 +738,32 @@ export function buildRunExecutionAnalysis(
   const fullSplits = splits.filter(s => s.average_speed > 0 && s.distance >= 1287);
   if (fullSplits.length < 3) return empty;
 
+  // Use grade-adjusted speed (GAP) when available on the majority of splits — it accounts
+  // for elevation so we don't credit a downhill second half as "pacing discipline".
+  const gapCount = fullSplits.filter(s => s.average_grade_adjusted_speed != null && s.average_grade_adjusted_speed > 0).length;
+  const useGap = gapCount >= Math.ceil(fullSplits.length / 2);
+
   // m/s to min/mi: 1 mile = 1609.34m; pace = (1609.34 / speed) / 60
-  const paces = fullSplits.map(s => 1609.34 / s.average_speed / 60);
+  const paces = fullSplits.map(s => {
+    const speed = useGap && s.average_grade_adjusted_speed != null && s.average_grade_adjusted_speed > 0
+      ? s.average_grade_adjusted_speed
+      : s.average_speed;
+    return 1609.34 / speed / 60;
+  });
 
   const half = Math.floor(paces.length / 2);
   const avgFirst = paces.slice(0, half).reduce((s, p) => s + p, 0) / half;
   const avgSecond = paces.slice(-half).reduce((s, p) => s + p, 0) / half;
 
   const fadeSecs = Math.round((avgSecond - avgFirst) * 60);
+
+  // When GAP is not available, detect elevation-assisted second-half to avoid misleading notes.
+  // Net elevation change per half: negative = net loss (downhill).
+  const firstHalfElevNet = !useGap && fullSplits.slice(0, half).reduce((sum, s) => sum + (s.elevation_difference ?? 0), 0);
+  const secondHalfElevNet = !useGap && fullSplits.slice(-half).reduce((sum, s) => sum + (s.elevation_difference ?? 0), 0);
+  // Flag if second half has >50m more net descent than first half
+  const elevationAssistedSecondHalf = typeof firstHalfElevNet === "number" && typeof secondHalfElevNet === "number"
+    && (firstHalfElevNet - secondHalfElevNet) > 50;
 
   const fmt = (minPerMile: number) => {
     const totalSec = Math.round(minPerMile * 60);
@@ -756,13 +776,22 @@ export function buildRunExecutionAnalysis(
   else if (fadeSecs <= 15) executionQuality = "positive_split";
   else executionQuality = "significant_fade";
 
+  const paceLabel = useGap ? "grade-adjusted pace" : "pace";
+  const gapNote = useGap ? " (grade-adjusted for elevation)" : "";
+
   let summary = "";
   if (executionQuality === "significant_fade") {
-    summary = `PACING NOTE: Pace faded ${fadeSecs}s/mi from first half (${fmt(avgFirst)}/mi) to second half (${fmt(avgSecond)}/mi) — likely went out too fast. Mention this once with a note on conservative starts.`;
+    summary = `PACING NOTE: ${paceLabel.charAt(0).toUpperCase() + paceLabel.slice(1)} faded ${fadeSecs}s/mi from first half (${fmt(avgFirst)}/mi${gapNote}) to second half (${fmt(avgSecond)}/mi) — likely went out too fast. Mention this once with a note on conservative starts.`;
   } else if (executionQuality === "negative_split") {
-    summary = `PACING NOTE: Excellent negative split — ran ${Math.abs(fadeSecs)}s/mi faster in the second half (${fmt(avgFirst)}/mi → ${fmt(avgSecond)}/mi). Strong pacing discipline worth acknowledging.`;
+    if (useGap) {
+      summary = `PACING NOTE: Excellent negative split (grade-adjusted) — ran ${Math.abs(fadeSecs)}s/mi faster in the second half (${fmt(avgFirst)}/mi → ${fmt(avgSecond)}/mi GAP). This reflects genuine pacing discipline even accounting for elevation changes.`;
+    } else if (elevationAssistedSecondHalf) {
+      summary = `PACING NOTE: Pace was faster in the second half (${fmt(avgFirst)}/mi → ${fmt(avgSecond)}/mi) but the course descended in the second half — this is likely elevation-assisted, not a genuine negative split. Acknowledge the faster second half but attribute it to the downhill terrain.`;
+    } else {
+      summary = `PACING NOTE: Excellent negative split — ran ${Math.abs(fadeSecs)}s/mi faster in the second half (${fmt(avgFirst)}/mi → ${fmt(avgSecond)}/mi). Strong pacing discipline worth acknowledging.`;
+    }
   } else if (executionQuality === "even") {
-    summary = `PACING NOTE: Very even pacing across the run (${fmt(avgFirst)}/mi first half vs ${fmt(avgSecond)}/mi second half). Good execution.`;
+    summary = `PACING NOTE: Very even pacing across the run (${fmt(avgFirst)}/mi first half vs ${fmt(avgSecond)}/mi second half${gapNote}). Good execution.`;
   }
   // positive_split (small fade): not worth a specific note — common and minor
 

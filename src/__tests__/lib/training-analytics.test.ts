@@ -287,6 +287,40 @@ describe("buildRunExecutionAnalysis", () => {
     expect(result.executionQuality).toBe("even");
     expect(result.summary).toContain("even");
   });
+
+  it("uses grade-adjusted speed (GAP) when available and calls it grade-adjusted", () => {
+    // Raw pace looks like a negative split (slower first half, faster second half)
+    // but GAP shows even effort — first half was uphill, second was downhill.
+    // average_grade_adjusted_speed ~= 3.0 m/s (9:00/mi) throughout.
+    const splits = [
+      { average_speed: 2.68, moving_time: 600, distance: 1609, elevation_difference: 40, average_grade_adjusted_speed: 3.0 },
+      { average_speed: 2.68, moving_time: 600, distance: 1609, elevation_difference: 40, average_grade_adjusted_speed: 3.0 },
+      { average_speed: 2.68, moving_time: 600, distance: 1609, elevation_difference: 40, average_grade_adjusted_speed: 3.0 },
+      { average_speed: 2.99, moving_time: 537, distance: 1609, elevation_difference: -40, average_grade_adjusted_speed: 3.0 },
+      { average_speed: 2.99, moving_time: 537, distance: 1609, elevation_difference: -40, average_grade_adjusted_speed: 3.0 },
+      { average_speed: 2.99, moving_time: 537, distance: 1609, elevation_difference: -40, average_grade_adjusted_speed: 3.0 },
+    ];
+    const result = buildRunExecutionAnalysis(splits);
+    // GAP shows even effort despite raw pace looking like negative split
+    expect(result.executionQuality).toBe("even");
+    expect(result.summary).toContain("grade-adjusted");
+  });
+
+  it("flags elevation-assisted second half as downhill when GAP unavailable but elevation favors second half", () => {
+    // Raw pace negative split, no GAP, but second half clearly descending
+    const splits = [
+      { average_speed: 2.68, moving_time: 600, distance: 1609, elevation_difference: 60 },
+      { average_speed: 2.68, moving_time: 600, distance: 1609, elevation_difference: 60 },
+      { average_speed: 2.68, moving_time: 600, distance: 1609, elevation_difference: 60 },
+      { average_speed: 2.99, moving_time: 537, distance: 1609, elevation_difference: -60 },
+      { average_speed: 2.99, moving_time: 537, distance: 1609, elevation_difference: -60 },
+      { average_speed: 2.99, moving_time: 537, distance: 1609, elevation_difference: -60 },
+    ];
+    const result = buildRunExecutionAnalysis(splits);
+    expect(result.executionQuality).toBe("negative_split");
+    expect(result.summary).toContain("downhill");
+    expect(result.summary).not.toContain("pacing discipline");
+  });
 });
 
 // ─── buildLongitudinalBlock ───────────────────────────────────────────────────

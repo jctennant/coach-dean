@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Three coaching quality fixes: mileage sync gap, elevation splits, dashboard in recap
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (user feedback)
+**User feedback:**
+1. "Dean didn't seem to see that I had 25 miles for the week on strava at the moment... You're currently at 0.0 miles for the week"
+2. "He also seems to think everytime I do a big climb then come back (increase in elevation then decrease) that I'm negative splitting... he should probably look at GAP here for more context"
+3. "I'd like Dean to reference and updates to the dashboard in his Sunday recap"
+**Root cause:**
+1. Confirmed via DB investigation: Jake's 4 activities (26.6mi total) were correctly stored and the timezone (America/Denver) was set. The "0 miles" came from a transient Supabase query failure — `recentActivitiesResult.error` was never checked, so the `|| []` fallback silently produced an empty activity list with no log and no error. Dean then treated "0.0 miles" as authoritative and stated it confidently.
+2. `buildRunExecutionAnalysis()` compared raw pace per split half without considering elevation. A climb-out-and-back run looks like a negative split in raw pace (second half faster due to downhill) even when effort was harder on the uphill first half. Strava provides `average_grade_adjusted_speed` per split but it wasn't used.
+3. The Sunday recap prompt had no instruction to include the dashboard URL, even though it's generated and available.
+**Fix / Change:**
+1. Added error check on `recentActivitiesResult.error` with a console.error log. When the activities query fails, `activitiesQueryFailed = true` is threaded into both `buildSystemPrompt` (FACTS block) and `buildUserMessage` (weekly_recap), telling Dean the data failed to load and to defer to what the athlete says rather than stating 0 miles. The old overly-broad "sync gap" warning (which would have fired on normal Monday mornings) was deliberately NOT implemented.
+2. `buildRunExecutionAnalysis()` now uses `average_grade_adjusted_speed` (GAP) when available on the majority of splits. When GAP is unavailable but the second half has >50m more net descent than the first, the note says "elevation-assisted, not a genuine negative split" instead of crediting pacing discipline.
+3. Weekly recap prompt now includes the dashboard URL when available, instructing Dean to add one short sentence with the link at the end of the second bubble.
+**Files changed:** `src/lib/training-analytics.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-analytics.test.ts`
+
+---
+
 ## 2026-04-24 — STRAVA CONNECTION keyword and write-permission re-auth flow
 
 **Type:** Feature

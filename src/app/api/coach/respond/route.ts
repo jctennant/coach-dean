@@ -882,6 +882,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   let profile = profileResult.data;
   const state = stateResult.data;
   const recentMessages = conversationsResult.data?.reverse() || [];
+  if (recentActivitiesResult.error) {
+    console.error(`[coach/respond] activities query failed for userId=${userId} trigger=${trigger}:`, recentActivitiesResult.error);
+  }
+  const activitiesQueryFailed = !!recentActivitiesResult.error;
   const recentActivities = deduplicateActivities(
     (recentActivitiesResult.data as ActivityRow[] | null) || []
   );
@@ -1334,7 +1338,8 @@ Use this data to:
     periodization,
     upcomingRaces,
     lthrData,
-    recentActivities
+    recentActivities,
+    activitiesQueryFailed
   ) + aerobicTrendBlock + strengthRoutineBlock;
 
   // For weekly_recap and user_message, fetch the stored training plan.
@@ -1604,7 +1609,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return sessions.length === 0;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length, avgWeeklyMileage);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length, avgWeeklyMileage, activitiesQueryFailed);
 
   // For uploaded plans in weekly_recap and user_message: inject next week's sessions directly
   // from the stored plan rather than relying on the periodization engine's inferred values.
@@ -3313,7 +3318,8 @@ function buildSystemPrompt(
   periodization?: PeriodizationContext,
   upcomingRaces?: Array<Record<string, unknown>>,
   lthrData?: { lthr: number; source: string; confidence: LTHRConfidence } | null,
-  recentActivities: ActivityRow[] = []
+  recentActivities: ActivityRow[] = [],
+  activitiesQueryFailed = false
 ): string {
   // Which trigger-conditional sections to include.
   const isReminder = trigger === "morning_reminder" || trigger === "nightly_reminder";
@@ -3801,7 +3807,9 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   // ─── FACTS block — pre-computed numbers injected at top of system prompt ───
   const factsBlock = (() => {
     const hasStrava = !!(user.strava_athlete_id as number | null);
-    const milogged = hasStrava || weekMileageSoFar > 0
+    const milogged = activitiesQueryFailed
+      ? `unavailable — activity data failed to load (DB error); if athlete mentions runs, take them at their word`
+      : hasStrava || weekMileageSoFar > 0
       ? `${tsMi(weekMileageSoFar)} logged (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`
       : "not tracked (no Strava)";
     const easyRange = easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD";
@@ -4698,6 +4706,7 @@ function buildUserMessage(
   uploadedCurrentWeek: { week_number: number; sessions: Array<{ dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null }>; total_miles: number; total_miles_min?: number; total_miles_max?: number } | null = null,
   uploadedTotalWeeks = 0,
   avgWeeklyMileage: number | null = null,
+  activitiesQueryFailed = false,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -5078,7 +5087,9 @@ Keep the whole thing under 480 characters. No markdown. Sound like a real coach 
       // that causes Dean to say "last week was quiet" and reset to a conservative plan.
       // Instead, tell Claude the data is missing and to use the conversation.
       const noStravaMileageData = !hasStrava && weekMileageSoFar === 0;
-      const weekMileageContext = noStravaMileageData
+      const weekMileageContext = activitiesQueryFailed
+        ? `<rule>ACTIVITY DATA UNAVAILABLE: The database query for this athlete's activities failed. Do NOT say "0 miles" or "quiet week". Ask the athlete what they completed this week and build next week's plan from the PROGRESSION TARGET in CURRENT TRAINING STATE.</rule>\n\n`
+        : noStravaMileageData
         ? `<rule>MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.</rule>\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
         : `<rule>THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.</rule>\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
       // Injury hold overrides normal progression entirely — applies regardless of plan type.
@@ -5178,7 +5189,7 @@ MILEAGE ACCURACY: The weekly mileage target is the running ceiling for the week 
 
 MONDAY: Close the final bubble with a natural, warm invitation to check in after the first run of the week. Vary the phrasing — "Excited to hear how the week kicks off.", "Hit me up after your first run.", "Let me know how the week starts." One short sentence.
 
-ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Thursday's tempo run") for any activity more than 1 day ago.`;
+ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Thursday's tempo run") for any activity more than 1 day ago.${dashboardUrl ? `\n\nDASHBOARD: At the end of your second bubble, add one short sentence with the dashboard link — e.g. "Your full plan is at ${dashboardUrl}" or "See the full week breakdown at ${dashboardUrl}". Vary the phrasing. This gives the athlete a quick reference for the week ahead.` : ""}`;
     }
     case "workout_image": {
       const imageGuard = buildActivityDataGuard(imageActivity ?? null);
