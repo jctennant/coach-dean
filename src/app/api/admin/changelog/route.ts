@@ -28,10 +28,11 @@
  */
 
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 // Split on \n\n so each paragraph sends as its own SMS bubble
 const CHANGELOG_MESSAGES = [
@@ -98,56 +99,53 @@ export async function POST(request: Request) {
 
   console.log(`[changelog] ${dry_run ? "DRY RUN — " : ""}targeting ${users.length} users`);
 
-  let sent = 0;
-  let skipped = 0;
-  const results: { id: string; name: string | null; status: string }[] = [];
-
-  for (const user of users) {
-    const phone = user.phone_number as string | null;
-
-    if (!phone) {
-      skipped++;
-      results.push({ id: user.id, name: user.name as string | null, status: "skipped_no_phone" });
-      continue;
-    }
-
-    if (dry_run) {
-      results.push({ id: user.id, name: user.name as string | null, status: "dry_run" });
-      sent++;
-      continue;
-    }
-
-    try {
-      for (let i = 0; i < CHANGELOG_MESSAGES.length; i++) {
-        await sendSMS(phone, CHANGELOG_MESSAGES[i]);
-        await supabase.from("conversations").insert({
-          user_id: user.id,
-          role: "assistant",
-          content: CHANGELOG_MESSAGES[i],
-          message_type: "changelog",
-        });
-        if (i < CHANGELOG_MESSAGES.length - 1) {
-          await new Promise((r) => setTimeout(r, 1500));
-        }
-      }
-
-      await supabase
-        .from("users")
-        .update({ plan_update_sent_at: new Date().toISOString() })
-        .eq("id", user.id);
-
-      sent++;
-      results.push({ id: user.id, name: user.name as string | null, status: "sent" });
-      console.log(`[changelog] sent to ${user.id} (${user.name ?? "unnamed"})`);
-
-      // Space between users to avoid rate limits
-      if (sent < users.length) await new Promise((r) => setTimeout(r, 2000));
-    } catch (err) {
-      console.error(`[changelog] failed for ${user.id}:`, err);
-      skipped++;
-      results.push({ id: user.id, name: user.name as string | null, status: "error" });
-    }
+  if (dry_run) {
+    return NextResponse.json({
+      ok: true,
+      sent: 0,
+      skipped: 0,
+      users: users.map((u) => ({ id: u.id, name: u.name as string | null, status: "dry_run" })),
+    });
   }
 
-  return NextResponse.json({ ok: true, sent, skipped, users: results });
+  after(async () => {
+    let sent = 0;
+    for (const user of users) {
+      const phone = user.phone_number as string | null;
+      if (!phone) {
+        console.log(`[changelog] skipping ${user.id} — no phone`);
+        continue;
+      }
+
+      try {
+        for (let i = 0; i < CHANGELOG_MESSAGES.length; i++) {
+          await sendSMS(phone, CHANGELOG_MESSAGES[i]);
+          await supabase.from("conversations").insert({
+            user_id: user.id,
+            role: "assistant",
+            content: CHANGELOG_MESSAGES[i],
+            message_type: "changelog",
+          });
+          if (i < CHANGELOG_MESSAGES.length - 1) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+        }
+
+        await supabase
+          .from("users")
+          .update({ plan_update_sent_at: new Date().toISOString() })
+          .eq("id", user.id);
+
+        sent++;
+        console.log(`[changelog] sent to ${user.id} (${user.name ?? "unnamed"})`);
+
+        if (sent < users.length) await new Promise((r) => setTimeout(r, 2000));
+      } catch (err) {
+        console.error(`[changelog] failed for ${user.id}:`, err);
+      }
+    }
+    console.log(`[changelog] done — sent to ${sent}/${users.length} users`);
+  });
+
+  return NextResponse.json({ ok: true, queued: users.length });
 }
