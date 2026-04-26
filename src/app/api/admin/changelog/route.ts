@@ -35,13 +35,15 @@ export const maxDuration = 120;
 
 // Split on \n\n so each paragraph sends as its own SMS bubble
 const CHANGELOG_MESSAGES = [
-  `Quick update on how I structure your plan.
+  `Wanted to share a few updates on how I can work with you.`,
 
-I don't map out every day anymore. Each week I give you three anchors: a mileage target, a long run, and one or two quality sessions — tempo, intervals, or strides depending on where you are in training. You fill in easy runs around those. Keeps things flexible when life gets in the way, and puts the decision-making back with you.`,
+  `1) Plan structure: I don't map out every day anymore. Each week I give you three anchors: a mileage target, a long run, and one or two quality sessions — tempo, intervals, or strides depending on where you are in training. You fill in easy runs around those. Keeps things flexible when life gets in the way, and puts the decision-making back with you.`,
 
-  `Also, the dashboard at coachdean.ai/dashboard now has training load trends and fitness projections. It will show up as long as you have Strava connected.`,
+  `2) Dashboard updates: The dashboard at coachdean.ai/dashboard now has training load trends and fitness projections. It will show up as long as you have Strava connected.`,
 
-  `Finally, I can now write a coaching note to each Strava activity - it will look something like this, changing depending on the type of workout you are doing: 🟢 Easy zone nailed — 92% Z1-Z2. If you want to opt in, just send me STRAVA CONNECTION and you can add write permissions to your strava connection!`,
+  `3) Strava annotations: I can now write a coaching note to each Strava activity — it will look something like this, changing depending on the type of workout you are doing: 🟢 Easy zone nailed — 92% Z1-Z2. If you want to opt in, just send me STRAVA CONNECTION and you can add write permissions to your Strava connection!`,
+
+  `Finally, feel free to text Jake or me with the label FEEDBACK to share what's working well or not — always helpful to hear.`,
 ];
 
 export async function POST(request: Request) {

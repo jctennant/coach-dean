@@ -944,7 +944,7 @@ export default async function DashboardPage({
   // Map plan weeks to a normalised shape usable for the arc (both uploaded and Dean-generated)
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
-  type DeanWeek = { week_number: number; phase: string; mileage_target: number; mileage_target_min?: number; mileage_target_max?: number; long_run_target: number; key_workout: string; notes: string };
+  type DeanWeek = { week_number: number; phase: string; mileage_target: number; mileage_target_min?: number; mileage_target_max?: number; long_run_target: number; key_workout: string; notes: string; cross_training?: string | null };
 
   const planWeeks: PlanTabWeek[] = (() => {
     if (!hasPlan || !planData?.weeks) return [];
@@ -974,6 +974,7 @@ export default async function DashboardPage({
       long_run_target: w.long_run_target ?? 0,
       key_workout: w.key_workout ?? "",
       notes: w.notes ?? "",
+      cross_training: w.cross_training ?? null,
     } satisfies PlanTabWeek));
   })();
 

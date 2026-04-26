@@ -4,6 +4,30 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Cross-training integration: effort classification, aerobic minutes, richer post-activity messaging, dashboard display
+
+**Type:** Feature
+**Reported by:** Jake (product direction)
+**User feedback:** N/A
+**Root cause:** Cross-training activities (bikes, swims) were treated as generic 2-3 sentence responses with no effort context or aerobic load reasoning. Cross-training was not shown on the plan card dashboard. Weekly recap ignored cross-training sessions entirely.
+**Fix / Change:**
+- New `src/lib/cross-training.ts` with `classifyCrossTrainingEffort()` (HR/watts/name-based), `computeAerobicMinutes()` (multiplier by sport + effort), `buildCrossTrainingContext()` (rich prompt block for post-activity messages), `buildWeeklyCrossTrainingSummary()` (for weekly recap), and `prescribeCrossTrainingForPhase()` (phase-appropriate prescriptions)
+- `post_run` for non-run activities now injects a structured cross-training context block: effort classification, aerobic equivalent minutes, week-to-date cross-training load, phase-appropriate framing
+- `STRENGTH, MOBILITY & CROSS-TRAINING` system prompt section upgraded with explicit phase-specific cycling (Z2 / sweetspot / easy spin by phase) and swimming (aerobic / drill sets / easy form) prescriptions
+- `weekly_recap` now injects a cross-training summary into the user message so notable bike/swim sessions are acknowledged in the Sunday recap
+- `training-plan.ts` Haiku arc enrichment now generates a `cross_training` field per week when the athlete has bike/pool tools, using phase-appropriate defaults as fallback
+- `plan-card.tsx` + `plan-tab.tsx` + `page.tsx` updated to pass and display `cross_training` from the plan arc — shows as a "Cross-training" section below Key Sessions on the dashboard
+**Files changed:** `src/lib/cross-training.ts` (new), `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/app/dashboard/plan-card.tsx`, `src/app/dashboard/plan-tab.tsx`, `src/app/dashboard/page.tsx`
+
+## 2026-04-26 — Fix HR hallucinations (no-HR activities + swims) and onboarding mode question duplication
+
+**Type:** Bug Fix
+**Reported by:** Daily recap email analysis
+**User feedback:** N/A
+**Root cause:** Two separate issues: (1) `transformSplitForClaude` spread all split fields including `average_heartrate` into the Claude-facing JSON, so even when the top-level HR guard said "no HR data", per-split BPM values were still visible in the raw JSON and Claude cited them. (2) For swim activities, Strava may record optical HR from a wrist sensor even though underwater HR monitoring is unreliable — no guard existed to suppress specific BPM citations for swims. (3) Onboarding fallback that re-asks the mode question (when [READY] fires but mode is unresolved) would append the question even when Claude had already included it naturally, causing the identical "three different ways" message to be sent twice 3 minutes apart.
+**Fix / Change:** (1) Strip `average_heartrate` from all split and lap entries when `hasHR = false` so the JSON stays clean and can't be cited. (2) Add a swim-specific data guard that prevents citing a specific BPM average for Swim activities. (3) Before appending the fallback mode question, check if `cleanedResponse` already contains "three different ways" — if so, skip the append.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
 ## 2026-04-26 — Three coaching quality fixes: mileage sync gap, elevation splits, dashboard in recap
 
 **Type:** Bug Fix / Improvement

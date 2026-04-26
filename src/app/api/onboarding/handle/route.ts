@@ -847,10 +847,12 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
         .update({ onboarding_data: mergedData as unknown as Json })
         .eq("id", user.id);
       const modeQuestion = "One last thing before I wrap up — I want to make sure I set this up the right way. I can work three different ways: (1) I build you a training plan from scratch, (2) I work alongside a plan you're already following (Runna, TrainingPeaks, a coach, etc.) and give you feedback after each run, or (3) no set schedule — I just send a coaching note after each run you log. Which sounds right?";
-      // Prefer Dean's own wrap-up line + the mode question so the athlete's last
-      // message is still acknowledged — otherwise the mode ask can feel abrupt
-      // when it replaces a substantive reply.
-      const combined = cleanedResponse ? `${cleanedResponse}\n\n${modeQuestion}` : modeQuestion;
+      // Only append the fallback mode question if Claude's response doesn't already contain it
+      // (Claude may have asked naturally, and appending again causes duplication).
+      const alreadyAsked = /three different ways/i.test(cleanedResponse ?? "");
+      const combined = alreadyAsked
+        ? (cleanedResponse ?? modeQuestion)
+        : (cleanedResponse ? `${cleanedResponse}\n\n${modeQuestion}` : modeQuestion);
       await sendAndStore(user.id, user.phone_number, combined, "onboarding");
       return NextResponse.json({ ok: true });
     }

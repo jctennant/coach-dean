@@ -11,6 +11,7 @@ type CurrentWeekData = {
   long_run_target: number;
   key_workout: string;
   phase: string;
+  cross_training?: string | null;
 };
 
 export type PlanCardProps = {
@@ -102,6 +103,7 @@ export function PlanCard({
     : null;
 
   const keyWorkout = currentWeekData?.key_workout || null;
+  const crossTraining = currentWeekData?.cross_training || null;
 
   return (
     <div className="space-y-5">
@@ -151,6 +153,17 @@ export function PlanCard({
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Cross-training */}
+      {crossTraining && (
+        <div className="border-t border-gray-50 pt-3 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Cross-training</p>
+          <div className="flex items-start gap-2">
+            <span className="text-base shrink-0 mt-0.5">🚴</span>
+            <p className="text-sm text-gray-700 leading-snug">{crossTraining}</p>
           </div>
         </div>
       )}

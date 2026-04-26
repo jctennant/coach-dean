@@ -17,6 +17,7 @@ import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { generateAndStoreDashboardInsights } from "@/lib/dashboard-insights";
+import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
 import type { ActivityWeatherData } from "@/lib/weather";
 
 export const maxDuration = 120;
@@ -1609,7 +1610,44 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return sessions.length === 0;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length, avgWeeklyMileage, activitiesQueryFailed);
+  // Pre-compute cross-training context for the two triggers that need it.
+  const lthrForCT = (profile?.lthr_estimate as number | null) ?? null;
+  const crosstrainingToolsForCT = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
+  const activityTypeForCT = (activityData?.activity_type ?? "") as string;
+  const isRunActivityForCT = ["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(activityTypeForCT);
+  const recentActivitiesForCT = recentActivities.map(a => ({
+    activity_type: a.activity_type as string | null,
+    moving_time_seconds: a.moving_time_seconds as number | null,
+    average_heartrate: a.average_heartrate as number | null,
+    average_watts: (a as unknown as Record<string, unknown>).average_watts as number | null,
+    workout_type: a.workout_type as number | null,
+    activity_name: (a as unknown as Record<string, unknown>).activity_name as string | null,
+    start_date: a.start_date as string,
+  }));
+  const crossTrainingPostRunContext = trigger === "post_run" && !isRunActivityForCT
+    ? buildCrossTrainingContext({
+        activityType: activityTypeForCT || "Unknown",
+        activityName: activityData?.activity_name as string | null ?? null,
+        movingTimeSeconds: activityData?.moving_time_seconds as number | null ?? null,
+        averageHeartrate: activityData?.average_heartrate as number | null ?? null,
+        averageWatts: activityData?.average_watts as number | null ?? null,
+        workoutType: activityData?.workout_type as number | null ?? null,
+        lthrEstimate: lthrForCT,
+        crosstrainingTools: crosstrainingToolsForCT,
+        phase: periodization?.phase ?? null,
+        weekAerobicMinutesSoFar: computeWeekCrossTrainingAerobicMinutes(recentActivitiesForCT, userTimezone, lthrForCT),
+        weekRunMileageSoFar: weekMileageSoFar,
+        useMetric: isMetricUser,
+      })
+    : null;
+  const crossTrainWeeklySummary = trigger === "weekly_recap"
+    ? buildWeeklyCrossTrainingSummary(recentActivitiesForCT, userTimezone, lthrForCT)
+    : "";
+  const crossTrainRecapBlock = crossTrainWeeklySummary
+    ? `\nCROSS-TRAINING THIS WEEK: ${crossTrainWeeklySummary}\nIn your recap, weave in notable cross-training — a hard bike or swim session mid-week provides real aerobic stimulus worth acknowledging (not just "and you cross-trained!"). If they did 2+ cross-training sessions, mention the aerobic base contribution. Do not ignore cross-training when summing up the week's training load.\n`
+    : "";
+
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock);
 
   // For uploaded plans in weekly_recap and user_message: inject next week's sessions directly
   // from the stored plan rather than relying on the periodization engine's inferred values.
@@ -4097,11 +4135,24 @@ ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports
 ${!isReminder && !isPostRun ? `STRENGTH, MOBILITY & CROSS-TRAINING — include on rest days when appropriate:
 - Include a strength/mobility session when the athlete has injury notes, has asked for strength or stretching, or has gym/yoga listed as cross-training. Tailor exercises to their specific injury or needs.
 - Include cross-training when they've listed tools (bike, pool, elliptical, yoga, etc.) or asked for it.
-- Format in the plan as e.g. "Strength + mobility 20 min" or "Easy bike 45 min" — brief and specific.
 - If none of the above apply, do NOT add strength or cross-training unprompted.
 - STRENGTH SESSION SPECIFICS: Whenever you include a strength or mobility session, follow the session list with a separate bubble giving 3–5 specific exercises. Default to runner-specific hip stability and glute work (e.g. single-leg deadlifts, hip thrusts, clamshells, Copenhagen plank, lateral band walks). Adjust for any injury notes or stated preferences. Keep this bubble short — under 480 chars. Example: "For the strength block: single-leg deadlifts 3×10, glute bridges 3×15, clamshells 3×20/side, Copenhagen plank 3×20 sec." Never leave a strength session at just "30 min" with no detail — runners won't know what to do with that.
 - VOLUME ADJUSTMENT FOR ATHLETES DOING CONSISTENT STRENGTH TRAINING: If an athlete is doing 2+ days/week of strength or gym work alongside running, their total training load is meaningfully higher than a running-only athlete. Reduce peak running volume by 10–15% compared to a comparable running-only athlete at the same base mileage. For example: a runner averaging 32 mi/week who also lifts 2x/week should peak around 42–48mi/week running, not 55+. Strength days count as training load — don't ignore them when projecting the volume arc.
 - SCHEDULING AROUND STRENGTH DAYS: Never schedule a hard quality run (tempo, intervals, long run) the day before or the day of a scheduled strength session. Easy runs are fine on strength days. Hard running + hard lifting on the same or adjacent days leads to under-recovery and injury.
+${crosstrainingTools && crosstrainingTools.length > 0 ? `CROSS-TRAINING PRESCRIPTION — this athlete has: ${crosstrainingTools.join(", ")}. When prescribing cross-training sessions:
+- CYCLING: prescribe with zone and structure by phase:
+  • Base/deload: "Z2 ride 40–50 min" (aerobic base, HR stays in Z2 — conversational)
+  • Build: "Sweetspot ride 45 min (15 min easy + 20 min moderate/sweetspot effort + 10 min easy)"
+  • Peak: "Sweetspot ride 40 min" or "Easy spin 30 min"
+  • Taper: "Easy spin 25–30 min" (active recovery only — no intensity in race week)
+  • Alternative on injury days: "Zwift easy ride 45 min" or "Indoor trainer Z2 45 min"
+- SWIMMING: prescribe with workout type:
+  • Base/deload: "Easy aerobic swim 30 min" or "Easy swim 1500m"
+  • Build: "Drill sets 40 min (500m warm-up + 6×100m moderate effort + 200m cool-down)"
+  • Peak: "Steady swim 30 min" or "Drill set 35 min"
+  • Taper: "Easy swim 20–25 min, focus on form"
+- NEVER assign a distance to a cross-training session — duration-based only (cross-training distance must not pollute running volume totals)
+- Cross-training replaces a rest day — it does NOT add to the running session count for the week` : ""}
 ` : ""}
 
 PROACTIVE INJURY & CONCERN FOLLOW-UP:
@@ -4707,6 +4758,8 @@ function buildUserMessage(
   uploadedTotalWeeks = 0,
   avgWeeklyMileage: number | null = null,
   activitiesQueryFailed = false,
+  crossTrainingPostRunContext: string | null = null,
+  crossTrainRecapBlock: string = "",
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -4765,10 +4818,16 @@ function buildUserMessage(
                       })
                       .map(s => {
                         cumulativeMiles += (s.distance_miles as number) || 0;
-                        return { ...s, cumulative_miles: Math.round(cumulativeMiles * 100) / 100 };
+                        const out: Record<string, unknown> = { ...s, cumulative_miles: Math.round(cumulativeMiles * 100) / 100 };
+                        if (!hasHR) delete out.average_heartrate;
+                        return out;
                       });
                   })(),
-                  laps: rawSummary.laps?.map(s => transformSplitForClaude(s as Record<string, unknown>)),
+                  laps: rawSummary.laps?.map(s => {
+                    const out = transformSplitForClaude(s as Record<string, unknown>);
+                    if (!hasHR) delete out.average_heartrate;
+                    return out;
+                  }),
                 }
               : null,
           }
@@ -4795,6 +4854,8 @@ function buildUserMessage(
       if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
       if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead. CRITICAL: Do NOT state how many intervals, repeats, or reps were completed (e.g. '5x800m', '6 repeats', '4 strides'). Without lap data you cannot know the rep count — the athlete knows their own workout and will immediately notice if you get it wrong. Describe the workout structure generically (e.g. 'your interval session showed strong pace variation') without citing a specific count.");
       if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference HR values, heart rate, specific BPM figures, aerobic zone labels (Zone 1/2/3/4/5), or make any effort-level inference that requires HR data (e.g. 'your heart rate seemed controlled', 'you stayed aerobic', 'it looked like a zone 2 effort'). Describe effort using pace, splits, and elapsed time only.");
+      const activityTypeStr = (activityData?.activity_type ?? activityData?.type) as string | null;
+      if (hasHR && activityTypeStr === "Swim") dataGuards.push("SWIM HR NOTE: Heart rate data for swim activities is often unreliable — wrist optical sensors do not work well underwater. Do NOT cite a specific average BPM for this swim. If you want to comment on effort, describe it qualitatively (e.g. 'comfortable aerobic effort') without stating a number.");
       // Power/watt guard: only present when there's no actual power data in the DB record.
       // If average_watts is populated (power meter, Zwift, etc.) Claude can reference the overall average.
       const hasWatts = !!(activityData?.average_watts != null);
@@ -4823,6 +4884,8 @@ function buildUserMessage(
       const isRunActivity = ["Run", "TrailRun", "VirtualRun"].includes((activityData?.type as string) ?? "");
       const weekMileageContext = isRunActivity
         ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
+        : crossTrainingPostRunContext
+        ? `\n${crossTrainingPostRunContext}\n`
         : `\n<rule>This is a non-run activity. Do NOT cite the week's running mileage total in your response — leave weekly mileage commentary for post-run messages. Keep your response to 2–3 sentences focused on the cross-training session itself.</rule>\n`;
 
       const activitySemanticGuard = buildActivityDataGuard(activityForClaude as Record<string, unknown> | null);
@@ -5143,7 +5206,7 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
           return `\nNEXT WEEK TARGET: ~${recapMi(nextTarget)}${compLabel} (~${periodization.phase === "peak" ? "5%" : "8%"} step from recent avg). Microcycle: ${cycleNote}. If the athlete's recent pace suggests they're ready for a quality session, include one.\n`;
         })()
         : "";
-      return `${storedPlanContext}${weekMileageContext}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
+      return `${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
 
 PLAN FORMAT — NO DATES, NO DAY-BY-DAY SCHEDULE:
 Do NOT list sessions by day (no "Mon 4/20 · Easy 5mi" lines). The athlete chooses when to run each session. Present the week as a small framework:
@@ -5151,7 +5214,7 @@ Do NOT list sessions by day (no "Mon 4/20 · Easy 5mi" lines). The athlete choos
 - Long run: distance + character (e.g. "Long run: 9mi easy on trails")
 - Quality session(s): 1–2 sessions — type, structure, and paces (e.g. "Tempo: 1mi WU + 3mi @ 7:50/mi + 1mi CD"). Include the "why" in one short clause.
 - Spacing guidance: one short line reminding them to leave an easy or rest day between hard sessions, and to fit easy miles around the rest of the week however works.
-- If strength/cross-training is relevant, mention it as a count per week (e.g. "Plus 2× strength + mobility this week"). Do NOT assign cross-training to specific days.
+- If strength/cross-training is relevant, mention it as a count per week (e.g. "Plus 2× strength + mobility this week" or "1× Z2 bike this week"). Do NOT assign cross-training to specific days.
 
 Example shape for the second text:
 "This week: ~34 mi total.

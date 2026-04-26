@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import type { Json } from "@/lib/database.types";
+import { prescribeCrossTrainingForPhase } from "@/lib/cross-training";
 
 /**
  * Compute training phase for a pre-generated plan arc, based on position
@@ -398,6 +399,8 @@ export async function generateAndSaveFullPlan(
   let buildMileage = baseMileage;
   let peakMileage = baseMileage;
 
+  const crosstrainingTools = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
+
   const planWeeks: Array<{
     week_number: number;
     phase: string;
@@ -405,6 +408,7 @@ export async function generateAndSaveFullPlan(
     long_run_target: number;
     key_workout: string;
     notes: string;
+    cross_training?: string | null;
   }> = [];
 
   for (let week = 1; week <= totalWeeks; week++) {
@@ -579,9 +583,11 @@ WARM-UP / COOL-DOWN RULE: Every interval or tempo key_workout MUST include a 1${
 SESSION MATH RULE: The distance prefix MUST equal the SUM of all components. Wrong: "Tempo 2${unitLabel} (1${unitLabel} WU + 1.5${unitLabel} @ threshold + 1${unitLabel} CD)" — 1+1.5+1=3.5, not 2. Right: "Tempo 3.5${unitLabel} (1${unitLabel} WU + 1.5${unitLabel} @ threshold + 1${unitLabel} CD)". For time-based main sets where total distance is uncertain, omit the prefix: "Intervals (1${unitLabel} WU + 4×3min @ 5K effort + 1${unitLabel} CD)".
 
 - notes: 2-3 sentences for the athlete to read on their dashboard. First sentence: the week's purpose and why it matters at this stage of training (e.g. "Week 6 is about building your aerobic base — consistent easy mileage here pays dividends in the peak phase."). Then 1-2 sentences on the key workout: what it is, the target effort or pace, and one brief execution tip (e.g. "The tempo run on Wednesday should feel comfortably hard — you should be able to speak in short phrases but not hold a conversation. Start controlled and aim to hold pace in the second half."). Deload weeks should acknowledge the pullback and why recovery is productive. Keep it direct and practical, not generic.
+${crosstrainingTools.length > 0 ? `
+- cross_training: a single cross-training session prescription for the week (1 line). Match the phase: base/deload = easy Z2 ride or easy swim; build = sweetspot or drill intervals; peak = moderate effort; taper = easy spin/swim only. Examples: "Z2 ride 45 min", "Sweetspot ride 45 min", "Easy swim 30 min", "Swim drill sets 35 min", "Easy spin 25 min". Keep it brief — just the session label. This replaces a rest day, it does NOT add to the running volume.` : ""}
 
 Return ONLY a valid JSON array:
-[{"week_number": 1, "key_workout": "...", "notes": "..."}, ...]
+[{"week_number": 1, "key_workout": "...", "notes": "..."${crosstrainingTools.length > 0 ? ', "cross_training": "..."' : ""}}, ...]
 No other text.`,
       messages: [{
         role: "user",
@@ -590,12 +596,16 @@ No other text.`,
     });
 
     const enrichText = enrichResponse.content[0].type === "text" ? enrichResponse.content[0].text.trim() : "[]";
-    const enriched = JSON.parse(enrichText.match(/\[[\s\S]*\]/)?.[0] || "[]") as Array<{ week_number: number; key_workout: string; notes: string }>;
+    const enriched = JSON.parse(enrichText.match(/\[[\s\S]*\]/)?.[0] || "[]") as Array<{ week_number: number; key_workout: string; notes: string; cross_training?: string | null }>;
     for (const e of enriched) {
       const w = planWeeks.find(x => x.week_number === e.week_number);
       if (w) {
         w.key_workout = fixKeyWorkoutMath(e.key_workout ?? "", unitLabel);
         w.notes = e.notes ?? "";
+        if (crosstrainingTools.length > 0) {
+          // Use Haiku's cross_training if provided, otherwise fall back to the phase-based default
+          w.cross_training = e.cross_training?.trim() || prescribeCrossTrainingForPhase(w.phase, crosstrainingTools);
+        }
       }
     }
   } catch (err) {

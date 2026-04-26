@@ -20,6 +20,7 @@ export type PlanWeek = {
   long_run_target: number;
   key_workout: string;
   notes: string;
+  cross_training?: string | null;
 };
 
 export type PlanSession = {
