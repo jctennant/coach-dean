@@ -4,6 +4,8 @@ import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getAthleteStats } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 
+export const maxDuration = 300;
+
 /**
  * GET /api/cron/sunday-recap
  * Triggered weekly at 01:00 UTC Monday (= Sunday 6pm PDT / 9pm EDT).
@@ -46,74 +48,84 @@ export async function GET(request: Request) {
   // the budget once we have more than a handful of Strava-connected users.
   // Vercel keeps the function alive to finish `after()` work post-response.
   after(async () => {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
     const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-    let sent = 0;
-    for (let i = 0; i < users.length; i++) {
-    const user = users[i];
-    // Refresh YTD stats from Strava before generating the recap so Dean has
-    // accurate year-to-date mileage for milestone callouts ("500 miles this year!").
-    // Non-fatal — if this fails we proceed with whatever is cached.
-    if (user.strava_athlete_id) {
-      try {
-        const accessToken = await getValidAccessToken(user.id);
-        const stats = await getAthleteStats(accessToken, user.strava_athlete_id as number);
-        const existingData = (user.onboarding_data as Record<string, unknown>) || {};
-        const existingStats = (existingData.strava_stats as Record<string, unknown>) || {};
-        await supabase
-          .from("users")
-          .update({
-            onboarding_data: {
-              ...existingData,
-              strava_stats: {
-                ...existingStats,
-                ytd_run_totals: stats.ytd_run_totals,
-                all_run_totals: stats.all_run_totals,
-                refreshed_at: new Date().toISOString(),
-              },
-            } as unknown as Json,
-          })
-          .eq("id", user.id);
-        console.log(`[sunday-recap] refreshed Strava stats for user ${user.id}`);
-      } catch (err) {
-        console.error(`[sunday-recap] stats refresh failed for user ${user.id} (non-fatal):`, err);
+
+    // Process users in batches of 30 to stay under the 450k TPM rate limit.
+    // Each batch uses ~360k tokens (30 × ~12k). 30s between batches lets the
+    // window recover. Scales safely to ~150 users before needing a job queue.
+    const BATCH_SIZE = 30;
+    const allResults: PromiseSettledResult<string>[] = [];
+    for (let b = 0; b < users.length; b += BATCH_SIZE) {
+      const batch = users.slice(b, b + BATCH_SIZE);
+      const batchResults = await Promise.allSettled(batch.map(async (user) => {
+        // Refresh YTD stats from Strava before generating the recap so Dean has
+        // accurate year-to-date mileage for milestone callouts ("500 miles this year!").
+        if (user.strava_athlete_id) {
+          try {
+            const accessToken = await getValidAccessToken(user.id);
+            const stats = await getAthleteStats(accessToken, user.strava_athlete_id as number);
+            const existingData = (user.onboarding_data as Record<string, unknown>) || {};
+            const existingStats = (existingData.strava_stats as Record<string, unknown>) || {};
+            await supabase
+              .from("users")
+              .update({
+                onboarding_data: {
+                  ...existingData,
+                  strava_stats: {
+                    ...existingStats,
+                    ytd_run_totals: stats.ytd_run_totals,
+                    all_run_totals: stats.all_run_totals,
+                    refreshed_at: new Date().toISOString(),
+                  },
+                } as unknown as Json,
+              })
+              .eq("id", user.id);
+            console.log(`[sunday-recap] refreshed Strava stats for user ${user.id}`);
+          } catch (err) {
+            console.error(`[sunday-recap] stats refresh failed for user ${user.id} (non-fatal):`, err);
+          }
+        }
+
+        // Skip users who already received an initial_plan or weekly_recap in the last 8 hours.
+        // This prevents a double-plan when someone onboards on the same Sunday the cron fires.
+        const { data: recentPlan } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("role", "assistant")
+          .in("message_type", ["initial_plan", "weekly_recap"])
+          .gte("created_at", eightHoursAgo)
+          .limit(1)
+          .single();
+        if (recentPlan) {
+          console.log(`[sunday-recap] skipping user ${user.id} — received a plan within the last 8 hours`);
+          return "skipped";
+        }
+
+        await fetch(`${appUrl}/api/coach/respond`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, trigger: "weekly_recap" }),
+          signal: AbortSignal.timeout(90_000),
+        });
+        return "sent";
+      }));
+      allResults.push(...batchResults);
+      batchResults.forEach((r, i) => {
+        if (r.status === "rejected") console.error(`[sunday-recap] failed for user ${batch[i].id}:`, r.reason);
+      });
+      if (b + BATCH_SIZE < users.length) {
+        console.log(`[sunday-recap] batch ${Math.floor(b / BATCH_SIZE) + 1} done — waiting 30s before next batch`);
+        await sleep(30_000);
       }
     }
 
-    // Skip users who already received an initial_plan or weekly_recap in the last 8 hours.
-    // This prevents a double-plan when someone onboards on the same Sunday the cron fires.
-    const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
-    const { data: recentPlan } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "assistant")
-      .in("message_type", ["initial_plan", "weekly_recap"])
-      .gte("created_at", eightHoursAgo)
-      .limit(1)
-      .single();
-    if (recentPlan) {
-      console.log(`[sunday-recap] skipping user ${user.id} — received a plan within the last 8 hours`);
-      continue;
-    }
-
-    // Stagger request starts to avoid hitting LLM token-per-minute rate limits.
-    // Fire-and-forget: don't await the coaching response — it runs in its own
-    // Vercel function context. Sleeping here only gates when the next request starts,
-    // keeping the sunday-recap loop well under Vercel's 300s after() limit.
-    if (i > 0) await sleep(35_000);
-
-    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId: user.id,
-        trigger: "weekly_recap",
-      }),
-    }).then(() => { sent++; }).catch(err => {
-      console.error(`Failed to send weekly recap to user ${user.id}:`, err);
-    });
-    }
-    console.log(`[sunday-recap] completed — sent ${sent}/${users.length}`);
+    const sent = allResults.filter(r => r.status === "fulfilled" && r.value === "sent").length;
+    const skipped = allResults.filter(r => r.status === "fulfilled" && r.value === "skipped").length;
+    const failed = allResults.filter(r => r.status === "rejected").length;
+    console.log(`[sunday-recap] completed — sent ${sent}, skipped ${skipped}, failed ${failed} of ${users.length}`);
   });
 
   return NextResponse.json({ ok: true, queued: users.length });
