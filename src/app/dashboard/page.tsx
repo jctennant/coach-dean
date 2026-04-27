@@ -1097,43 +1097,135 @@ export default async function DashboardPage({
                   const avg = hasRange ? (w.mileage_target_min! + w.mileage_target_max!) / 2 : w.mileage_target;
                   return { weekNum: w.week_number, target: avg, phase: w.phase };
                 });
-                const maxTarget = Math.max(...arcWeeks.map(a => a.target));
+                const CHART_H = 80;
+                const rawMax = Math.max(...arcWeeks.map(a => a.target));
+                const rawMin = Math.min(...arcWeeks.map(a => a.target));
+                const yMax = Math.ceil(rawMax / 5) * 5;
+                const yMin = Math.max(0, Math.floor(rawMin / 5) * 5);
+                const yRange = yMax - yMin || 1;
+                const yMid = Math.round(((yMin + yMax) / 2) / 5) * 5;
                 const fmtMi = (miles: number) => useMetric ? `${Math.round(miles * 1.60934)} km` : `${Math.round(miles)} mi`;
                 const peakWeek = arcWeeks.reduce((best, a) => a.target > best.target ? a : best, arcWeeks[0]!);
+                // bar height as % of chart, anchored to yMin floor
+                const barH = (t: number) => Math.max(4, ((t - yMin) / yRange) * 100);
+                // gridline position from bottom (as %)
+                const gridY = (v: number) => ((v - yMin) / yRange) * 100;
+
+                // Phase color classes
+                const PHASE_COLOR: Record<string, string> = {
+                  base: "bg-slate-300",
+                  build: "bg-blue-300",
+                  peak: "bg-amber-400",
+                  deload: "bg-violet-200",
+                  taper: "bg-emerald-300",
+                  race: "bg-yellow-400",
+                };
+                const PHASE_LABEL: Record<string, string> = {
+                  base: "Base", build: "Build", peak: "Peak",
+                  deload: "Deload", taper: "Taper", race: "Race wk",
+                };
+
+                // Phase segments for x-axis grouping labels
+                const segments: Array<{ phase: string; startIdx: number; span: number }> = [];
+                arcWeeks.forEach((w, i) => {
+                  const ph = allRaceWeekNums.includes(w.weekNum) ? "race" : w.phase;
+                  const prev = i > 0 ? (allRaceWeekNums.includes(arcWeeks[i - 1]!.weekNum) ? "race" : arcWeeks[i - 1]!.phase) : null;
+                  if (i === 0 || ph !== prev) segments.push({ phase: ph, startIdx: i, span: 1 });
+                  else segments[segments.length - 1]!.span++;
+                });
+
+                // Legend: unique phases in plan order
+                const legendPhases = [...new Set(segments.map(s => s.phase))];
+
                 return (
                   <div className="rounded-xl border border-gray-100 bg-white px-4 pt-3.5 pb-3 shadow-sm">
-                    <div className="flex items-baseline justify-between mb-2.5">
+                    {/* Header */}
+                    <div className="flex items-baseline justify-between mb-3">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Mileage arc</p>
-                      <p className="text-[11px] text-gray-400">peaks at {fmtMi(peakWeek.target)} (wk {peakWeek.weekNum})</p>
+                      <p className="text-[11px] text-gray-400">peaks {fmtMi(peakWeek.target)} · wk {peakWeek.weekNum}</p>
                     </div>
-                    <div className="flex items-end gap-px" style={{ height: 36 }}>
-                      {arcWeeks.map(({ weekNum, target, phase }) => {
-                        const isCurrent = weekNum === planCurrentWeek;
-                        const isPast = weekNum < planCurrentWeek;
-                        const isTaper = phase === "taper";
-                        const heightPct = maxTarget > 0 ? Math.max(8, (target / maxTarget) * 100) : 50;
-                        const barClass = isCurrent
-                          ? "bg-green-500"
-                          : isPast
-                          ? "bg-gray-150"
-                          : isTaper
-                          ? "bg-blue-100"
-                          : "bg-gray-200";
-                        return (
-                          <div key={weekNum} className="relative flex-1 flex flex-col items-center justify-end h-full">
-                            {isCurrent && (
-                              <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-green-600 whitespace-nowrap tabular-nums">
-                                {fmtMi(target)}
-                              </span>
-                            )}
-                            <div className={`w-full rounded-sm ${barClass}`} style={{ height: `${heightPct}%` }} />
+
+                    {/* Chart: y-axis column + bar area */}
+                    <div className="flex gap-1.5">
+                      {/* Y-axis labels */}
+                      <div className="relative shrink-0" style={{ width: 28, height: CHART_H }}>
+                        {[yMax, yMid, yMin].map((v, i) => {
+                          const bottomPct = gridY(v);
+                          return (
+                            <span
+                              key={i}
+                              className="absolute right-0 text-[8px] text-gray-400 tabular-nums leading-none -translate-y-1/2"
+                              style={{ bottom: `${bottomPct}%` }}
+                            >
+                              {fmtMi(v)}
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {/* Bars + gridlines */}
+                      <div className="flex-1 flex flex-col gap-0">
+                        <div className="relative" style={{ height: CHART_H }}>
+                          {/* Horizontal gridlines */}
+                          {[yMax, yMid, yMin].map((v, i) => (
+                            <div
+                              key={i}
+                              className="absolute left-0 right-0 border-t border-gray-100"
+                              style={{ bottom: `${gridY(v)}%` }}
+                            />
+                          ))}
+
+                          {/* Bars */}
+                          <div className="absolute inset-0 flex items-end gap-px">
+                            {arcWeeks.map(({ weekNum, target, phase }) => {
+                              const isCurrent = weekNum === planCurrentWeek;
+                              const isRace = allRaceWeekNums.includes(weekNum);
+                              const effectivePhase = isRace ? "race" : phase;
+                              const barColor = isCurrent ? "bg-green-500" : (PHASE_COLOR[effectivePhase] ?? "bg-gray-200");
+                              const h = barH(target);
+                              return (
+                                <div key={weekNum} className="relative flex-1 flex flex-col items-center justify-end h-full">
+                                  {isCurrent && (
+                                    <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-green-600 whitespace-nowrap tabular-nums">
+                                      {fmtMi(target)}
+                                    </span>
+                                  )}
+                                  <div className={`w-full rounded-sm ${barColor}`} style={{ height: `${h}%` }} />
+                                </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })}
+                        </div>
+
+                        {/* Phase segment labels */}
+                        <div className="flex mt-1" style={{ height: 14 }}>
+                          {segments.map(seg => (
+                            <div
+                              key={`${seg.phase}-${seg.startIdx}`}
+                              className="flex items-center justify-center overflow-hidden"
+                              style={{ width: `${(seg.span / arcWeeks.length) * 100}%` }}
+                            >
+                              <span className="text-[8px] text-gray-400 truncate px-0.5">
+                                {PHASE_LABEL[seg.phase] ?? seg.phase}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex justify-between mt-1.5">
-                      <span className="text-[9px] text-gray-300">wk 1</span>
-                      <span className="text-[9px] text-gray-300">wk {planTotalWeeks}</span>
+
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2.5 pt-2.5 border-t border-gray-50">
+                      {legendPhases.map(ph => (
+                        <div key={ph} className="flex items-center gap-1">
+                          <div className={`w-2 h-2 rounded-sm ${PHASE_COLOR[ph] ?? "bg-gray-200"}`} />
+                          <span className="text-[9px] text-gray-400">{PHASE_LABEL[ph] ?? ph}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-sm bg-green-500" />
+                        <span className="text-[9px] text-gray-400">This week</span>
+                      </div>
                     </div>
                   </div>
                 );

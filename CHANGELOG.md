@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Dashboard insights regenerate after injury_hold, injury_clear, and lighter_week
+
+**Type:** Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** `injury_hold`, `injury_clear`, and `lighter_week` all modify `training_state` (zero/reduce mileage, clear sessions, or rebuild the plan arc) but none called `generateAndStoreDashboardInsights` afterward. The dashboard would show stale insights after any of these events until the next `post_run`, `weekly_recap`, or `initial_plan` triggered a refresh.
+**Fix / Change:** Added a non-blocking `generateAndStoreDashboardInsights` call (fire-and-forget via `void`) at the end of each handler, passing a descriptive coach message so the insights reflect the current state.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-26 — Dashboard syncs after mid-week session change; Dean no longer restates session on confirmation
 
 **Type:** Bug Fix

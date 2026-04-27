@@ -416,6 +416,9 @@ async function handleInjuryHold(userId: string, dryRun: boolean): Promise<NextRe
       weekly_plan_sessions: null,
     }).eq("user_id", userId);
     void trackEvent(userId, "injury_hold_set", { injury_hold_since: today, pre_injury_mileage_target: currentTarget });
+    void generateAndStoreDashboardInsights(userId, "injury_hold", "Injury hold set — this week's running has been paused.").catch(err =>
+      console.error("[handleInjuryHold] generateAndStoreDashboardInsights failed:", err)
+    );
   }
 
   console.log(`[handleInjuryHold] userId=${userId} — hold set since ${today}, pre-injury target=${currentTarget}`);
@@ -524,6 +527,9 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
         }
       );
       void trackEvent(userId, "plan_generated", { plan_type: "injury_return", weeks_injured: weeksInjured });
+      void generateAndStoreDashboardInsights(userId, "injury_clear", planReadyNote).catch(err =>
+        console.error("[handleInjuryClear] generateAndStoreDashboardInsights failed:", err)
+      );
     } catch (err) {
       console.error("[handleInjuryClear] generateAndSaveFullPlan failed:", err);
       void trackEvent(userId, "after_error", { trigger: "injury_clear", error: String(err) });
@@ -566,6 +572,9 @@ async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextR
       })
       .eq("user_id", userId);
     void trackEvent(userId, "lighter_week_set", { previous_target: currentTarget, new_target: reducedTarget });
+    void generateAndStoreDashboardInsights(userId, "lighter_week", `Lighter week set — target reduced from ${currentTarget} to ${reducedTarget} mi.`).catch(err =>
+      console.error("[handleLighterWeek] generateAndStoreDashboardInsights failed:", err)
+    );
   }
 
   return NextResponse.json({ ok: true, previous_target: currentTarget, new_target: reducedTarget });
