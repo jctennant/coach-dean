@@ -4193,7 +4193,11 @@ ${crosstrainingTools && crosstrainingTools.length > 0 ? `CROSS-TRAINING PRESCRIP
 PROACTIVE INJURY & CONCERN FOLLOW-UP:
 If the athlete has injury notes or reported physical concerns (see "Injury / constraints" in ATHLETE HISTORY above), reference them proactively — but read the notes and recent conversation first.
 
+PHYSICAL INJURY ONLY: "Injury / constraints" notes are for physical body concerns (pain, tightness, soreness, specific body parts). Do NOT treat general training context (e.g. "building back from a 5K season", "returning to mileage", "ramping up speed") as an injury check-in topic. If the notes do not describe a physical symptom or body part, skip this section entirely.
+
 RESOLVED INJURIES: If "Injury / constraints" starts with "Past (resolved):", the athlete has confirmed this is no longer an issue. Do NOT check in on it, do NOT ask how it's feeling, do NOT mention it in reminders. It's in the record as historical context only. Only bring it up if the athlete raises it again themselves.
+
+STALE CONTEXT RULE: If the athlete has explicitly changed their training focus or life context in RECENT CONVERSATION (e.g. announced a new goal race, pregnancy, injury recovery, major schedule change), do NOT ask about their previous training context as if it's still current. Reference only what's relevant NOW.
 
 STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSATION before asking. If the athlete has said it's fine, not bothering them, or no issues in any of the last 6 messages — do NOT ask about it again in this response. If they've said this twice or more across recent messages, treat it as fading and skip the check-in entirely. Repeating the same injury question after the athlete has already said they're fine is annoying and erodes trust.
 
@@ -4867,8 +4871,9 @@ function buildUserMessage(
               : null,
           }
         : activityData;
-      const injuryReminder = injuryNotes
-        ? `\nINJURY FOLLOW-UP: This athlete has active concern notes: "${injuryNotes}". If they haven't mentioned how this area felt during the run, check in on it — one brief question as part of your feedback.`
+      const physicalInjuryKeywords = /\b(pain|sore|soreness|tight|tightness|strain|sprain|injury|injured|knee|hip|shin|achilles|hamstring|calf|ankle|foot|plantar|IT band|tendon|tendinitis|tendinopathy|stress fracture|bruise|blister|inflammation|swelling|ache|aching|hurt|hurts|pulled|tweak|nagging|flare|discomfort)\b/i;
+      const injuryReminder = injuryNotes && physicalInjuryKeywords.test(injuryNotes)
+        ? `\nINJURY FOLLOW-UP: This athlete has active physical concern notes: "${injuryNotes}". Before asking: scan RECENT CONVERSATION — if the athlete has said it's fine or not bothering them in any of the last 6 messages, skip the check-in entirely. If it's still unaddressed: ask one brief question about how the area held up during this run. Do NOT ask about old training context (past races, build-back phases, goal shifts) as if it were an injury — only physical pain or body-part concerns qualify for this check-in.`
         : "";
 
       // Build data availability guards to prevent Claude from hallucinating specific values

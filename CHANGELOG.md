@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Stop asking about stale training context after every post-run
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "what are our current guardrails on asking about a past race build back or injury? feels like we are overdoing it here asking about last summers 5k haha"
+**Root cause:** The `injuryReminder` block in the `post_run` prompt fired whenever `injury_notes` was non-null — including when the notes contained general training context like "building back from summer 5K season" rather than a physical injury. This caused Dean to ask "how's your build-back from last summer's 5K?" after every single post-run, even after the athlete had explicitly shifted focus to a new race. The block also had no staleness check — it overrode the STOP ASKING RULE in the main system prompt because it was a closer, more specific instruction.
+**Fix / Change:** (1) `injuryReminder` now only fires when `injury_notes` contains physical injury language (pain, tightness, body part keywords, etc.) — general training context notes are skipped entirely. (2) `injuryReminder` now explicitly tells Claude to apply the STOP ASKING RULE before including a check-in. (3) Added PHYSICAL INJURY ONLY and STALE CONTEXT RULE guardrails to the PROACTIVE INJURY section of the system prompt to prevent Claude from treating goal/context notes as recurring injury check-in topics.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-26 — Dashboard insights regenerate after injury_hold, injury_clear, and lighter_week
 
 **Type:** Bug Fix

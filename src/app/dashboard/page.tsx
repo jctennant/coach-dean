@@ -1092,10 +1092,33 @@ export default async function DashboardPage({
 
               {/* Mileage arc — weekly targets across the full plan */}
               {planWeeks.length >= 2 && (() => {
+                // Build week → race distance map so we can add the race miles to the shakeout target
+                const GOAL_DIST: Record<string, number> = {
+                  "5k": 3.1, "5 k": 3.1, "10k": 6.2, "10 k": 6.2,
+                  "half_marathon": 13.1, "half marathon": 13.1,
+                  "marathon": 26.2,
+                  "50k": 31.1, "50 k": 31.1, "50mi": 50, "50 mi": 50,
+                  "100k": 62.1, "100 k": 62.1, "100mi": 100, "100 mi": 100,
+                };
+                const raceWeekMiles = new Map<number, number>();
+                if (week1StartDate) {
+                  const w1 = new Date(week1StartDate + "T00:00:00Z");
+                  races.forEach(r => {
+                    const daysDiff = (new Date(r.race_date + "T12:00:00Z").getTime() - w1.getTime()) / (1000 * 60 * 60 * 24);
+                    const wk = Math.floor(daysDiff / 7) + 1;
+                    if (wk < 1 || wk > planTotalWeeks) return;
+                    const dist = r.goal_distance_miles
+                      ?? (r.goal ? (Object.entries(GOAL_DIST).find(([k]) => r.goal!.toLowerCase().includes(k))?.[1] ?? null) : null);
+                    if (dist) raceWeekMiles.set(wk, (raceWeekMiles.get(wk) ?? 0) + dist);
+                  });
+                }
+
                 const arcWeeks = planWeeks.map(w => {
                   const hasRange = w.mileage_target_min != null && w.mileage_target_max != null && w.mileage_target_max! > w.mileage_target_min!;
-                  const avg = hasRange ? (w.mileage_target_min! + w.mileage_target_max!) / 2 : w.mileage_target;
-                  return { weekNum: w.week_number, target: avg, phase: w.phase };
+                  const shakeout = hasRange ? (w.mileage_target_min! + w.mileage_target_max!) / 2 : w.mileage_target;
+                  // Add race distance to the shakeout miles so race week shows full expected effort
+                  const raceDist = raceWeekMiles.get(w.week_number) ?? 0;
+                  return { weekNum: w.week_number, target: shakeout + raceDist, phase: w.phase };
                 });
                 const CHART_H = 80;
                 const rawMax = Math.max(...arcWeeks.map(a => a.target));
