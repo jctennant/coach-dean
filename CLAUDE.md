@@ -42,6 +42,20 @@ Crons → POST /api/coach/respond (various triggers)
 | `races` | `race_date`, `race_name`, `goal`, `priority` (A/B/C), `goal_time_minutes`, `goal_distance_miles` |
 | `conversations` | `role`, `content`, `message_type`, `strava_activity_id`, `created_at` |
 
+### conversations.message_type allowlist
+
+The DB has a `CHECK` constraint (`conversations_message_type_check`) enforcing valid values. **Whenever you add a new message_type, you must also add it to this constraint via a migration**, otherwise inserts will fail silently (the error is swallowed unless logged).
+
+Current valid values:
+`post_run`, `initial_plan`, `initial_plan_link`, `morning_plan`, `nightly_reminder`, `morning_reminder`, `weekly_recap`, `user_message`, `coach_response`, `onboarding`, `awaiting_strava`, `reengagement`, `plan_import_week_ask`, `plan_upload`, `changelog`, `dashboard_announcement`, `welcome_tips`, `workout_image`
+
+Migration pattern to add a new type:
+```sql
+ALTER TABLE conversations DROP CONSTRAINT conversations_message_type_check;
+ALTER TABLE conversations ADD CONSTRAINT conversations_message_type_check
+  CHECK (message_type IN ('post_run', 'initial_plan', ... , 'your_new_type'));
+```
+
 ## Coach triggers (coach/respond)
 
 | Trigger | When |
