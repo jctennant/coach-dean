@@ -48,7 +48,8 @@ export async function GET(request: Request) {
   after(async () => {
     const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
     let sent = 0;
-    for (const user of users) {
+    for (let i = 0; i < users.length; i++) {
+    const user = users[i];
     // Refresh YTD stats from Strava before generating the recap so Dean has
     // accurate year-to-date mileage for milestone callouts ("500 miles this year!").
     // Non-fatal — if this fails we proceed with whatever is cached.
@@ -95,21 +96,22 @@ export async function GET(request: Request) {
       continue;
     }
 
-    try {
-      await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          trigger: "weekly_recap",
-        }),
-      });
-      sent++;
-    } catch (err) {
+    // Stagger request starts to avoid hitting LLM token-per-minute rate limits.
+    // Fire-and-forget: don't await the coaching response — it runs in its own
+    // Vercel function context. Sleeping here only gates when the next request starts,
+    // keeping the sunday-recap loop well under Vercel's 300s after() limit.
+    if (i > 0) await sleep(35_000);
+
+    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: user.id,
+        trigger: "weekly_recap",
+      }),
+    }).then(() => { sent++; }).catch(err => {
       console.error(`Failed to send weekly recap to user ${user.id}:`, err);
-    }
-    // Stagger requests to avoid hitting LLM token-per-minute rate limits.
-    if (sent < users.length) await sleep(30_000);
+    });
     }
     console.log(`[sunday-recap] completed — sent ${sent}/${users.length}`);
   });
