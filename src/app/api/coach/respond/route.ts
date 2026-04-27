@@ -1742,8 +1742,23 @@ Weekly total: ${mileageRange}
     if (arcTarget) arcLines.push(`Weekly mileage target: ${fmtArcMi(arcTarget)}`);
     if (arcLongRun) arcLines.push(`Long run this week: ${fmtArcMi(arcLongRun)}`);
     if (arcQuality) arcLines.push(`Quality session this week: ${arcQuality}`);
+
+    // Fetch the full plan arc to show the athlete their mileage progression
+    const { data: fullPlanData } = await supabase.from("training_plans").select("weeks, total_weeks").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    type ArcWeek = { week_number: number; mileage_target: number; phase: string };
+    const fullArcSummary = (() => {
+      if (!fullPlanData?.weeks || !Array.isArray(fullPlanData.weeks) || fullPlanData.weeks.length === 0) return "";
+      const weeks = fullPlanData.weeks as ArcWeek[];
+      const peakWeek = weeks.reduce((best, w) => (w.mileage_target ?? 0) > (best.mileage_target ?? 0) ? w : best, weeks[0]!);
+      const taperWeeks = weeks.filter(w => w.phase === "taper");
+      const avgTaperMiles = taperWeeks.length > 0 ? taperWeeks.reduce((s, w) => s + (w.mileage_target ?? 0), 0) / taperWeeks.length : null;
+      const totalWeeks = fullPlanData.total_weeks ?? weeks.length;
+      let summary = `Full plan mileage arc (${totalWeeks} weeks): starts at ${fmtArcMi(arcTarget ?? weeks[0]!.mileage_target)}/wk, builds to peak of ${fmtArcMi(peakWeek.mileage_target)}/wk (week ${peakWeek.week_number})`;
+      if (avgTaperMiles) summary += `, then tapers to ~${fmtArcMi(avgTaperMiles)}/wk for race prep`;
+      return summary + ".";
+    })();
     if (arcLines.length > 0) {
-      initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES (the dashboard already shows them — mismatches confuse athletes):\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.</arc_values>`;
+      initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES (the dashboard already shows them — mismatches confuse athletes):\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.\n\n${fullArcSummary ? `MILEAGE PROGRESSION: ${fullArcSummary}\nAt the end of your message, include one sentence summarizing the overall mileage arc so the athlete knows how their plan builds. Keep it brief and natural.` : ""}</arc_values>`;
     }
     console.log("[initial_plan] arc pre-generated — token:", preGeneratedDashboardToken, "longRun:", arcLongRun, "quality:", arcQuality, "target:", arcTarget);
   }
@@ -2340,7 +2355,13 @@ Weekly total: ${mileageRange}
 
       if (!wantsRebuild) {
         if (storedPlanId && storedPlanAllWeeks.length > 0) {
-          await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
+          const changedWeeks = await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
+          // If the current week was patched, sync training_state so the dashboard reflects it.
+          if (changedWeeks.includes(periodization.effectiveWeek)) {
+            void syncWeekFromArc(userId, periodization.effectiveWeek).catch(err =>
+              console.error("[user_message] syncWeekFromArc after plan patch failed:", err)
+            );
+          }
         }
         // Handle structured schedule tags from Dean's response
         if (tagWeekOverrideDays && tagWeekOverrideDays.length > 0) {
@@ -3282,9 +3303,9 @@ async function maybeUpdateTrainingPlanWeeks(
   allWeeks: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>,
   userMessage: string,
   coachResponse: string
-): Promise<void> {
+): Promise<number[]> {
   const adjustmentKeywords = /\b(sick|ill|illness|injury|injured|hurt|travel|traveling|travelling|busy|adjust|update.*plan|change.*plan|drop.*week|recovery week|rest week|modified|lighter week|easy week|more interval|add interval|more tempo|add tempo|more hill|add hill|more strength|add strength|switch.*workout|change.*workout|different workout|more quality|harder week)\b/i;
-  if (!adjustmentKeywords.test(userMessage) && !adjustmentKeywords.test(coachResponse)) return;
+  if (!adjustmentKeywords.test(userMessage) && !adjustmentKeywords.test(coachResponse)) return [];
 
   // Only look ahead at upcoming weeks — don't allow retroactive changes to past weeks.
   // We infer "current" as the lowest week_number not yet modified; practically just pass all weeks
@@ -3315,7 +3336,9 @@ Rules:
   const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
   try {
     const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
-    if (!parsed.changed || !Array.isArray(parsed.weeks) || parsed.weeks.length === 0) return;
+    if (!parsed.changed || !Array.isArray(parsed.weeks) || parsed.weeks.length === 0) return [];
+
+    const changedWeekNums = (parsed.weeks as Array<{ week_number: number }>).map(w => w.week_number);
 
     const updatedWeeks = allWeeks.map(w => {
       const change = parsed.weeks.find((c: { week_number: number }) => c.week_number === w.week_number);
@@ -3326,8 +3349,11 @@ Rules:
       .from("training_plans")
       .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
       .eq("id", planId);
+
+    return changedWeekNums;
   } catch {
     // parse failed — leave plan unchanged
+    return [];
   }
 }
 
@@ -4964,6 +4990,8 @@ PLAN DEVIATION — NON-RUN DAY: Today's plan called for "${skippedNonRunSession}
 DIRECT QUESTIONS — MUST ANSWER: If the athlete's message contains a direct coaching question (e.g. "how do I...", "what should I...", "why is my...", "how do I get faster", "what's the best way to..."), you MUST answer it in your response. Do not address only the recovery or emotional aspect and skip the substantive question. If they ask about speed, answer the speed question with specific tactics. If they ask about a training concept, explain it. A response that ignores a direct question is a coaching failure.
 
 ALREADY-COMPLETED UPDATES: Check RECENT CONVERSATION. If your most recent message already made an update the athlete is now asking about or providing context for (e.g., you just recalculated paces from a race time and the athlete is now confirming the race date, or you just changed the schedule and they're confirming the swap), do NOT redo the work or say you can't do it. Acknowledge briefly that it's already done. Example: "Already updated — your paces are locked in from that half 👊" One sentence max. Do not re-explain the update.
+
+CONFIRMATION RESPONSES: If the athlete's message is a short confirmation of something you just proposed in your previous message — e.g. "Sure", "Sounds good", "OK", "Works for me", "Let's do it", "That works", "Yep", "Yeah", "Perfect", "Great" — do NOT restate the full session details you already described. Give a single brief acknowledgment and stop. Example: "Perfect — let me know how it goes!" Do not repeat the workout, paces, or plan structure. The athlete already has that information.
 
 PACE UPDATES FROM RACE DATA — CRITICAL: If the athlete provides a race result (e.g. "17:40 5K", "sub-20 10K") and you recalculate their training paces, you MUST:
 1. Show the new paces in THIS message. Do NOT say "give me a sec", "I'll send that over", "I'll rebuild the plan shortly", or any variation implying a follow-up message is coming. There is no follow-up — this IS the message. If you want to show a rebuilt week plan, include it here.

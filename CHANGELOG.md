@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Dashboard syncs after mid-week session change; Dean no longer restates session on confirmation
+
+**Type:** Bug Fix
+**Reported by:** Jake (user feedback)
+**User feedback:** "dashboard didn't update" + Dean sent same workout details twice after user said "Sure that sounds good"
+**Root cause:** (1) `maybeUpdateTrainingPlanWeeks` patched the `training_plans` arc but never synced `training_state.weekly_quality_session`, which is what the dashboard reads. (2) When the user confirmed a proposed session change with a short reply ("Sure that sounds good"), Dean's response to that confirmation restated the full workout details already described in the previous message.
+**Fix / Change:** (1) `maybeUpdateTrainingPlanWeeks` now returns the list of patched week numbers; if the current week is among them, `syncWeekFromArc` is called to update `training_state` so the dashboard reflects the change immediately. (2) Added a CONFIRMATION RESPONSES prompt rule: when the athlete sends a short confirmation ("Sure", "Sounds good", "OK", etc.), Dean must respond with a single brief acknowledgment and not restate session details already described.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-26 — Mileage arc on dashboard + arc summary in initial plan message
+
+**Type:** Feature
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Users had no visibility into how their weekly mileage would progress across the full plan — only the current week's target was shown.
+**Fix / Change:** Added a compact bar chart below the "This Week" card in the dashboard showing every week's mileage target (midpoint of range if applicable). Current week highlighted green, past weeks gray, taper weeks blue-tinted. Also added a full arc summary to the `initialPlanArcConstraint` so Claude ends the initial plan SMS with one sentence describing the overall mileage progression (e.g. "Your plan builds from 34 to 52 mi/week at peak, then tapers for race prep.").
+**Files changed:** src/app/dashboard/page.tsx, src/app/api/coach/respond/route.ts
+
 ## 2026-04-26 — Fix cross-training prescribed outside athlete's stated tools
 
 **Type:** Bug Fix

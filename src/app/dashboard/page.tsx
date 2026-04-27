@@ -1089,6 +1089,55 @@ export default async function DashboardPage({
                   })()}
                 />
               </div>
+
+              {/* Mileage arc — weekly targets across the full plan */}
+              {planWeeks.length >= 2 && (() => {
+                const arcWeeks = planWeeks.map(w => {
+                  const hasRange = w.mileage_target_min != null && w.mileage_target_max != null && w.mileage_target_max! > w.mileage_target_min!;
+                  const avg = hasRange ? (w.mileage_target_min! + w.mileage_target_max!) / 2 : w.mileage_target;
+                  return { weekNum: w.week_number, target: avg, phase: w.phase };
+                });
+                const maxTarget = Math.max(...arcWeeks.map(a => a.target));
+                const fmtMi = (miles: number) => useMetric ? `${Math.round(miles * 1.60934)} km` : `${Math.round(miles)} mi`;
+                const peakWeek = arcWeeks.reduce((best, a) => a.target > best.target ? a : best, arcWeeks[0]!);
+                return (
+                  <div className="rounded-xl border border-gray-100 bg-white px-4 pt-3.5 pb-3 shadow-sm">
+                    <div className="flex items-baseline justify-between mb-2.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Mileage arc</p>
+                      <p className="text-[11px] text-gray-400">peaks at {fmtMi(peakWeek.target)} (wk {peakWeek.weekNum})</p>
+                    </div>
+                    <div className="flex items-end gap-px" style={{ height: 36 }}>
+                      {arcWeeks.map(({ weekNum, target, phase }) => {
+                        const isCurrent = weekNum === planCurrentWeek;
+                        const isPast = weekNum < planCurrentWeek;
+                        const isTaper = phase === "taper";
+                        const heightPct = maxTarget > 0 ? Math.max(8, (target / maxTarget) * 100) : 50;
+                        const barClass = isCurrent
+                          ? "bg-green-500"
+                          : isPast
+                          ? "bg-gray-150"
+                          : isTaper
+                          ? "bg-blue-100"
+                          : "bg-gray-200";
+                        return (
+                          <div key={weekNum} className="relative flex-1 flex flex-col items-center justify-end h-full">
+                            {isCurrent && (
+                              <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-green-600 whitespace-nowrap tabular-nums">
+                                {fmtMi(target)}
+                              </span>
+                            )}
+                            <div className={`w-full rounded-sm ${barClass}`} style={{ height: `${heightPct}%` }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between mt-1.5">
+                      <span className="text-[9px] text-gray-300">wk 1</span>
+                      <span className="text-[9px] text-gray-300">wk {planTotalWeeks}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </section>
           ) : (weeklyTargetDisplay != null || weekLongRunDisplay != null || weekQualitySession) ? (
             <section className="space-y-3">
