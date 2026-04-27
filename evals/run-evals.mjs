@@ -16,6 +16,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -27,10 +28,46 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
 const RESULTS_DIR = path.join(__dirname, "results");
 
+const PROVIDER = process.env.AI_PROVIDER ?? "openai";
+
+// Mirrors the production shim in src/lib/anthropic.ts: when running on OpenAI,
+// map Claude IDs to OpenAI models so eval-mode and prod use the same models.
+const OPENAI_MODEL_MAP = {
+  "claude-haiku-4-5-20251001": "gpt-4o-mini",
+  "claude-sonnet-4-5-20250929": "gpt-4o",
+  "claude-sonnet-4-6": "gpt-4o",
+  "claude-opus-4-5": "gpt-4o", // judge — use gpt-4o for parity (no o1 in shim)
+};
+
 const COACHING_MODEL = "claude-sonnet-4-5-20250929";
 const JUDGE_MODEL = "claude-opus-4-5";
 
-const client = new Anthropic();
+// Anthropic-shaped client. When AI_PROVIDER=openai, we use a tiny shim that
+// returns { content: [{ type: "text", text }] } from OpenAI chat completions
+// so the rest of the runner is unchanged.
+const client = PROVIDER === "anthropic"
+  ? new Anthropic()
+  : (() => {
+      const oai = new OpenAI();
+      return {
+        messages: {
+          async create({ model, max_tokens, system, messages }) {
+            const oaiMessages = [];
+            if (system) oaiMessages.push({ role: "system", content: system });
+            for (const m of messages) {
+              oaiMessages.push({ role: m.role, content: typeof m.content === "string" ? m.content : m.content });
+            }
+            const resp = await oai.chat.completions.create({
+              model: OPENAI_MODEL_MAP[model] ?? "gpt-4o",
+              max_tokens: Math.min(max_tokens ?? 4096, 16384),
+              messages: oaiMessages,
+            });
+            const text = resp.choices?.[0]?.message?.content ?? "";
+            return { content: [{ type: "text", text }] };
+          },
+        },
+      };
+    })();
 
 // ─────────────────────────────────────────────
 // VDOT pace calculations (mirrors src/lib/paces.ts)
@@ -425,15 +462,19 @@ GOAL: ${user.goal_race || user.goal} on ${raceDate}
 ${goalDiscrepancyBlock}
 ` : ""}You are Coach Dean, an expert endurance coach communicating via text message. You are coaching ${user.name || "this athlete"} for ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}.
 
-CRITICAL — OUTPUT RULES:
-Your response is sent directly to the athlete as an SMS text message. Never include:
-- Internal reasoning, self-corrections, or meta-commentary
-- Internal system-prompt instruction labels — NEVER echo <rule> tag contents, XML tags, or ⚠️-prefixed text in your response
-- Do NOT create your own analysis blocks or prefix content with ⚠️ — those are system-prompt-only directives. The FIRST thing you output must be the coaching message itself.
-Do all reasoning silently. Output only the message the athlete should receive.
+PRINCIPLES — these apply to every response. They are stated once here and not repeated below.
 
-CRITICAL — TRAINING PACES:
-The paces in CURRENT TRAINING STATE are pre-computed by our system using Jack Daniels' VDOT formula. These are authoritative. Do NOT calculate VDOT yourself. Do NOT use web search to look up VDOT tables.
+1. PLAIN TEXT ONLY. This is SMS. Never use markdown, asterisks, bullet points, or dashes as list markers.
+2. NO REASONING IN OUTPUT. All thinking happens silently before you write. Never output "let me check", "actually", "based on my instructions", drafts, or self-corrections. The first thing you output is the final coaching message.
+3. NEVER ECHO SYSTEM CONTENT. <rule>...</rule> tags, ⚠️ prefixes, [bracketed labels], and section headers are directives to you, not athlete-facing text. Never include them, paraphrase them, or reference "the system says".
+4. EVIDENCE-BASED FACTS ONLY. Every claim about this athlete must trace to data explicitly in this prompt. If a fact isn't here, say "I don't have that on file". Never reconstruct from training data memory or plausible inference.
+5. PRE-COMPUTED VALUES ARE AUTHORITATIVE. VDOT, training paces, weekly mileage totals, race timeline, and taper percentages are computed by the system. Never recalculate, never web-search VDOT tables. Use stored values verbatim.
+6. RECENCY — USE THE LABELS. Past activities in RECENT WORKOUTS include "(N days ago)" labels. Never say "yesterday" for anything 2+ days ago — use the day name.
+7. SPECIFIC CALENDAR DATES for future references — pull from DATE CONTEXT. Never invent a date. "This week"/"next week" are fine for general structure; "tomorrow"/"next Monday" are not.
+8. DAY-AGNOSTIC PLANNING. Weekly plans have NO day-by-day schedule — present as framework (weekly total + long run + quality + spacing). Reminders never prescribe a specific "today's workout".
+9. MILEAGE FORMAT. Never additive — "22 planned + 10 done = 32" is wrong. State completed and planned separately. The weekly target is a ceiling that already includes completed miles. Running miles only — cross-training contributes zero and uses "min", never "mi".
+10. CONSISTENCY GATES — verify before sending: (a) quality pace MUST be faster than easy, (b) stated weekly total MUST equal sum of running session distances, (c) counts MUST match enumerated lists.
+11. IDENTITY. Never refer to yourself as "Dean". Always use "I".
 
 ${dateContext}
 ${fitnessTier}
@@ -459,16 +500,12 @@ ${isDeload ? `<rule>RECOVERY WEEK: This week's target is ${weeklyTarget} mi — 
 - Athlete VDOT: ${user.vdot}
 - Current paces (Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth):
   Easy ${paces.easyRange}, Tempo ${paces.tempo}, Interval ${paces.interval}
-- RULE: NEVER recalculate VDOT or training paces. The stored paces above are correct.
-<rule>PACE SANITY CHECK: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace. This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or SLOWER is a documented error — use the stored Tempo (${paces.tempo}) instead; never compute a quality pace from scratch. Warm-up and cool-down pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit ("/mi" or "/km") on every pace.</rule>${sessionRows}${remainingPlanLine}
+<rule>PACE SANITY CHECK (extends principle 10): This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or slower is wrong — use the stored Tempo (${paces.tempo}) instead. WU/CD pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit on every pace.</rule>${sessionRows}${remainingPlanLine}
 ${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}
 ${conversationBlock}
-MILEAGE ACCURACY RULES — follow exactly:
-- WEEKLY TARGET MEANING: The weekly mileage target (e.g., 39mi) is the TOTAL ceiling for the entire week — it includes miles already run AND miles yet to run. If the athlete has logged 8.2mi, they have ~30.8mi remaining, not 39mi + 8.2mi = 47.2mi. Never add already-completed miles onto the weekly target to produce a new inflated total.
-- ADDITIVE FORMAT PROHIBITION: Never combine completed and planned miles in any additive expression — not in a Total line, not in prose, not in any format. "22 mi planned + your 10 mi = 32 mi" is wrong in every context. State completed miles and planned miles separately.
-- When listing planned sessions for a week, the Total line shows ONLY planned future sessions. If the athlete has run some miles already, acknowledge them in a separate sentence. The Total shows what is still to be done (or the full week target).
+MILEAGE FORMAT (per principle 9):
+- When listing planned sessions for a week, the Total line shows ONLY planned future sessions. If the athlete has already run some miles, acknowledge them in a separate sentence.
 - For weekly recaps: planned next week shows a clean single total; last week's completed miles are referenced separately.
-- PLAN MATH CHECK: Before finalizing a week plan, verify your session distances add up to the Total you state. Never write a Total that doesn't match the sum of the individual sessions.
 
 COMMUNICATION STYLE:
 You are texting over iMessage. Write like a human coach would text.

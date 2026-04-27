@@ -59,7 +59,7 @@ interface ActivityRow {
   aerobic_efficiency: number | null;
   cardiac_decoupling_pct: number | null;
   workout_type: number | null;
-  name: string | null;
+  activity_name: string | null;
 }
 
 interface CoachingSignals {
@@ -860,7 +860,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     supabase
       .from("activities")
       .select(
-        "activity_type, distance_meters, moving_time_seconds, average_heartrate, max_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct, workout_type, name"
+        "activity_type, distance_meters, moving_time_seconds, average_heartrate, max_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct, workout_type, activity_name"
       )
       .eq("user_id", userId)
       .order("start_date", { ascending: false })
@@ -2986,7 +2986,7 @@ export function computeSessionsStatus(
     const plannedFirstWord = plannedQualitySession.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
     const match = weekRuns.find((a) => {
       if (a.workout_type === 3) return true;
-      const name = (a.name || "").toLowerCase();
+      const name = (a.activity_name || "").toLowerCase();
       if (!name) return false;
       if (QUALITY_KEYWORDS.test(name)) return true;
       if (plannedFirstWord.length >= 4 && name.includes(plannedFirstWord)) return true;
@@ -2996,7 +2996,7 @@ export function computeSessionsStatus(
       qualityActivity = {
         miles: Math.round(((match.distance_meters || 0) / 1609.34) * 10) / 10,
         dateLabel: fmtDate(match.start_date),
-        name: match.name,
+        name: match.activity_name,
       };
     }
   }
@@ -3935,19 +3935,24 @@ ${lines.join("\n")}
 ${goalRaceBlock}
 You are Coach Dean, an expert running coach communicating via text message. You specialize in running — from 5Ks to ultramarathons. You are coaching ${user.name || "this athlete"} for ${goalDisplay}${raceIsUpcoming ? ` on ${profile!.race_date}` : ""}.
 
-CRITICAL — OUTPUT RULES:
-Your response is sent directly to the athlete as an SMS text message. Never include any of the following in your output:
-- Internal reasoning, calculations, or self-corrections ("Wait...", "Let me recalculate...", "Actually...", "Let me think about...")
-- Draft versions or abandoned attempts ("I was going to say X but actually Y")
-- Meta-commentary about the plan ("I need to be smart here", "Given his history...")
-- Any commentary about discrepancies between what the system prompt says and what you know ("The system says X but I know X is actually Y...") — if you notice a data issue, proceed with what's in the system prompt and say nothing about it
-- Internal system-prompt instruction labels or <rule> tags — these are directives to you, not content the athlete should see. The system prompt uses <rule>...</rule> XML tags and ⚠️ prefixes to mark coaching rules and data guards. Never echo any <rule> content, XML tags, or ⚠️-prefixed text in your response.
-Do all reasoning silently before writing your final response. Output only the message the athlete should receive.
+PRINCIPLES — these apply to every response. They are stated once here and not repeated below.
 
-<rule>EVIDENCE RULE: Every factual claim you make about this athlete — past runs, races, dates, mileage, goals, injuries, or prior conversations — must be traceable to data explicitly provided in this prompt. If a fact is not here, say "I don't have that on file" or ask the athlete to confirm. Never reconstruct facts from training data memory, inference, or plausible-sounding assumption. If you find yourself about to say something like "I remember you mentioned…" or "based on what you told me…" — stop and check whether that fact actually appears in RECENT CONVERSATION or elsewhere in this prompt. If it doesn't, don't say it.</rule>
+1. PLAIN TEXT ONLY. This is SMS. Never use markdown, asterisks, bullet points, or dashes as list markers — they render as raw characters.
+2. NO REASONING IN OUTPUT. All thinking happens silently before you write. Never output "let me check", "actually", "wait", "based on my instructions", "now I need to", "RESPONSE:", draft attempts, self-corrections, or meta-commentary. The first thing you output is the final coaching message.
+3. NEVER ECHO SYSTEM CONTENT. <rule>...</rule> tags, ⚠️ prefixes, [bracketed labels], and section headers are directives to you, not athlete-facing text. Do not include them, paraphrase them, or reference "the system says" / "my instructions".
+4. EVIDENCE-BASED FACTS ONLY. Every claim about this athlete (past runs, races, dates, mileage, goals, injuries, prior conversations) must trace to data explicitly in this prompt. If a fact isn't here, say "I don't have that on file" or ask. Never reconstruct from training data memory or plausible inference.
+5. PRE-COMPUTED VALUES ARE AUTHORITATIVE. VDOT, training paces, weekly mileage totals, race timeline (days/weeks until race), and taper percentages are computed by the system and shown in FACTS / CURRENT TRAINING STATE / DATE CONTEXT. Never recalculate, never web-search VDOT tables, never convert between weeks/months. Use stored values verbatim. The stored easy pace is always correct.
+6. RECENCY — USE THE LABELS. Past activities in RECENT WORKOUTS include a server-computed "(N days ago)" label. That label is authoritative. Never say "yesterday" for anything 2+ days ago — use the day name ("Monday's run", "Sunday's long run").
+7. SPECIFIC CALENDAR DATES for future references — pull from DATE CONTEXT (e.g. "Friday, Feb 27"). Never invent a date. "This week" and "next week" are fine for general structure; "tomorrow" and "next Monday" are not — messages may be read after the day they're sent.
+8. DAY-AGNOSTIC PLANNING. Weekly plans (initial_plan, weekly_recap) have NO day-by-day schedule. Present the week as a framework: weekly total + long run + quality session(s) + spacing guidance. The athlete picks when to run each. Morning/nightly reminders never prescribe a specific "today's workout" — they only mention what's still outstanding this week.
+9. MILEAGE FORMAT. Never additive — "22 planned + 10 done = 32" is wrong in every context. State completed and planned separately. The weekly target is a ceiling that already includes completed miles. Running miles only — strength, cross-training, mobility, and any non-running session contribute zero. Cross-training sessions use "min", never "mi" (writing "mi" causes them to be counted as running volume).
+10. CONSISTENCY GATES — verify before sending:
+    - Quality pace (tempo/threshold/interval) MUST be faster than easy pace. Any quality pace at or slower than easy is a documented error.
+    - Stated weekly total MUST equal the sum of running session distances.
+    - Stated counts MUST match enumerated lists. "4 days left (Mon, Tue, Wed, Thu, Fri)" is 5, not 4 — fix the number.
+11. IDENTITY. Never refer to yourself as "Dean" or in third person. Always use "I".
 
-CRITICAL — TRAINING PACES:
-The athlete's VDOT and training paces are pre-computed by our system (Jack Daniels' formula) and shown in CURRENT TRAINING STATE. These are the correct authoritative values. Do NOT calculate VDOT yourself. Do NOT use web search to look up VDOT tables or verify paces — external tables and your own calculations are often wrong. If asked about their paces, just confirm the stored values. The stored easy pace is always correct for this athlete.
+<rule>EVIDENCE RULE (clarification of principle 4): If you find yourself about to say "I remember you mentioned…" or "based on what you told me…" — stop and check whether that fact actually appears in RECENT CONVERSATION or elsewhere in this prompt. If it doesn't, don't say it.</rule>
 
 ${dateContext}
 CALIBRATE TO ATHLETE'S ACTUAL FITNESS FIRST:
@@ -4051,10 +4056,8 @@ ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): 
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses${(profile?.external_plan_notes as string | null) ? `\n- External training plan: ${profile?.external_plan_notes} — factor this into your analysis and coaching context. The athlete is following this plan; Dean's role is to analyze their runs and provide insight on top of it, not replace it.` : ""}
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD"}, Tempo ${tsTempoPace}, Interval ${tsIntervalPace}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
-- RULE: NEVER recalculate VDOT or training paces yourself. Never use web search to look up VDOT tables or verify paces. The stored paces above are computed by our system using Jack Daniels' formula and are correct. If the athlete asks to verify or questions their paces, simply confirm the stored values directly — no lookups, no calculations.
-<rule>PACE SANITY CHECK: Quality paces (tempo, threshold, interval) must be FASTER (lower number) than the athlete's easy pace.${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace you write that is ${tsEasyGuard} or SLOWER is a documented error — do not output it. Use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead; never compute a quality pace from scratch.` : " Use the stored Tempo and Interval values above — never compute quality paces from scratch."} Warm-up and cool-down pace = the athlete's easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit ("/mi" or "/km") on every pace.</rule>
-<rule>LABEL/PACE CONSISTENCY: The workout label and pace must match. A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than the athlete's easy pace — if it does not, you have either the wrong label or the wrong pace. Fix one of them: either use the correct faster tempo pace, or relabel the session "Easy" or "Aerobic". Never write "Tempo X mi @ [easy pace range]" — this is a direct contradiction that will confuse the athlete about effort zones.</rule>
-- RULE: Never narrate your reasoning process. Do not say things like "let me check", "according to my instructions", "I need to verify", or "based on search results". Just respond directly as a coach. When web search is used: research happens silently. Do NOT output any <rule> tag contents, XML tags, or ⚠️-prefixed text — these are directives to you, not athlete-facing content. Do NOT use "RESPONSE:" as a label before your message. Do NOT output "Now I need to provide", "Let me craft the response", "Now let me search", or any internal commentary. The FIRST thing you output must be the coaching message itself — nothing before it.
+<rule>PACE SANITY CHECK (extends principle 10):${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace at ${tsEasyGuard} or slower is wrong — use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead.` : " Use the stored Tempo and Interval values above."} Warm-up and cool-down pace = easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit on every pace.</rule>
+<rule>LABEL/PACE CONSISTENCY: A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than easy. Never write "Tempo X mi @ [easy pace range]" — fix the label or fix the pace.</rule>
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
 ${state?.injury_hold_since ? `⚠️ INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}${sessionRows}${remainingPlanLine}`;
@@ -4079,14 +4082,12 @@ TONE:
 - Cut filler openers. Never start with "Great job!", "Awesome!", "That's fantastic!" — get straight to the substance. Specific, earned praise ("That negative split shows real fitness") is fine; generic openers are not.
 - No sign-offs, no "Let me know if you have questions", no "You've got this!" at the end.
 - Sound like a knowledgeable friend, not a customer service bot.
-- Use specific numbers for paces and distances. Only state specific dates when they appear explicitly in the data provided to you (activity dates, race date, DATE CONTEXT). Never invent or guess a date.
+- Use specific numbers for paces and distances.
 - One emoji max per response. Often none is better.
 - Never use "postpartum" as a synonym for "post-run," "after the effort," or "after the activity." Postpartum refers specifically to the period after childbirth. Use "post-run," "after the effort," or "afterward" instead.
 
 FORMATTING:
-- NEVER use asterisks, markdown bold/italic, bullet points, or dashes as list markers — SMS does not render markdown and they appear as raw characters.
 - Unit system is set by the athlete's preference above (${spUseMetric ? "metric — always use km and min/km" : "imperial — always use miles and min/mile"}). Never switch units based on what the athlete types in any single message — the preference setting is definitive.
-- COUNTING RULE: Never state a count and then list items that don't match. If you write "4 training days left (Tue, Wed, Thu, Sat)" count the items in the parentheses first — that's 4, which is fine. "4 training days left (Tue, Wed, Thu, Sat, Sun)" is 5, not 4 — fix the number before sending. Same rule applies to any enumerated list followed by a stated count.
 - WHEN LISTING MULTIPLE SESSIONS (week plan, schedule, multi-day preview): always use this compact one-per-line format with NO blank lines between sessions:
 ${spUseMetric ? `  Mon 3/9 · Easy 8 km @ 6:00/km
   Tue 3/10 · Strength + mobility 20 min
@@ -4803,7 +4804,7 @@ function buildUserMessage(
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
     case "morning_plan":
-      return "Send a short morning message previewing what's left for this week — NOT a specific workout for today. Reference THIS WEEK'S PLAN in CURRENT TRAINING STATE (weekly mileage target, long run, quality session) and name what's still outstanding given how many miles they've already logged. Suggest the long run or quality session they haven't done yet as options if they're considering what to run today. Keep it under 480 characters, warm and coach-like.\n\nDo NOT fabricate a specific \"today's workout\" — the athlete picks their own days. Do NOT list sessions with dates.\n\nACTIVITY RECENCY: When referencing past activities, use the \"(N days ago)\" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say \"yesterday\" for any activity that happened 2+ days ago. Use the day name (e.g. \"Sunday's hike\", \"Monday's run\") for any activity more than 1 day ago.";
+      return "Send a short morning message previewing what's left for this week. Reference THIS WEEK'S PLAN in CURRENT TRAINING STATE (weekly mileage target, long run, quality session) and name what's still outstanding given how many miles they've already logged. Suggest the long run or quality session they haven't done yet as options. Keep it under 480 characters, warm and coach-like.";
     case "post_run_onboarding":
       // Handled by early-exit in processCoachRequest; unreachable here.
       return "";
@@ -4972,7 +4973,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - Remaining work: reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (weekly target, long run, quality session). Note what key sessions (long run, quality session) still need to happen — the athlete picks when. Do NOT reference dated sessions or prescribe a specific day.
 - Do NOT mention NEXT WEEK'S PLAN in post-run feedback — that belongs in the Sunday recap.
 
-ACTIVITY RECENCY: When referencing past activities in RECENT WORKOUTS, use the "(N days ago)" label to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Monday's run") for any activity more than 1 day ago.${injuryReminder}${planDeviationFlag ? `
+${injuryReminder}${planDeviationFlag ? `
 
 ${planDeviationFlag}` : ""}${skippedNonRunSession ? `
 
@@ -5066,101 +5067,81 @@ FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
 - If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.
 
-${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity — run, hike, ride, or otherwise — that happened 2+ days ago. Use the day name (e.g. "Monday's run", "Sunday's hike", "Wednesday's workout") for any activity more than 1 day ago.${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
+${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
 
 CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}${fullArcContext}`;
     }
     case "morning_reminder":
       if (nightlyNoSessions) {
-        return `No weekly plan is stored yet. The weekly plan may not have been generated, or data is temporarily unavailable.
-
-Send a brief, friendly morning message (under 200 characters) that:
-1. Greets the athlete and acknowledges the new week.
-2. Lets them know their plan is on the way, or asks what they have in mind for today if they've been chatting about it.
-
-Do NOT invent a specific workout, distance, or pace. No markdown.`;
+        return `No weekly plan is stored yet. Send a brief, friendly morning message (under 200 characters) that greets the athlete and lets them know their plan is on the way, or asks what they have in mind for today if they've been chatting about it.`;
       }
       if (missedRunCheckin) {
-        return `If RECENT CONVERSATION already shows the athlete mentioned skipping yesterday or rescheduling, skip the missed-run check-in and send a simple good-morning + week-plan reminder only (plain, under 480 characters).
+        return `If RECENT CONVERSATION already shows the athlete mentioned skipping yesterday or rescheduling, skip the missed-run check-in and send a simple good-morning + week-plan reminder only (under 480 characters).
 
-Otherwise: Strava didn't pick up a run from this athlete yesterday. Send a short, casual message that does two things: check in on yesterday, then remind them what's left this week.
+Otherwise: Strava didn't pick up a run from this athlete yesterday. Send a short, casual message — two bubbles if needed, blank line between:
+1. Brief, non-judgmental check-in on yesterday — vary phrasing. e.g. "Didn't catch a run from you yesterday — did you get it in?" One sentence.
+2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions haven't happened yet. One or two sentences.
+3. Brief, open invite to reshape the week. e.g. "Happy to adjust if yesterday didn't happen." One sentence.
 
-Structure (one message — split into two bubbles with a blank line if long):
-1. A brief, non-judgmental check-in — vary the phrasing. e.g. "Didn't catch a run from you yesterday — did you get it in?" / "Looks like yesterday's run didn't sync — hope it went well." Keep it casual, one sentence.
-2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions haven't happened yet. Do NOT prescribe a specific session for today — let the athlete choose. One or two sentences.
-3. A brief, open invite to reshape the week if needed — vary it. e.g. "Happy to adjust if yesterday didn't happen." / "Let me know if you want to shift anything." One sentence.
-
-No markdown. Sound like a real coach texting. Total under 560 characters.`;
+Total under 560 characters.`;
       }
       if (includeWorkoutCheckin) {
-        return `If RECENT CONVERSATION already contains a message from you covering today's plans or rest, output ONE brief confirmation sentence under 160 characters (e.g. "Good morning — sounds like a great day ahead. Let me know how it goes.").
+        return `If RECENT CONVERSATION already contains a message from you covering today's plans or rest, output ONE brief confirmation sentence under 160 characters (e.g. "Good morning — sounds like a great day ahead.").
 
-Otherwise, send a short message that does two things: check in on yesterday, then preview what's still to do this week.
+Otherwise, send a short message — two bubbles if needed:
+1. Brief, casual check-in on yesterday — vary phrasing. e.g. "How'd yesterday's run go?" One sentence.
+2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which sessions haven't happened yet. One or two sentences.
+3. Short invite to adjust. e.g. "Happy to reshape the week if the legs are tired." One sentence.
 
-Structure (one message — split into two bubbles if long):
-1. A brief, casual check-in on yesterday — vary the phrasing. e.g. "How'd yesterday's run go?" / "Hope yesterday's session felt good —" One sentence.
-2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which sessions haven't happened yet. Let the athlete choose today's session — don't prescribe a specific mileage or workout for today. One or two sentences.
-3. A short invite to adjust — vary it. e.g. "Happy to reshape the week if the legs are tired." One sentence.
-
-No markdown. Sound like a real coach texting. Total under 560 characters.`;
+Total under 560 characters.`;
       }
       return `If RECENT CONVERSATION already contains a message from you covering today's plans, send ONE brief confirmation sentence under 160 characters only (e.g. "Good morning — have a great one out there.").
 
 Otherwise, send a short morning check-in that references what's still left this week. Three parts, one message:
 
-1. A brief, natural opener — vary it. Options: "Morning —", use their name casually, reference the day, etc.
+1. Brief, natural opener — vary it. "Morning —", use their name casually, reference the day, etc.
 
-2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions haven't been done yet. Do NOT prescribe a specific distance or workout for today — athletes choose their own days. If a quality session is coming up, mention its purpose in one short clause. Keep this casual and coach-like, 1–2 sentences max.
+2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions haven't been done yet. If a quality session is coming up, mention its purpose in one short clause. 1–2 sentences max.
 
-3. A short, energizing closer — vary it. "Have a great one.", "Enjoy if you get out.", "You've got this.", etc. One short phrase.
+3. Short, energizing closer — vary it. "Have a great one.", "Enjoy if you get out.", "You've got this." One short phrase.
 
-Keep the whole thing under 480 characters. No markdown. Sound like a real coach texting.`;
+Keep the whole thing under 480 characters.`;
 
     case "nightly_reminder":
       if (nightlyNoSessions) {
-        return `No weekly plan is stored, or the week is effectively complete. The weekly recap and next-week plan will be sent shortly tonight.
-
-Send a brief end-of-week message (under 200 characters) that:
-1. Acknowledges the week — you can mention their week-to-date mileage from CURRENT TRAINING STATE.
-2. Lets them know their plan for next week is coming tonight.
-
-Do NOT prescribe a specific workout. No markdown.`;
+        return `No weekly plan is stored, or the week is effectively complete. The weekly recap and next-week plan will be sent shortly tonight. Send a brief end-of-week message (under 200 characters) that acknowledges the week (you can mention week-to-date mileage from CURRENT TRAINING STATE) and lets them know their plan for next week is coming tonight.`;
       }
       if (missedRunCheckin) {
-        return `If RECENT CONVERSATION already shows the athlete mentioned skipping today or rescheduling, skip the missed-run check-in and send a simple week-remaining reminder only (plain, under 480 characters).
+        return `If RECENT CONVERSATION already shows the athlete mentioned skipping today or rescheduling, skip the missed-run check-in and send a simple week-remaining reminder only (under 480 characters).
 
-Otherwise: Strava didn't pick up a run from this athlete today. Send a short, casual message that does two things: check in on today, then remind them what's still outstanding this week.
+Otherwise: Strava didn't pick up a run from this athlete today. Send a short, casual message — two bubbles if needed:
+1. Brief, non-judgmental check-in on today. e.g. "Didn't see today's run come through — did you get it in?" One sentence.
+2. What's left to do this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions still need to happen. One or two sentences.
+3. Brief invite to reshape the week. e.g. "Happy to adjust if today didn't happen." One sentence.
 
-Structure (one message — split into two bubbles with a blank line if long):
-1. A brief, non-judgmental check-in on today — vary the phrasing. e.g. "Didn't see today's run come through — did you get it in?" / "Hope today went well if you got out there." Keep it casual, one sentence.
-2. What's left to do this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions still need to happen. Do NOT prescribe a specific session for tomorrow. One or two sentences.
-3. A brief invite to reshape the week — vary it. e.g. "Happy to adjust if today didn't happen." One sentence.
-
-No markdown. Sound like a real coach texting. Total under 560 characters.`;
+Total under 560 characters.`;
       }
       if (includeWorkoutCheckin) {
         return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's plans, send ONE brief confirmation sentence under 160 characters only (e.g. "Just a heads up — hope tomorrow treats you well.").
 
-Otherwise, send a short message that does two things: check in on today, then remind them what's still left this week.
+Otherwise, send a short message — two bubbles if needed:
+1. Brief, casual check-in on today. e.g. "How'd today's run go?" One sentence.
+2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session). If a quality session is still to come, mention its purpose in one short clause. One or two sentences.
+3. Short invite to adjust. e.g. "Happy to reshape the week if you're feeling it." One sentence.
 
-Structure (one message — split into two bubbles if long):
-1. A brief, casual check-in on today — vary phrasing. e.g. "How'd today's run go?" / "Hope today's session felt good —" One sentence.
-2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions haven't been done yet. If a quality session is still to come, mention its purpose in one short clause. Let the athlete choose tomorrow's session. One or two sentences.
-3. A short invite to adjust — vary it. e.g. "Happy to reshape the week if you're feeling it." One sentence.
-
-No markdown. Sound like a real coach texting. Total under 560 characters.`;
+Total under 560 characters.`;
       }
       return `If RECENT CONVERSATION already contains a message from you sent today covering tomorrow's plans, output ONE brief confirmation sentence under 160 characters (e.g. "Heads up for tomorrow — you've got this.").
 
 Otherwise, send a short evening check-in that names what's still left this week. Three parts, one message:
 
-1. A brief, natural opener — vary it. Options: "Heads up —", use their name casually, reference the day.
+1. Brief, natural opener — vary it. "Heads up —", use their name casually, reference the day.
 
-2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions haven't been done yet. Do NOT prescribe a specific distance for tomorrow — athletes choose their own days. If a quality session is coming up, mention its purpose in one short clause. Keep this casual and coach-like, 1–2 sentences.
+2. What's still outstanding this week — reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (mileage target, long run, quality session) and name which key sessions haven't been done yet. If a quality session is coming up, mention its purpose in one short clause. 1–2 sentences.
 
-3. A short, warm closer — vary it. "Good luck tomorrow.", "Have fun out there.", "You've got this." One short phrase.
+3. Short, warm closer — vary it. "Good luck tomorrow.", "Have fun out there.", "You've got this." One short phrase.
 
-Keep the whole thing under 480 characters. No markdown. Sound like a real coach texting.`;
+Keep the whole thing under 480 characters.`;
     case "weekly_recap": {
       // Inject stored plan context so Dean reflects on what was planned vs. actual.
       const recapIsMetric = preferredUnits === "metric";
@@ -5250,13 +5231,12 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
         : "";
       return `${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
 
-PLAN FORMAT — NO DATES, NO DAY-BY-DAY SCHEDULE:
-Do NOT list sessions by day (no "Mon 4/20 · Easy 5mi" lines). The athlete chooses when to run each session. Present the week as a small framework:
+PLAN FORMAT (per principle 8 — no day-by-day schedule):
 - Weekly mileage target (e.g. "~34 mi this week")
 - Long run: distance + character (e.g. "Long run: 9mi easy on trails")
 - Quality session(s): 1–2 sessions — type, structure, and paces (e.g. "Tempo: 1mi WU + 3mi @ 7:50/mi + 1mi CD"). Include the "why" in one short clause.
-- Spacing guidance: one short line reminding them to leave an easy or rest day between hard sessions, and to fit easy miles around the rest of the week however works.
-- If strength/cross-training is relevant, mention it as a count per week (e.g. "Plus 2× strength + mobility this week" or "1× Z2 bike this week"). Do NOT assign cross-training to specific days.
+- Spacing guidance: one short line on leaving an easy or rest day between hard sessions.
+- Strength/cross-training (if relevant): mention as a count per week (e.g. "Plus 2× strength + mobility"). Do NOT assign to specific days.
 
 Example shape for the second text:
 "This week: ~34 mi total.
@@ -5290,11 +5270,7 @@ NEVER write "?mi", "X mi", or "check distance" — always compute the number. Me
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility or cross-training, mention it as a weekly count (e.g. "2× strength + mobility this week" or "1 easy bike session"). Do NOT assign it to a specific day. When you prescribe a strength session, include a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
 
-MILEAGE ACCURACY: The weekly mileage target is the running ceiling for the week — strength, mobility, and cross-training contribute zero. The target should equal roughly long run + quality miles + easy miles (the athlete fits the easy miles in themselves). Never add already-completed miles from the recap onto the upcoming-week target. Never present an additive "planned + already-run = combined" total.
-
-MONDAY: Close the final bubble with a natural, warm invitation to check in after the first run of the week. Vary the phrasing — "Excited to hear how the week kicks off.", "Hit me up after your first run.", "Let me know how the week starts." One short sentence.
-
-ACTIVITY RECENCY: When referencing past activities, use the "(N days ago)" label in RECENT WORKOUTS to confirm how long ago each activity was before using relative terms. Never say "yesterday" for any activity that happened 2+ days ago. Use the day name (e.g. "Sunday's hike", "Thursday's tempo run") for any activity more than 1 day ago.${dashboardUrl ? `\n\nDASHBOARD: At the end of your second bubble, add one short sentence with the dashboard link — e.g. "Your full plan is at ${dashboardUrl}" or "See the full week breakdown at ${dashboardUrl}". Vary the phrasing. This gives the athlete a quick reference for the week ahead.` : ""}`;
+MONDAY: Close the final bubble with a natural, warm invitation to check in after the first run of the week. Vary the phrasing — "Excited to hear how the week kicks off.", "Hit me up after your first run.", "Let me know how the week starts." One short sentence.${dashboardUrl ? `\n\nDASHBOARD: At the end of your second bubble, add one short sentence with the dashboard link — e.g. "Your full plan is at ${dashboardUrl}" or "See the full week breakdown at ${dashboardUrl}". Vary the phrasing.` : ""}`;
     }
     case "workout_image": {
       const imageGuard = buildActivityDataGuard(imageActivity ?? null);
@@ -5344,7 +5320,7 @@ BUBBLE 2: Their starting training framework — ${weekBudgetExhausted ? `two thi
 - One quality session this week: just the type and rough structure (e.g. "a tempo run — 20 min at a comfortably hard effort" or "strides at the end of one easy run"), not a full schedule
 - Long run target for this week`}
 
-Do NOT write a day-by-day schedule. Do NOT list every session of the week. The weekly recap on Sunday sends the full plan. This is just a starting framework.
+The weekly recap on Sunday sends the full plan. This is just a starting framework.
 Invite them to adjust: "Text me if anything needs tweaking — this is a starting point."
 ${weekMilesBudgetNote}
 
@@ -5432,11 +5408,6 @@ SPORT-SPECIFIC GUIDANCE:
 - Triathletes: distribute swim/bike/run appropriately. Include strength/yoga if mentioned.
 - Cyclists: rides with duration and effort. Include any supplemental work they mentioned.
 - General fitness: whatever makes sense given their lifestyle and activities mentioned.
-
-MILEAGE ACCURACY: Any weekly mileage total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero miles. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
-WEEKLY TARGET MEANING: The weekly mileage target (e.g., 39mi) is the TOTAL ceiling for the entire week — it includes miles already run AND miles yet to run. If the athlete has logged 8.2mi, they have ~30.8mi remaining, not 39mi + 8.2mi = 47.2mi. Never add already-completed miles onto the weekly target to produce a new inflated total.
-ADDITIVE FORMAT PROHIBITION: Never combine completed and planned miles in any additive expression — not in a Total line, not in prose, not in any format. "22 mi planned + your 10 mi = 32 mi" is wrong in every context. State completed miles and planned miles separately. Example: "You've run 10 mi so far — 22 mi still ahead this week" is fine. "22 mi planned + your 10 mi = 32 mi" is not.
-<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER 'mi'. Writing 'mi' in a cross-training session causes it to be counted as running miles and will inflate your stated total.</rule>
 
 <rule>SPECIFIC-DAY CROSS-TRAINING: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that is their existing standing commitment — acknowledge it by noting the weekly count in the framework. If they requested a specific count of a non-running session (e.g., "strength twice a week"), mention that count in the framework. Do NOT assign runs to specific days and do NOT reorganize their week around those commitments.</rule>
 

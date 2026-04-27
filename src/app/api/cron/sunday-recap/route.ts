@@ -46,6 +46,7 @@ export async function GET(request: Request) {
   // the budget once we have more than a handful of Strava-connected users.
   // Vercel keeps the function alive to finish `after()` work post-response.
   after(async () => {
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
     let sent = 0;
     for (const user of users) {
     // Refresh YTD stats from Strava before generating the recap so Dean has
@@ -107,6 +108,8 @@ export async function GET(request: Request) {
     } catch (err) {
       console.error(`Failed to send weekly recap to user ${user.id}:`, err);
     }
+    // Stagger requests to avoid hitting LLM token-per-minute rate limits.
+    if (sent < users.length) await sleep(30_000);
     }
     console.log(`[sunday-recap] completed — sent ${sent}/${users.length}`);
   });

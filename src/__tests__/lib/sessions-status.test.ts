@@ -11,7 +11,7 @@ function todayISO(daysAgo = 0): string {
 
 function activity(
   overrides: Partial<{
-    name: string | null;
+    activity_name: string | null;
     workout_type: number | null;
     distance_meters: number;
     start_date: string;
@@ -33,7 +33,7 @@ function activity(
     aerobic_efficiency: null,
     cardiac_decoupling_pct: null,
     workout_type: null,
-    name: null,
+    activity_name: null,
     ...overrides,
   };
 }
@@ -72,7 +72,7 @@ describe("computeSessionsStatus", () => {
 
   it("marks quality DONE when activity name contains a quality keyword", () => {
     const status = computeSessionsStatus(
-      [activity({ name: "Tempo Tuesday" })],
+      [activity({ activity_name: "Tempo Tuesday" })],
       TZ,
       null,
       "Tempo 5mi"
@@ -82,7 +82,7 @@ describe("computeSessionsStatus", () => {
 
   it("marks quality DONE for interval-style rep patterns in the name", () => {
     const status = computeSessionsStatus(
-      [activity({ name: "6x800m track" })],
+      [activity({ activity_name: "6x800m track" })],
       TZ,
       null,
       "Intervals 5mi"
@@ -92,7 +92,7 @@ describe("computeSessionsStatus", () => {
 
   it("marks quality PENDING when no matching signals are present", () => {
     const status = computeSessionsStatus(
-      [activity({ name: "Morning jog" })],
+      [activity({ activity_name: "Morning jog" })],
       TZ,
       null,
       "Tempo 5mi"

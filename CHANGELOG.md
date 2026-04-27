@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-27 — Stagger Sunday recap cron to avoid LLM rate limit errors
+
+**Type:** Bug Fix
+**Reported by:** Jake (Vercel logs after Sunday recap cron)
+**User feedback:** "429 Rate limit reached for gpt-4o on tokens per min (TPM): Limit 30000, Used 30000"
+**Root cause:** The `sunday-recap` cron fired all users' `coach/respond` calls back-to-back with no delay. Each recap uses ~11k tokens, so the second user immediately exhausted the 30k TPM limit.
+**Fix / Change:** Added a 30s sleep between each user in the `after()` loop. The delay is skipped after the last user so there's no unnecessary tail wait. 30s matches the rate-limit reset window from the error headers.
+**Files changed:** `src/app/api/cron/sunday-recap/route.ts`
+
+---
+
+## 2026-04-27 — Fix activities query crashing on wrong column name (broke Sunday recap)
+
+**Type:** Bug Fix
+**Reported by:** Jake (Vercel logs after Sunday recap cron)
+**User feedback:** "got a bunch of errors like this! column activities.name does not exist"
+**Root cause:** The main activities SELECT in `coach/respond` was fetching a column called `name`, but the actual DB column is `activity_name`. This caused a `42703` PostgreSQL error for every user during the weekly_recap cron, making the activities query fail and blocking the recap from generating correctly. The `ActivityRow` interface and downstream usage (`a.name`, `match.name`) also used the wrong field name.
+**Fix / Change:** Renamed `name` → `activity_name` in the SELECT string, the `ActivityRow` interface, and the two downstream references in `computeSessionsStatus`. Updated the sessions-status test fixtures to match.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/sessions-status.test.ts`
+
+---
+
 ## 2026-04-26 — Stop asking about stale training context after every post-run
 
 **Type:** Bug Fix

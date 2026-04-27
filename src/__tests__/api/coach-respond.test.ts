@@ -899,11 +899,14 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(1);
+    const systemPrompt = calls[0][0].system as string;
     const userMsg = calls[0][0].messages[0].content as string;
 
-    // Guard must be present — Claude must not prescribe a specific workout
-    expect(userMsg).toContain("Do NOT prescribe a specific workout");
-    // Normal reminder instruction must NOT be the active branch
+    // Guard must be present — reminders never prescribe a specific today's workout
+    // (stated once in PRINCIPLES principle 8 in the system prompt, applies to all reminder branches).
+    expect(systemPrompt).toContain("never prescribe a specific");
+    // No-plan branch must be active in the user message — not the normal reminder text
+    expect(userMsg).toContain("plan for next week is coming tonight");
     expect(userMsg).not.toContain("Heads up —");
   });
 
