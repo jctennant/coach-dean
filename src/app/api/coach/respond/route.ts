@@ -2033,13 +2033,14 @@ Weekly total: ${mileageRange}
     const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
     if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
 
-    await supabase.from("conversations").insert({
+    const { error: convInsertErr } = await supabase.from("conversations").insert({
       user_id: userId,
       role: "assistant",
       content: part,
       message_type: msgType,
       strava_activity_id: activityId || null,
     });
+    if (convInsertErr) console.error(`[coach/respond] conversations insert failed userId=${userId} trigger=${trigger}:`, convInsertErr);
   }
 
   // Persist chatId if we learned it for the first time
