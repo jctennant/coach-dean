@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Fix cross-training prescribed outside athlete's stated tools
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "seeing that I got prescribed swimming but I didn't mention that in onboarding at all"
+**Root cause:** The Haiku arc-enrichment prompt listed "easy Z2 ride or easy swim" as generic options for the base phase, without constraining to the athlete's actual cross-training tools. A user who only mentioned biking could still receive a swim prescription.
+**Fix / Change:** Updated the cross_training instruction in the Haiku prompt to explicitly inject the athlete's tools (`[${crosstrainingTools.join(", ")}]`) and forbid suggesting any tool not in that list.
+**Files changed:** src/lib/training-plan.ts
+
+---
+
 ## 2026-04-26 — Stronger quality sessions for high-volume athletes in week 1; fix double dashboard link
 
 **Type:** Bug Fix / Improvement
