@@ -751,7 +751,8 @@ function validateTrainingStateInvariants(
   userId: string,
   state: Record<string, unknown> | null,
   planTotalWeeks: number | null,
-  trigger: TriggerType
+  trigger: TriggerType,
+  goalType?: string | null
 ): void {
   if (!state) return;
   const currentWeek = state.current_week as number | null;
@@ -763,7 +764,8 @@ function validateTrainingStateInvariants(
     }
   }
   const weeklyTarget = state.weekly_mileage_target as number | null;
-  if (weeklyTarget !== null && weeklyTarget <= 0) {
+  const isRecoveryGoal = goalType === "return_to_running" || goalType === "injury_recovery";
+  if (weeklyTarget !== null && weeklyTarget <= 0 && !isRecoveryGoal) {
     console.warn(`[invariant] userId=${userId} trigger=${trigger}: weekly_mileage_target=${weeklyTarget} is invalid (≤0).`);
   }
 }
@@ -910,7 +912,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   }
 
   // Invariant check — log warnings for plan-state drift before it reaches the LLM.
-  validateTrainingStateInvariants(userId, state as Record<string, unknown> | null, planTotalWeeks, trigger);
+  validateTrainingStateInvariants(userId, state as Record<string, unknown> | null, planTotalWeeks, trigger, (profile?.goal as string | null) ?? null);
 
   // Opt-out gate — never send messages to users who have unsubscribed.
   if (user.messaging_opted_out) {
