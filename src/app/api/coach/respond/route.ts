@@ -1238,6 +1238,9 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
         const p = estimatePacesFromEasyPace(pendingExtracted!.easy_pace!);
         if (p.easy) profile = { ...profile, current_easy_pace: p.easy, ...(p.tempo ? { current_tempo_pace: p.tempo } : {}), ...(p.interval ? { current_interval_pace: p.interval } : {}) } as typeof profile;
       }
+      // Direct tempo/interval pace overrides (independent of easy pace or race data)
+      if (pendingExtracted?.tempo_pace) profile = { ...profile, current_tempo_pace: pendingExtracted.tempo_pace } as typeof profile;
+      if (pendingExtracted?.interval_pace) profile = { ...profile, current_interval_pace: pendingExtracted.interval_pace } as typeof profile;
     }
   }
 
@@ -4350,6 +4353,8 @@ type ExtractedProfileData = {
   recent_race_distance_km?: number | null;
   recent_race_time_minutes?: number | null;
   easy_pace?: string | null;
+  tempo_pace?: string | null;
+  interval_pace?: string | null;
   timezone?: string | null;
   race_date?: string | null;
   goal_time_minutes?: number | null;
@@ -4397,6 +4402,8 @@ Extract ONLY explicitly stated NEW information:
 - A PR or recent race time → recent_race_distance_km + recent_race_time_minutes. Distances: 5K=5, 10K=10, half=21.0975, marathon=42.195, 1mi=1.609. If given as a pace (e.g. "5K PR pace is 5:40/mi"), compute total time: pace_sec/mile × distance_in_miles / 60 (5K=3.107mi, 10K=6.214mi, half=13.109mi, marathon=26.219mi).
 - A stated lifetime personal best time at a standard distance (e.g. "my best 5K is 22:30", "I ran a 1:48 half PR last year", "my marathon PR is 3:45") → manual_pr_updates as array of objects. Use canonical distance names: "400m", "1/2 mile", "1K", "1 mile", "2 mile", "5K", "10K", "15K", "10 mile", "20K", "Half-Marathon", "Marathon", "50K". Convert time to total seconds. Only set when the athlete is explicitly stating a personal best time — NOT for recent training runs or for times they're targeting.
 - A comfortable/easy running pace (NOT a race or PR pace) → easy_pace as M:SS per mile. Convert from km if needed (÷0.621).
+- A stated tempo pace (e.g. "my tempo is 7:45", "I run tempos at 8:10", "my threshold pace is 7:30") → tempo_pace as M:SS per mile. Only set when athlete explicitly states their tempo/threshold pace, not when they mention a race pace or goal pace.
+- A stated interval pace (e.g. "I do 400s at 6:30", "my interval pace is 6:45") → interval_pace as M:SS per mile.
 - A completed workout the athlete is reporting (e.g. "did a 10 mile run", "just finished 45 min easy", "rode 30 miles this morning") → workout with fields:
   - activity_type: one of "Run", "Ride", "Swim", "Walk", "TrailRun", "WeightTraining", "Yoga", "Other"
   - distance_meters: convert miles×1609.34 or km×1000 (null if not stated)
@@ -4411,7 +4418,7 @@ Extract ONLY explicitly stated NEW information:
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 - A secondary (B or C) race mentioned alongside their existing primary goal — e.g. "I also signed up for X on [date]", "I'm doing Y as a tune-up", "there's a local 10K on [date] I want to do", "I registered for Z too" → new_b_races as array of objects with: date (YYYY-MM-DD, resolve the same way as race_date), name (string or null), priority ("B" for tune-up/goal races, "C" for low-key/fun runs), goal_race_type (the race's own distance type — one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "trail_race", or null if unclear), goal_distance_miles (number or null — 5K=3.107, 10K=6.214, half=13.109, marathon=26.219, null if unknown). Only set when the race is ADDITIONAL to their primary goal, not a replacement for it.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -4456,7 +4463,9 @@ async function persistProfileUpdates(
     const hasGoalRaceType = !!(extracted.goal_race_type);
     const hasNewBRaces = Array.isArray(extracted.new_b_races) && (extracted.new_b_races as unknown[]).length > 0;
     const hasManualPRs = Array.isArray(extracted.manual_pr_updates) && (extracted.manual_pr_updates as unknown[]).length > 0;
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs) return;
+    const hasDirectTempoPace = !!(extracted.tempo_pace && /^\d+:\d{2}$/.test(extracted.tempo_pace));
+    const hasDirectIntervalPace = !!(extracted.interval_pace && /^\d+:\d{2}$/.test(extracted.interval_pace));
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -4534,6 +4543,9 @@ async function persistProfileUpdates(
       if (computedPaces.interval) profileUpdate.current_interval_pace = computedPaces.interval;
       if (computedPaces.vdot) profileUpdate.current_vdot = computedPaces.vdot;
     }
+    // Direct pace overrides — athlete explicitly stated their tempo or interval pace
+    if (hasDirectTempoPace) profileUpdate.current_tempo_pace = extracted.tempo_pace;
+    if (hasDirectIntervalPace) profileUpdate.current_interval_pace = extracted.interval_pace;
     if (hasRaceDate) profileUpdate.race_date = extracted.race_date;
     if (hasGoalTime) profileUpdate.goal_time_minutes = extracted.goal_time_minutes;
     if (hasTrainingDays) {
@@ -5271,7 +5283,7 @@ NEVER write "?mi", "X mi", or "check distance" — always compute the number. Me
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility or cross-training, mention it as a weekly count (e.g. "2× strength + mobility this week" or "1 easy bike session"). Do NOT assign it to a specific day. When you prescribe a strength session, include a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
 
-MONDAY: Close the final bubble with a natural, warm invitation to check in after the first run of the week. Vary the phrasing — "Excited to hear how the week kicks off.", "Hit me up after your first run.", "Let me know how the week starts." One short sentence.${dashboardUrl ? `\n\nDASHBOARD: At the end of your second bubble, add one short sentence with the dashboard link — e.g. "Your full plan is at ${dashboardUrl}" or "See the full week breakdown at ${dashboardUrl}". Vary the phrasing.` : ""}`;
+${dashboardUrl ? `DASHBOARD: At the end of your second bubble, add one short sentence with the dashboard link — e.g. "Your full plan is at ${dashboardUrl}" or "See the full week breakdown at ${dashboardUrl}". Vary the phrasing.` : ""}`;
     }
     case "workout_image": {
       const imageGuard = buildActivityDataGuard(imageActivity ?? null);

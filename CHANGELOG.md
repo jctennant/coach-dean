@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Fix awkward weekly recap closing line; add direct tempo/interval pace correction support
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback (Jake)
+**User feedback:** "this message of 'invite me into your week' is very weird" / "I also don't think that's my tempo speed. It's more like 7:45"
+**Root cause:** (1) Claude was generating the phrase "Invite me into your week" — the prompt examples weren't explicit enough to prevent awkward/formal phrasings. (2) There was no extraction path for direct tempo or interval pace corrections; the system only updated paces via VDOT (race data) or easy-pace estimation, so "my tempo is 7:45" was silently ignored.
+**Fix / Change:** (1) Updated weekly recap prompt to explicitly ban "Invite me into your week" and similar formal phrasing, with better example variations. (2) Added `tempo_pace` and `interval_pace` to the Haiku extraction schema and `ExtractedProfileData` type; both are now written to `current_tempo_pace`/`current_interval_pace` in `training_profiles` when explicitly stated, and pre-loaded into the profile before building the system prompt so Dean responds with the corrected pace immediately.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `CHANGELOG.md`
+
 ## 2026-04-27 — Stagger Sunday recap cron to avoid LLM rate limit errors
 
 **Type:** Bug Fix
