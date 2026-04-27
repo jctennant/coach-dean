@@ -1099,17 +1099,18 @@ export default async function DashboardPage({
                 });
                 const CHART_H = 80;
                 const rawMax = Math.max(...arcWeeks.map(a => a.target));
-                const rawMin = Math.min(...arcWeeks.map(a => a.target));
                 const yMax = Math.ceil(rawMax / 5) * 5;
-                const yMin = Math.max(0, Math.floor(rawMin / 5) * 5);
-                const yRange = yMax - yMin || 1;
-                const yMid = Math.round(((yMin + yMax) / 2) / 5) * 5;
+                // Always anchor y-axis at 0 so race-week bars (25–30% of peak) render
+                // with proper proportional height instead of clipping to a tiny stub.
+                const yMin = 0;
+                const yRange = yMax || 1;
+                const yMid = Math.round((yMax / 2) / 5) * 5;
                 const fmtMi = (miles: number) => useMetric ? `${Math.round(miles * 1.60934)} km` : `${Math.round(miles)} mi`;
                 const peakWeek = arcWeeks.reduce((best, a) => a.target > best.target ? a : best, arcWeeks[0]!);
-                // bar height as % of chart, anchored to yMin floor
-                const barH = (t: number) => Math.max(4, ((t - yMin) / yRange) * 100);
+                // bar height as % of chart from 0 baseline
+                const barH = (t: number) => Math.max(3, (t / yRange) * 100);
                 // gridline position from bottom (as %)
-                const gridY = (v: number) => ((v - yMin) / yRange) * 100;
+                const gridY = (v: number) => (v / yRange) * 100;
 
                 // Phase color classes
                 const PHASE_COLOR: Record<string, string> = {
@@ -1185,11 +1186,6 @@ export default async function DashboardPage({
                               const h = barH(target);
                               return (
                                 <div key={weekNum} className="relative flex-1 flex flex-col items-center justify-end h-full">
-                                  {isCurrent && (
-                                    <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-green-600 whitespace-nowrap tabular-nums">
-                                      {fmtMi(target)}
-                                    </span>
-                                  )}
                                   <div className={`w-full rounded-sm ${barColor}`} style={{ height: `${h}%` }} />
                                 </div>
                               );
@@ -1214,18 +1210,18 @@ export default async function DashboardPage({
                       </div>
                     </div>
 
-                    {/* Legend */}
+                    {/* Legend — "This week" first so it's closest to the left */}
                     <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2.5 pt-2.5 border-t border-gray-50">
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-sm bg-green-500" />
+                        <span className="text-[9px] text-gray-400">This week</span>
+                      </div>
                       {legendPhases.map(ph => (
                         <div key={ph} className="flex items-center gap-1">
                           <div className={`w-2 h-2 rounded-sm ${PHASE_COLOR[ph] ?? "bg-gray-200"}`} />
                           <span className="text-[9px] text-gray-400">{PHASE_LABEL[ph] ?? ph}</span>
                         </div>
                       ))}
-                      <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 rounded-sm bg-green-500" />
-                        <span className="text-[9px] text-gray-400">This week</span>
-                      </div>
                     </div>
                   </div>
                 );
