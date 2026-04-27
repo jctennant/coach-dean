@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-26 — Stronger quality sessions for high-volume athletes in week 1; fix double dashboard link
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Internal observation (user onboarded at 34 mi/week received only strides as week 1 quality session; dashboard link sent twice)
+**User feedback:** "feels like the quality workout here is very light considering what type of volume and intervals I've done recently" / "he sent the dashboard link twice, I don't think that is intended!"
+**Root cause:** (1) The HIGH VOLUME rule (30+ mi/week) listed strides as an acceptable quality session alongside tempo/intervals, so injury notes tipped the model toward strides as a "safe" choice. (2) Claude was including the dashboard URL at the end of Bubble 2 (it's visible in the system prompt for FULL PLAN REQUESTS), and then `closingMsg` in `initial_plan` was also sending the URL — appearing twice.
+**Fix / Change:** (1) Updated HIGH VOLUME rule to explicitly state strides are NOT sufficient for 30+ mi/week athletes — they must get tempo, fartlek, intervals, or hill repeats; reduced-intensity versions are fine when injury history is present. (2) Added explicit `<rule>` in the initial_plan prompt instructing Claude not to include the dashboard URL — it's sent automatically as a separate follow-up.
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-04-26 — Cross-training integration: effort classification, aerobic minutes, richer post-activity messaging, dashboard display
 
 **Type:** Feature
