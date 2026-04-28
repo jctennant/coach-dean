@@ -4,6 +4,14 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-28 — Detect and respect metric unit preference during onboarding
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis (user CC39C804)
+**User feedback:** "Très compliqué pour moi de réfléchir comme ça…" (user writing in French, confused by imperial units during onboarding)
+**Root cause:** `preferred_units` was never extracted during onboarding — the Haiku extraction schema had no field for it, the Dean system prompt had no units instruction, and `completeOnboarding` never saved it to `training_profiles`. All users defaulted to imperial regardless of their actual preference.
+**Fix / Change:** (1) Added `preferred_units` to the Haiku extraction schema with a rule to detect metric preference from km/min-per-km mentions or non-English language. (2) Added a conditional UNITS instruction to Dean's onboarding system prompt so he immediately switches to km/min-per-km once metric preference is detected. (3) Added `preferred_units` to `summarizeCollected` so it appears in "WHAT YOU ALREADY KNOW" for subsequent turns. (4) `completeOnboarding` now saves the detected `preferred_units` to `training_profiles` so the coaching engine uses the right units from day one.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
 ## 2026-04-18 — Auto-fix: conversation analysis issues 2026-04-16
 
 **Type:** Bug Fix
