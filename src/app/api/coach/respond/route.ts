@@ -4974,6 +4974,20 @@ INSIGHT RULES:
 - If aerobic efficiency or cardiac drift is improving: name the specific trend. Specific progress is more motivating than "you're doing great."
 - If the athlete has a goal race: connect at least one insight to race prep.
 - GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if the activity's avg_heartrate is actually in Z3 (the gray zone band shown in HEART RATE ZONES above). If avg_heartrate is in Z2 (Aerobic Base) or lower, today's effort was appropriate and well-executed — do not call it gray zone. If you want to comment on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it clearly as a training trend ("your recent runs have been trending toward moderate effort") — never apply it to today's run when today was Z2 or below.
+- EASY EFFORT AFFIRMATION (required when HR data is present): When avg HR falls in Z1 or Z2 on an easy/aerobic run, at least one insight MUST positively acknowledge the athlete executed the effort correctly — e.g. "Your heart rate sat right in Zone 2 today — that's exactly the aerobic stimulus you're after" or "You nailed the effort here — HR stayed in Z2 the whole way." Do NOT issue any reminder to "keep easy runs easy" when the athlete already ran easy. Generic effort reminders are only appropriate when avg HR was actually in Z3 or higher on what should have been an easy session. Affirm correct execution rather than repeating standing advice.
+- INSIGHT VARIETY — pick the 2 most interesting signals for THIS specific run from this menu (don't always hit the same two notes):
+  • HR zone execution (Z1/Z2 affirmation or Z3 correction — see rules above)
+  • Aerobic efficiency (m/beat trend from AEROBIC METRICS HISTORY)
+  • Cardiac decoupling / drift (< 5% = aerobic held; 5–10% = moderate; > 10% = consider easier next)
+  • Pacing consistency — were splits even or did effort spike/fade? What does that signal?
+  • Cadence (if average_cadence is present): flag if below ~170 spm (overstriding risk); affirm if at/above target
+  • Elevation / terrain: if this run had significant vert (>100 ft/mile), note the grade-adjusted effort or vert-training value
+  • Best efforts (if best_efforts JSON is present): check for course PRs or near-PRs on common distances (1mi, 5K, 10K) and call them out
+  • Week-over-week comparison: if RECENT WORKOUTS contains a similar run type from last week, compare pace + HR trend — progress is motivating
+  • Weather / conditions (beyond just heat): cold, wind, rain all affect pace — acknowledge conditions-adjusted effort
+  • Load context: where does this run fit in the training arc (base build, sharpening, taper)?
+  • Race connection: how does this specific session build toward the goal race?
+  The two fixed-priority rules above (load spike >10%, heat >75°F) still take a slot when triggered. For the remaining slot(s), choose the signal most relevant and interesting given this athlete's goal and situation — don't default to the same two every time.
 - If any lap or split shows a pace more than ~90 sec/mi faster than the run's average pace, flag it explicitly rather than presenting it neutrally — e.g. "Your final segment shows [X pace] — that's likely a short burst or GPS artifact. If intentional, keep in mind [recovery/easy] runs should stay fully aerobic." Do NOT describe an outlier sub-5:30 pace on an easy or recovery run as a normal "sprint finish" without comment.
 
 COACHING FORWARD — tell them what it means, not just what happened:

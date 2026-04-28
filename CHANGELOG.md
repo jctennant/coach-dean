@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-28 — Post-run Z2 affirmation + insight variety roster
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** "Dean is having issues - he's saying to keep easy runs easy all the time but doesn't seem to actually examine whether I was in Zone 2 or not. I've been in zone 2 a bunch the past few runs and he keeps reminding me to run easy."
+**Root cause:** The GRAY ZONE GUARD correctly prevented mislabeling a Z2 run as gray zone, but didn't require Claude to positively affirm correct easy effort — so Claude fell back on generic "keep easy runs easy" filler even when the athlete already nailed it. Additionally, the 2-insight rule had no variety menu, so Dean tended to hit the same 2 notes every post-run.
+**Fix / Change:** (1) Added EASY EFFORT AFFIRMATION rule: when avg HR is in Z1/Z2 on an easy run, at least one insight must explicitly confirm correct execution (e.g. "Your HR sat right in Zone 2 — that's exactly the aerobic stimulus you're after"). Generic effort reminders are now only allowed when HR was actually in Z3+. (2) Added INSIGHT VARIETY menu listing all available signals (HR zones, cadence, cardiac decoupling, split consistency, best efforts, week-over-week comparison, vert/terrain, weather, load arc, race connection) so Dean picks the 2 most relevant for each specific run rather than always defaulting to the same topics.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-26 — Fix awkward weekly recap closing line; add direct tempo/interval pace correction support
 
 **Type:** Bug Fix / Improvement
