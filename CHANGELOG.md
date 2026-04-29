@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-28 — Language + units preferences now persist and propagate to all messages
+
+**Type:** Bug Fix
+**Reported by:** Minette, Jb (both French users)
+**User feedback:**
+- Minette: "Parle pas en miles mais en km" (repeated multiple times, never persisted)
+- Jb: "Et tu mets tout en miles, c'est pas évident pour moi" / "Je veux que tu me parles en français Dean" (asked 4 times, still getting English automated messages)
+- Jb: "I don't want you to post on my behalf on my Strava activities, never do it again" (bot said "understood" but never actually disabled the flag)
+**Root cause:**
+1. `preferred_units` ("use km") and `preferred_language` ("speak French") were never extracted from user messages and never persisted — `extractProfileData` Haiku prompt had no detection for either. So every automated message (post_run, morning cron, weekly_recap) continued using the defaults (imperial, English).
+2. `strava_write_enabled = false` was likewise never extracted — the bot acknowledged the request but never wrote the DB flag.
+3. `post_run_onboarding` was hardcoded in English and miles with no way to override.
+4. Onboarding hardcoded strings (`stravaMsg` footer, `modeQuestion` fallback) were always English regardless of user language.
+5. `parseModeFallback` English-only regex: "J'ai pas de plan donc pars de zéro" was never recognized → `modeUnresolved` stayed true → English mode question kept looping.
+**Fix / Change:**
+- Added `preferred_units`, `preferred_language`, and `strava_write_enabled` to `ExtractedProfileData` type and Haiku extraction prompt with French/Spanish pattern examples.
+- `persistProfileUpdates` now writes `preferred_units` → `training_profiles.preferred_units`, `preferred_language` → `users.onboarding_data.preferred_language`, `strava_write_enabled = false` → `users.strava_write_enabled`.
+- `buildSystemPrompt` injects a hard language instruction ("ALWAYS respond in French") when `preferred_language ≠ "en"` — applies to all automated messages.
+- `post_run_onboarding` reads `preferred_language` and `preferred_units` from `onboarding_data`, injects language/units into system prompt and uses km for activity details when metric.
+- Added `detectLanguage()` to onboarding handler — detects French/Spanish from user message history and auto-stores in `mergedData.preferred_language` before the first onboarding response.
+- Onboarding system prompt now injects a hard language instruction when a non-English language is detected.
+- `stravaMsg` footer and `modeQuestion` fallback both use `mergedData.preferred_language` to select pre-translated French/Spanish/English text.
+- `parseModeFallback` now matches French FROM_SCRATCH ("pars de zéro", "pas de plan"), COMPLEMENT, and NO_PLAN patterns.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-28 — Post-run Z2 affirmation + insight variety roster
 
 **Type:** Improvement

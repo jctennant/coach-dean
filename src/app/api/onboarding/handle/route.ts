@@ -14,6 +14,26 @@ export const maxDuration = 60;
 const dryRunUsers = new Set<string>();
 
 /**
+ * Detect the primary language from a set of user messages.
+ * Returns an ISO 639-1 code or "en" as fallback.
+ */
+function detectLanguage(userMessages: string[]): string {
+  const frenchWords = /\b(je|tu|il|nous|vous|ils|ne|pas|que|les|des|avec|pour|dans|très|aussi|bien|mais|avoir|être|c'est|j'ai|pardon|merci|bonjour|peux|donc|mon|ma|mes|ton|ta|notre|votre|leur|suis|avez|fait|fais|cette|ça|ca|moi|toi|lui|nous|eux|oui|non|pourquoi|comment|quand|où|quoi|qui|quel|quelle|veux|vouloir|faire|parle|parler|préfère|voudrais|puis|depuis|plus|moins|comme|aussi|après|avant|pendant)\b/i;
+  const spanishWords = /\b(yo|tú|él|nosotros|vosotros|ellos|no|que|los|las|con|para|por|muy|también|bien|pero|haber|ser|estar|es|soy|tengo|hola|gracias|sí|porque|cómo|cuándo|dónde|quién|qué|quiero|puedo|hacer|hablar)\b/i;
+  const frenchCount = userMessages.filter(m => frenchWords.test(m)).length;
+  const spanishCount = userMessages.filter(m => spanishWords.test(m)).length;
+  if (frenchCount >= 2 && frenchCount >= spanishCount) return "fr";
+  if (spanishCount >= 2 && spanishCount > frenchCount) return "es";
+  return "en";
+}
+
+/** Map ISO 639-1 code to English language name. */
+function langCodeToName(code: string): string {
+  const names: Record<string, string> = { fr: "French", es: "Spanish", de: "German", pt: "Portuguese", it: "Italian", nl: "Dutch" };
+  return names[code] ?? code;
+}
+
+/**
  * Fallback parser for working mode when Dean fails to emit [MODE:...].
  * Only fires when the last assistant message asked the three-options question —
  * otherwise a "1" reply could mean anything. This is a safety net for model
@@ -25,7 +45,7 @@ function parseModeFallback(
 ): "FROM_SCRATCH" | "COMPLEMENT" | "NO_PLAN" | null {
   if (!lastAssistantMessage) return null;
   const askedMode =
-    /three different ways/i.test(lastAssistantMessage) ||
+    /three different ways|trois mani[eè]res|trois façons/i.test(lastAssistantMessage) ||
     (/\(1\)/.test(lastAssistantMessage) &&
       /\(2\)/.test(lastAssistantMessage) &&
       /\(3\)/.test(lastAssistantMessage));
@@ -38,16 +58,22 @@ function parseModeFallback(
   if (/^(3|three|option\s*3|third|#3|\(3\))[.!\s]*$/i.test(msg)) return "NO_PLAN";
 
   if (/\bfrom scratch\b|\bbuild (me )?(a |one|it)|\bbuild one\b/i.test(msg)) return "FROM_SCRATCH";
+  // French FROM_SCRATCH patterns: "pars de zéro", "depuis zéro", "crée(r) un plan", "sans plan", "pas de plan"
+  if (/\b(pars?|partir|depuis|de) (de )?z[eé]ro\b|\bcr[eé][eé](r)? (un |mon )?(plan|programme)\b|\bsans plan\b|\bpas de plan\b/i.test(msg)) return "FROM_SCRATCH";
   if (
     /\b(runna|trainingpeaks|training peaks|garmin coach)\b/i.test(msg) ||
     /\b(i (have|follow|use|am on|'?m on)|already (have|follow|using))\b.*\b(plan|coach|program)\b/i.test(msg) ||
-    /\bwork alongside\b|\balongside (my|a) plan\b/i.test(msg)
+    /\bwork alongside\b|\balongside (my|a) plan\b/i.test(msg) ||
+    // French COMPLEMENT patterns: "j'ai (déjà) un plan", "je suis un plan", "travaille avec mon plan"
+    /\bj'ai (déjà |un )?plan\b|\bje suis (déjà |un )?plan\b|\btravaille.{0,10}(avec|sur) (mon|un) plan\b/i.test(msg)
   )
     return "COMPLEMENT";
   if (
     /\bno (set )?(plan|schedule)\b|\bjust (coaching )?(notes|feedback)\b|\bpost.run (notes?|feedback) only\b|\bfeedback only\b/i.test(
       msg
-    )
+    ) ||
+    // French NO_PLAN patterns: "sans planning", "juste des notes", "retours après chaque course"
+    /\bsans (planning|programme fixe)\b|\bjuste des notes\b|\bjuste un (retour|feedback)\b|\bret(our|ours) apr[eè]s chaque (course|run)\b/i.test(msg)
   )
     return "NO_PLAN";
 
@@ -257,6 +283,12 @@ async function handleConversation(
   if (mergedData.goal && !VALID_GOAL_BUCKETS.has(mergedData.goal as string)) {
     delete mergedData.goal;
   }
+  // Detect language from user messages once and persist — only set if not already stored
+  if (!mergedData.preferred_language) {
+    const userMsgs = [...history.filter(m => m.role === "user").map(m => m.content), message];
+    const detected = detectLanguage(userMsgs);
+    if (detected !== "en") mergedData.preferred_language = detected;
+  }
   if (mergedData.race_date) {
     const dateStr = mergedData.race_date as string;
     const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(Date.parse(dateStr));
@@ -359,9 +391,14 @@ async function handleConversation(
 
   const collected = summarizeCollected(mergedData);
 
+  const onbLang = (mergedData.preferred_language as string | undefined) ?? "en";
+  const langInstruction = onbLang !== "en"
+    ? `\nLANGUAGE: This athlete communicates in ${langCodeToName(onbLang)}. You MUST respond in ${langCodeToName(onbLang)} for every message. Do not switch to English. When the instructions below specify exact English wording (e.g. the three-options question), translate it into ${langCodeToName(onbLang)} while preserving all options and their structure.\n`
+    : "";
+
   const systemPrompt = `${!isFirstResponse ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.
 
-` : ""}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
+` : ""}${langInstruction}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
 
 Dean's core job: help athletes get faster without getting injured. Every conversation should calibrate both performance and injury risk from the start.
 
@@ -739,7 +776,13 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       .trim();
     responseText = beforeStrava;
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\nStrava will ask to allow "Upload your activities" — that's me writing a short coaching note to each activity description (like "🟢 Easy zone nailed — 92% Z1-Z2"). You can uncheck it if you'd prefer not.\n\nNo Strava? Reply "skip" — you can connect later from your dashboard.`;
+    const stravaLang = (mergedData.preferred_language as string | undefined) ?? "en";
+    const stravaFooter = stravaLang === "fr"
+      ? `Strava vous demandera d'autoriser "Télécharger vos activités" — c'est moi qui ajoute une note de coaching sur chaque activité (ex. : "🟢 Zone facile respectée — 92% Z1-Z2"). Vous pouvez décocher cette option si vous préférez.\n\nPas de Strava ? Répondez "skip" — vous pourrez vous connecter plus tard depuis votre tableau de bord.`
+      : stravaLang === "es"
+      ? `Strava te pedirá que autorices "Subir tus actividades" — así es como agrego una nota de entrenamiento a cada actividad (ej. "🟢 Zona fácil lograda — 92% Z1-Z2"). Puedes desmarcar esa opción si prefieres.\n\nSin Strava? Responde "skip" — puedes conectarlo más tarde desde tu panel.`
+      : `Strava will ask to allow "Upload your activities" — that's me writing a short coaching note to each activity description (like "🟢 Easy zone nailed — 92% Z1-Z2"). You can uncheck it if you'd prefer not.\n\nNo Strava? Reply "skip" — you can connect later from your dashboard.`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\n${stravaFooter}`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -847,10 +890,15 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       await supabase.from("users")
         .update({ onboarding_data: mergedData as unknown as Json })
         .eq("id", user.id);
-      const modeQuestion = "One last thing before I wrap up — I want to make sure I set this up the right way. I can work three different ways: (1) I build you a training plan from scratch, (2) I work alongside a plan you're already following (Runna, TrainingPeaks, a coach, etc.) and give you feedback after each run, or (3) no set schedule — I just send a coaching note after each run you log. Which sounds right?";
+      const modeLang = (mergedData.preferred_language as string | undefined) ?? "en";
+      const modeQuestion = modeLang === "fr"
+        ? "Dernière chose avant de commencer — je veux m'assurer de travailler de la bonne façon. Je peux fonctionner de trois manières : (1) Je vous crée un plan d'entraînement depuis zéro, (2) Je travaille en complément d'un plan que vous suivez déjà (Runna, TrainingPeaks, un coach, etc.) et vous donne des retours après chaque course, ou (3) Sans plan fixe — je vous envoie simplement une note de coaching après chaque course. Laquelle vous convient ?"
+        : modeLang === "es"
+        ? "Una última cosa — quiero asegurarme de trabajar de la manera correcta. Puedo trabajar de tres formas: (1) Te creo un plan de entrenamiento desde cero, (2) Trabajo junto a un plan que ya sigues (Runna, TrainingPeaks, un entrenador, etc.) y te doy feedback después de cada carrera, o (3) Sin horario fijo — simplemente te envío una nota de entrenamiento después de cada carrera que registras. ¿Cuál te funciona?"
+        : "One last thing before I wrap up — I want to make sure I set this up the right way. I can work three different ways: (1) I build you a training plan from scratch, (2) I work alongside a plan you're already following (Runna, TrainingPeaks, a coach, etc.) and give you feedback after each run, or (3) no set schedule — I just send a coaching note after each run you log. Which sounds right?";
       // Only append the fallback mode question if Claude's response doesn't already contain it
       // (Claude may have asked naturally, and appending again causes duplication).
-      const alreadyAsked = /three different ways/i.test(cleanedResponse ?? "");
+      const alreadyAsked = /three different ways|trois mani[eè]res|trois façons/i.test(cleanedResponse ?? "");
       const combined = alreadyAsked
         ? (cleanedResponse ?? modeQuestion)
         : (cleanedResponse ? `${cleanedResponse}\n\n${modeQuestion}` : modeQuestion);

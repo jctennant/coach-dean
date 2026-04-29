@@ -685,14 +685,25 @@ async function handlePostRunOnboarding(
     ? `After your brief reaction, ask: "${pendingQuestion}"`
     : "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
 
-  const systemPrompt = `You are Coach Dean, an AI running coach. A user just finished a run but hasn't finished setting up their coaching profile yet. React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable). Keep the whole message under 4 sentences. No lists, no markdown, no bullet points.${collectedSummary}\n\n${closingInstruction}`;
+  const onbLang = (collectedData.preferred_language as string | undefined) ?? "en";
+  const onbIsMetric = (collectedData.preferred_units as string | undefined) === "metric";
+  const langLine = onbLang !== "en" ? ` Respond in ${langCodeToName(onbLang)} only — do not use English.` : "";
+  const unitsLine = onbIsMetric ? ` Use km and min/km for all distances and paces.` : " Use miles and min/mile for all distances and paces.";
+  const systemPrompt = `You are Coach Dean, an AI running coach. A user just finished a run but hasn't finished setting up their coaching profile yet. React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable). Keep the whole message under 4 sentences. No lists, no markdown, no bullet points.${langLine}${unitsLine}${collectedSummary}\n\n${closingInstruction}`;
 
   const activityDetails = activity
     ? {
         type: activity.activity_type,
-        distance_miles: Math.round(((activity.distance_meters as number) / 1609.34) * 100) / 100,
+        ...(onbIsMetric
+          ? {
+              distance_km: Math.round(((activity.distance_meters as number) / 1000) * 10) / 10,
+              average_pace_per_km: activity.average_pace ? convertPaceStrToKm(activity.average_pace as string) : null,
+            }
+          : {
+              distance_miles: Math.round(((activity.distance_meters as number) / 1609.34) * 100) / 100,
+              average_pace_per_mile: activity.average_pace,
+            }),
         duration_minutes: Math.round((activity.moving_time_seconds as number) / 60),
-        average_pace: activity.average_pace,
         average_heartrate: activity.average_heartrate ?? null,
         elevation_gain_feet: activity.elevation_gain != null
           ? Math.round((activity.elevation_gain as number) * 3.28084)
@@ -3372,6 +3383,11 @@ Rules:
   }
 }
 
+function langCodeToName(code: string): string {
+  const names: Record<string, string> = { fr: "French", es: "Spanish", de: "German", pt: "Portuguese", it: "Italian", nl: "Dutch", zh: "Chinese", ja: "Japanese", ko: "Korean", ar: "Arabic" };
+  return names[code] ?? code;
+}
+
 function buildSystemPrompt(
   user: Record<string, unknown>,
   profile: Record<string, unknown> | null,
@@ -4059,7 +4075,7 @@ ${(() => {
   return `- Week ${tsEffectiveWeek} of training plan, phase: ${tsPhaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""} (week 1 = first week of current plan; advances each Sunday)
 ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): ${tsTargetMiles ? tsMi(tsTargetMiles) : "TBD"}
 <rule>THIS WEEK'S MILEAGE: ${tsMileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}</rule>
-- Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses${(profile?.external_plan_notes as string | null) ? `\n- External training plan: ${profile?.external_plan_notes} — factor this into your analysis and coaching context. The athlete is following this plan; Dean's role is to analyze their runs and provide insight on top of it, not replace it.` : ""}
+- Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses${(profile?.external_plan_notes as string | null) ? `\n- External training plan: ${profile?.external_plan_notes} — factor this into your analysis and coaching context. The athlete is following this plan; Dean's role is to analyze their runs and provide insight on top of it, not replace it.` : ""}${(() => { const lang = ((user.onboarding_data as Record<string, unknown> | null)?.preferred_language as string | undefined) ?? "en"; return lang !== "en" ? `\n- Language: ALWAYS respond in ${langCodeToName(lang)}. Do not switch to English even though this system prompt is in English. Every message you send must be in ${langCodeToName(lang)}.` : ""; })()}
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
 - Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD"}, Tempo ${tsTempoPace}, Interval ${tsIntervalPace}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
 <rule>PACE SANITY CHECK (extends principle 10):${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace at ${tsEasyGuard} or slower is wrong — use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead.` : " Use the stored Tempo and Interval values above."} Warm-up and cool-down pace = easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit on every pace.</rule>
@@ -4378,6 +4394,9 @@ type ExtractedProfileData = {
     date_offset: number;
   } | null;
   manual_pr_updates?: Array<{ distance: string; time_seconds: number }> | null;
+  preferred_units?: "imperial" | "metric" | null;
+  preferred_language?: string | null;
+  strava_write_enabled?: boolean | null;
 };
 
 /**
@@ -4419,8 +4438,12 @@ Extract ONLY explicitly stated NEW information:
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip, swap, or "this week only" request (e.g. "I want to run Mon, Tue, Fri this week" should NOT set updated_training_days).
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 - A secondary (B or C) race mentioned alongside their existing primary goal — e.g. "I also signed up for X on [date]", "I'm doing Y as a tune-up", "there's a local 10K on [date] I want to do", "I registered for Z too" → new_b_races as array of objects with: date (YYYY-MM-DD, resolve the same way as race_date), name (string or null), priority ("B" for tune-up/goal races, "C" for low-key/fun runs), goal_race_type (the race's own distance type — one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "trail_race", or null if unclear), goal_distance_miles (number or null — 5K=3.107, 10K=6.214, half=13.109, marathon=26.219, null if unknown). Only set when the race is ADDITIONAL to their primary goal, not a replacement for it.
+- Explicitly requests using kilometers/km/metric (e.g. "I prefer km", "use km", "en km", "je préfère les km", "switch to km", "in kilometers", "mets tout en km", "parle en km") → preferred_units: "metric"
+- Explicitly requests using miles/imperial (e.g. "use miles", "in miles please") → preferred_units: "imperial"
+- Explicitly requests Coach Dean to respond in a specific language (e.g. "speak French", "parle en français", "je veux que tu me parles en français", "respond in Spanish", "réponds en français", "Tu parles en français") → preferred_language as ISO 639-1 code ("fr" for French, "es" for Spanish, "de" for German, "pt" for Portuguese, "it" for Italian)
+- Explicitly requests to stop Coach Dean from posting notes to Strava activity descriptions (e.g. "don't post to my Strava", "stop writing to my activities", "never do it again" in context of Strava notes, "I don't want you posting on my Strava", "never post on my behalf") → strava_write_enabled: false
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -4467,7 +4490,10 @@ async function persistProfileUpdates(
     const hasManualPRs = Array.isArray(extracted.manual_pr_updates) && (extracted.manual_pr_updates as unknown[]).length > 0;
     const hasDirectTempoPace = !!(extracted.tempo_pace && /^\d+:\d{2}$/.test(extracted.tempo_pace));
     const hasDirectIntervalPace = !!(extracted.interval_pace && /^\d+:\d{2}$/.test(extracted.interval_pace));
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs) return;
+    const hasPreferredUnits = !!(extracted.preferred_units);
+    const hasPreferredLanguage = !!(extracted.preferred_language);
+    const hasStravaWriteDisable = extracted.strava_write_enabled === false;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -4577,6 +4603,10 @@ async function persistProfileUpdates(
       }
       profileUpdate.manual_prs = merged;
     }
+    if (hasPreferredUnits) {
+      profileUpdate.preferred_units = extracted.preferred_units;
+      console.log(`[persistProfileUpdates] preferred_units updated to ${extracted.preferred_units}`);
+    }
 
     // Build onboarding_data update
     const updatedOnboardingData = { ...onboardingData };
@@ -4585,6 +4615,10 @@ async function persistProfileUpdates(
       updatedOnboardingData.other_notes = existing
         ? `${existing}; ${extracted.other_notes}`
         : (extracted.other_notes as string);
+    }
+    if (hasPreferredLanguage) {
+      updatedOnboardingData.preferred_language = extracted.preferred_language;
+      console.log(`[persistProfileUpdates] preferred_language updated to ${extracted.preferred_language}`);
     }
 
     // Write manual workout to activities table if reported.
@@ -4628,15 +4662,19 @@ async function persistProfileUpdates(
       }
     }
 
+    const userUpdate: Record<string, unknown> = {};
+    if (hasOtherNotes || hasPreferredLanguage) userUpdate.onboarding_data = updatedOnboardingData;
+    if (hasTimezone) userUpdate.timezone = extracted.timezone;
+    if (hasStravaWriteDisable) {
+      userUpdate.strava_write_enabled = false;
+      console.log(`[persistProfileUpdates] strava_write_enabled set to false`);
+    }
     await Promise.all([
       Object.keys(profileUpdate).length > 1
         ? supabase.from("training_profiles").update(profileUpdate).eq("user_id", userId)
         : Promise.resolve(),
-      hasOtherNotes || hasTimezone
-        ? supabase.from("users").update({
-            onboarding_data: updatedOnboardingData as unknown as Json,
-            ...(hasTimezone ? { timezone: extracted.timezone } : {}),
-          }).eq("id", userId)
+      Object.keys(userUpdate).length > 0
+        ? supabase.from("users").update(userUpdate).eq("id", userId)
         : Promise.resolve(),
     ]);
 
