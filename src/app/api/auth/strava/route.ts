@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     client_id: process.env.STRAVA_CLIENT_ID!,
     response_type: "code",
     redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/callback`,
-    scope: "read,activity:read_all,activity:write",
+    scope: "read,activity:read_all",
     state: userId,
   });
 

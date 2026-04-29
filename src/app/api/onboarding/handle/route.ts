@@ -777,12 +777,13 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     responseText = beforeStrava;
     const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
     const stravaLang = (mergedData.preferred_language as string | undefined) ?? "en";
+    const notesUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
     const stravaFooter = stravaLang === "fr"
-      ? `Strava vous demandera d'autoriser "Télécharger vos activités" — c'est moi qui ajoute une note de coaching sur chaque activité (ex. : "🟢 Zone facile respectée — 92% Z1-Z2"). Vous pouvez décocher cette option si vous préférez.\n\nPas de Strava ? Répondez "skip" — vous pourrez vous connecter plus tard depuis votre tableau de bord.`
+      ? `Pas de Strava ? Répondez "skip" — vous pourrez vous connecter plus tard depuis votre tableau de bord.\n\nEnvie que je laisse une note de coaching sur chaque activité (ex. "🟢 Zone facile respectée — 92% Z1-Z2") ? Utilisez ce lien à la place :\n${notesUrl}`
       : stravaLang === "es"
-      ? `Strava te pedirá que autorices "Subir tus actividades" — así es como agrego una nota de entrenamiento a cada actividad (ej. "🟢 Zona fácil lograda — 92% Z1-Z2"). Puedes desmarcar esa opción si prefieres.\n\nSin Strava? Responde "skip" — puedes conectarlo más tarde desde tu panel.`
-      : `Strava will ask to allow "Upload your activities" — that's me writing a short coaching note to each activity description (like "🟢 Easy zone nailed — 92% Z1-Z2"). You can uncheck it if you'd prefer not.\n\nNo Strava? Reply "skip" — you can connect later from your dashboard.`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\n${stravaFooter}`;
+      ? `Sin Strava? Responde "skip" — puedes conectarlo más tarde desde tu panel.\n\n¿Quieres que Dean agregue una nota de entrenamiento a cada actividad (ej. "🟢 Zona fácil lograda — 92% Z1-Z2")? Usa este enlace en su lugar:\n${notesUrl}`
+      : `No Strava? Reply "skip" — you can connect later from your dashboard.\n\nWant Dean to add a coaching note to each activity (like "🟢 Easy zone nailed — 92% Z1-Z2")? Use this link instead:\n${notesUrl}`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\n${stravaFooter}`; // stravaUrl = read-only; notesUrl = write opt-in (in footer)
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")

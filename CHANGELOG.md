@@ -4,6 +4,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-28 — Strava activity annotations are now opt-in
+
+**Type:** Improvement
+**Reported by:** Jb ("I don't want you to post on my behalf on my Strava activities, never do it again")
+**Root cause:** The default Strava connect flow requested `activity:write` scope, so the "Upload your activities" checkbox was pre-checked — users had to actively uncheck it to avoid notes. This is opt-out, not opt-in.
+**Fix / Change:** Changed the default `/api/auth/strava` scope to `read,activity:read_all` only (no write). The Strava OAuth screen now shows no notes-related checkbox. The connect message now presents the read-only URL as the default, with a second link (`/api/auth/strava/write`) for users who want coaching notes. The "STRAVA CONNECTION" shortcut already handled write scope re-auth correctly and remains unchanged. The `connect strava` fallback in the linq webhook was updated to match the same two-URL pattern.
+**Files changed:** `src/app/api/auth/strava/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/webhooks/linq/route.ts`
+
+---
+
 ## 2026-04-28 — Dashboard respects preferred_units for pace and distance display
 
 **Type:** Bug Fix
