@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-28 — Dashboard respects preferred_units for pace and distance display
+
+**Type:** Bug Fix
+**Reported by:** Jake (prompted by Minette and Jb feedback)
+**User feedback:** N/A (follow-up to language/units fix)
+**Root cause:** The prescribed paces panel ("Easy", "Tempo", "Intervals") always displayed in min/mile regardless of `preferred_units`. `easyRange` was computed with a hardcoded `/mi` suffix. The "fill the rest with easy miles" label was also hardcoded.
+**Fix / Change:** Added a `displayPace()` helper that converts stored min/mile values to min/km when `useMetric=true`. Applied to `easyRange` (full range computed in km when metric), `rawTempo`, and `rawInterval` display. Changed "easy miles" label to use `distUnit` (`km`/`mi`). Distances (weekly target, long run, chart) were already metric-aware.
+**Files changed:** `src/app/dashboard/page.tsx`
+
+---
+
 ## 2026-04-28 — Language + units preferences now persist and propagate to all messages
 
 **Type:** Bug Fix

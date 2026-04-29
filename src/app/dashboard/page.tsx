@@ -884,17 +884,36 @@ export default async function DashboardPage({
     });
 
   // Paces (normalized above via normalizePace — guards against per-km values mislabeled as per-mile)
+  // Stored always as min/mile internally; convert to min/km for display when useMetric=true.
   const rawEasy = storedEasyPace;
   const rawTempo = storedTempoPace;
   const rawInterval = (profileData?.current_interval_pace as string | null) ?? null;
+
+  function displayPace(paceMinMile: string | null): string | null {
+    if (!paceMinMile) return null;
+    const clean = paceMinMile.replace("/mi", "").replace("/km", "").trim();
+    const parts = clean.split(":");
+    if (parts.length !== 2) return paceMinMile;
+    const totalSec = parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
+    if (isNaN(totalSec)) return paceMinMile;
+    if (!useMetric) return `${clean}/mi`;
+    const kmSec = Math.round(totalSec / 1.60934);
+    return `${Math.floor(kmSec / 60)}:${String(kmSec % 60).padStart(2, "0")}/km`;
+  }
+
   const easyRange = rawEasy ? (() => {
-    const parts = rawEasy.replace("/mi", "").split(":");
+    const parts = rawEasy.replace("/mi", "").replace("/km", "").split(":");
     if (parts.length === 2) {
       const base = parseInt(parts[0]!) * 60 + parseInt(parts[1]!);
       const ceilSec = base + 30;
-      return `${rawEasy.replace("/mi", "")}–${Math.floor(ceilSec / 60)}:${String(ceilSec % 60).padStart(2, "0")}/mi`;
+      if (useMetric) {
+        const loKm = Math.round(base / 1.60934);
+        const hiKm = Math.round(ceilSec / 1.60934);
+        return `${Math.floor(loKm / 60)}:${String(loKm % 60).padStart(2, "0")}–${Math.floor(hiKm / 60)}:${String(hiKm % 60).padStart(2, "0")}/km`;
+      }
+      return `${rawEasy.replace("/mi", "").replace("/km", "")}–${Math.floor(ceilSec / 60)}:${String(ceilSec % 60).padStart(2, "0")}/mi`;
     }
-    return rawEasy;
+    return displayPace(rawEasy);
   })() : null;
 
   // Dashboard insights
@@ -1254,7 +1273,7 @@ export default async function DashboardPage({
             <section className="space-y-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">This Week</p>
-                <p className="text-[11px] text-gray-400 mt-0.5">Weekly target + key sessions — fill the rest with easy miles</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">Weekly target + key sessions — fill the rest with easy {distUnit}</p>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white shadow-sm divide-y divide-gray-50">
                 {weeklyTargetDisplay != null && (
@@ -1505,8 +1524,8 @@ export default async function DashboardPage({
                       <div className="flex flex-wrap gap-2">
                         {[
                           easyRange && { label: "Easy", pace: easyRange, dot: "bg-green-400" },
-                          rawTempo && { label: "Tempo", pace: rawTempo, dot: "bg-amber-400" },
-                          rawInterval && { label: "Intervals", pace: rawInterval, dot: "bg-red-400" },
+                          rawTempo && { label: "Tempo", pace: displayPace(rawTempo), dot: "bg-amber-400" },
+                          rawInterval && { label: "Intervals", pace: displayPace(rawInterval), dot: "bg-red-400" },
                         ].filter(Boolean).map((p) => {
                           const pace = p as { label: string; pace: string; dot: string };
                           return (
