@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-29 — Fix onboarding unit confusion for metric users
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis 2026-04-27 (user cc39c804)
+**User feedback:** "Très compliqué pour moi de réfléchir comme ça…" (French-speaking user confused by Imperial units during onboarding)
+**Root cause:** `handleConversation` never read `preferred_units` from `training_profiles`. The Strava callback already sets `preferred_units = "metric"` when the athlete's Strava account uses meters, but the onboarding conversation had no awareness of this — it always injected mi/week stats into the system prompt and always told Dean to ask "How many miles are you running per week?" — even for metric users who had already connected Strava.
+**Fix / Change:** Added a `training_profiles` SELECT for `preferred_units` at the top of `handleConversation`. When `isMetric`, the Strava context stats (weekly avg, longest run, weekly progression) are converted mi→km with correct unit labels. The easy pace range uses `easyPaceRange(..., isMetric)` so it shows min/km. The "weekly mileage" prompt line adapts to ask for km vs miles. A `UNITS` instruction is added to the system prompt telling Dean which unit system to use — matching the same pattern used in `coach/respond`.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-04-24 — STRAVA CONNECTION keyword and write-permission re-auth flow
 
 **Type:** Feature

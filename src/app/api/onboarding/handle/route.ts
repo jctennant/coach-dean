@@ -288,6 +288,15 @@ async function handleConversation(
   }
   // -------------------------------------------------------------------------
 
+  // Read metric preference — set at Strava connect time; null means not yet known, default imperial.
+  const { data: prefProfile } = await supabase
+    .from("training_profiles")
+    .select("preferred_units")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const isMetric = (prefProfile?.preferred_units as string | null) === "metric";
+  const miToKm = (mi: number) => Math.round(mi * 1.60934 * 10) / 10;
+
   // Build Strava context (best race for pace suggestion, if available)
   let stravaContext = "";
   if (mergedData.strava_connected) {
@@ -304,14 +313,22 @@ async function handleConversation(
     const maxWeeklySpikePct = mergedData.strava_max_weekly_spike_pct as number | null ?? null;
 
     const weeklyLine = avgWeeklyMiles != null
-      ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
+      ? isMetric
+        ? ` Recent avg: ~${miToKm(avgWeeklyMiles)} km/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
+        : ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
       : "";
     const frequencyLine = avgRunsPerWeek != null ? ` ~${avgRunsPerWeek} runs/week.` : "";
-    const longestLine = longestRunMiles != null ? ` Longest run (8 weeks): ${longestRunMiles} mi.` : "";
+    const longestLine = longestRunMiles != null
+      ? isMetric
+        ? ` Longest run (8 weeks): ${miToKm(longestRunMiles)} km.`
+        : ` Longest run (8 weeks): ${longestRunMiles} mi.`
+      : "";
     const elevLine = avgElevFtPerRun ? ` Avg elevation/run: ${avgElevFtPerRun} ft.` : "";
     // Show weekly progression oldest→newest so trend is readable (e.g. "22, 25, 28, 30")
     const progressionLine = recent4Weeks && recent4Weeks.some(m => m > 0)
-      ? ` Weekly miles (oldest→newest): ${[...recent4Weeks].reverse().join(", ")}.`
+      ? isMetric
+        ? ` Weekly km (oldest→newest): ${[...recent4Weeks].reverse().map(m => miToKm(m)).join(", ")}.`
+        : ` Weekly miles (oldest→newest): ${[...recent4Weeks].reverse().join(", ")}.`
       : "";
     const hrZoneLine = hrZonePct
       ? ` HR zones (% of runs by avg HR): Z1 ${hrZonePct.z1}%, Z2 ${hrZonePct.z2}%, Z3 ${hrZonePct.z3}%, Z4 ${hrZonePct.z4}%, Z5 ${hrZonePct.z5}%.${estimatedMaxHR ? ` Est. max HR: ${estimatedMaxHR} bpm.` : ""}`
@@ -321,14 +338,14 @@ async function handleConversation(
       : "";
 
     if (sbr) {
-      const easyRange = easyPaceRange(sbr.easy_pace);
+      const easyRange = easyPaceRange(sbr.easy_pace, isMetric);
       // For trail races, withhold the easy pace suggestion entirely — trail paces run slower
       // than road paces due to elevation, so the VDOT-derived easy pace is systematically
       // low. Showing it causes Claude to anchor on the wrong number even after the user
       // provides a road race time. Instead, prompt Claude to collect a road baseline.
       const paceNote = sbr.is_trail
         ? ` Note: this is a trail race — easy pace suggestion withheld. Collect a road 5K/10K/HM time to set accurate training zones.`
-        : ` Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
+        : ` Suggested easy pace: ${easyRange}. You can use this to set their training zones.`;
       stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
 
       // Store trail-race flag so completeOnboarding can guard the VDOT recalculation.
@@ -375,7 +392,7 @@ Required before signaling [READY] — for ALL athletes:
 - Injury history — REQUIRED FOR ALL ATHLETES. Must ask and receive an answer before [READY]. Frame naturally: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around before?" Even "no injuries at all" is a complete and valid answer. Ask AFTER Strava is handled (connected or skipped) — not before.
 - Strength & cross-training — REQUIRED FOR ALL ATHLETES. One brief question: "Do you do any strength work or cross-training?" Accept any answer (lifting, yoga, cycling, swimming, or nothing). This directly shapes injury prevention guidance. Ask alongside or right after injury history — they're naturally related.
 - Fitness baseline: a recent race PR, current easy pace, OR Strava connected. If the athlete is clearly just starting out or returning after a long break and genuinely has no benchmarks — accept that. Don't push for numbers that don't exist. Dean will calibrate from their first few runs.
-- Current weekly mileage — REQUIRED if Strava is not connected AND not already shown in the STRAVA context above. If Strava shows "Recent avg: ~X mi/week", that IS the baseline — do NOT ask again. Ask directly: "How many miles are you running per week right now?" If they say they're not running yet, record as 0.
+- Current weekly mileage — REQUIRED if Strava is not connected AND not already shown in the STRAVA context above. If Strava shows "Recent avg: ~X ${isMetric ? "km/week" : "mi/week"}", that IS the baseline — do NOT ask again. Ask directly: "How many ${isMetric ? "km" : "miles"} are you running per week right now?" If they say they're not running yet, record as 0.
 - Terrain type and training tools: do NOT ask directly — extract passively. Infer terrain from goal. Extract tools from any mention of Runna, TrainingPeaks, Garmin, etc.
 - Training days (specific days of week) — collect if mentioned naturally, but do NOT ask for them. Not required.
 
@@ -440,6 +457,7 @@ INSTRUCTIONS:
 - When the athlete tells you their name for the first time, acknowledge it warmly at the start of your response — e.g. "Jake!" or "Hey Jake —" before continuing. Do NOT use "Nice to meet you" or any formal first-meeting phrase. Just use the name naturally.
 - If they ask a coaching question, answer it briefly, then continue naturally.
 - Training days: do NOT ask which days of the week they run. Plans are day-agnostic — the athlete picks their own days. If they mention a weekly count (e.g. "5 days a week"), acknowledge it but don't follow up with "which days".
+- UNITS: Athlete's preferred unit system is ${isMetric ? "metric — use km and min/km in all responses" : "imperial — use miles and min/mile in all responses"}. Never switch units based on what the athlete types.
 
 ${isFirstResponse
   ? `- This is your FIRST message. Lead with the Strava/post-run differentiator, then broaden the goal framing beyond just racing. Example: "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it means, whether to push or back off, and what's coming. My job is to make sure your training actually adds up to something, whether that's a race PR, staying healthy, or just running more consistently." Then close with a single question that asks for BOTH their name and what they're working toward — e.g. "What's your name, and what are you training for?" or "What's your name and what are you working toward?" Do NOT ask for name and goal as two separate questions — combine them into one. Do NOT reference specific tools like Runna or TrainingPeaks in the intro. Do NOT use the phrase "SMS running coach" — use "AI running coach" instead.`
