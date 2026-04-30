@@ -5557,7 +5557,8 @@ function detectWorkoutKind(
   distanceMiles: number,
   plannedLabel: string | null,
   avgHR?: number | null,
-  maxHR?: number | null
+  maxHR?: number | null,
+  peakSplitHR?: number | null
 ): WorkoutKind {
   if (workoutType === 1) return "race";
   const lower = (plannedLabel ?? "").toLowerCase();
@@ -5568,12 +5569,18 @@ function detectWorkoutKind(
   if (workoutType === 2) return "long";
   if (workoutType === 3) return "interval";
   // No plan label and no Strava workout type tag — infer from HR effort level.
-  // This prevents interval/tempo runs from being mislabeled "easy" for users
-  // without a training plan or when day-level session tracking is disabled.
+  // peakSplitHR (highest per-mile split avg HR) is more reliable than raw max_heartrate
+  // because each split averages 5-10 minutes, filtering out sensor spikes.
+  if (peakSplitHR && maxHR && maxHR > 0) {
+    const peakPct = peakSplitHR / maxHR;
+    if (peakPct >= 0.88) return "interval"; // sustained Z4-Z5 effort
+    if (peakPct >= 0.82) return "tempo";    // sustained threshold effort
+  }
+  // Fallback to session avg HR when no split data available
   if (avgHR && maxHR && maxHR > 0) {
     const hrPct = avgHR / maxHR;
-    if (hrPct >= 0.82) return "interval"; // clearly hard effort
-    if (hrPct >= 0.75) return "tempo";    // threshold-level effort
+    if (hrPct >= 0.82) return "interval";
+    if (hrPct >= 0.75) return "tempo";
   }
   return "easy";
 }
@@ -5775,6 +5782,9 @@ async function annotateStravaActivity(
 
   // Workout-type-specific metric line
   const { plannedSessionLabel } = ctx;
+  const peakSplitHR = splits.length > 0
+    ? Math.max(...splits.map(s => (s.average_heartrate as number | null) ?? 0).filter(v => v > 0))
+    : null;
   const workoutKind = detectWorkoutKind(
     workoutType,
     activityType,
@@ -5782,7 +5792,8 @@ async function annotateStravaActivity(
     distanceMiles,
     plannedSessionLabel,
     hr,
-    userMaxHR
+    userMaxHR,
+    peakSplitHR || null
   );
 
   // Status line — colored verdict + number.
@@ -5791,11 +5802,12 @@ async function annotateStravaActivity(
   let statusLine: string | null = null;
 
   // Fitness trend (easy + long only — aerobic base signal, needs ≥6 runs of history)
+  // Negative signals (declining) are reserved for SMS coaching, not the public Strava annotation.
   if (workoutKind === "easy" || workoutKind === "long") {
     switch (efficiencyTrend) {
       case "improving": statusLine = "🟢 Aerobic fitness trending up"; break;
       case "steady":    statusLine = "🟡 Fitness holding steady"; break;
-      case "declining": statusLine = "🔴 Efficiency dipping — recovery may help"; break;
+      case "declining": /* omit — coach will address via SMS */ break;
     }
   }
 
@@ -5807,7 +5819,7 @@ async function annotateStravaActivity(
         if (z12Pct !== null) {
           if (z12Pct >= 90)      statusLine = `🟢 Easy zone nailed — ${z12Pct}% Z1-Z2`;
           else if (z12Pct >= 70) statusLine = `🟡 Mostly easy — ${z12Pct}% Z1-Z2`;
-          else                   statusLine = `🔴 Ran harder than easy — ${z12Pct}% Z1-Z2`;
+          // else: ran too hard — omit, coach addresses via SMS
         }
         break;
       }
@@ -5815,14 +5827,14 @@ async function annotateStravaActivity(
         if (decouplingPct !== null) {
           if (decouplingPct < 5)       statusLine = `🟢 Low HR drift (${decouplingPct.toFixed(0)}%) — efficiency held`;
           else if (decouplingPct < 10) statusLine = `🟡 Moderate HR drift (${decouplingPct.toFixed(0)}%) — normal for long effort`;
-          else                         statusLine = `🔴 High HR drift (${decouplingPct.toFixed(0)}%) — recovery priority tomorrow`;
+          // else: high drift — omit, coach addresses via SMS
         } else {
           const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
           const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
           if (z12Pct !== null) {
             if (z12Pct >= 90)      statusLine = `🟢 Easy zone nailed — ${z12Pct}% Z1-Z2`;
             else if (z12Pct >= 70) statusLine = `🟡 Mostly easy — ${z12Pct}% Z1-Z2`;
-            else                   statusLine = `🔴 Ran harder than easy — ${z12Pct}% Z1-Z2`;
+            // else: ran too hard — omit, coach addresses via SMS
           }
         }
         break;
@@ -5830,10 +5842,10 @@ async function annotateStravaActivity(
       case "tempo":
       case "interval": {
         const qualMins = userMaxHR ? computeZoneTime(splits, userMaxHR, 0.80, 1.0) : null;
-        if (qualMins !== null && qualMins > 0) {
+        if (qualMins !== null && qualMins >= 5) {
           if (qualMins >= 15)     statusLine = `🟢 Quality work locked in — ${qualMins} min Z4-Z5`;
-          else if (qualMins >= 5) statusLine = `🟡 Some quality effort — ${qualMins} min Z4-Z5`;
-          else                    statusLine = `🔴 Didn't reach target zones`;
+          else                    statusLine = `🟡 Some quality effort — ${qualMins} min Z4-Z5`;
+          // else (<5 min): didn't reach zones — omit, coach addresses via SMS
         } else if (gaAvgPaceStr) {
           statusLine = `Grade-adj pace: ${gaAvgPaceStr}`;
         }

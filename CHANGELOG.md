@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-29 — Fix interval session misclassified as easy in Strava annotation
+
+**Type:** Bug Fix
+**Reported by:** Jake (user feedback)
+**User feedback:** "I did intervals today; max hr 172, avg 149 (just at the top of zone 2) and he gave me a green 100% in Z1-Z2 which didn't seem right"
+**Root cause:** `detectWorkoutKind` inferred workout type from session avg HR / estimated max HR. For intervals, recovery jogs drag avg HR way down, making the ratio fall below the "tempo" threshold and defaulting to "easy" — then the annotation showed the Z1-Z2 metric which was irrelevant.
+**Fix / Change:** Added `peakSplitHR` (highest per-mile split average HR) as the primary inference signal. Since each split averages 5-10 minutes, a high peak split HR means sustained Z4-Z5 effort, not a sensor spike. Thresholds: peakSplitHR/estimatedMax ≥ 0.88 → interval, ≥ 0.82 → tempo. Falls back to session avg HR when no split data is available.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-28 — Strava activity annotations are now opt-in
 
 **Type:** Improvement
