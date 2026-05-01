@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-01 — Remove activity:write from initial Strava OAuth scope
+
+**Type:** Bug Fix
+**Reported by:** User feedback (conversation analysis 2026-04-30)
+**User feedback:** "Yo t'es fou. J'ai pas envie que tu partage ton analyse dans ma bio Strava !! Ne recommence plus jamais ça."
+**Root cause:** The initial Strava OAuth route (`/api/auth/strava/route.ts`) was requesting `activity:write` scope by default. Every user who connected Strava was implicitly granting write permission, causing `strava_write_enabled` to be set `true` in the callback — even though the user never explicitly opted into activity annotation. The dedicated write re-auth flow (`/api/auth/strava/write`) exists precisely for users who choose to opt in.
+**Fix / Change:** Removed `activity:write` from the scope string in the initial OAuth route. Initial Strava connect now requests only `read,activity:read_all`. Users who want Dean to annotate their Strava activities must explicitly trigger the write re-auth via the `STRAVA CONNECTION` keyword, which routes through `/api/auth/strava/write` (still requests `activity:write`). Existing users with `strava_write_enabled = true` from the initial connect flow will need a manual Supabase update to `strava_write_enabled = false` if they did not intend to grant write access.
+**Files changed:** `src/app/api/auth/strava/route.ts`
+
+---
+
 ## 2026-04-24 — STRAVA CONNECTION keyword and write-permission re-auth flow
 
 **Type:** Feature
