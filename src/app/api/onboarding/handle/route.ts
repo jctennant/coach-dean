@@ -477,7 +477,7 @@ INSTRUCTIONS:
 - When the athlete tells you their name for the first time, acknowledge it warmly at the start of your response — e.g. "Jake!" or "Hey Jake —" before continuing. Do NOT use "Nice to meet you" or any formal first-meeting phrase. Just use the name naturally.
 - If they ask a coaching question, answer it briefly, then continue naturally.
 - Training days: do NOT ask which days of the week they run. Plans are day-agnostic — the athlete picks their own days. If they mention a weekly count (e.g. "5 days a week"), acknowledge it but don't follow up with "which days".
-
+${(mergedData.preferred_units as string | null) === "metric" ? "- UNITS: This athlete prefers metric — use km for distances and min/km for paces in all messages.\n" : ""}
 ${isFirstResponse
   ? `- This is your FIRST message. Lead with the Strava/post-run differentiator, then broaden the goal framing beyond just racing. Example: "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it means, whether to push or back off, and what's coming. My job is to make sure your training actually adds up to something, whether that's a race PR, staying healthy, or just running more consistently." Then close with a single question that asks for BOTH their name and what they're working toward — e.g. "What's your name, and what are you training for?" or "What's your name and what are you working toward?" Do NOT ask for name and goal as two separate questions — combine them into one. Do NOT reference specific tools like Runna or TrainingPeaks in the intro. Do NOT use the phrase "SMS running coach" — use "AI running coach" instead.`
   : ""}
@@ -991,6 +991,7 @@ function summarizeCollected(data: Record<string, unknown>): string {
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);
   if (data.strength_habits) lines.push(`Strength/cross-training: ${data.strength_habits}`);
   if (data.ultra_race_history) lines.push(`Ultra background: ${data.ultra_race_history}`);
+  if (data.preferred_units) lines.push(`Units preference: ${data.preferred_units}`);
   if (data.timezone) lines.push(`Timezone: ${data.timezone}`);
   if (data.strava_city) {
     const loc = data.strava_state ? `${data.strava_city}, ${data.strava_state}` : (data.strava_city as string);
@@ -1032,6 +1033,7 @@ Rules:
 - recent_race_distance_km: ONLY from lines labeled "Athlete:" in the transcript — NEVER from "Coach:" lines, Strava summaries, or race data the coach mentions. This captures the athlete's road race PR they state in their own words (e.g. "my fastest 5K is 17:50", "I ran a 1:38 half last fall"). Trail races (Dipsea, ultras, mountain races, any race with "trail" in the name) are NOT eligible — leave null even if the athlete mentions them. If the coach references a Strava trail race (e.g. "your Dipsea 30K"), do NOT extract that distance. Extract even if caveated ("net downhill", "a while ago").
 - recent_race_time_minutes: ONLY from lines labeled "Athlete:" — never from "Coach:" lines. M:SS → "18:45" = 18.75. H:MM:SS → "1:05:30" = 65.5. Use the most recent road race time (not trail, not Strava coach summaries). If only a trail time is mentioned by the athlete, leave null.
 - easy_pace: the athlete's stated easy running pace — "M:SS" format (e.g. "8:30" = 8 min 30 sec/mile). ONLY from lines labeled "Athlete:" — never from "Coach:" lines, training plan content, PDF attachments, or pace suggestions the coach provides. If Dean says "your easy pace is 9:30/mi" but the athlete never stated it themselves, leave null.
+- preferred_units: 'metric' if the athlete mentions distances in km, paces in min/km, or writes primarily in a non-English language (French, Spanish, German, etc.). 'imperial' if they explicitly reference miles or min/mile. null if not determinable from the conversation.
 - timezone: IANA string from location ("Provo, UT" → "America/Denver").
 - race_name: extract the named target race when the athlete names one (e.g. "Dipsea", "Boston Marathon", "Snowbird Cirque Series"). Capture the name as stated, even if no date is given — the system will look up the date separately. If the athlete names multiple races, race_name is the primary/A race; the rest go into other_races.
 - other_races: B/C secondary races only, not the main A race. Always include named races the athlete mentions even if the date isn't given (use null date) — capturing the name lets the system pre-search the date next turn. Same date rule as race_date: if only a month was given with no specific day, omit the date or leave it null — do NOT default to the 1st of the month.
@@ -1113,6 +1115,7 @@ Rules:
             description: "Tools the athlete uses: 'runna', 'trainingpeaks', 'garmin', 'self_directed', 'other', etc."
           },
           terrain_type: { type: ["string", "null"], enum: ["road", "trail", "mixed", null], description: "Primary running terrain" },
+          preferred_units: { type: ["string", "null"], enum: ["metric", "imperial", null], description: "Unit system the athlete prefers. 'metric' if they use km/min-per-km or write in non-English. 'imperial' if they reference miles. null if unclear." },
           external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current external plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'. Null if no current plan — NEVER capture a plan Dean is going to build." },
           other_notes: { type: ["string", "null"] },
           race_elevation_gain_feet: { type: ["number", "null"], description: "Total elevation gain of the goal race course in feet. Extract from Dean's web search results if mentioned in the transcript." },
@@ -1577,6 +1580,7 @@ async function completeOnboarding(
         terrain_type: terrainType,
         external_plan_notes: externalPlanDescription,
         proactive_cadence: "weekly_only",
+        ...((data.preferred_units as string | null) ? { preferred_units: data.preferred_units as string } : {}),
         injury_notes: combinedInjuryNotes,
         goal_distance_miles: goalDistanceMiles,
         ...(lthrEstimate != null ? {
