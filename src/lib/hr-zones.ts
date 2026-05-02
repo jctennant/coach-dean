@@ -163,7 +163,7 @@ export function buildHRZoneContext(
 - Z3 Tempo: ${z.z2_ceiling + 1}–${z.z3_ceiling} bpm — comfortably hard (gray zone between LT1 and LT2)
 - Z4 Threshold: ${z.z3_ceiling + 1}–${z.z4_ceiling} bpm — uncomfortable, near race pace (at LT2)
 - Z5 VO2 Max: > ${z.z5_floor} bpm — all-out effort
-Use zone names AND bpm values in coaching copy. Never reference raw HR percentages in user-facing messages.
+Use zone names AND bpm values when discussing runs or activities that include heart rate data. For PRESCRIBING future training sessions — especially cycling, swimming, or any cross-training where the athlete may not wear an HR monitor — rely on effort language (conversational, comfortably hard, at threshold) rather than specific bpm targets, unless you have evidence they actively monitor HR during that activity type. Never reference raw HR percentages in user-facing messages.
 <rule>LTHR GUARD: The threshold value above (${lthr} bpm) is a stored estimate computed from race history — it is NOT derived from the max_heartrate field in any activity JSON. The max_heartrate field in activity data is still a single-run peak reading only; do not use it to estimate or assert the athlete's max HR or threshold.</rule>${lowConfNote}`;
 }
 
