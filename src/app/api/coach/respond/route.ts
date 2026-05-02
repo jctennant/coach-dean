@@ -800,7 +800,7 @@ function buildActivityDataGuard(activity: Record<string, unknown> | null): strin
   }
 
   if (activity.activity_type === "TrailRun") {
-    annotations.push("activity_type=TrailRun — trail pace is inherently slower than road pace due to terrain and elevation. Slower pace is expected and correct; do NOT flag it as underperformance. Use grade-adjusted pace (GAP) reasoning rather than raw pace comparisons.");
+    annotations.push("activity_type=TrailRun — trail pace is inherently slower than road pace due to terrain and elevation. Slower pace is expected and correct; do NOT flag it as underperformance. Use grade-adjusted pace (GAP) reasoning rather than raw pace comparisons. Each split in the JSON has a gap_pace field (min/mi) reflecting effort on a flat equivalent — use this when the athlete asks about their pace or how they paced climbs.");
   }
 
   annotations.push("max_heartrate is this session's single-run peak reading — NOT the athlete's physiological maximum heart rate. Do not use it to estimate or assert the athlete's max HR.");
@@ -4318,6 +4318,7 @@ ${conversationHistory || "No previous messages."}`;
  */
 function transformSplitForClaude(split: Record<string, unknown>): Record<string, unknown> {
   const speed = typeof split.average_speed === "number" ? split.average_speed : null;
+  const gapSpeed = typeof split.average_grade_adjusted_speed === "number" ? split.average_grade_adjusted_speed : null;
   // splits_metric uses elevation_difference (meters); laps use total_elevation_gain (meters)
   const elevDiff = typeof split.elevation_difference === "number" ? split.elevation_difference : null;
   const elevGain = typeof split.total_elevation_gain === "number" ? split.total_elevation_gain : null;
@@ -4326,15 +4327,20 @@ function transformSplitForClaude(split: Record<string, unknown>): Record<string,
   const pace = speed && speed > 0
     ? fmtPace(1609.34 / speed / 60, "mi")
     : null;
+  const gapPace = gapSpeed && gapSpeed > 0
+    ? fmtPace(1609.34 / gapSpeed / 60, "mi")
+    : null;
 
   const result: Record<string, unknown> = { ...split };
   if (distMeters != null) result.distance_miles = Math.round((distMeters / 1609.34) * 100) / 100;
   if (pace) result.pace = pace;
+  if (gapPace) result.gap_pace = gapPace;
   // Convert elevation from meters to feet; replace raw fields so Claude can't misread units
   if (elevDiff != null) result.elevation_difference_feet = Math.round(elevDiff * 3.28084);
   if (elevGain != null) result.total_elevation_gain_feet = Math.round(elevGain * 3.28084);
   delete result.distance;
   delete result.average_speed;
+  delete result.average_grade_adjusted_speed;
   delete result.elevation_difference;
   delete result.total_elevation_gain;
   return result;

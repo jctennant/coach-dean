@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-02 — Surface GAP (grade-adjusted pace) per split for trail runs
+
+**Type:** Bug Fix
+**Reported by:** Jake (user feedback)
+**User feedback:** "What were my GAP paces for the first few miles of that run" — Dean gave a generic non-answer instead of actual GAP values
+**Root cause:** Strava's API returns `average_grade_adjusted_speed` on each split object, but `transformSplitForClaude()` only converted `average_speed` → `pace`. The GAP field was silently dropped during transformation, so Claude had no GAP values to reference when asked.
+**Fix / Change:** Added `gap_pace` extraction in `transformSplitForClaude()` — converts `average_grade_adjusted_speed` (m/s) to a min/mi string, stored alongside `pace` in each split. Also updated the TrailRun annotation in the system prompt to explicitly tell Claude the `gap_pace` field exists and to use it when the athlete asks about effort or pacing on climbs.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-05-01 — Fix zone number mismatch when LTHR confidence is low
 
 **Type:** Bug Fix
