@@ -4,6 +4,35 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-04-11 — Comprehensive metric units throughout coaching pipeline
+
+**Type:** Bug Fix
+**Reported by:** Internal audit (follow-up to post-run units fix)
+**User feedback:** N/A
+**Root cause:** Several places in the system still fed imperial data to Claude for metric users: (1) `buildActivitySummary` showed historical weekly volumes in miles, paces as `/mi`, and elevation in feet — all hardcoded. (2) `parseSessionMiles`/`computeProjectedWeekMiles` only parsed `mi` in session labels, silently returning 0 for `km` labels (breaking projected mileage math). (3) `correctProjectedTotal` regexes only matched `/mi` patterns, so the projection-correction post-processing was skipped for metric users. (4) The weekly_recap session format instructions (example runs, SESSION_LIST tag format, quality session warmup/cooldown examples) all showed imperial units, causing Claude to generate km labels inconsistently.
+**Fix / Change:** (1) `buildActivitySummary` now accepts `isMetric` and outputs km/min/km/m for metric users. (2) All `parseSessionMiles` / `parseMilesFromLabel` / `computeProjectedWeekMiles` now match both `mi` and `km` (converting km → miles internally for math). (3) `correctProjectedTotal` now takes `isMetric`, converts the system projection to km, and matches km patterns in Claude's output. (4) Weekly_recap session format instructions are now fully dynamic — example sessions, SESSION_LIST tag format, quality session WU/CD examples, and total format all use km for metric users.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-11 — Post-run messages now use metric units consistently for metric users
+
+**Type:** Bug Fix
+**Reported by:** User (PE's friend, metric user)
+**User feedback:** "Can you also take a look at Dean saying a mix of min / mi and then using kilometers? For this user everything should be in KM"
+**Root cause:** The post_run user message fed Claude entirely imperial data (average_pace stored as "/mi", splits with distance_miles and pace as "/mi", week-to-date in miles, data glossary saying "all paces are min/mile") while the system prompt told Claude to "use km and min/km." Claude had to self-convert which produced inconsistent output (e.g. "5 mi — 8:11/mi avg" for a metric user). Race history in the system prompt also always showed miles and /mi pace.
+**Fix / Change:** `transformSplitForClaude` now accepts `isMetric` param and outputs `distance_km`, `cumulative_km`, and `/km` paces for metric users. Activity JSON for metric users gets `distance_km` and `average_pace` pre-converted to `/km`. Week-to-date context, data glossary, and race history all now display in km/min/km when `preferred_units = "metric"`. All data guards updated to use the correct unit label.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-04-11 — Fix beginner plan generating 16mi/week and fartlek for never-run-before user
+
+**Type:** Bug Fix
+**Reported by:** Conversation analysis email (user bcf3ffa5 "Pookie")
+**User feedback:** "Why does it say I'm running 16 miles this week" / "I've never run continuously, how can I do a 5 mile long run?"
+**Root cause:** Two compounding issues: (1) The plan arc base mileage was derived from Strava's historical average even when the user explicitly self-identified as a beginner. A "never run before" user with old Strava running activity (e.g. occasional jogs, runs from a prior fitness phase) would get their plan anchored to that historical avg (e.g. 16mi/week) rather than the 8mi beginner default. (2) The system prompt fitness tier block used the raw Strava avg to select the coaching tier — so `avgWeeklyMileage = 16` triggered "MODERATE VOLUME" treatment, telling Claude to prescribe ~16-17mi for week 1 and include fartlek/quality sessions from week 2.
+**Fix / Change:** Two targeted changes: (1) In `generateAndSaveFullPlan`, when `fitness_level === "beginner"` (explicitly set, not defaulted), cap the Strava-derived `avgWeeklyMileage` at `noHistoryDefault` (8mi) before computing `baseMileage`. This prevents the arc from being anchored to stale historical data. Uses strict equality check so legacy profiles without a `fitness_level` are unaffected. (2) In `buildSystemPrompt`, added `forceBeginnerTier` flag — when `trigger === "initial_plan"` and `fitness_level === "beginner"` and `avgWeeklyMileage > 8`, force the beginner-tier block in the fitness tier section instead of MODERATE/HIGH VOLUME. The beginner block for this case uses updated wording: "Strava history likely reflects past fitness, not current ability — do not use historical average to set volume." Cap stays at 10mi/week for week 1.
 ## 2026-05-02 — Surface GAP (grade-adjusted pace) per split for trail runs
 
 **Type:** Bug Fix

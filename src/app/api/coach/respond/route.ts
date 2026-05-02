@@ -2497,7 +2497,13 @@ function computeProjectedWeekMiles(
       || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
     const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
     const mMatch = explicitTotal || firstMi;
-    if (mMatch) remainingMiles += parseFloat(mMatch[1]);
+    if (mMatch) { remainingMiles += parseFloat(mMatch[1]); continue; }
+    // Also handle km labels (metric users)
+    const explicitKm = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*km/i)
+      || s.label.match(/\((\d+(?:\.\d+)?)\s*km(?:\s+total)?\)/i);
+    const firstKm = s.label.match(/(\d+(?:\.\d+)?)\s*km/i);
+    const kmMatch = explicitKm || firstKm;
+    if (kmMatch) remainingMiles += parseFloat(kmMatch[1]) / 1.60934;
   }
   const projection = weekMileageSoFar + remainingMiles;
   // If the projection significantly exceeds the planned weekly target, it likely reflects
@@ -3160,7 +3166,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
       weeks[key] = { miles: 0, runs: 0, vert: 0, fastest: 999 };
     weeks[key].miles += miles;
     weeks[key].runs += 1;
-    weeks[key].vert += (a.elevation_gain || 0) * 3.28084; // stored in meters, display in feet
+    weeks[key].vert += (a.elevation_gain || 0); // keep in meters; display depends on isMetric
     if (paceMinPerMile < weeks[key].fastest)
       weeks[key].fastest = paceMinPerMile;
   }
@@ -3175,9 +3181,28 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
     .sort(([a], [b]) => b.localeCompare(a))
     .slice(0, 8);
 
-  let summary = "WEEKLY MILEAGE (completed weeks, most recent first):\n";
+  const paceUnit = useMetric ? "/km" : "/mi";
+  const distUnit = useMetric ? "km" : "mi";
+  const vertUnit = useMetric ? "m" : "ft";
+
+  const formatWeekDist = (miles: number) =>
+    useMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
+
+  // Format a pace in min/mile → display as min/mi or min/km
+  const formatPaceDisplay = (minPerMile: number): string => {
+    const paceInUnit = useMetric ? minPerMile / 1.60934 : minPerMile;
+    const totalSec = Math.round(paceInUnit * 60);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  const formatVert = (meters: number) =>
+    useMetric ? `${Math.round(meters)}m` : `${Math.round(meters * 3.28084)}ft`;
+
+  let summary = `WEEKLY VOLUME (completed weeks, most recent first):\n`;
   for (const [week, data] of sortedWeeks) {
-    summary += `  ${week}: ${actDistStr(data.miles)} (${data.runs} runs, ${actVertStr(data.vert)}, fastest ${actPaceStr(data.fastest)})\n`;
+    summary += `  ${week}: ${formatWeekDist(data.miles)} (${data.runs} runs, ${formatVert(data.vert)} vert, fastest ${formatPaceDisplay(data.fastest)}${paceUnit})\n`;
   }
 
   // Pace distribution from road-like runs (< 12 min/mi)
@@ -3189,9 +3214,10 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
   });
 
   if (roadRuns.length > 0) {
+    // Compute pace in min/mile; convert to display unit when formatting
     const paces = roadRuns.map((a) => {
       const miles = a.distance_meters / 1609.34;
-      return a.moving_time_seconds / 60 / miles;
+      return a.moving_time_seconds / 60 / miles; // always min/mile internally
     });
     paces.sort((a, b) => a - b);
 
@@ -3200,10 +3226,11 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
     const slowest = paces[paces.length - 1];
 
     summary += `\nPACE ANALYSIS (${roadRuns.length} road-like runs):\n`;
-    summary += `  Fastest efforts: ${fastest5.map(p => actPaceStr(p)).join(", ")}\n`;
-    summary += `  Median pace: ${actPaceStr(median)}\n`;
-    summary += `  Slowest easy: ${actPaceStr(slowest)}\n`;
+    summary += `  Fastest efforts: ${fastest5.map(formatPaceDisplay).join(", ")}${paceUnit}\n`;
+    summary += `  Median pace: ${formatPaceDisplay(median)}${paceUnit}\n`;
+    summary += `  Slowest easy: ${formatPaceDisplay(slowest)}${paceUnit}\n`;
   }
+  void distUnit; // referenced in label context but used via formatWeekDist
 
   // Trail runs
   const trailRuns = activities.filter(
@@ -3316,6 +3343,289 @@ ${lines.join("\n")}
 `;
 }
 
+/**
+ * After generating an initial_plan or weekly_recap, extract the specific planned
+ * sessions as structured JSON and store them in training_state.weekly_plan_sessions.
+ * This gives every subsequent message (post_run, reminders) a single authoritative
+ * source for session distances — Claude cannot contradict itself if it reads from here.
+ */
+async function extractAndStorePlanSessions(userId: string, planText: string): Promise<void> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 500,
+    system: `Extract the list of planned training sessions from this coaching message and call save_plan_sessions.
+If a session starts with "(Optional)" or "Optional:", set "optional": true and strip that prefix from the label.
+If no session list is found, call save_plan_sessions with an empty sessions array.`,
+    messages: [{ role: "user", content: planText }],
+    tools: [{
+      name: "save_plan_sessions",
+      description: "Save the extracted training sessions from the plan message.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          sessions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                day: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+                date: { type: "string", description: "M/D format, e.g. 3/10" },
+                label: { type: "string", description: "Session description, e.g. Easy 6.5mi" },
+                optional: { type: "boolean" },
+              },
+              required: ["day", "date", "label", "optional"],
+            },
+          },
+        },
+        required: ["sessions"],
+      },
+    }],
+    tool_choice: { type: "tool" as const, name: "save_plan_sessions" },
+  });
+
+  const toolBlock = response.content.find(b => b.type === "tool_use" && b.name === "save_plan_sessions");
+  let sessions: Array<{ day: string; date: string; label: string; optional?: boolean }> = [];
+  if (toolBlock && toolBlock.type === "tool_use") {
+    const input = toolBlock.input as { sessions?: unknown };
+    if (Array.isArray(input.sessions)) sessions = input.sessions as typeof sessions;
+  }
+
+  // Sanitize cross-training labels with incorrect units or suspiciously short durations.
+  const CROSS_TRAINING_KEYWORDS = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin)\b/i;
+  sessions = sessions.map(s => {
+    if (!CROSS_TRAINING_KEYWORDS.test(s.label)) return s;
+    let label = s.label;
+    // Fix 1: "X mi" on a cross-training session → "X min" (e.g. "3.5 mi" → "4 min", then fix 2 below)
+    // e.g. "Strength + mobility 3.5 mi" → "Strength + mobility 4 min"
+    label = label.replace(/(\d+(?:\.\d+)?)\s*mi(?!\w)/gi, (_, num) => {
+      const mins = Math.round(parseFloat(num));
+      return `${mins} min`;
+    });
+    // Fix 2: suspiciously short decimal durations (< 5 min) like "3.5min" or "3.5 min" are almost
+    // certainly a mis-extracted "35 min" where the Haiku extractor dropped a digit.
+    // e.g. "Strength + mobility 3.5min" → "Strength + mobility 35 min"
+    label = label.replace(/(\d+\.\d+)\s*min\b/gi, (match, num) => {
+      const val = parseFloat(num);
+      if (val < 5) return `${Math.round(val * 10)} min`;
+      return match;
+    });
+    return { ...s, label };
+  });
+
+  await supabase
+    .from("training_state")
+    .update({ weekly_plan_sessions: sessions as unknown as Json })
+    .eq("user_id", userId);
+}
+
+/**
+ * After extractAndStorePlanSessions runs, sync the training arc's current week entry
+ * so the dashboard shows what Dean actually prescribed — not what the Haiku arc
+ * generator guessed during plan creation.
+ *
+ * Updates three fields on the current week row in training_plans.weeks:
+ *   - mileage_target  → sum of miles from stored sessions
+ *   - key_workout     → label of the quality session (or long run)
+ *   - notes           → Haiku-generated note based on actual sessions
+ *
+ * Non-fatal: failures are logged and the arc is left as-is.
+ */
+async function syncArcCurrentWeek(
+  userId: string,
+  currentWeekNum: number,
+  phase: string,
+  goal: string,
+  athleteName?: string | null,
+): Promise<void> {
+  try {
+    // Fetch the sessions that were just stored
+    const { data: stateRow } = await supabase
+      .from("training_state")
+      .select("weekly_plan_sessions")
+      .eq("user_id", userId)
+      .single();
+
+    const sessions = (stateRow?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+    if (sessions.length === 0) return;
+
+    // Compute actual mileage from session labels.
+    // For run/walk interval sessions (time-based, e.g. "Run 2 min, walk 2 min × 6 (~24 min total)")
+    // that don't include explicit miles, estimate from total minutes at ~13 min/mile as a fallback.
+    function parseMilesFromLabel(label: string): number {
+      const miMatch = label.match(/(\d+(?:\.\d+)?)\s*mi(?!\w)/i);
+      if (miMatch) return parseFloat(miMatch[1]!);
+      // Handle km labels (metric users) — convert to miles for internal arc storage
+      const kmMatch = label.match(/(\d+(?:\.\d+)?)\s*km(?!\w)/i);
+      if (kmMatch) return parseFloat(kmMatch[1]!) / 1.60934;
+      // Fallback: time-based run/walk session → estimate at ~13 min/mile
+      if (/\b(run|walk)\b/i.test(label)) {
+        const totalMinMatch = label.match(/~?(\d+)\s*min(?:\s+total)?[)]/i);
+        if (totalMinMatch) return Math.round(parseInt(totalMinMatch[1]) / 13 * 10) / 10;
+      }
+      return 0;
+    }
+    const actualMiles = Math.round(sessions.reduce((sum, s) => sum + parseMilesFromLabel(s.label), 0) * 2) / 2;
+
+    // Detect the key quality session (intervals, tempo, etc.) and the long run
+    function isQualitySession(label: string): boolean {
+      const l = label.toLowerCase();
+      return l.includes("tempo") || l.includes("interval") || l.includes("repeat") ||
+        l.includes("threshold") || l.includes("fartlek") || l.includes("vo2") ||
+        l.includes("hill") || l.includes("stride") || l.includes("progression");
+    }
+    const qualitySession = sessions.find(s => isQualitySession(s.label));
+    // Identify the long run: prefer explicit "long" keyword, fall back to the
+    // highest-mileage running session (Dean sometimes omits "Long run" and just
+    // writes "Easy 11mi" for the Saturday session).
+    const CROSS_TRAINING_RE = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin)\b/i;
+    const longRunByLabel = sessions.find(s => s.label.toLowerCase().includes("long"));
+    const longRunByMileage = sessions
+      .filter(s => !CROSS_TRAINING_RE.test(s.label))
+      .reduce<{ day: string; date: string; label: string } | null>((best, s) =>
+        parseMilesFromLabel(s.label) > parseMilesFromLabel(best?.label ?? "") ? s : best
+      , null);
+    const longRunSession = longRunByLabel ?? longRunByMileage;
+    const longRunMiles = longRunSession ? parseMilesFromLabel(longRunSession.label) : 0;
+    const keySession = qualitySession ?? longRunSession ?? sessions[0];
+    let derivedKeyWorkout = keySession?.label ?? "";
+    if (derivedKeyWorkout.length > 80) derivedKeyWorkout = derivedKeyWorkout.slice(0, 77) + "...";
+
+    // Generate notes using actual sessions so the dashboard reflects what Dean prescribed
+    let derivedNotes = "";
+    try {
+      const sessionList = sessions.map(s => `${s.day}: ${s.label}`).join("; ");
+      const notesResp = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 180,
+        system: `Write a 2-sentence coach's note for an athlete's training week dashboard. Phase: ${phase}. Goal: ${goal || "general running fitness"}.
+First sentence: this week's purpose and why it matters. Second sentence: one brief execution tip for the key session — what to focus on during that workout.
+If the session list includes jargon (strides, tempo, intervals), use plain language to describe the effort level in that second sentence.
+Do not use the athlete's name. Be direct and practical. No filler. Return ONLY the note text.`,
+        messages: [{ role: "user", content: `Sessions: ${sessionList}\nTotal: ~${actualMiles}mi` }],
+      });
+      derivedNotes = notesResp.content[0].type === "text" ? notesResp.content[0].text.trim() : "";
+    } catch (err) {
+      console.error("[syncArcCurrentWeek] notes generation failed (non-fatal):", err);
+    }
+
+    // Fetch the latest plan for this user and patch the current week
+    const { data: planRow } = await supabase
+      .from("training_plans")
+      .select("id, weeks")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!planRow) return;
+
+    const planWeeks = (planRow.weeks as Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>) ?? [];
+    const updatedWeeks = planWeeks.map(w =>
+      w.week_number === currentWeekNum
+        ? {
+            ...w,
+            ...(actualMiles > 0 ? { mileage_target: actualMiles } : {}),
+            ...(longRunMiles > 0 ? { long_run_target: longRunMiles } : {}),
+            ...(derivedKeyWorkout ? { key_workout: derivedKeyWorkout } : {}),
+            ...(derivedNotes ? { notes: derivedNotes } : {}),
+          }
+        : w
+    );
+
+    await supabase
+      .from("training_plans")
+      .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
+      .eq("id", planRow.id as string);
+
+    // Also sync training_state.weekly_mileage_target to match what Dean actually prescribed
+    // (the value set during weekly_recap is the periodization engine's suggestion, which may
+    // differ from what Claude prescribed after adjusting for the athlete's specific week).
+    if (actualMiles > 0) {
+      await supabase
+        .from("training_state")
+        .update({ weekly_mileage_target: actualMiles })
+        .eq("user_id", userId);
+    }
+
+    console.log(`[syncArcCurrentWeek] synced week ${currentWeekNum}: ${actualMiles}mi, key="${derivedKeyWorkout.slice(0, 50)}"`);
+  } catch (err) {
+    console.error("[syncArcCurrentWeek] failed (non-fatal):", err);
+  }
+}
+
+/**
+ * After a user_message exchange, check if the conversation resulted in any plan
+ * changes (day swaps, distance changes, cancelled sessions). If so, merge the
+ * changes into the stored weekly_plan_sessions so reminders and post-run messages
+ * stay consistent with what Dean just agreed to.
+ *
+ * Only writes to the DB if changes are actually detected — no-ops on normal chat.
+ */
+async function maybeUpdatePlanSessions(
+  userId: string,
+  currentSessions: Array<{ day: string; date: string; label: string }>,
+  userMessage: string,
+  coachResponse: string,
+  planId: string | null = null,
+  planAllWeeks: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }> = [],
+  currentWeekNum: number = 1,
+): Promise<void> {
+  if (currentSessions.length === 0) return; // no plan stored yet — nothing to update
+
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 500,
+    system: `You are checking whether a conversation exchange changed any planned training sessions for the week.
+
+Current planned sessions (JSON):
+${JSON.stringify(currentSessions)}
+
+The athlete sent a message and the coach responded. Determine if any sessions were changed (different day, different distance, cancelled, added, or replaced).
+
+If NO changes were made, return exactly: {"changed": false}
+If changes WERE made, return the full updated sessions list AND the new key workout for the plan arc:
+{"changed": true, "sessions": [{"day": "Mon"|"Tue"|..., "date": "M/D", "label": "..."}], "key_workout": "brief label for the defining quality session this week, e.g. '6×800m @ 5K pace' or '4mi tempo'. Null if no quality session was added or changed."}
+
+Rules:
+- Mark changed=true if the coach agreed to a session change. This includes:
+  - Explicit past-tense: "Done — moved strength to Sunday", "I've moved...", "Switched...", "already swapped", "already updated"
+  - Explicit future-tense: "Moving strength to Sunday", "I'll put the easy 3mi on Tuesday instead", "Sure — strength goes to Sunday"
+  - Implicit confirmation where the coach restates the new arrangement without objection, e.g. "Perfect — Saturday long run 10mi, Sunday easy 6mi" or "Sounds good — 10mi Saturday, 6mi Sunday". If the coach's response lists the sessions in an order different from the current plan and doesn't push back, treat this as a confirmed change.
+  - "Already" language ("already swapped", "already updated") still means the DB needs updating — mark changed=true regardless.
+- Mark changed=false if the coach only gave general advice, asked a clarifying question, or suggested a change without agreeing to it.
+- For day swaps: update BOTH the "day" field AND the "date" field. The date for each session should match the calendar date of its new day. Infer dates from the existing sessions (e.g. if Mon is "4/7" and Tue is "4/8", Sun would be "4/13").
+- Preserve all unchanged sessions exactly as-is
+- If a session was cancelled with no replacement, omit it from the list
+- key_workout: pick the most quality-focused session that changed (intervals, tempo, race-specific work). If only easy runs changed, set to null.
+- Return ONLY valid JSON, no other text`,
+    messages: [{ role: "user", content: `Athlete: ${userMessage}\n\nCoach: ${coachResponse}` }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text.trim() : "{}";
+  try {
+    const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    if (!parsed.changed || !Array.isArray(parsed.sessions) || parsed.sessions.length === 0) return;
+
+    await supabase
+      .from("training_state")
+      .update({ weekly_plan_sessions: parsed.sessions as unknown as Json })
+      .eq("user_id", userId);
+
+    // If a quality session changed and we have the arc, patch the current week's key_workout
+    // so the dashboard reflects what Dean actually agreed to.
+    if (planId && planAllWeeks.length > 0 && parsed.key_workout) {
+      const updatedWeeks = planAllWeeks.map(w =>
+        w.week_number === currentWeekNum ? { ...w, key_workout: parsed.key_workout as string } : w
+      );
+      await supabase
+        .from("training_plans")
+        .update({ weeks: updatedWeeks as unknown as Json, updated_at: new Date().toISOString() })
+        .eq("id", planId);
+    }
+  } catch {
+    // parse failed — leave sessions unchanged
+  }
+}
 
 /**
  * After a user_message exchange, check if the coach committed to adjusting any
@@ -3810,23 +4120,100 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
     const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
     return est.tempo ? tsFormatPace(est.tempo) : null;
   })();
-  // Simplified week plan — target, long run, quality session from arc.
-  // No longer tracks day-level sessions; the coach prescribes a weekly target and
-  // the athlete decides when to run each session.
-  const thisWeekPlan = (() => {
-    const target = tsTargetMiles;
-    const longRun = (state?.weekly_long_run_miles as number | null) ?? null;
-    const qualitySession = (state?.weekly_quality_session as string | null) ?? null;
-    if (!target && !longRun && !qualitySession) return "";
-    const lines: string[] = [];
-    if (target) lines.push(`Target: ${tsMi(target)}`);
-    if (longRun) lines.push(`Long run: ~${tsMi(longRun)} (fit it wherever works)`);
-    if (qualitySession) lines.push(`Quality session: ${qualitySession}`);
-    return lines.length > 0 ? `\nTHIS WEEK'S PLAN:\n${lines.map(l => `- ${l}`).join("\n")}` : "";
+  const { sessionRows, projectedWeekMiles, remainingPlanLine } = (() => {
+    const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+    if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
+    const tz2 = timezone || "America/New_York";
+    const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz2 }).format(new Date());
+    const [ty, tm, td] = localTodayStr.split("-").map(Number);
+    const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
+    const dayOfWeekToday = localTodayUTC.getUTCDay();
+    const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
+    const endOfWeekMs = Date.UTC(ty, tm - 1, td + daysToSunday);
+    const todaySessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return false;
+      return new Date(Date.UTC(ty, m - 1, d)).getTime() === localTodayUTC.getTime();
+    });
+    const futureSessions = sessions.filter(s => {
+      const [m, d] = s.date.split("/").map(Number);
+      if (isNaN(m) || isNaN(d)) return true;
+      return new Date(Date.UTC(ty, m - 1, d)) > localTodayUTC;
+    });
+    const activeSessions = [...todaySessions, ...futureSessions];
+    if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
+    const parseSessionMiles = (s: { label: string }) => {
+      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
+      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
+      const mMatch = explicitTotal || firstMi;
+      if (mMatch) return parseFloat(mMatch[1]);
+      // Handle km labels (metric users)
+      const explicitKm = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*km/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*km(?:\s+total)?\)/i);
+      const firstKm = s.label.match(/(\d+(?:\.\d+)?)\s*km/i);
+      const kmMatch = explicitKm || firstKm;
+      return kmMatch ? parseFloat(kmMatch[1]) / 1.60934 : 0;
+    };
+    const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
+    const todaySessionMiles = trigger !== "post_run" ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0) : 0;
+    const totalRemainingPlanMiles = todaySessionMiles + remainingSessionMiles;
+    const targetAlreadyMet = tsTargetMiles > 0 && weekMileageSoFar >= tsTargetMiles;
+    let sessionRows = "";
+    if (todaySessions.length > 0) {
+      const todayList = todaySessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+      const todayLabel = trigger === "post_run"
+        ? `TODAY'S PLANNED SESSION (COMPLETED — already included in week-to-date above; do NOT add this distance again)`
+        : `TODAY'S PLANNED SESSION (may already be completed — check conversation history before giving future-tense advice)`;
+      sessionRows += `\n- ${todayLabel}:\n${todayList}\n`;
+    }
+    if (futureSessions.length > 0) {
+      if (targetAlreadyMet) {
+        const futureList = futureSessions.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n");
+        sessionRows += `\n- REMAINING SESSIONS (weekly target already met — these are optional / bonus miles only):\n${futureList}\n`;
+      } else {
+        const thisWeekFuture = futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return true;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
+        });
+        const nextWeekFuture = futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return false;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() > endOfWeekMs;
+        });
+        if (thisWeekFuture.length > 0) {
+          sessionRows += `\n- UPCOMING SESSIONS THIS WEEK (week ends Sunday):\n${thisWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+        }
+        if (nextWeekFuture.length > 0) {
+          sessionRows += `\n- NEXT WEEK'S PLANNED SESSIONS (starts Monday — do NOT count these as part of this week's mileage or day count):\n${nextWeekFuture.map(s => `${s.day} ${s.date} · ${s.label}`).join("\n")}\n`;
+        }
+      }
+    }
+    let remainingPlanLine = "";
+    if (totalRemainingPlanMiles > 0 && !targetAlreadyMet && trigger !== "post_run") {
+      const thisWeekRemaining = [
+        ...todaySessions,
+        ...futureSessions.filter(s => {
+          const [mm, dd] = s.date.split("/").map(Number);
+          if (isNaN(mm) || isNaN(dd)) return true;
+          return new Date(Date.UTC(ty, mm - 1, dd)).getTime() <= endOfWeekMs;
+        }),
+      ];
+      const breakdown = thisWeekRemaining.map(s => {
+        const [m, d] = s.date.split("/").map(Number);
+        const isToday = !isNaN(m) && !isNaN(d) && new Date(Date.UTC(ty, m - 1, d)).getTime() === localTodayUTC.getTime();
+        return `${isToday ? "today's" : `${s.day} ${s.date}`} ${s.label}`;
+      }).join(" + ");
+      const projTotal = weekMileageSoFar + totalRemainingPlanMiles;
+      remainingPlanLine = `\n- MILES REMAINING IN PLAN THIS WEEK: ${tsMi(totalRemainingPlanMiles)} across ${thisWeekRemaining.length} session${thisWeekRemaining.length !== 1 ? "s" : ""} (${breakdown}) → projected week total: ${tsMi(projTotal)}`;
+    }
+    return {
+      sessionRows,
+      projectedWeekMiles: trigger === "post_run"
+        ? weekMileageSoFar + remainingSessionMiles
+        : weekMileageSoFar + totalRemainingPlanMiles,
+      remainingPlanLine,
+    };
   })();
-  const sessionRows = thisWeekPlan; // referenced in system prompt sections below
-  const projectedWeekMiles = weekMileageSoFar;
-  const remainingPlanLine = "";
   const tsMileageLine = (() => {
     const hasStrava = !!(user.strava_athlete_id as number | null);
     if (!hasStrava && weekMileageSoFar === 0 && weekRunCount === 0) {
@@ -3922,7 +4309,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       ...(qualitySessionFact ? [qualitySessionFact] : []),
       ...(sessionsStatusBlock ? [sessionsStatusBlock] : []),
       ...(raceLine ? [raceLine] : []),
-      ...(thisWeekPlan ? [thisWeekPlan] : []),
+      ...(sessionRows ? [sessionRows] : []),
     ];
     return `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FACTS — pre-computed by system. Never recalculate these.
@@ -4061,8 +4448,24 @@ ${raceHistory.length > 0 ? `
 RACE HISTORY (from Strava, workout_type=race):
 ${raceHistory.map((r) => {
   const date = r.start_date ? (r.start_date as string).slice(0, 10) : "unknown date";
-  const distMiles = Math.round(((r.distance_meters as number) / 1609.34) * 10) / 10;
-  return `- ${date}: ${spMi(distMiles)} @ ${spUseMetric && r.average_pace ? convertPaceStrToKm(r.average_pace as string) : (r.average_pace || "unknown pace")}`;
+  const distMeters = r.distance_meters as number;
+  const distDisplay = tsUseMetric
+    ? `${Math.round(distMeters / 10) / 100} km`
+    : `${Math.round(distMeters / 1609.34 * 10) / 10} mi`;
+  // Convert stored /mi pace to /km for metric users
+  const paceRaw = r.average_pace as string | null;
+  const paceDisplay = (() => {
+    if (!paceRaw) return "unknown pace";
+    if (!tsUseMetric) return paceRaw;
+    const match = paceRaw.match(/^(\d+):(\d{2})/);
+    if (!match) return paceRaw;
+    const secPerMile = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    const secPerKm = secPerMile / 1.60934;
+    const m = Math.floor(secPerKm / 60);
+    const s = Math.round(secPerKm % 60);
+    return `${m}:${s.toString().padStart(2, "0")}/km`;
+  })();
+  return `- ${date}: ${distDisplay} @ ${paceDisplay}`;
 }).join("\n")}
 ` : ""}
 CURRENT TRAINING STATE:
@@ -4316,7 +4719,7 @@ ${conversationHistory || "No previous messages."}`;
  * Strava always returns distance in meters, speed in m/s, and elevation in meters
  * regardless of whether the split is metric or imperial.
  */
-function transformSplitForClaude(split: Record<string, unknown>): Record<string, unknown> {
+function transformSplitForClaude(split: Record<string, unknown>, isMetric = false): Record<string, unknown> {
   const speed = typeof split.average_speed === "number" ? split.average_speed : null;
   const gapSpeed = typeof split.average_grade_adjusted_speed === "number" ? split.average_grade_adjusted_speed : null;
   // splits_metric uses elevation_difference (meters); laps use total_elevation_gain (meters)
@@ -4325,19 +4728,30 @@ function transformSplitForClaude(split: Record<string, unknown>): Record<string,
   const distMeters = typeof split.distance === "number" ? split.distance : null;
 
   const pace = speed && speed > 0
-    ? fmtPace(1609.34 / speed / 60, "mi")
+    ? isMetric
+      ? fmtPace(1000 / speed / 60, "km")
+      : fmtPace(1609.34 / speed / 60, "mi")
     : null;
   const gapPace = gapSpeed && gapSpeed > 0
     ? fmtPace(1609.34 / gapSpeed / 60, "mi")
     : null;
 
   const result: Record<string, unknown> = { ...split };
-  if (distMeters != null) result.distance_miles = Math.round((distMeters / 1609.34) * 100) / 100;
-  if (pace) result.pace = pace;
-  if (gapPace) result.gap_pace = gapPace;
-  // Convert elevation from meters to feet; replace raw fields so Claude can't misread units
-  if (elevDiff != null) result.elevation_difference_feet = Math.round(elevDiff * 3.28084);
-  if (elevGain != null) result.total_elevation_gain_feet = Math.round(elevGain * 3.28084);
+  if (isMetric) {
+    if (distMeters != null) result.distance_km = Math.round((distMeters / 1000) * 100) / 100;
+    if (pace) result.pace = pace;
+    if (gapPace) result.gap_pace = gapPace;
+    // Keep elevation in meters for metric users
+    if (elevDiff != null) result.elevation_difference_m = Math.round(elevDiff * 10) / 10;
+    if (elevGain != null) result.total_elevation_gain_m = Math.round(elevGain * 10) / 10;
+  } else {
+    if (distMeters != null) result.distance_miles = Math.round((distMeters / 1609.34) * 100) / 100;
+    if (pace) result.pace = pace;
+    if (gapPace) result.gap_pace = gapPace;
+    // Convert elevation from meters to feet
+    if (elevDiff != null) result.elevation_difference_feet = Math.round(elevDiff * 3.28084);
+    if (elevGain != null) result.total_elevation_gain_feet = Math.round(elevGain * 3.28084);
+  }
   delete result.distance;
   delete result.average_speed;
   delete result.average_grade_adjusted_speed;
@@ -4876,10 +5290,23 @@ function buildUserMessage(
       const dateNote = actStartDate
         ? `Activity date: ${actStartDate}. This may differ from today if the athlete logged it retroactively — use the activity date, not today's date, when referencing when the run happened.`
         : "";
-      // Convert elevation_gain from meters (how Strava/DB stores it) to feet for Claude.
+      // Convert elevation_gain from meters (how Strava/DB stores it) to the preferred unit for Claude.
       // Also transform splits and laps: Strava always returns distance in meters, speed in m/s,
-      // and elevation in meters regardless of split type — convert all to imperial/readable units.
+      // and elevation in meters regardless of split type — convert all to the athlete's preferred units.
+      const isMetricUser = preferredUnits === "metric";
       const rawSummary = activityData?.summary as { splits?: unknown[]; laps?: unknown[] } | null;
+      const storedPacePerMile = activityData?.average_pace as string | null;
+      // Convert stored /mi pace to /km for metric users by parsing the M:SS/mi string.
+      const pacePerKm = (() => {
+        if (!storedPacePerMile || !isMetricUser) return null;
+        const match = storedPacePerMile.match(/^(\d+):(\d{2})/);
+        if (!match) return null;
+        const totalSecPerMile = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+        const totalSecPerKm = totalSecPerMile / 1.60934;
+        const m = Math.floor(totalSecPerKm / 60);
+        const s = Math.round(totalSecPerKm % 60);
+        return `${m}:${s.toString().padStart(2, "0")}/km`;
+      })();
       // Compute hasHR here — before activityForClaude — so we can strip HR fields from the JSON
       // when no monitor was used. The text guard alone isn't enough: Claude reads the raw JSON
       // and will cite values it finds there even if instructed not to.
@@ -4891,44 +5318,55 @@ function buildUserMessage(
             // to infer "breaks were built in" when the athlete just forgot to stop their watch.
             // moving_time_seconds is the meaningful figure for coaching.
             elapsed_time_seconds: undefined,
+            // Show distance in the athlete's preferred unit alongside the raw meters
+            ...(isMetricUser
+              ? {
+                  distance_km: activityData.distance_meters != null ? Math.round((activityData.distance_meters as number) / 10) / 100 : null,
+                  average_pace: pacePerKm ?? storedPacePerMile,
+                  elevation_gain_m: activityData.elevation_gain != null ? Math.round((activityData.elevation_gain as number) * 10) / 10 : null,
+                  elevation_gain: undefined,
+                }
+              : {
+                  elevation_gain_feet: activityData.elevation_gain != null ? Math.round((activityData.elevation_gain as number) * 3.28084) : null,
+                  elevation_gain: undefined,
+                }),
             // Strip HR fields when no monitor was worn — keeps the raw JSON honest so
             // Claude cannot read a value that contradicts the "no HR data" guard.
             average_heartrate: hasHR ? activityData.average_heartrate : undefined,
             max_heartrate: hasHR ? (activityData as Record<string, unknown>).max_heartrate : undefined,
-            elevation_gain_feet: activityData.elevation_gain != null
-              ? Math.round((activityData.elevation_gain as number) * 3.28084)
-              : null,
-            elevation_gain: undefined,
             summary: rawSummary
               ? {
-                  // Filter out paused-device splits (pace > 20 min/mile = clearly not running).
+                  // Filter out paused-device splits (pace > 20 min/unit = clearly not running).
                   // These appear when the athlete forgets to stop Strava, creating a wildly-slow
                   // final partial split that Claude then flags as a concerning anomaly.
                   // splits_standard gives one entry per mile (matching what the athlete sees in
-                  // the Strava app). Add cumulative_miles so Claude knows the actual position —
-                  // the last split is often partial (e.g. a 5.1mi run has 5 full splits + 1 partial).
+                  // the Strava app). Add cumulative distance so Claude knows the actual position.
                   splits: (() => {
-                    let cumulativeMiles = 0;
+                    let cumulative = 0;
                     return rawSummary.splits
-                      ?.map(s => transformSplitForClaude(s as Record<string, unknown>))
+                      ?.map(s => transformSplitForClaude(s as Record<string, unknown>, isMetricUser))
                       .filter(s => {
                         const pace = s.pace as string | null;
                         if (!pace) return true;
                         const mins = parseInt(pace.split(":")[0], 10);
+                        // Threshold: 20 min/mi (~12.4 min/km) — filters stalled/paused device splits
                         return isNaN(mins) || mins < 20;
                       })
                       .map(s => {
-                        cumulativeMiles += (s.distance_miles as number) || 0;
-                        const out: Record<string, unknown> = { ...s, cumulative_miles: Math.round(cumulativeMiles * 100) / 100 };
-                        if (!hasHR) delete out.average_heartrate;
-                        return out;
+                        if (isMetricUser) {
+                          cumulative += (s.distance_km as number) || 0;
+                          const out: Record<string, unknown> = { ...s, cumulative_km: Math.round(cumulative * 100) / 100 };
+                          if (!hasHR) delete out.average_heartrate;
+                          return out;
+                        } else {
+                          cumulative += (s.distance_miles as number) || 0;
+                          const out: Record<string, unknown> = { ...s, cumulative_miles: Math.round(cumulative * 100) / 100 };
+                          if (!hasHR) delete out.average_heartrate;
+                          return out;
+                        }
                       });
                   })(),
-                  laps: rawSummary.laps?.map(s => {
-                    const out = transformSplitForClaude(s as Record<string, unknown>);
-                    if (!hasHR) delete out.average_heartrate;
-                    return out;
-                  }),
+                  laps: rawSummary.laps?.map(s => { const out = transformSplitForClaude(s as Record<string, unknown>, isMetricUser); if (!hasHR) delete out.average_heartrate; return out; }),
                 }
               : null,
           }
@@ -4953,8 +5391,9 @@ function buildUserMessage(
       if ((activityData?.type as string) === "Ride") {
         dataGuards.push("RIDE SPEED UNITS: This is an outdoor Ride (not a VirtualRide). Strava reports cycling speed in mph or km/h — do NOT express it as min/mile or min/km pace (those are running-pace units). Report speed as mph for imperial athletes or km/h for metric athletes (e.g. '18.2 mph avg' or '29.3 km/h avg').");
       }
-      if (!hasSplits) dataGuards.push("No per-mile split data was synced from Strava. Do NOT quote specific mile split paces — ask the athlete how it felt instead.");
-      if (!hasLaps) dataGuards.push("No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around mile X' instead. CRITICAL: Do NOT state how many intervals, repeats, or reps were completed (e.g. '5x800m', '6 repeats', '4 strides'). Without lap data you cannot know the rep count — the athlete knows their own workout and will immediately notice if you get it wrong. Describe the workout structure generically (e.g. 'your interval session showed strong pace variation') without citing a specific count.");
+      const splitUnitLabel = isMetricUser ? "km" : "mile";
+      if (!hasSplits) dataGuards.push(`No per-${splitUnitLabel} split data was synced from Strava. Do NOT quote specific ${splitUnitLabel} split paces — ask the athlete how it felt instead.`);
+      if (!hasLaps) dataGuards.push(`No lap data was synced from Strava. Do NOT reference lap counts, per-lap pace, per-lap elevation, or lap-by-lap effort. Do NOT use terms like 'lap-button', 'lap X', or describe the run as having discrete named segments (warmup lap, hard lap, cooldown lap). Pace/HR variation visible in the GPS splits is NOT evidence of lap-button presses — describe it as 'your splits show…' or 'around ${splitUnitLabel} X' instead.`);
       if (!hasHR) dataGuards.push("No heart rate data is available for this activity. Do NOT reference HR values, heart rate, specific BPM figures, aerobic zone labels (Zone 1/2/3/4/5), or make any effort-level inference that requires HR data (e.g. 'your heart rate seemed controlled', 'you stayed aerobic', 'it looked like a zone 2 effort'). Describe effort using pace, splits, and elapsed time only.");
       const activityTypeStr = (activityData?.activity_type ?? activityData?.type) as string | null;
       if (hasHR && activityTypeStr === "Swim") dataGuards.push("SWIM HR NOTE: Heart rate data for swim activities is often unreliable — wrist optical sensors do not work well underwater. Do NOT cite a specific average BPM for this swim. If you want to comment on effort, describe it qualitatively (e.g. 'comfortable aerobic effort') without stating a number.");
@@ -4965,40 +5404,45 @@ function buildUserMessage(
       // Cadence guard: only reference cadence when it's stored in the activity record.
       const hasCadence = !!(activityData?.average_cadence != null);
       if (!hasCadence) dataGuards.push("No cadence data is available for this activity. Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, or range.");
-      // Per-mile and per-lap elevation breakdown is not a Strava-provided field — only total elevation gain is.
-      dataGuards.push("Per-mile and per-lap elevation breakdowns (e.g. '500ft gain on lap 2', '721ft at miles 11-12') are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific footage to individual miles or laps.");
+      // Per-split elevation breakdown is not a Strava-provided field — only total elevation gain is.
+      dataGuards.push(`Per-${splitUnitLabel} and per-lap elevation breakdowns are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific ${isMetricUser ? "meters" : "footage"} to individual ${splitUnitLabel}s or laps.`);
+      // splits_standard gives one split per mile; for metric users we output per-km fields.
+      // This guard catches legacy activities with km-based splits stored before splits_standard.
+      if (!isMetricUser && hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
       // max_heartrate is this activity's single-run peak, NOT the athlete's physiological maximum.
       // Do not multiply it by ~1.02 or otherwise derive a "true max HR" estimate from it.
       dataGuards.push("The `max_heartrate` field in the activity JSON is this run's single-activity peak reading, NOT the athlete's physiological maximum heart rate. Do NOT use it to estimate or state the athlete's max HR (e.g. do NOT say 'your max is around X based on today's peak'). If you need to reference HR zones, describe them in relative terms (e.g. 'zone 4-5', 'high aerobic effort') without asserting a specific max HR figure.");
-      // splits_standard gives one split per mile, so splitCount ≈ ceil(runDistanceMiles).
-      // Guard: if splits look like km data (far more splits than miles), warn Claude.
-      // This handles legacy activities stored before the switch to splits_standard.
-      if (hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
         dataGuards.push(`SPLIT UNIT WARNING: This run is ${runDistanceMiles.toFixed(2)} miles but has ${splitCount} split entries — the splits appear to be per-kilometer, not per-mile. Each split's "cumulative_miles" field shows its actual position in the run. NEVER reference "mile ${splitCount}" or any mile number beyond ${Math.ceil(runDistanceMiles)} — that mile does not exist in this run. Use cumulative_miles to describe position (e.g. "around mile 2.5" or "in the final stretch").`);
       }
       const dataGuardBlock = dataGuards.length > 0
         ? `\nDATA AVAILABILITY GUARD — the following data is NOT present; do not fabricate it:\n${dataGuards.map(g => `- ${g}`).join("\n")}`
         : "";
 
-      const weekMilesStr = umUseMetric
+      const weekVolumeDisplay = isMetricUser
         ? `${(weekMileageSoFar * 1.60934).toFixed(1)} km`
         : `${weekMileageSoFar.toFixed(1)} mi`;
       const isRunActivity = ["Run", "TrailRun", "VirtualRun"].includes((activityData?.type as string) ?? "");
       const weekMileageContext = isRunActivity
-        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekMilesStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
+        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
         : crossTrainingPostRunContext
         ? `\n${crossTrainingPostRunContext}\n`
-        : `\n<rule>This is a non-run activity. Do NOT cite the week's running mileage total in your response — leave weekly mileage commentary for post-run messages. Keep your response to 2–3 sentences focused on the cross-training session itself.</rule>\n`;
+        : `\n<rule>WEEK-TO-DATE RUNNING: ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
+
+      const dataGlossaryUnits = isMetricUser
+        ? "All paces are min/km. Elevation in meters. Distances in km (distance_km field) and meters (distance_meters field)."
+        : "All paces are min/mile. Elevation in feet. Distances in miles.";
+      const cumulativeField = isMetricUser ? "cumulative_km" : "cumulative_miles";
+      const splitUnit = isMetricUser ? "km" : "mile";
 
       const activitySemanticGuard = buildActivityDataGuard(activityForClaude as Record<string, unknown> | null);
 
       return `A workout just synced from Strava. ${dateNote}${weekMileageContext}
-${activitySemanticGuard ? `${activitySemanticGuard}\n` : ""}
-CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 8:12/mi avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
+
+CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 5:06/km avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
 
 DATA GLOSSARY for the details below:
-- summary.splits: auto-generated by Strava, one entry per kilometer (NOT per mile). Each entry includes a "cumulative_miles" field showing how far into the run that split ends. Use cumulative_miles to describe position — do NOT treat the array index or the "split" field as a mile number. For a 3.1mi run there will be ~5 km splits; calling the last one "mile 5" is wrong.${hasLaps ? "\n- summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown. IMPORTANT: Lap data provides per-lap AVERAGES for pace and HR only. Do NOT cite per-lap elevation gain, per-lap cadence, or per-lap power/watt ranges — Strava does not provide these per lap. Do NOT cite specific elapsed-time markers within a lap (e.g. \"at 48:46 into the run, HR jumped to 140\") — Strava does not record event-level timestamps within a lap. Only reference per-lap pace and HR averages. Do NOT refer to laps by specific index numbers (e.g. \"lap 3\", \"laps 3/6/7/8\") — lap ordering is not reliably meaningful to the athlete. Instead describe them by effort pattern: \"the hard intervals\", \"the high-effort segments\", \"your recovery laps\", \"the harder efforts\" etc." : ""}
-- All paces in the JSON below are min/mile. Elevation in feet. Distances in miles. ${umUseMetric ? "This athlete uses metric — convert all paces to min/km, distances to km, and elevation to meters in your response." : "Use these units as-is in your response."}${dataGuardBlock}
+- summary.splits: auto-generated by Strava, one entry per ${splitUnit}. Each entry includes a "${cumulativeField}" field showing how far into the run that split ends. Use ${cumulativeField} to describe position — do NOT treat the array index or the "split" field as a ${splitUnit} number.${hasLaps ? "\n- summary.laps: manual lap button presses on the athlete's watch (or device auto-laps). Distance and time vary — these reflect segments the athlete intentionally marked, e.g. warm-up, hard effort, cooldown. IMPORTANT: Lap data provides per-lap AVERAGES for pace and HR only. Do NOT cite per-lap elevation gain, per-lap cadence, or per-lap power/watt ranges — Strava does not provide these per lap. Do NOT cite specific elapsed-time markers within a lap (e.g. \"at 48:46 into the run, HR jumped to 140\") — Strava does not record event-level timestamps within a lap. Only reference per-lap pace and HR averages." : ""}
+- ${dataGlossaryUnits}${dataGuardBlock}
 ${intervalPattern ? `\n${intervalPattern}\n` : ""}
 Details:
 ${JSON.stringify(activityForClaude, null, 2)}
@@ -5327,12 +5771,25 @@ If LONGITUDINAL TRAINING ANALYSIS is present above, use it to elevate your first
 Do NOT just recite the numbers — synthesize them into one actionable sentence.
 
 PROGRESSION — be a proactive coach, not a scheduler:
-If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly framework must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.
-- If recent weeks have been all easy miles with no quality work: this week should introduce a tempo or interval session. Name it specifically ("Let's add a 3-mile tempo at 8:30/mi this week").
-- If the athlete is several weeks out from their race: the plan should be building toward race-specific fitness (threshold work, goal-pace miles), not just accumulating easy volume.
+If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly plan must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.
+- If recent weeks have been all easy miles with no quality work: this week should introduce or propose a tempo or interval session. Name it specifically (e.g. ${recapIsMetric ? '"Let\'s add a 5km tempo at 5:15/km on Wednesday"' : '"Let\'s add a 3-mile tempo at 8:30/mi on Wednesday"'}).
+- If the athlete is several weeks out from their race: the plan should be building toward race-specific fitness (threshold work, goal-pace ${recapIsMetric ? "km" : "miles"}), not just accumulating easy volume.
 - If the athlete has been consistent: acknowledge the trend and explain what comes next and why ("You've built a solid base over the last month — time to start sharpening with some quality sessions").
 Always include one sentence in the first text explaining what this week is targeting and why, even if the phase hasn't changed.
 
+QUALITY SESSION "WHY": In the sessions list, for any tempo run, interval session, or race-pace workout, add a brief purpose note on the same line — one short clause after a dash. e.g. ${recapIsMetric ? '"Wed 3/12 · Tempo 6.5km (3km @ 5:15/km) — threshold work, the engine for your race pace"' : '"Wed 3/12 · Tempo 4mi (2mi @ 8:45) — threshold work, the engine for your marathon pace"'} or "Thu 3/13 · 6×800m @ 5K pace — sharpens race speed and economy." Keep it to one clause only. Easy runs and long runs do not need this.
+
+EASY RUN ENRICHMENT: Easy runs don't need a "why" clause, but they should never be bare mileage either. Add one of the following based on context — pick whichever is most useful for this athlete this week:
+${recapIsMetric
+  ? `- HR target if HR data is in the activity summary: "Easy 10km @ 6:00-6:30/km (~140 bpm)"
+- Terrain or surface cue when it matters: "Easy 10km — trails or soft surface if you can, legs should feel fresh"
+- Effort cue for weeks with no quality sessions: "Easy 8km — full conversational effort, never pushing"
+- Recovery framing after a hard week: "Easy 10km — keep it genuinely easy, this is active recovery"`
+  : `- HR target if HR data is in the activity summary: "Easy 6mi @ 9:30-10:00/mi (~140 bpm)"
+- Terrain or surface cue when it matters: "Easy 6mi — trails or soft surface if you can, legs should feel fresh"
+- Effort cue for weeks with no quality sessions: "Easy 5mi — full conversational effort, never pushing"
+- Recovery framing after a hard week: "Easy 6mi — keep it genuinely easy, this is active recovery"`}
+One cue per easy run is enough. Don't annotate every run the same way — vary them, and skip the annotation entirely on short recovery runs where the label is self-explanatory.
 WEEK NUMBERING: Do NOT refer to weeks as "Week 2", "Week 3", etc. Use "this week" and "next week". If you want to signal a phase, describe it by feel or intent — "another building week", "recovery week", "adding a quality session this week".
 
 YTD MILESTONES: Check "Year-to-date" in ATHLETE HISTORY. If the athlete has crossed a round-number milestone (100, 200, 250, 300, 500, 1000 miles) or is within striking distance of one, call it out naturally — one short sentence woven into the recap, not a separate announcement. Skip it if the number isn't notable.
@@ -5345,6 +5802,53 @@ NEVER write "?mi", "X mi", or "check distance" — always compute the number. Me
 
 STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility or cross-training, mention it as a weekly count (e.g. "2× strength + mobility this week" or "1 easy bike session"). Do NOT assign it to a specific day. When you prescribe a strength session, include a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
 
+YTD MILESTONES: Check "Year-to-date" in ATHLETE HISTORY. If the athlete has crossed a round-number milestone this week (100, 200, 250, 300, 500, 1000 miles) or is within striking distance of one in the coming week, call it out naturally — one short sentence woven into the recap, not a separate announcement. e.g. "You also just crossed 500 miles on the year — that's a real number." Keep it earned, not forced. Skip it if the number isn't notable.
+
+SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
+<rule>CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.</rule>
+
+TRAINING DAY COUNT VALIDATION — CRITICAL: The number of running sessions in your plan must exactly match the athlete's stated days/week preference ("Training days" in ATHLETE HISTORY). If the athlete wants 5 days of running, the plan must have exactly 5 running sessions — not 4, not 6. If the count is wrong, fix the plan. This is one of the most common plan errors.
+
+For the sessions text, put each session on its own line using this compact format, sorted chronologically by date — never group by type:
+${recapIsMetric
+  ? `Mon 3/2 · Easy 8km @ 6:00-6:30/km
+Tue 3/3 · Strength + mobility 20 min
+Wed 3/4 · Tempo 6.5km (3km @ 5:15/km)
+Sat 3/7 · Long run 13km easy`
+  : `Mon 3/2 · Easy 5mi @ 9:30/mi
+Tue 3/3 · Strength + mobility 20 min
+Wed 3/4 · Tempo 4mi (2mi @ 8:45)
+Sat 3/7 · Long run 8mi easy`}
+Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
+NO DUPLICATE ENTRIES: Each date must appear at most once per session type. Before sending, scan your session list — if the same date and session description appear more than once, remove the duplicate. A plan with "Thu 3/26 · Easy ${recapIsMetric ? "3km" : "2mi"}" listed twice is wrong and confusing.
+SESSION DISTANCE FORMAT: Running sessions must include distance in ${recapIsMetric ? "km (e.g. \"Easy 8km\")" : "miles (e.g. \"Easy 5mi\")"}. Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance — use duration or activity name only (e.g. "Strength + mobility 30 min", "Zwift ride 60 min", "Master's swim"). Putting distance on a non-running session causes it to be incorrectly counted as running volume.
+
+STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate. When you prescribe a strength session, always follow the session list with a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
+OPTIONAL CROSS-TRAINING SESSIONS: If the athlete has requested optional workouts (e.g. "optional bike", "optional strength", "optional cross-training"), include them in the sessions list on rest days. Mark them with "(Optional)" at the start of the label. Example: "Mon 3/2 · (Optional) Easy bike 45 min" or "Fri 3/6 · (Optional) Strength + climbing drills 30 min". Optional sessions are a suggestion — the athlete can skip them freely. Do NOT include their duration in the Total mileage count.
+
+QUALITY SESSION DISTANCE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. ${recapIsMetric ? "Use defaults of 1.5km warmup and 1km cooldown if the athlete hasn't specified." : "Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified."} Format the label to show the breakdown in parentheses. Examples:
+${recapIsMetric
+  ? `- "Tempo 10km (1.5km WU + 7km @ 5:15/km tempo + 1.5km CD)"
+- "Intervals 8km (1.5km WU + 6×800m @ 4:30/km + 1km CD)"
+- "Treadmill hills 10km (1.5km WU + 7km at 8% grade + 1.5km CD)"`
+  : `- "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
+- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
+- "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"`}
+Never write a short quality distance when the athlete will also run warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava. This prevents the plan from understating the week's actual volume.
+
+VOLUME ACCURACY: Any weekly volume total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero. If the sum doesn’t match your stated total, correct the plan before sending. Never show the calculation. If you’re not listing every session, omit the total entirely.
+TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the ${recapIsMetric ? "km" : "miles"} from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: ${recapIsMetric ? "52 km" : "32.5 mi"}". Wrong: adding past-week volume to next week’s total.
+<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use ‘min’ for duration — NEVER ‘${recapIsMetric ? "km" : "mi"}’. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60${recapIsMetric ? "km" : "mi"}". Writing distance on a cross-training session causes it to be counted as running volume and will inflate your stated total.</rule>
+
+SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the upcoming week’s plan. Format exactly:
+[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"${recapIsMetric ? "Easy 10km" : "Easy 6mi"}","optional":false},{"day":"Wed","date":"M/D","label":"${recapIsMetric ? "6×800m @ 5K pace 5km" : "6×800m @ 5K pace 3mi"}","optional":false}]]
+Rules:
+- day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
+- date: M/D format matching the calendar date you assigned to this session
+- label: concise session description including distance in ${recapIsMetric ? "km" : "miles"} (e.g. "${recapIsMetric ? "Easy 10km" : "Easy 6mi"}", "${recapIsMetric ? "Long run 16km" : "Long run 10mi"}", "${recapIsMetric ? "6×800m @ 5K pace 8km" : "6×800m @ 5K pace 3mi"}", "Strength 30min")
+- optional: true only for explicitly optional sessions, false otherwise
+- Include every session in the upcoming week — do not omit any
+- The tag is stripped before the athlete sees the message — they will never see it
 ${dashboardUrl ? `DASHBOARD: At the end of your second bubble, add one short sentence with the dashboard link — e.g. "Your full plan is at ${dashboardUrl}" or "See the full week breakdown at ${dashboardUrl}". Vary the phrasing.` : ""}`;
     }
     case "workout_image": {
