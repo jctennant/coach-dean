@@ -5307,10 +5307,11 @@ function buildUserMessage(
         const s = Math.round(totalSecPerKm % 60);
         return `${m}:${s.toString().padStart(2, "0")}/km`;
       })();
-      // Compute hasHR here — before activityForClaude — so we can strip HR fields from the JSON
-      // when no monitor was used. The text guard alone isn't enough: Claude reads the raw JSON
-      // and will cite values it finds there even if instructed not to.
+      // Compute hasHR and hasWatts before activityForClaude — so we can strip fields from the
+      // JSON when no monitor was used. The text guard alone isn't enough: Claude reads the raw
+      // JSON and will cite (or report availability of) values it finds there even if instructed not to.
       const hasHR = !!(activityData?.average_heartrate != null);
+      const hasWatts = !!((activityData as Record<string, unknown> | null)?.average_watts != null);
       const activityForClaude = activityData
         ? {
             ...activityData,
@@ -5334,6 +5335,12 @@ function buildUserMessage(
             // Claude cannot read a value that contradicts the "no HR data" guard.
             average_heartrate: hasHR ? activityData.average_heartrate : undefined,
             max_heartrate: hasHR ? (activityData as Record<string, unknown>).max_heartrate : undefined,
+            // Strip watts field when no power meter — same pattern as HR above.
+            average_watts: hasWatts ? (activityData as Record<string, unknown>).average_watts : undefined,
+            elevation_gain_feet: activityData.elevation_gain != null
+              ? Math.round((activityData.elevation_gain as number) * 3.28084)
+              : null,
+            elevation_gain: undefined,
             summary: rawSummary
               ? {
                   // Filter out paused-device splits (pace > 20 min/unit = clearly not running).
@@ -5399,7 +5406,7 @@ function buildUserMessage(
       if (hasHR && activityTypeStr === "Swim") dataGuards.push("SWIM HR NOTE: Heart rate data for swim activities is often unreliable — wrist optical sensors do not work well underwater. Do NOT cite a specific average BPM for this swim. If you want to comment on effort, describe it qualitatively (e.g. 'comfortable aerobic effort') without stating a number.");
       // Power/watt guard: only present when there's no actual power data in the DB record.
       // If average_watts is populated (power meter, Zwift, etc.) Claude can reference the overall average.
-      const hasWatts = !!(activityData?.average_watts != null);
+      // hasWatts is computed earlier (before activityForClaude) so the field is also stripped from JSON.
       if (!hasWatts) dataGuards.push(`No power data is available for this activity. Do NOT reference wattage, watts, or power output — not even as a range or estimate. Describe effort using ${hasHR ? "HR, " : ""}elapsed time, and pace-equivalent language only.`);
       // Cadence guard: only reference cadence when it's stored in the activity record.
       const hasCadence = !!(activityData?.average_cadence != null);

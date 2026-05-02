@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-02 — Fix HR BPM targets in cycling prescriptions; strip watts field when no power data
+
+**Type:** Bug Fix
+**Reported by:** Daily conversation analysis (2026-05-01)
+**User feedback:** N/A
+**Root cause:**
+1. `buildHRZoneContext` unconditionally told Claude to "use zone names AND bpm values in coaching copy." Combined with the cross-training prescription template saying "HR stays in Z2 — conversational," Claude cited specific BPM targets (e.g. "Zone 2 (152–167 bpm)") for cycling prescriptions even when the athlete had no HR monitor on their bike. LTHR zones are derived from running data and the BPM guidance was inappropriate for cross-training contexts where HR monitoring isn't confirmed.
+2. `average_watts` was never stripped from `activityForClaude` when `hasWatts = false` — unlike `average_heartrate` which is stripped when `!hasHR`. Seeing the field in the raw JSON (even as `null`) caused Claude to hallucinate "power/watts data: YES" in activity summaries with no power meter data.
+**Fix / Change:**
+1. Modified the instruction in `buildHRZoneContext` to distinguish between analyzing runs with HR data (bpm values appropriate) vs. prescribing future cross-training sessions (use effort/RPE language unless there's evidence the athlete monitors HR for that activity).
+2. Moved `hasWatts` computation to before `activityForClaude` construction (same pattern as `hasHR`), and added `average_watts: hasWatts ? ... : undefined` to the spread so the field is fully absent from the Claude-visible JSON when no power data exists.
+**Files changed:** `src/lib/hr-zones.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-04-28 — Detect and respect metric unit preference during onboarding
 
 **Type:** Bug Fix
