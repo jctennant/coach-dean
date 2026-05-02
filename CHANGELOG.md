@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-01 — Fix zone number mismatch when LTHR confidence is low
+
+**Type:** Bug Fix
+**Reported by:** Jake (user feedback)
+**User feedback:** "This isn't accurate for my zone 2!" / "my zone 2 is like 130-150" / "it already has my zone 1-5 but it accidentally paired my zone 3 in this response instead of zone 2"
+**Root cause:** When `lthr_confidence = "low"`, the dashboard already falls back to % max HR zones (Z1-Z5 with different bpm boundaries). But the coaching system prompt was still injecting the low-confidence LTHR zones. This meant the athlete saw one set of bpm ranges on their dashboard and a different set in Dean's coaching messages — same zone *numbers*, different bpm values.
+**Fix / Change:** Mirror the dashboard's behavior: when `lthr_confidence === "low"`, set `lthrData = null` so the coaching prompt falls back to the % max HR zone description instead of the LTHR zones. The zone bpm ranges Dean cites now match what the athlete sees on their dashboard.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-04-29 — Fix interval session misclassified as easy in Strava annotation
 
 **Type:** Bug Fix

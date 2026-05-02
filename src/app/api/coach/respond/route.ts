@@ -1326,7 +1326,9 @@ Use this data to:
     const lthr = profile?.lthr_estimate as number | null;
     const source = profile?.lthr_source as string | null;
     const confidence = profile?.lthr_confidence as LTHRConfidence | null;
-    if (lthr && source && confidence) return { lthr, source, confidence };
+    // Mirror the dashboard: when confidence is "low", fall back to % max HR zones
+    // so the zone bpm ranges Dean cites match what the athlete sees on their dashboard.
+    if (lthr && source && confidence && confidence !== "low") return { lthr, source, confidence };
     return null;
   })();
 
