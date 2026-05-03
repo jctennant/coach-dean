@@ -368,11 +368,18 @@ function buildEvalSystemPrompt(fixture) {
   let activityBlock = "";
   if (fixture.activity_details) {
     const a = fixture.activity_details;
+    const hrVal = a.average_heartrate ?? a.hr;
     activityBlock = `\nACTIVITY JUST SYNCED FROM STRAVA:
 - Type: ${a.type}
 - Distance: ${a.distance_miles} miles
 - Avg pace: ${a.pace || "unknown"}
-${a.hr ? `- Avg HR: ${a.hr} bpm\n` : ""}`;
+${hrVal ? `- Avg HR: ${hrVal} bpm\n` : ""}${a.elevation_gain_ft ? `- Elevation gain: ${a.elevation_gain_ft} ft\n` : ""}`;
+    if (a.splits && a.splits.length > 0) {
+      activityBlock += `- Mile splits:\n`;
+      for (const s of a.splits) {
+        activityBlock += `  Mile ${s.mile}: ${s.pace}\n`;
+      }
+    }
     if (a.splits_km && a.splits_km.length > 0) {
       activityBlock += `- Splits (one entry per kilometer — use cumulative_miles for position, do NOT treat split index as a mile number):\n`;
       for (const s of a.splits_km) {
@@ -500,7 +507,7 @@ ${isDeload ? `<rule>RECOVERY WEEK: This week's target is ${weeklyTarget} mi — 
 - Athlete VDOT: ${user.vdot}
 - Current paces (Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth):
   Easy ${paces.easyRange}, Tempo ${paces.tempo}, Interval ${paces.interval}
-<rule>PACE SANITY CHECK (extends principle 10): This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or slower is wrong — use the stored Tempo (${paces.tempo}) instead. WU/CD pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit on every pace.</rule>${sessionRows}${remainingPlanLine}
+<rule>PACE SANITY CHECK (extends principle 10): This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or slower is wrong — use the stored Tempo (${paces.tempo}) instead. WU/CD pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit on every pace.</rule>${sessionRows}${remainingPlanLine}${user.weekly_plan?.quality_session ? `\nTHIS WEEK'S PLAN — Quality session: YES — ${user.weekly_plan.quality_session}` : ""}
 ${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}
 ${conversationBlock}
 MILEAGE FORMAT (per principle 9):
@@ -596,11 +603,16 @@ function buildUserMessage(fixture) {
   if (trigger === "post_run" && activity_details) {
     const a = activity_details;
     const weekSoFar = user.miles_logged_this_week || a.distance_miles || 0;
+    const hrVal = a.average_heartrate ?? a.hr;
     let msg = `New activity synced from Strava:\n`;
     msg += `- Type: ${a.type}\n`;
     msg += `- Distance: ${a.distance_miles} miles\n`;
     msg += `- Avg pace: ${a.pace || "N/A"}\n`;
-    if (a.hr) msg += `- Avg HR: ${a.hr} bpm\n`;
+    if (hrVal) msg += `- Avg HR: ${hrVal} bpm\n`;
+    if (a.elevation_gain_ft) msg += `- Elevation gain: ${a.elevation_gain_ft} ft\n`;
+    if (a.splits && a.splits.length > 0) {
+      msg += `- Mile splits: ${a.splits.map(s => `Mile ${s.mile}: ${s.pace}`).join(", ")}\n`;
+    }
     msg += `\n<rule>WEEK-TO-DATE (authoritative — from Strava, Monday through now): ${weekSoFar.toFixed(1)} mi total</rule>`;
     baseMsg = msg;
   } else if (trigger === "weekly_recap") {

@@ -1,0 +1,52 @@
+{
+  "id": "post-run-trail-vert",
+  "description": "Trail runner targeting a mountain race (Snowbird, 8.9mi, ~4,400ft gain). Post-run for a vert-heavy 7-mile trail run. Insight should tie to race-specific vert demands, not generic feedback.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-05-15",
+  "user": {
+    "name": "Jake",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "trail_race",
+    "goal_race": "Cirque Series Snowbird",
+    "goal_race_date": "2026-07-11",
+    "goal_time_minutes": null,
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 52,
+    "easy_pace": "9:15/mi",
+    "tempo_pace": "7:26/mi",
+    "interval_pace": "6:42/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 28,
+    "miles_logged_this_week": 7,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "notes": "Training for Cirque Series Snowbird — 8.9mi, ~4,400ft elevation gain, race altitude ~11,000ft.",
+    "recent_activities": [
+      { "date": "2026-05-15", "type": "Trail Run", "distance_miles": 7.0, "pace": "11:20/mi", "elevation_gain_ft": 1850 },
+      { "date": "2026-05-11", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:20/mi", "elevation_gain_ft": 120 },
+      { "date": "2026-05-09", "type": "Trail Run", "distance_miles": 6.5, "pace": "11:45/mi", "elevation_gain_ft": 1400 },
+      { "date": "2026-05-04", "type": "Long Run", "distance_miles": 9.0, "pace": "10:05/mi", "elevation_gain_ft": 800 },
+      { "date": "2026-05-01", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:10/mi", "elevation_gain_ft": 80 }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-05-15",
+    "type": "Trail Run",
+    "distance_miles": 7.0,
+    "pace": "11:20/mi",
+    "duration_minutes": 79,
+    "elevation_gain_ft": 1850
+  },
+  "ground_truth": {
+    "notes": "This is a trail runner building toward Snowbird (8.9mi, ~4,400ft gain). The activity had 1,850ft of gain in 7 miles — that's ~264ft/mile. The race demands ~494ft/mile avg gain. The post-run insight should be goal-tied to the trail race: either (a) acknowledge the vert accumulation and frame it in terms of race prep (e.g. 'building the climbing legs you'll need at Snowbird'), or (b) note that the vert-per-mile today (~264ft/mi) is building toward the race's ~494ft/mi demand. Should NOT give generic HR zone or aerobic base feedback unconnected to the trail goal. Should NOT treat the 11:20/mi pace as slow — on a trail with 1,850ft gain, that's strong effort.",
+    "must_mention_trail_or_vert": true,
+    "must_connect_to_race": true,
+    "forbidden_phrases": ["gray zone", "keep easy runs easy", "aerobic base", "Zone 2 today"],
+    "required_signals": ["vert", "climb", "elevation", "Snowbird", "race", "trail"]
+  }
+}

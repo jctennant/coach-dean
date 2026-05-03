@@ -1,0 +1,63 @@
+{
+  "id": "post-run-easy-zone2-affirm",
+  "description": "Marathon runner does a correct easy Zone 2 run. Dean should affirm the effort, connect it to marathon prep, and NOT lecture about keeping easy runs easy or add caveats.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-05-13",
+  "user": {
+    "name": "Sarah",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-10-11",
+    "goal_time_minutes": 225,
+    "current_week": 6,
+    "current_phase": "build",
+    "vdot": 46,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:38/mi",
+    "interval_pace": "6:54/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 36,
+    "miles_logged_this_week": 6,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "average_heartrate": 138,
+    "max_heartrate_observed": 182,
+    "notes": "First marathon. Goal is sub-3:45.",
+    "recent_activities": [
+      { "date": "2026-05-13", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:35/mi", "average_heartrate": 138 },
+      { "date": "2026-05-11", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:45/mi", "average_heartrate": 168 },
+      { "date": "2026-05-08", "type": "Long Run", "distance_miles": 12.0, "pace": "9:40/mi", "average_heartrate": 142 },
+      { "date": "2026-05-06", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:28/mi", "average_heartrate": 136 }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-05-13",
+    "type": "Easy Run",
+    "distance_miles": 6.0,
+    "pace": "9:35/mi",
+    "duration_minutes": 57,
+    "average_heartrate": 138
+  },
+  "ground_truth": {
+    "notes": "Sarah ran 6mi at 9:35/mi with avg HR 138. Her easy pace is 9:30/mi (±20s = 9:10–9:50/mi). HR 138 on an estimated max of ~182 = 75.8% — solidly Zone 2 / aerobic zone. The insight MUST positively affirm she ran easy correctly — e.g. 'HR sat right in Zone 2 — exactly the aerobic stimulus marathon training needs.' It should then connect to marathon prep. It MUST NOT say 'remember to keep easy runs easy' or any variant — she already did it right. It MUST NOT say her pace was slow or add caveats. The pace 9:35 is appropriate for her easy pace. Affirm, connect to goal, done.",
+    "must_affirm_zone2": true,
+    "must_connect_to_goal": true,
+    "forbidden_phrases": [
+      "keep easy runs easy",
+      "make sure to keep it easy",
+      "easy enough",
+      "try to keep the pace easy",
+      "remember to",
+      "gray zone",
+      "Zone 3",
+      "too fast",
+      "a bit fast"
+    ],
+    "required_signals": ["Zone 2", "aerobic", "marathon", "heart rate"]
+  }
+}

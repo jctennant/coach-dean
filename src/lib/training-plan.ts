@@ -403,6 +403,7 @@ export async function generateAndSaveFullPlan(
     mileage_target: number;
     long_run_target: number;
     key_workout: string;
+    key_workout_2?: string | null;
     notes: string;
     cross_training?: string | null;
   }> = [];
@@ -582,8 +583,10 @@ SESSION MATH RULE: The distance prefix MUST equal the SUM of all components. Wro
 ${crosstrainingTools.length > 0 ? `
 - cross_training: a single cross-training session prescription for the week (1 line). IMPORTANT: the athlete's tools are [${crosstrainingTools.join(", ")}] — ONLY use these. Do NOT suggest swimming if the athlete didn't mention it; do NOT suggest cycling if the athlete didn't mention it. Match the phase: base/deload = easy aerobic effort; build = moderate/sweetspot effort; peak = moderate effort; taper = easy only. Examples for cycling: "Z2 ride 45 min", "Sweetspot ride 45 min", "Easy spin 25 min". Examples for swimming: "Easy swim 30 min", "Swim drill sets 35 min". Keep it brief — just the session label. This replaces a rest day, it does NOT add to the running volume.` : ""}
 
+- key_workout_2 (optional): a SECOND quality session. Use ONLY when the phase is "build" or "peak" AND either (a) goal is mile/5k/10k/half_marathon/marathon AND weekly mileage ≥40mi, or (b) goal is mile/5k/10k AND weekly mileage ≥30mi. Leave null for base, deload, taper, and all lower-volume weeks. Format and WU/CD rules identical to key_workout. Pick a complementary session type — e.g. if key_workout is tempo, key_workout_2 should be shorter intervals or strides; if key_workout is intervals, key_workout_2 could be a short tempo or fartlek. DO NOT generate key_workout_2 for athletes with injury notes. Leave null when unsure.
+
 Return ONLY a valid JSON array:
-[{"week_number": 1, "key_workout": "...", "notes": "..."${crosstrainingTools.length > 0 ? ', "cross_training": "..."' : ""}}, ...]
+[{"week_number": 1, "key_workout": "...", "key_workout_2": null, "notes": "..."${crosstrainingTools.length > 0 ? ', "cross_training": "..."' : ""}}, ...]
 No other text.`,
       messages: [{
         role: "user",
@@ -592,11 +595,12 @@ No other text.`,
     });
 
     const enrichText = enrichResponse.content[0].type === "text" ? enrichResponse.content[0].text.trim() : "[]";
-    const enriched = JSON.parse(enrichText.match(/\[[\s\S]*\]/)?.[0] || "[]") as Array<{ week_number: number; key_workout: string; notes: string; cross_training?: string | null }>;
+    const enriched = JSON.parse(enrichText.match(/\[[\s\S]*\]/)?.[0] || "[]") as Array<{ week_number: number; key_workout: string; key_workout_2?: string | null; notes: string; cross_training?: string | null }>;
     for (const e of enriched) {
       const w = planWeeks.find(x => x.week_number === e.week_number);
       if (w) {
         w.key_workout = fixKeyWorkoutMath(e.key_workout ?? "", unitLabel);
+        w.key_workout_2 = e.key_workout_2 ? fixKeyWorkoutMath(e.key_workout_2, unitLabel) : null;
         w.notes = e.notes ?? "";
         if (crosstrainingTools.length > 0) {
           // Use Haiku's cross_training if provided, otherwise fall back to the phase-based default

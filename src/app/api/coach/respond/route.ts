@@ -1250,7 +1250,7 @@ Use this data to:
   // For weekly_recap and user_message, fetch the stored training plan.
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
   // user_message: injects the next-week plan so Dean can propose and commit to adjustments.
-  type StoredPlanWeek = { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string };
+  type StoredPlanWeek = { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; key_workout_2?: string | null; notes: string };
   let storedPlanWeek: StoredPlanWeek | null = null;
   let storedNextPlanWeek: StoredPlanWeek | null = null;
   let storedPlanAllWeeks: StoredPlanWeek[] = [];
@@ -5003,10 +5003,10 @@ function buildUserMessage(
   weekRunCount = 0,
   missedRunCheckin?: boolean,
   periodization?: PeriodizationContext,
-  storedPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
-  storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
+  storedPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; key_workout_2?: string | null; notes: string } | null,
+  storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; key_workout_2?: string | null; notes: string } | null,
   timezoneConfirmed = true,
-  storedPlanAllWeeks?: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>,
+  storedPlanAllWeeks?: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; key_workout_2?: string | null; notes: string }>,
   racePreparednessFlag = "",
   preferredUnits: string = "imperial",
   daysSinceLastCoachMessage: number | null = null,
@@ -5205,30 +5205,35 @@ If THIS WEEK'S PLAN in CURRENT TRAINING STATE lists a quality session (e.g. "Tem
 If no plan is stored or this run doesn't match the planned quality session, describe the split pattern as observed (e.g. "your first mile was a touch slower, then you settled into a strong rhythm") without inferring intent.
 - LAP PACE SANITY CHECK: If lap data is available and the FINAL lap is faster than the middle (main effort) laps, do NOT confidently label it a "cooldown" — a cooldown is by definition slower than the main set. If the paces contradict the expected warmup→main effort→cooldown structure, flag the anomaly instead of asserting the wrong label: e.g. "Your last lap was actually your fastest — was that intentional, or did the structure shift?" Never apply a workout structure label that contradicts the pace data.
 
-Provide post-run feedback in 3–5 sentences. Surface exactly 2 insights — no more, no less — and both must be actionable. A stat without a "so what" is noise, not coaching.
+Provide post-run feedback in 2–4 sentences. Surface 1 crisp, goal-tied insight — the most important signal from this specific run. A stat without a "so what" is noise, not coaching.
+
+GOAL LENS — let the athlete's goal shape which signal you surface:
+- trail_race / mountain race: elevation load (vert per mile vs race demands), time-on-feet on long efforts, grade-adjusted pace execution
+- marathon / half_marathon: aerobic efficiency trend, long run progression, cardiac drift on longer efforts
+- 5k / 10k / mile: speed session execution vs prescribed pace, running economy (cadence, aerobic efficiency)
+- general_fitness: consistency signal, sustainable effort affirmation, aerobic base progress
+
+FIXED PRIORITY (overrides goal lens when triggered):
+- Load spike (ACWR >10%): the 1 insight MUST address load management
+- Heat (>75°F feels-like): acknowledge conditions-adjusted effort — don't let athlete think slow pace means something went wrong
 
 INSIGHT RULES:
 - Every data point must connect to a decision or action. "Your HR was 152" is not an insight. "Your HR was 152 in 82°F heat — that's equivalent effort to 145 in cooler conditions, so the pace was appropriate" is an insight.
-- If the LONGITUDINAL TRAINING ANALYSIS shows a load spike (>10%): one of your two insights must address load management.
-- If weather at run time shows heat (>75°F feels-like): acknowledge the conditions-adjusted effort explicitly. Don't let the athlete think a slower pace means something went wrong.
+- EFFORT vs PRESCRIPTION (required when a plan exists): If THIS WEEK'S PLAN lists a quality session and this run appears to be that session, explicitly compare actual pace to prescribed pace — "You hit 8:24/mi on the tempo segment — right on target at 8:30/mi." If the run is an easy day, affirm (or flag) whether pace matched easy pace range. A mismatch with no comment is a coaching miss.
+- GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if avg_heartrate is actually in Z3. If in Z2 or below, do not call it gray zone. If commenting on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it as a trend — never apply it to today's run when today was Z2 or below.
+- EASY EFFORT AFFIRMATION (required when HR data is present): When avg HR is in Z1 or Z2 on an easy run, the 1 insight MUST positively affirm correct execution — e.g. "HR sat right in Zone 2 — exactly the aerobic stimulus you're after." Do NOT add a "keep easy runs easy" reminder when they already ran easy.
 - If aerobic efficiency or cardiac drift is improving: name the specific trend. Specific progress is more motivating than "you're doing great."
-- If the athlete has a goal race: connect at least one insight to race prep.
-- EFFORT vs PRESCRIPTION (required when a plan exists): If THIS WEEK'S PLAN lists a quality session and this run appears to be that session, explicitly compare actual pace to prescribed pace. "You hit 8:24/mi on the tempo segment — right on target at 8:30/mi" or "The tempo segments came in at 8:15/mi — a touch faster than the 8:30/mi target, which is fine but watch that the effort feels controlled." If the run is an easy day, explicitly affirm (or flag) whether actual pace matched easy pace range. A mismatch with no comment is a coaching miss.
-- GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if the activity's avg_heartrate is actually in Z3 (the gray zone band shown in HEART RATE ZONES above). If avg_heartrate is in Z2 (Aerobic Base) or lower, today's effort was appropriate and well-executed — do not call it gray zone. If you want to comment on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it clearly as a training trend ("your recent runs have been trending toward moderate effort") — never apply it to today's run when today was Z2 or below.
-- EASY EFFORT AFFIRMATION (required when HR data is present): When avg HR falls in Z1 or Z2 on an easy/aerobic run, at least one insight MUST positively acknowledge the athlete executed the effort correctly — e.g. "Your heart rate sat right in Zone 2 today — that's exactly the aerobic stimulus you're after" or "You nailed the effort here — HR stayed in Z2 the whole way." Do NOT issue any reminder to "keep easy runs easy" when the athlete already ran easy. Generic effort reminders are only appropriate when avg HR was actually in Z3 or higher on what should have been an easy session. Affirm correct execution rather than repeating standing advice.
-- INSIGHT VARIETY — pick the 2 most interesting signals for THIS specific run from this menu (don't always hit the same two notes):
-  • HR zone execution (Z1/Z2 affirmation or Z3 correction — see rules above)
+- Apply the goal lens to choose from this menu:
+  • HR zone execution (Z1/Z2 affirmation or Z3 correction)
   • Aerobic efficiency (m/beat trend from AEROBIC METRICS HISTORY)
   • Cardiac decoupling / drift (< 5% = aerobic held; 5–10% = moderate; > 10% = consider easier next)
-  • Pacing consistency — were splits even or did effort spike/fade? What does that signal?
-  • Cadence (if average_cadence is present): flag if below ~170 spm (overstriding risk); affirm if at/above target
-  • Elevation / terrain: if this run had significant vert (>100 ft/mile), note the grade-adjusted effort or vert-training value
-  • Best efforts (if best_efforts JSON is present): check for course PRs or near-PRs on common distances (1mi, 5K, 10K) and call them out
-  • Week-over-week comparison: if RECENT WORKOUTS contains a similar run type from last week, compare pace + HR trend — progress is motivating
-  • Weather / conditions (beyond just heat): cold, wind, rain all affect pace — acknowledge conditions-adjusted effort
-  • Load context: where does this run fit in the training arc (base build, sharpening, taper)?
+  • Pacing consistency — even splits vs fade; what does it signal for this athlete's goal?
+  • Cadence (if present): flag < 170 spm overstriding; affirm if on target
+  • Elevation / terrain: vert per mile vs race demands (especially trail goals)
+  • Best efforts (if present): course PRs or near-PRs on common distances
+  • Week-over-week: similar run type from last week — pace/HR trend signals progress
+  • Load context: where does this run fit in the training arc?
   • Race connection: how does this specific session build toward the goal race?
-  The two fixed-priority rules above (load spike >10%, heat >75°F) still take a slot when triggered. For the remaining slot(s), choose the signal most relevant and interesting given this athlete's goal and situation — don't default to the same two every time.
 - If any lap or split shows a pace more than ~90 sec/mi faster than the run's average pace, flag it explicitly rather than presenting it neutrally — e.g. "Your final segment shows [X pace] — that's likely a short burst or GPS artifact. If intentional, keep in mind [recovery/easy] runs should stay fully aerobic." Do NOT describe an outlier sub-5:30 pace on an easy or recovery run as a normal "sprint finish" without comment.
 
 CARDIAC DECOUPLING — translate to plain English when present in the activity JSON (cardiac_decoupling_pct field):
@@ -5254,7 +5259,7 @@ PROJECTED vs TARGET DIRECTION: When comparing a projected total to the weekly ta
 
 PLAN CONSISTENCY RULES — follow these exactly:
 - Week-to-date mileage: use the WEEK-TO-DATE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
-- Remaining work: reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (weekly target, long run, quality session). Note what key sessions (long run, quality session) still need to happen — the athlete picks when. Do NOT reference dated sessions or prescribe a specific day.
+- Remaining work: reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (weekly target, long run, quality session). Note what key sessions (long run, quality session) still need to happen — the athlete picks when. Do NOT reference dated sessions or prescribe a specific day.${storedPlanWeek?.key_workout_2 ? `\n- SECONDARY QUALITY SESSION this week: ${storedPlanWeek.key_workout_2} — this is a second quality session on top of the primary one. Mention it when relevant (e.g. "you still have the tempo and the short interval session this week").` : ""}
 - Do NOT mention NEXT WEEK'S PLAN in post-run feedback — that belongs in the Sunday recap.
 
 ${injuryReminder}${planDeviationFlag ? `
@@ -5282,7 +5287,7 @@ PLAN DEVIATION — NON-RUN DAY: Today's plan called for "${skippedNonRunSession}
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
       const fullArcContext = storedPlanAllWeeks && storedPlanAllWeeks.length > 0
-        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}`).join('\n')}`
+        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}${w.key_workout_2 ? ` | 2nd quality: ${w.key_workout_2}` : ''}`).join('\n')}`
         : '';
       return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
 
@@ -5324,6 +5329,8 @@ TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored 
 FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "rebuild my plan with more tempo", "add speed work throughout", "update the whole plan" — describe what will change in 1-2 sentences, then end with: "Reply UPDATE PLAN to confirm." Do NOT include a session list or week-by-week schedule. Do NOT say the plan has already been updated — nothing changes until they confirm. Do NOT use [REBUILD_PLAN].${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
 INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
+
+When signaling [INJURY_HOLD], your response MUST include a brief cross-training week outline — 3–4 sessions using ONLY the athlete's available tools (check "cross-training tools" in their profile; if none listed, suggest walking and easy elliptical as universally accessible options). Format as a compact daily suggestion: "Mon/Wed/Fri — easy 30min bike or elliptical; Thu — optional swim if available. No high-impact activity — focus on blood flow and recovery." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week."
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
 
@@ -5431,7 +5438,7 @@ Keep the whole thing under 480 characters.`;
       const recapIsMetric = preferredUnits === "metric";
       const recapMi = (miles: number) => recapIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const storedPlanContext = storedPlanWeek
-        ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${recapMi(storedPlanWeek.mileage_target)} | Long run: ~${recapMi(storedPlanWeek.long_run_target)}\nKey workout: ${storedPlanWeek.key_workout || "n/a"}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
+        ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${recapMi(storedPlanWeek.mileage_target)} | Long run: ~${recapMi(storedPlanWeek.long_run_target)}\nKey workout: ${storedPlanWeek.key_workout || "n/a"}${storedPlanWeek.key_workout_2 ? `\nSecondary quality: ${storedPlanWeek.key_workout_2}` : ""}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
         : "";
       const isMetric = preferredUnits === "metric";
       const weekVolumeVal = isMetric ? (weekMileageSoFar * 1.60934).toFixed(1) : weekMileageSoFar.toFixed(1);

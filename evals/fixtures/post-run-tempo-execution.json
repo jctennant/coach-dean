@@ -1,0 +1,67 @@
+{
+  "id": "post-run-tempo-execution",
+  "description": "5K runner hits a prescribed tempo session. Dean should compare actual pace to prescribed pace explicitly and tie it to race prep — not give generic feedback.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-05-14",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "5k",
+    "goal_race": "Local 5K",
+    "goal_race_date": "2026-06-20",
+    "goal_time_minutes": 21,
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 44,
+    "easy_pace": "9:48/mi",
+    "tempo_pace": "7:54/mi",
+    "interval_pace": "7:06/mi",
+    "training_days": ["tuesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 22,
+    "miles_logged_this_week": 5,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "weekly_plan": {
+      "quality_session": "Tempo 4mi (1mi WU + 2mi @ 7:54/mi + 1mi CD)"
+    },
+    "notes": "Training for a local 5K, goal sub-21min.",
+    "recent_activities": [
+      { "date": "2026-05-14", "type": "Tempo Run", "distance_miles": 4.1, "pace": "8:10/mi" },
+      { "date": "2026-05-11", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:50/mi" },
+      { "date": "2026-05-09", "type": "Intervals", "distance_miles": 4.0, "pace": "7:45/mi" },
+      { "date": "2026-05-07", "type": "Easy Run", "distance_miles": 4.5, "pace": "9:45/mi" }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-05-14",
+    "type": "Tempo Run",
+    "distance_miles": 4.1,
+    "pace": "8:10/mi",
+    "duration_minutes": 33,
+    "splits": [
+      { "mile": 1, "pace": "9:42/mi" },
+      { "mile": 2, "pace": "7:58/mi" },
+      { "mile": 3, "pace": "7:55/mi" },
+      { "mile": 4, "pace": "9:50/mi" }
+    ]
+  },
+  "ground_truth": {
+    "notes": "Marcus's prescribed tempo is 4mi (1mi WU + 2mi @ 7:54/mi + 1mi CD). He ran 4.1mi with splits: 9:42 (WU), 7:58, 7:55 (tempo segments), 9:50 (CD). The tempo segments averaged 7:57/mi vs prescribed 7:54/mi — essentially on target (3 sec/mile over). Dean MUST explicitly compare actual vs prescribed pace: e.g. 'The tempo miles came in at 7:57/mi — right on your 7:54 target, essentially a perfect execution.' The insight must also connect to 5K race prep. Dean MUST NOT just say 'great tempo run' without comparing to prescribed pace. The 9:42 WU and 9:50 CD should be read as intentional warmup/cooldown, not pacing anomalies. The overall average (8:10/mi) is diluted by the WU/CD — do not use the overall pace as the tempo benchmark.",
+    "must_compare_actual_vs_prescribed": true,
+    "must_connect_to_5k_goal": true,
+    "prescribed_tempo_pace": "7:54/mi",
+    "actual_tempo_pace": "7:57/mi",
+    "forbidden_phrases": [
+      "a bit off",
+      "slightly slow",
+      "didn't hit the target",
+      "missed the pace",
+      "overall pace of 8:10"
+    ],
+    "required_signals": ["7:54", "7:57", "tempo", "5K", "on target"]
+  }
+}
