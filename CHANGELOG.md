@@ -4,6 +4,33 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-03 — Eval harness improvements: HR zones, taper rules, injury tags, new post-run fixtures
+
+**Type:** Improvement / Testing
+**Reported by:** Internal eval run (35/60 passing, 6.9/10 avg baseline)
+**User feedback:** N/A
+**Root cause:** Eval runner was missing several key context blocks that route.ts injects — HR zone classification, taper phase rules, injury tag instructions, split analysis guidance. The model was producing correct responses that the eval harness couldn't score correctly because the judge and runner were missing parity with production.
+**Fix / Change:**
+- Added 3 new post-run eval fixtures: `post-run-tempo-execution` (split vs prescribed pace comparison), `post-run-easy-zone2-affirm` (Zone 2 affirm for marathon), `post-run-trail-vert` (vert-per-mile vs race demands)
+- Eval runner: injected HR zone context block when avg HR is available (80% max = Z2/Z3 boundary; affirm Z2 for marathon goal)
+- Eval runner: fixed `isDeload` to use explicit `is_deload_week: true` rather than `week % 4 === 0` (was wrongly marking build weeks as deload)
+- Eval runner: added taper phase `<rule>` block (name "taper madness", glycogen supercompensation, affirm reduced volume, redirect to race prep)
+- Eval runner: added general fitness no-race `<rule>` (no race references, base-building framing)
+- Eval runner: added injury tag instructions mirroring route.ts (INJURY_HOLD high threshold, INJURY_CLEAR on confirmed hold, LIGHTER_WEEK for setbacks)
+- Eval runner: added post-run GOAL LENS section (trail vert, marathon Zone 2, 5K speed execution)
+- Eval runner: added vert-per-mile comparison for trail run fixtures with elevation data
+- Eval runner: strengthened split analysis rule (compute avg workout-segment pace; explicitly forbid "slightly slower" for ≤5 sec/mi differences)
+- Eval runner: fixed metric easyPaceRange to use +30s upper bound matching route.ts/paces.ts
+- Eval runner: improved nightly no-sessions message with explicit "plan coming tonight" structure
+- Eval runner: improved uploaded plan weekly recap — uses plan week range, includes missed-run note, recap before preview
+- Eval runner: improved weekly recap missed_run injection from ground_truth
+- Judge: fixed `isDeload` computation (same `is_deload_week === true` fix)
+- Judge: added metric mileage note (km equivalents accepted for mileage_correct)
+- Judge: tightened `must_contain_tag` scoring (tag presence overrides mileage concerns)
+- Judge: expanded `must_acknowledge_week_complete` and `must_mention_plan_coming` examples
+- Fixture fixes: moved prior-week activities to correct dates in tempo, zone2, trail, and post-run-feedback fixtures
+**Files changed:** `evals/run-evals.mjs`, `evals/judges/factual-accuracy.mjs`, `evals/fixtures/post-run-tempo-execution.json`, `evals/fixtures/post-run-easy-zone2-affirm.json`, `evals/fixtures/post-run-trail-vert.json`, `evals/fixtures/quality-post-run-feedback.json`, `evals/fixtures/quality-general-fitness-no-race.json`, `evals/fixtures/pace-metric-user.json`
+
 ## 2026-05-02 — Simplify onboarding, make Strava required, opt-in plan generation, first-run experience
 
 **Type:** Feature / Improvement
