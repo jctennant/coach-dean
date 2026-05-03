@@ -383,10 +383,10 @@ async function handleConversation(
         : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
       stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine}${paceNote}`;
     }
-  } else if (mergedData.strava_skipped) {
-    stravaContext = "\nSTRAVA: User skipped Strava. Collect mileage + pace data manually.";
   } else {
-    stravaContext = "\nSTRAVA: Not connected yet.";
+    // Strava is mandatory — never treat the athlete as having skipped. If a legacy
+    // user has strava_skipped: true, ignore it and re-pitch Strava on the next ask.
+    stravaContext = "\nSTRAVA: Not connected yet — REQUIRED before [READY]. Re-pitch with [STRAVA_LINK] if the athlete pushes back.";
   }
 
   const collected = summarizeCollected(mergedData);
@@ -748,7 +748,7 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   let responseText: string;
   let stravaMsg: string | null = null;
 
-  if (wantsStravaLink && !mergedData.strava_connected && !mergedData.strava_skipped) {
+  if (wantsStravaLink && !mergedData.strava_connected) {
     const paragraphs = rawText.split(/\n{2,}/);
     const stravaParaIdx = paragraphs.findIndex(p => /\[STRAVA_LINK\]/i.test(p));
     const beforeStrava = paragraphs
@@ -867,6 +867,34 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   }
 
   if (isReady) {
+    // Strava gate: Coach Dean's value depends on reading every run automatically.
+    // Without Strava, the post-run insights (cadence, decoupling, GAP, splits)
+    // that are the core product never fire — the athlete eventually loses trust
+    // and churns. Block [READY] when Strava is not connected and re-pitch it.
+    // Only exception: athletes who can't run yet (return_to_running, injury_recovery)
+    // can complete onboarding without Strava because they may have no recent activity.
+    const goalForGate = mergedData.goal as string | null | undefined;
+    const stravaConnected = !!mergedData.strava_connected;
+    const stravaExempt = goalForGate === "return_to_running" || goalForGate === "injury_recovery";
+    if (!stravaConnected && !stravaExempt) {
+      console.warn("[onboarding] [READY] fired but Strava not connected — re-pitching Strava");
+      await supabase.from("users")
+        .update({
+          onboarding_step: "awaiting_strava",
+          onboarding_data: mergedData as unknown as Json,
+        })
+        .eq("id", user.id);
+      const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+      const lang = (mergedData.preferred_language as string | undefined) ?? "en";
+      const pitch = lang === "fr"
+        ? `Avant qu'on lance — j'ai vraiment besoin de Strava pour te coacher correctement. Sans ça, je ne peux pas voir tes courses ni te donner de retour utile après chaque sortie. Connecte ici (gratuit, deux minutes) :\n\n${stravaUrl}`
+        : lang === "es"
+        ? `Antes de empezar — necesito Strava de verdad para entrenarte. Sin él no puedo ver tus carreras ni darte feedback útil después de cada una. Conéctalo aquí (gratis, dos minutos):\n\n${stravaUrl}`
+        : `Before we kick off — I really need Strava to coach you properly. Without it I can't see your runs or give you useful feedback after each one. Takes two minutes (free):\n\n${stravaUrl}`;
+      await sendAndStore(user.id, user.phone_number, pitch, "awaiting_strava");
+      return NextResponse.json({ ok: true });
+    }
+
     // Mode guard: never silently default to plan-building when the athlete's
     // working mode is unresolved. If both has_existing_plan and wants_plan are
     // null at [READY], the downstream completeOnboarding path falls through to
@@ -906,8 +934,9 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
     return NextResponse.json({ ok: true });
   }
 
-  if (wantsStravaLink && !mergedData.strava_connected && !mergedData.strava_skipped) {
-    // Claude asked about Strava — pause conversation until user connects or skips
+  if (wantsStravaLink && !mergedData.strava_connected) {
+    // Claude asked about Strava — pause conversation until user connects.
+    // Strava is mandatory; "skip" is no longer a valid path.
     await supabase.from("users")
       .update({
         onboarding_step: "awaiting_strava",
@@ -1037,7 +1066,6 @@ Rules:
 - current_niggles: any current aches, pain, or issues the athlete is managing right now (distinct from past injury history). Null if not mentioned.
 - strength_habits: a brief description of the athlete's strength training and cross-training habits — what they do, how often. Examples: "3x/week lifting, no cross-training", "yoga 2x/week, cycling occasionally", "no strength work". Null if not mentioned.
 - cross_training_activities: array of cross-training activities the athlete does (e.g. ['cycling', 'swimming', 'yoga', 'lifting']). Null if not mentioned.
-- strava_skipped: true if athlete says they don't have or won't use Strava. Null otherwise.
 - wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.
 - training_tools: array of tools mentioned (lowercase: 'runna', 'trainingpeaks', 'garmin', 'self_directed', 'other'). Null if not mentioned.
 - terrain_type: 'road', 'trail', or 'mixed' based on what athlete says. Null if not mentioned.
@@ -1079,6 +1107,23 @@ Rules:
             ],
             description: "Cross-training activities the athlete does, e.g. ['cycling', 'swimming', 'yoga', 'lifting']"
           },
+          lifting_days: {
+            oneOf: [
+              { type: "array", items: { type: "string" } },
+              { type: "null" },
+            ],
+            description: "Days of the week the athlete lifts weights, lowercase 3-letter abbreviations (e.g. ['tue', 'thu']). Only set when athlete explicitly states days. Null if they only mention frequency (e.g. '3x/week') without naming days."
+          },
+          leg_lift_days: {
+            oneOf: [
+              { type: "array", items: { type: "string" } },
+              { type: "null" },
+            ],
+            description: "Subset of lifting_days that are leg-focused (squats, deadlifts, leg day). Only set when athlete distinguishes leg days from upper-body days."
+          },
+          active_injury: { type: ["boolean", "null"], description: "True if the athlete describes a CURRENT injury they're managing right now (e.g. 'my achilles is still bothering me', 'recovering from a stress fracture'). False/null for historical injuries that are resolved." },
+          injury_severity: { type: ["string", "null"], enum: ["mild", "moderate", "severe", null], description: "Severity of the current active injury. mild=annoyance, can run modified. moderate=skipping some sessions, modifying others. severe=cannot run at all." },
+          injury_body_part_current: { type: ["string", "null"], description: "Body part of the CURRENT active injury (e.g. 'left achilles', 'right knee'). Null for historical injuries." },
           experience_years: { type: ["number", "null"] },
           other_races: {
             oneOf: [
@@ -1100,7 +1145,6 @@ Rules:
             ],
           },
           timezone: { type: ["string", "null"] },
-          strava_skipped: { type: ["boolean", "null"] },
           wants_speed_work: { type: ["boolean", "null"] },
           training_tools: {
             oneOf: [
@@ -1561,6 +1605,28 @@ async function completeOnboarding(
         ...((data.preferred_units as string | null) ? { preferred_units: data.preferred_units as string } : {}),
         injury_notes: combinedInjuryNotes,
         goal_distance_miles: goalDistanceMiles,
+        ...((() => {
+          const liftDays = data.lifting_days as string[] | null | undefined;
+          const legDays = data.leg_lift_days as string[] | null | undefined;
+          const fields: Record<string, unknown> = {};
+          if (Array.isArray(liftDays)) fields.lifting_days = liftDays.map(d => String(d).toLowerCase().slice(0, 3));
+          if (Array.isArray(legDays)) fields.leg_lift_days = legDays.map(d => String(d).toLowerCase().slice(0, 3));
+          return fields;
+        })()),
+        ...((() => {
+          const active = data.active_injury;
+          const severity = data.injury_severity as string | null | undefined;
+          const part = data.injury_body_part_current as string | null | undefined;
+          if (active === true) {
+            return {
+              active_injury: true,
+              ...(severity ? { injury_severity: severity } : {}),
+              ...(part ? { injury_body_part: part } : {}),
+              injury_start_date: new Date().toISOString().slice(0, 10),
+            };
+          }
+          return {};
+        })()),
         ...(lthrEstimate != null ? {
           lthr_estimate: lthrEstimate,
           lthr_source: lthrSource,

@@ -375,12 +375,35 @@ export async function GET(request: Request) {
     Array.isArray(onboardingData.training_days) &&
     (onboardingData.training_days as string[]).length > 0;
 
-  // Brief acknowledgment only — no question, no insight here.
+  // Brief acknowledgment that names what Dean just read — the "magic moment" of the
+  // product. We surface 8-week analytics computed above (avg weekly miles, longest run,
+  // trend direction) so the athlete sees Dean responding to their actual data, not a
+  // generic confirmation.
   // For mid-onboarding users, onboarding/handle fires 2 seconds later and generates
   // a single rich message with the Strava context + next question, avoiding a double text.
+  const stravaSyncedDetails = (() => {
+    const parts: string[] = [];
+    if (avgWeeklyMiles != null && avgWeeklyMiles > 0) {
+      parts.push(preferredUnits === "metric"
+        ? `~${Math.round(avgWeeklyMiles * 1.60934)} km/week avg`
+        : `~${avgWeeklyMiles} mi/week avg`);
+    }
+    if (longestRunMiles != null && longestRunMiles > 0) {
+      parts.push(preferredUnits === "metric"
+        ? `longest ${(longestRunMiles * 1.60934).toFixed(1)} km`
+        : `longest ${longestRunMiles.toFixed(1)} mi`);
+    }
+    if (mileageTrend === "building") parts.push("trending up");
+    else if (mileageTrend === "declining") parts.push("backed off recently");
+    return parts.length > 0 ? parts.join(", ") : null;
+  })();
   const smsMsg = alreadyOnboarded
-    ? `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`
-    : `Strava connected${firstName}! Give me a moment to pull in your history.`;
+    ? (stravaSyncedDetails
+        ? `Strava connected${firstName}! Just read your last 8 weeks — ${stravaSyncedDetails}. I'll factor it all into your coaching going forward.`
+        : `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`)
+    : (stravaSyncedDetails
+        ? `Strava connected${firstName}! Just read your last 8 weeks — ${stravaSyncedDetails}. Give me a sec to pull the rest in.`
+        : `Strava connected${firstName}! Give me a moment to pull in your history.`);
 
   // Only send "Strava connected" the first time — skip on re-auth flows where
   // the token was already present. This prevents duplicate messages when users

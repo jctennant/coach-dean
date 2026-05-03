@@ -327,6 +327,7 @@ export type Database = {
       }
       training_profiles: {
         Row: {
+          active_injury: boolean | null
           coaching_mode: string
           constraints: string | null
           crosstraining_tools: string[] | null
@@ -343,10 +344,16 @@ export type Database = {
           goal_time_minutes: number | null
           hr_zone_method: string
           id: string
+          injury_body_part: string | null
           injury_body_parts: string[] | null
           injury_notes: string | null
+          injury_return_protocol: string | null
+          injury_severity: string | null
+          injury_start_date: string | null
           last_morning_reminder_date: string | null
           last_nightly_reminder_date: string | null
+          leg_lift_days: string[] | null
+          lifting_days: string[] | null
           lthr_confidence: string | null
           lthr_estimate: number | null
           lthr_history: Json | null
@@ -366,6 +373,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          active_injury?: boolean | null
           coaching_mode?: string
           constraints?: string | null
           crosstraining_tools?: string[] | null
@@ -382,10 +390,16 @@ export type Database = {
           goal_time_minutes?: number | null
           hr_zone_method?: string
           id?: string
+          injury_body_part?: string | null
           injury_body_parts?: string[] | null
           injury_notes?: string | null
+          injury_return_protocol?: string | null
+          injury_severity?: string | null
+          injury_start_date?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          leg_lift_days?: string[] | null
+          lifting_days?: string[] | null
           lthr_confidence?: string | null
           lthr_estimate?: number | null
           lthr_history?: Json | null
@@ -405,6 +419,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          active_injury?: boolean | null
           coaching_mode?: string
           constraints?: string | null
           crosstraining_tools?: string[] | null
@@ -421,10 +436,16 @@ export type Database = {
           goal_time_minutes?: number | null
           hr_zone_method?: string
           id?: string
+          injury_body_part?: string | null
           injury_body_parts?: string[] | null
           injury_notes?: string | null
+          injury_return_protocol?: string | null
+          injury_severity?: string | null
+          injury_start_date?: string | null
           last_morning_reminder_date?: string | null
           last_nightly_reminder_date?: string | null
+          leg_lift_days?: string[] | null
+          lifting_days?: string[] | null
           lthr_confidence?: string | null
           lthr_estimate?: number | null
           lthr_history?: Json | null

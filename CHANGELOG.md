@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-03 — "Coach that adapts" pivot: recap arc position, mandatory Strava, named post-run metric, lifting/injury state
+
+**Type:** Feature / Improvement
+**Reported by:** Internal product audit
+**User feedback:** N/A
+**Root cause:** Product was leaning on plan generation as the value prop while the actual differentiator (specific coaching insights from Strava data) was under-served. Sunday recap lacked macro arc position and phase-transition signals; post-run insights weren't required to name the metric they cited; Strava was skippable, hollowing out the data layer; lifting/injury state lived only in freeform notes.
+**Fix / Change:**
+- **Sunday recap:** Inject `TRAINING ARC POSITION: Week N of M · phase · X days to race day` for athletes on a Coach Dean plan. Phase-transition `<rule>` fires on the final week of a phase. Athletes without a stored plan (uploaded plan / general fitness / pre-plan) skip the block — no fabricated week-of-total. Longitudinal-signals section reframed to require one synthesized week-over-week observation in the first text instead of an optional menu.
+- **Post-run insight:** Added a `REQUIRED — NAME ONE METRIC` rule with a priority-ordered menu (cadence → cardiac decoupling → aerobic efficiency → HR zone → pacing/GAP → best efforts → WoW). Every response must name the metric the insight is built on, not default to "solid run at X pace".
+- **Strava onboarding hook:** Connect SMS now names what was just read — "Just read your last 8 weeks — ~28 mi/week avg, longest 9.2 mi, trending up." Both mid-onboarding and already-onboarded paths surface 8-week analytics.
+- **Mandatory Strava:** [READY] is now blocked when Strava is not connected (exception: return_to_running / injury_recovery goals). The `strava_skipped` field is removed from the Haiku extractor schema and from the system-prompt's STRAVA status line; legacy users with the field set are ignored.
+- **Lifting days as formal state:** New `training_profiles.lifting_days` and `leg_lift_days` columns (migration 040). Onboarding extracts both. System prompt injects them into ATHLETE HISTORY with a 24-hour-after-leg-day rule against hard runs.
+- **Formal injury state:** New `training_profiles.active_injury / injury_severity / injury_body_part / injury_start_date / injury_return_protocol` columns (migration 041). Onboarding extracts these for current injuries. When `active_injury=true`, an ACTIVE INJURY `<rule>` is injected into every coach response with severity-specific go/no-go guidance.
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts, src/app/api/auth/strava/callback/route.ts, src/lib/database.types.ts, supabase/migrations/040_lifting_days.sql, supabase/migrations/041_formal_injury_state.sql, src/__tests__/api/onboarding-handle.test.ts, src/__tests__/api/multi-race-onboarding.test.ts
+
+---
+
 ## 2026-05-03 — Eval harness improvements: HR zones, taper rules, injury tags, new post-run fixtures
 
 **Type:** Improvement / Testing

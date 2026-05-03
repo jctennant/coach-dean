@@ -1521,7 +1521,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     ? `\nCROSS-TRAINING THIS WEEK: ${crossTrainWeeklySummary}\nIn your recap, weave in notable cross-training — a hard bike or swim session mid-week provides real aerobic stimulus worth acknowledging (not just "and you cross-trained!"). If they did 2+ cross-training sessions, mention the aerobic base contribution. Do not ignore cross-training when summing up the week's training load.\n`
     : "";
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null);
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -4187,9 +4187,32 @@ GRADE-ADJUSTED PACE — apply this any time you prescribe a treadmill or trail w
 ATHLETE HISTORY:
 ${coachStartFormatted ? `- Started with Coach Dean: ${coachStartFormatted} (${weeksWithDean} week${weeksWithDean !== 1 ? "s" : ""} ago)\n` : ""}- Strava: ${user.strava_athlete_id ? "connected" : "not connected"}${!user.strava_athlete_id ? `\n<rule>STRAVA NOT CONNECTED: This athlete does not have Strava linked to Coach Dean. If they say they "uploaded to Strava" or that their run "is on Strava", do NOT say it will sync shortly or imply it will appear in your feed — it won't. Instead: acknowledge their run, let them know you don't have a Strava connection for them so it won't auto-sync, and offer to connect it — tell them to text you "connect strava" and you'll send the link. Keep this brief and conversational — don't make it a big deal.</rule>` : ""}
 ${allTimeInfo}- Sport: ${sportType}
-- Training days: ${trainingDays}${profile?.training_days && (profile.training_days as string[]).length > 0 ? `\n- <rule>TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${(profile.training_days as string[]).length} running session${(profile.training_days as string[]).length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${(profile.training_days as string[]).length <= 3 ? ` With only ${(profile.training_days as string[]).length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${(profile.training_days as string[]).length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}</rule>` : ""}
+- Training days: ${trainingDays}${(() => {
+  const liftDays = (profile?.lifting_days as string[] | null) ?? [];
+  const legDays = (profile?.leg_lift_days as string[] | null) ?? [];
+  if (liftDays.length === 0) return "";
+  const fmt = (d: string) => d.charAt(0).toUpperCase() + d.slice(1, 3);
+  const liftLabel = liftDays.map(fmt).join(", ");
+  const legLabel = legDays.length > 0 ? legDays.map(fmt).join(", ") : "all lifting days (assumed leg-impacting unless told otherwise)";
+  return `\n- Lifting days: ${liftLabel} (leg-focused: ${legLabel}). Do NOT schedule hard runs (tempo, intervals, hill repeats) within 24 hours AFTER a leg-focused lift day — legs are too pre-fatigued to hit prescribed paces and injury risk climbs. Easy runs are fine. If the athlete asks about a hard run on a leg day or the day after, name the conflict explicitly and suggest a swap.`;
+})()}${profile?.training_days && (profile.training_days as string[]).length > 0 ? `\n- <rule>TRAINING SESSION COUNT — PLAN GENERATION RULE: When building any week plan, include EXACTLY ${(profile.training_days as string[]).length} running session${(profile.training_days as string[]).length !== 1 ? "s" : ""} — never more. No optional, bonus, or supplementary running sessions beyond these days. (This applies to plan generation only — do not volunteer session counts in post-run or conversational responses.)${(profile.training_days as string[]).length <= 3 ? ` With only ${(profile.training_days as string[]).length} training days, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${(profile.training_days as string[]).length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week requires more days than this athlete has — never do it.` : ""}</rule>` : ""}
 ${restDays.length > 0 ? `- <rule>REST DAYS — NEVER schedule a run on: ${restDays.join(", ")}. This is a hard constraint — it applies to all weeks including the initial plan and any future-week previews.</rule>\n` : ""}- Goal: ${raceName ? `${raceName}${exactDistanceSuffix}` : (profile?.goal ? formatGoalLabel(profile.goal as string) : "unknown")}${profile?.race_date ? ` on ${profile.race_date}` : ""}${goalTimeMinutes != null ? ` — goal finish time: ${Math.floor(goalTimeMinutes / 60)}:${String(Math.round(goalTimeMinutes % 60)).padStart(2, "0")}${goalPaceStr}` : goalTimeMinutes === null ? " — no specific time goal (completion/fitness focus)" : " — no goal time on file"}
-${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.` : ""; })()}
+${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after the primary race — don't split focus now)\n` : ""}${(() => {
+  const active = !!(profile?.active_injury);
+  if (!active) return "";
+  const severity = (profile?.injury_severity as string | null) || "unspecified severity";
+  const bodyPart = (profile?.injury_body_part as string | null) || "unspecified area";
+  const startDate = (profile?.injury_start_date as string | null) || null;
+  const protocol = (profile?.injury_return_protocol as string | null) || null;
+  return `<rule>ACTIVE INJURY — APPLIES TO EVERY MESSAGE THIS TURN:
+- Body part: ${bodyPart}
+- Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}
+Coaching adjustments:
+- ${severity === "severe" ? "No running prescribed. Cross-training and gentle test probes only — do not advise running through this." : severity === "moderate" ? "Modify aggressively: reduce volume, drop quality sessions, and frame runs as pain-monitored. Stop-immediately-if-pain language belongs on every prescription." : "Run modified — easy efforts only, no quality work, monitor the area on every run."}
+- Proactively go/no-go: when discussing today's or tomorrow's run, check this state first before suggesting a session.
+- If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.
+</rule>\n`;
+})()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}
 ${otherNotes ? `- Athlete preferences / notes: ${otherNotes}\n` : ""}${timeConstraintBlock ? `${timeConstraintBlock}\n` : ""}${isTri ? `- Swim pace: ${swimPace || "unknown"}\n- Bike: ${bikeInfo || "unknown"}` : ""}
 
@@ -5021,6 +5044,7 @@ function buildUserMessage(
   activitiesQueryFailed = false,
   crossTrainingPostRunContext: string | null = null,
   crossTrainRecapBlock: string = "",
+  raceDate: string | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -5206,6 +5230,16 @@ If no plan is stored or this run doesn't match the planned quality session, desc
 - LAP PACE SANITY CHECK: If lap data is available and the FINAL lap is faster than the middle (main effort) laps, do NOT confidently label it a "cooldown" — a cooldown is by definition slower than the main set. If the paces contradict the expected warmup→main effort→cooldown structure, flag the anomaly instead of asserting the wrong label: e.g. "Your last lap was actually your fastest — was that intentional, or did the structure shift?" Never apply a workout structure label that contradicts the pace data.
 
 Provide post-run feedback in 2–4 sentences. Surface 1 crisp, goal-tied insight — the most important signal from this specific run. A stat without a "so what" is noise, not coaching.
+
+REQUIRED — NAME ONE METRIC: Every post-run response must explicitly name the metric the insight is built on. Pick exactly one from this list (in priority order — use the first one that has data for this run):
+1. Cadence (when average_cadence is present)
+2. Cardiac decoupling / drift (when cardiac_decoupling_pct is present)
+3. Aerobic efficiency / pace-at-HR (when avg HR + AEROBIC METRICS HISTORY are present and a multi-week trend exists)
+4. HR zone execution (when avg HR is present)
+5. Pacing — fade vs negative split / GAP on hilly runs (when splits are present; prefer GAP on rolling/hilly terrain)
+6. Best efforts / course PR (when best_efforts data flags one)
+7. Week-over-week comparison vs the same run type from last week (always available as a fallback)
+Use the metric's plain-English name in your sentence (e.g. "your cadence held at 178 spm…", "cardiac drift was just 4% — aerobic system held…", "GAP was 8:42/mi on that climb — true effort was steady…"). Do NOT default to a generic "solid run at X pace" with no named metric — that's the failure mode this rule exists to prevent.
 
 GOAL LENS — let the athlete's goal shape which signal you surface:
 - trail_race / mountain race: elevation load (vert per mile vs race demands), time-on-feet on long efforts, grade-adjusted pace execution
@@ -5451,6 +5485,30 @@ Keep the whole thing under 480 characters.`;
       const storedPlanContext = storedPlanWeek
         ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${recapMi(storedPlanWeek.mileage_target)} | Long run: ~${recapMi(storedPlanWeek.long_run_target)}\nKey workout: ${storedPlanWeek.key_workout || "n/a"}${storedPlanWeek.key_workout_2 ? `\nSecondary quality: ${storedPlanWeek.key_workout_2}` : ""}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
         : "";
+      // Macro position — only injected for athletes on a Coach Dean plan with a known
+      // total-weeks count. Athletes without a stored plan (general fitness, uploaded plan,
+      // pre-plan onboarding completion) skip this entirely so we don't fabricate "Week N of M".
+      const macroPositionContext = (() => {
+        const allWeeks = storedPlanAllWeeks ?? [];
+        if (!storedPlanWeek || allWeeks.length === 0) return "";
+        const totalWeeks = allWeeks.length;
+        const currentWeekNum = storedPlanWeek.week_number;
+        const currentPhase = storedPlanWeek.phase;
+        const nextPhase = storedNextPlanWeek?.phase ?? null;
+        const phaseEnding = !!(nextPhase && nextPhase !== currentPhase);
+        const raceDateStr = raceDate;
+        let daysToRace: number | null = null;
+        if (raceDateStr) {
+          const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+          const race = new Date(raceDateStr); race.setUTCHours(0, 0, 0, 0);
+          daysToRace = Math.round((race.getTime() - today.getTime()) / 86400000);
+        }
+        const raceClause = daysToRace !== null && daysToRace >= 0 ? ` — ${daysToRace} days to race day` : "";
+        const phaseEndLine = phaseEnding
+          ? `\n<rule>PHASE TRANSITION: This is the FINAL week of the ${currentPhase} phase — next week begins the ${nextPhase} phase. Name the transition explicitly in your first text (e.g. "this wraps the base phase — build phase starts next week"). Don't bury it.</rule>`
+          : "";
+        return `TRAINING ARC POSITION: Week ${currentWeekNum} of ${totalWeeks} · ${currentPhase} phase${raceClause}. Reference this position naturally once in your first text — athletes want to know where they are in the bigger picture (e.g. "Week ${currentWeekNum} of ${totalWeeks}, still in ${currentPhase}${raceClause}").${phaseEndLine}\n\n`;
+      })();
       const isMetric = preferredUnits === "metric";
       const weekVolumeVal = isMetric ? (weekMileageSoFar * 1.60934).toFixed(1) : weekMileageSoFar.toFixed(1);
       const weekVolumeUnit = isMetric ? "km" : "mi";
@@ -5509,7 +5567,7 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
           return `\nNEXT WEEK TARGET: ~${recapMi(nextTarget)}${compLabel} (~${periodization.phase === "peak" ? "5%" : "8%"} step from recent avg). Microcycle: ${cycleNote}. If the athlete's recent pace suggests they're ready for a quality session, include one.\n`;
         })()
         : "";
-      return `${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
+      return `${macroPositionContext}${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
 
 PLAN FORMAT (per principle 8 — no day-by-day schedule):
 - Weekly mileage target (e.g. "~34 mi this week")
@@ -5524,12 +5582,15 @@ Long run: 9mi easy on trails.
 Quality: Tempo 5mi (1mi WU + 3mi @ 7:50/mi + 1mi CD) — threshold work, the engine for your goal pace.
 Leave at least one easy or rest day between the long run and the tempo; fit the rest of the easy miles in wherever suits your week."
 
-LONGITUDINAL SIGNALS — USE THESE TO MAKE THE RECAP DATA-DRIVEN:
-If LONGITUDINAL TRAINING ANALYSIS is present above, use it to elevate your first message beyond a simple mileage recap:
-- Load spike (>10% week-over-week): mention it explicitly. "Mileage jumped 15% this week — we're pulling back slightly next week to let the adaptation catch up."
-- Aerobic efficiency improving: call it out. "Your pace-at-HR is trending better over the last 6 weeks — the base work is paying off."
-- HR drift worsening or high: suggest more easy mileage or a recovery week.
-Do NOT just recite the numbers — synthesize them into one actionable sentence.
+LONGITUDINAL SIGNALS — REQUIRED IN THE FIRST TEXT:
+If LONGITUDINAL TRAINING ANALYSIS is present above, your first text MUST include one synthesized week-over-week or multi-week observation — not just this-week mileage. Pick the most actionable signal from this menu:
+- Load: week-over-week mileage % change ("up 12% on last week"), 4-week trend direction (building / steady / declining)
+- Aerobic efficiency: pace-at-HR trend across the last 6+ weeks ("your easy pace at the same HR is ~10s/mi quicker than 6 weeks ago — base work is paying off")
+- Cardiac drift: improving / worsening on long runs
+- Long run progression: stagnating (4+ weeks no growth) or jumping (>25%)
+- Intensity distribution: zone-3 trap if flagged
+- Cadence: only if flagged low
+Pick ONE — don't list multiple. Translate the number into what it means for the athlete and what the next week reflects in response. If LONGITUDINAL TRAINING ANALYSIS is empty (low data), skip this and recap from this week's runs only.
 
 PROGRESSION — be a proactive coach, not a scheduler:
 If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly plan must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.

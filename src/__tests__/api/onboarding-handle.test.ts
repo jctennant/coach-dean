@@ -171,7 +171,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     mockTables({
       users: [
         // Mode already resolved via earlier [MODE:FROM_SCRATCH] tag, persisted in onboarding_data
-        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"], has_existing_plan: false, wants_plan: true } }), error: null },
+        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"], has_existing_plan: false, wants_plan: true, strava_connected: true } }), error: null },
         { data: { dashboard_token: "tok-abc" }, error: null },  // for completeOnboarding user lookup
       ],
       conversations: { data: [], error: null },
