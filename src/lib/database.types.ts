@@ -329,6 +329,8 @@ export type Database = {
         Row: {
           active_injury: boolean | null
           coaching_mode: string
+          coaching_threads: string | null
+          coaching_threads_updated_at: string | null
           constraints: string | null
           crosstraining_tools: string[] | null
           current_easy_pace: string | null
@@ -375,6 +377,8 @@ export type Database = {
         Insert: {
           active_injury?: boolean | null
           coaching_mode?: string
+          coaching_threads?: string | null
+          coaching_threads_updated_at?: string | null
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null
@@ -421,6 +425,8 @@ export type Database = {
         Update: {
           active_injury?: boolean | null
           coaching_mode?: string
+          coaching_threads?: string | null
+          coaching_threads_updated_at?: string | null
           constraints?: string | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null

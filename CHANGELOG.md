@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-03 — Post-run variety pass: forbidden cliches, walk-specific framing, anti-repetition, non-obvious wins, coaching threads
+
+**Type:** Feature / Improvement
+**Reported by:** Jake's wife (repeated user feedback)
+**User feedback:** "Every post-run / post-walk message Dean says 'remember to keep easy days easy' or something like that"
+**Root cause:** The "no easy-easy reminder" guard fired only when HR data was present and HR was Z1/Z2 — runs without HR fell through to platitudes. Walks routed through generic cross-training framing but inherited all the run-day instructions. Successive post-runs picked the same insight lens with no anti-repetition signal. The "menu" of insights was a menu, not a rotation, so Claude defaulted to safe filler.
+**Fix / Change:**
+- **A — Forbidden phrases (unconditional):** A `FORBIDDEN PHRASES` block in the post_run prompt bans "keep easy days easy / make sure to keep it easy / great work / nice job / solid effort / way to get out the door / keep it up / keep crushing it / stay consistent (as a closer) / make sure to recover / rest up / listen to your body (as filler)" — regardless of HR data presence.
+- **B — Walk-specific framing:** When `activity_type === "Walk"`, a dedicated `<rule>` block suspends the run frame and supplies a walk-only insight menu (time on feet, recovery quality after recent hard runs, weekly cumulative load, lifestyle/NEAT framing). Closing question must be walk-appropriate.
+- **C — Anti-repetition:** Server-side scan of the last 5 assistant `post_run` messages detects which insight lenses were used (cadence, decoupling, aerobic efficiency, HR zone, pacing, GAP, vert, best efforts, load context). Lenses already used are listed in the prompt with a "DO NOT REPEAT THESE THIS TURN" directive.
+- **D — Non-obvious wins (deterministic):** New computation surfaces findings Strava can't spot — YTD milestone crossings (100/200/250/300/500/750/1000+ mi or km equivalents), longest run in 30 days, pace-at-HR improvement vs. 60-day baseline at the same average HR. When any fire, prompt instructs Dean to lead with the finding, not bury it.
+- **E — Folded into A** (single FORBIDDEN PHRASES block).
+- **F — Coaching threads (per-athlete narrative):** New `training_profiles.coaching_threads` and `coaching_threads_updated_at` columns (migration 042). The Sunday `weekly_recap` Sonnet response now emits a `[THREADS: ...]` machine tag with 1–3 sentences of "what Dean is watching" on this athlete. Server-side parser strips the tag from the SMS, persists it, and the system prompt's ATHLETE HISTORY block reads it back as `WHAT YOU'RE WATCHING (active coaching threads)` for every subsequent post-run / morning / user_message — so Dean references the same evolving story across runs instead of treating each one in isolation. This is the differentiator vs. Strava: Strava sees runs in isolation; a coach sees a thread.
+**Files changed:** src/app/api/coach/respond/route.ts, src/lib/database.types.ts, supabase/migrations/042_coaching_threads.sql, CHANGELOG.md
+
+---
+
 ## 2026-05-03 — "Coach that adapts" pivot: recap arc position, mandatory Strava, named post-run metric, lifting/injury state
 
 **Type:** Feature / Improvement
