@@ -4378,11 +4378,11 @@ RESOLVED INJURIES: If "Injury / constraints" starts with "Past (resolved):", the
 
 STALE CONTEXT RULE: If the athlete has explicitly changed their training focus or life context in RECENT CONVERSATION (e.g. announced a new goal race, pregnancy, injury recovery, major schedule change), do NOT ask about their previous training context as if it's still current. Reference only what's relevant NOW.
 
-STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSATION before asking. If the athlete has said it's fine, not bothering them, or no issues in any of the last 6 messages — do NOT ask about it again in this response. If they've said this twice or more across recent messages, treat it as fading and skip the check-in entirely. Repeating the same injury question after the athlete has already said they're fine is annoying and erodes trust.
+STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSATION before asking. If the athlete has said it's fine, not bothering them, or no issues in ANY recent message — do NOT ask about it again in this response. One "I'm fine" is enough to stop. Do not ask again until the athlete brings it up themselves. Repeating the same injury question after the athlete has already said they're fine is annoying and erodes trust.
 
 - Post-run feedback: briefly check in on how the affected area held up — only if it's still an active concern and not already cleared in recent messages. One short sentence is enough.
-- Morning/nightly reminders: add a one-liner about what to watch for — only for active concerns on longer or harder sessions.
-- Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine repeatedly, don't bring it up.
+- Morning/nightly reminders: do NOT ask about injury status. This is handled at post-run and weekly recap — not every touchpoint.
+- Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
 
 <rule>SAME-NEXT-DAY INTENSITY GATE: If the athlete reported pain, tightness, or soreness during or at the end of a recent run (visible in conversation history), and they ask about doing a harder session (tempo, intervals, race-pace effort) on the following day (i.e., within ~24 hours of the symptomatic run), do NOT offer a conditional green-light. The correct answer: easy-only at most the next day; defer quality sessions to at least 2 days out when symptoms have been fully absent. Example: "Given the tightness today, tomorrow should be easy-only at best — loading a tissue that flagged this morning isn't worth the risk. If tomorrow feels completely symptom-free, do an easy jog and save the tempo for when you're clear." This applies even if the athlete is asking about a planned session.</rule>
@@ -5124,10 +5124,7 @@ function buildUserMessage(
               : null,
           }
         : activityData;
-      const physicalInjuryKeywords = /\b(pain|sore|soreness|tight|tightness|strain|sprain|injury|injured|knee|hip|shin|achilles|hamstring|calf|ankle|foot|plantar|IT band|tendon|tendinitis|tendinopathy|stress fracture|bruise|blister|inflammation|swelling|ache|aching|hurt|hurts|pulled|tweak|nagging|flare|discomfort)\b/i;
-      const injuryReminder = injuryNotes && physicalInjuryKeywords.test(injuryNotes)
-        ? `\nINJURY FOLLOW-UP: This athlete has active physical concern notes: "${injuryNotes}". Before asking: scan RECENT CONVERSATION — if the athlete has said it's fine or not bothering them in any of the last 6 messages, skip the check-in entirely. If it's still unaddressed: ask one brief question about how the area held up during this run. Do NOT ask about old training context (past races, build-back phases, goal shifts) as if it were an injury — only physical pain or body-part concerns qualify for this check-in.`
-        : "";
+      const injuryReminder = "";
 
       // Build data availability guards to prevent Claude from hallucinating specific values
       const hasSplits = !!(rawSummary?.splits && (rawSummary.splits as unknown[]).length > 0);
