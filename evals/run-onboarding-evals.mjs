@@ -61,6 +61,7 @@ function summarizeCollected(data) {
   if (data.days_per_week) lines.push(`Days per week: ${data.days_per_week}`);
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
   if (data.easy_pace) lines.push(`Easy pace: ${data.easy_pace}/mi`);
+  if (data.injury_history) lines.push(`Injury history: ${data.injury_history}`);
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);
   if (data.timezone) lines.push(`Timezone: ${data.timezone}`);
   if (data.strava_city) {
@@ -72,7 +73,16 @@ function summarizeCollected(data) {
       .map((r) => `${r.name ?? "unnamed"} (${r.priority}, ${r.date ?? "no date"})`).join("; ");
     lines.push(`Other races: ${raceList}`);
   }
-  if (data.has_existing_plan != null) lines.push(`Has existing plan: ${data.has_existing_plan ? "yes" : "no"}`);
+  if (data.has_existing_plan != null) {
+    const planPref = data.has_existing_plan
+      ? "has existing plan (Dean works alongside it)"
+      : data.wants_plan === false
+      ? "no plan, wants post-run coaching notes only"
+      : data.wants_plan === true
+      ? "wants Dean to build a plan from scratch"
+      : "no existing plan";
+    lines.push(`Plan preference: ${planPref} — do NOT ask about this again`);
+  }
   if (data.external_plan_description) lines.push(`Current plan: ${data.external_plan_description}`);
   return lines.join("\n");
 }

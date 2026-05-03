@@ -1546,6 +1546,17 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
   }
 
+  // First-run detection: if this is the athlete's first post_run coaching message,
+  // add a warmer tone instruction so it feels like the start of a relationship.
+  if (trigger === "post_run") {
+    const hasAnyPriorPostRun = recentMessages.some(
+      m => m.role === "assistant" && (m as Record<string, unknown>).message_type === "post_run"
+    );
+    if (!hasAnyPriorPostRun) {
+      userMessage += `\n\nFIRST COACHING SESSION: This is the first run you've coached for this athlete — you've never sent them a post-run note before. Tone should feel like the start of a coaching relationship: warm, specific to their data, and ending with one question that helps you understand them better (their goals, how they felt, what they're working on). Reference their name naturally if you know it. Make this feel like the beginning of something, not a generic coaching note.`;
+    }
+  }
+
   // Append weather-at-activity-time block to post_run prompts.
   if (trigger === "post_run" && activityData?.weather_data) {
     const wd = activityData.weather_data as unknown as ActivityWeatherData;

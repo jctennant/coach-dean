@@ -214,7 +214,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     const stravaMsg = smsCalls[0]?.[1] as string;
     expect(stravaMsg).not.toContain("[STRAVA_LINK]");
     expect(stravaMsg).toContain("https://coachdean.ai/api/auth/strava");
-    expect(stravaMsg).toContain('"skip"');
+    // No "skip" option in the message — Strava is now required
+    expect(stravaMsg).not.toContain('"skip"');
     // Only one SMS sent (no separate pre-Strava response)
     expect(smsCalls.length).toBe(1);
 
@@ -398,33 +399,25 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 describe("POST /api/onboarding/handle — awaiting_strava step", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("skip: sets strava_skipped and routes back through handleConversation", async () => {
+  it("skip text: re-sends Strava link (Strava is now required, no skip allowed)", async () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
 
     mockTables({
       users: { data: onboardingUser({ onboarding_step: "awaiting_strava" }), error: null },
-      conversations: { data: [], error: null },
+      conversations: { data: null, error: null },
     });
-
-    // Extract-first ordering: Haiku extraction (tool use) runs before Sonnet
-    mockToolResponse("save_training_fields", {});
-    // Sonnet: conversation response after skip
-    mockLLMResponse("No worries! Which days of the week work best for training?");
 
     await POST(makeRequest({ userId: "user-001", message: "skip" }));
 
-    expect(sendSMS).toHaveBeenCalledWith(
-      "+12025551234",
-      "No worries! Which days of the week work best for training?"
-    );
-
-    // Should update step back to "onboarding"
-    const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
-    const userFromCalls = fromCalls.filter((c: unknown[]) => c[0] === "users");
-    expect(userFromCalls.length).toBeGreaterThan(0);
+    // Should re-send the Strava link (not proceed without Strava)
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const textSent = smsCalls[0]?.[1] as string;
+    expect(textSent).toContain("https://coachdean.ai/api/auth/strava");
+    // Should NOT contain "skip" option since Strava is required
+    expect(textSent).not.toContain('"skip"');
   });
 
-  it("non-skip, non-question: re-sends the Strava link", async () => {
+  it("non-question: re-sends the Strava link without skip option", async () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
 
     mockTables({
@@ -437,7 +430,8 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
     const textSent = smsCalls[0]?.[1] as string;
     expect(textSent).toContain("https://coachdean.ai/api/auth/strava");
-    expect(textSent).toContain("skip");
+    // No skip option — Strava is required
+    expect(textSent).not.toContain('"skip"');
   });
 
   it("Strava question: explains what Strava is and re-sends link", async () => {

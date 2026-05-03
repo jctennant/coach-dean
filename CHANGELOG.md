@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-02 — Simplify onboarding, make Strava required, opt-in plan generation, first-run experience
+
+**Type:** Feature / Improvement
+**Reported by:** Internal product decision
+**User feedback:** N/A
+**Root cause:** Onboarding was too long (3-option mode question early, required strength/fitness questions), Strava was skippable which meant thin coaching context, plan generation was the default rather than a conscious choice, and first Strava sync had no special warmth.
+**Fix / Change:**
+- Strava is now required during onboarding — skip path removed from `handleStrava`. Re-sends link for any message until connected.
+- Simplified WHAT TO COLLECT: removed strength/cross-training and fitness baseline as required fields (Strava covers them). Training days, mileage, terrain now all passively extracted only.
+- Moved plan preference to the end of onboarding as a simple binary question ("want me to build a plan, or just coaching notes after each run?") instead of a 3-option question at step 2.
+- Removed [DASHBOARD_LINK] from onboarding wrap-up messages. Complement/no-plan users no longer receive a follow-up dashboard link message after [READY] — Dean's wrap-up covers it.
+- First-run experience: `post_run` now detects when no prior coaching messages exist and injects a warmer tone instruction, framing the response as the start of a coaching relationship.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-05-02 — Cut dashboard, simplify plan upload to text context, clean coaching engine
 
 **Type:** Refactor / Feature Removal
