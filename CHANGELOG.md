@@ -4,6 +4,44 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-03 — FAQ pass: em-dash scrub, stale-claim fixes, new "what insights Dean delivers" section
+
+**Type:** Improvement
+**Reported by:** Jake (preference + accuracy audit)
+**User feedback:** "Make sure we aren't using M dashes, that's a dead giveaway for AI written content. Use a hyphen if needed... make sure all FAQs are still relevant. I kind of think an FAQ about what insights Dean can provide (or a new section of the landing page) would be helpful!"
+**Root cause:**
+- FAQ section had ~30 em-dashes, a known AI-writing tell.
+- Two FAQ claims were stale post dashboard deprecation: (1) "upload your plan as a PDF to the dashboard" (FAQ #1), and (2) the DASHBOARD inbound-SMS keyword (special-commands FAQ). An audit of `src/app/api/webhooks/linq/route.ts` confirmed no DASHBOARD handler exists; live keywords are FEEDBACK, STRAVA CONNECTION, UPDATE PLAN, UNSUBSCRIBE, STOP.
+- The page had no enumerated list of analysis categories Dean actually delivers. Prospects could only infer breadth from the four narrative InsightCards.
+**Fix / Change:**
+- Em-dash sweep across the entire FAQ block, restructured into commas, periods, colons, and parentheses; only natural-fit cases use a hyphen. Verified zero em-dashes remain in the FAQ range.
+- FAQ #1 (Runna/TrainingPeaks) PDF paragraph rewritten: PDF upload is now described as SMS-based (text Dean a PDF), matching the actual `handlePDFPlan()` ingestion flow in `linq/route.ts`.
+- DASHBOARD keyword removed from special-commands FAQ. UPDATE PLAN added in its place (was missing from the FAQ but live in code).
+- New "Six lenses on every run" landing-page section inserted between Comparison and Testimonials. Six categorical cards (Aerobic efficiency, Pacing and splits, Effort zone audit, Load monitoring, Cadence and form trends, Workout vs intent) each with a one-line plain-language example. Categories grounded in the post_run prompt analysis blocks in `src/app/api/coach/respond/route.ts`.
+- Added a corresponding FAQ entry "What kinds of insights does Coach Dean give me after a run?" listing the same six categories for users who skim FAQs first.
+- Follow-up trim pass: merged the "what paces" + "do I need Strava/GPS" FAQs into a single Strava FAQ; compressed the "build me a plan" FAQ to two sentences (it overlapped Runna FAQ #1); tightened "not training for a race" to a single short paragraph; cut the "training philosophy" answer from a paragraph of jargon to two sentences. Net: 13 FAQs → 11.
+**Files changed:** src/app/page.tsx, CHANGELOG.md
+
+---
+
+## 2026-05-03 — Landing page reorientation: data interpretation, real-time adaptation, injury navigation
+
+**Type:** Improvement
+**Reported by:** Internal engagement audit
+**User feedback:** N/A — driven by analysis of top users (Benjamin: 42 msgs of Garmin-stat interpretation; #2 user: 32 msgs of "lifted heavy, should I run?"; 5 of top 8 users have injury notes)
+**Root cause:** Landing page positioned Dean primarily as a post-run feedback tool with generic "fitness building" framing. The three patterns actually driving deep engagement — (1) interpreting Garmin/Strava metrics, (2) adapting plans around lifting/cross-training/skipped runs, (3) injury go/no-go sounding board — weren't surfaced as concrete examples. Page also kept a dashboard mock for a feature that's been removed, and had FAQ copy promoting general-fitness and triathlon use cases that produce shallow engagement.
+**Fix / Change:**
+- Hero subhead rewritten to lead with reading data, explaining what it means, and adapting to life
+- "How it works" step 2 reframed as "Dean reads every run and texts you what it means"; sub mentions lift days, sore knees, weird HR
+- Insights section: swapped Fitness-progress card → "What does this mean?" Garmin-stat interpretation example (HR/cadence/GCT); swapped Load-management card → "Lifted heavy this morning" real-time adaptation example. Section heading changed to "A coach who reads your data and adapts to your life."
+- Comparison table Dean column: now leads with data interpretation, lifting/sick/skipped adaptation, and injury go/no-go
+- FAQ "not training for a race" softened — leads with injury return / consistency framing, gently steers toward picking a goal
+- FAQ "what races" — dropped triathlon paragraph
+- Removed dashboard mock section entirely (dashboard feature deprecated)
+**Files changed:** src/app/page.tsx, CHANGELOG.md
+
+---
+
 ## 2026-05-03 — Sunday recap variety pass: loosened opener, anti-repetition, weekly wins, forbidden phrases, threads weave-in
 
 **Type:** Improvement

@@ -185,7 +185,7 @@ export default function Home() {
               An expert running coach in your pocket.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              Connect Strava and get instant feedback after every run — what it means, what to do tomorrow, and when to rest. All over text.
+              Connect Strava and get a coach who reads every run, explains what your data actually means, and adapts when life gets in the way. All over text.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -210,7 +210,7 @@ export default function Home() {
           <div className="grid gap-4 md:grid-cols-3 md:gap-6">
             {[
               { step: "01", label: "Connect Strava", sub: "One tap — Coach Dean reads your full history and knows your fitness baseline from day one." },
-              { step: "02", label: "Coach Dean analyzes every run and texts you", sub: "Coaching note the moment your run syncs. Ask anything, any time." },
+              { step: "02", label: "Dean reads every run and texts you what it means", sub: "Coaching note within minutes. Ask anything — heavy lift day, sore knee, weird HR — and your plan adjusts." },
               { step: "03", label: "Train with confidence, not guesswork", sub: "Know when to push, when to back off, and why it's working." },
             ].map(({ step, label, sub }) => (
               <div key={step} className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -235,10 +235,10 @@ export default function Home() {
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Coach Dean catches what your watch doesn&apos;t tell you.
+              A coach who reads your data and adapts to your life.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Not &ldquo;great run!&rdquo; notifications. Actual analysis from your Strava data — the kind that changes what you do next.
+              Not &ldquo;great run!&rdquo; notifications. Actual analysis from your Strava data — and a real conversation when life gets in the way.
             </p>
           </div>
 
@@ -264,23 +264,25 @@ export default function Home() {
               ]}
             />
 
-            {/* Insight 3 — Fitness building */}
+            {/* Insight 3 — Data interpretation */}
             <InsightCard
-              context="Your 6-week progress check"
-              tag="Fitness progress"
+              context="Reading your Garmin"
+              tag="What does this mean?"
               tagColor="#16a34a"
               messages={[
-                { from: "dean", text: "Your aerobic efficiency is up 9% over the last 6 weeks — you're running the same pace at a meaningfully lower heart rate. That's your base building in real time. Keep the easy days truly easy and this trend will carry you right through your build phase." },
+                { from: "user", text: "Easy run today felt fine but my HR averaged 162 and cadence was 168. Is that cadence too low?" },
+                { from: "dean", text: "168 is on the lower end but not a problem on its own — taller runners naturally sit closer to 165–170. The bigger signal is the 162 HR on what felt like an easy effort — that's drifting into moderate territory, which is the grey-zone trap. Slow the next two easy days by 30–45 sec/mi and you'll see HR drop into the low 150s where the aerobic adaptation actually happens." },
               ]}
             />
 
-            {/* Insight 4 — Load management */}
+            {/* Insight 4 — Real-time adaptation */}
             <InsightCard
-              context="After a big training week"
-              tag="Load management"
+              context="Tuesday morning"
+              tag="Adapts to your life"
               tagColor="#0891b2"
               messages={[
-                { from: "dean", text: "Big week — you've logged 43% more than your 4-week average. That's real training stimulus. Keep Friday short and easy so your body can actually absorb it. Fitness built on fresh legs sticks; fitness stacked on top of fatigue tends not to." },
+                { from: "user", text: "Just did a heavy leg day — squats and deadlifts. Should I still run my 6 tonight?" },
+                { from: "dean", text: "Skip the 6 tonight — running heavy after that lift is how achilles and hamstring stuff sneaks in. Move tonight to a 30-min easy spin or full rest, and we'll shift the 6 to Wednesday and bump Thursday's tempo to Friday so the legs get a real recovery window. Plan still works." },
               ]}
             />
           </div>
@@ -319,9 +321,9 @@ export default function Home() {
                 <p className="font-serif text-lg font-normal">Coach Dean</p>
               </div>
               <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tracks whether training is actually building fitness</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Tells you when to push and when to back off</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Explains every run in plain language</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Explains what your HR, pace, and cadence actually mean</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Adapts when you lift, get sick, or skip three days</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Daily go/no-go sounding board for niggles and injuries</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags load patterns before they interrupt training</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan</li>
               </ul>
@@ -349,128 +351,33 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Fitness over time — dashboard mock */}
+      {/* Insights — what Coach Dean delivers after every run */}
       <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
         <div className="mx-auto max-w-5xl">
-          <div className="mb-10 text-center">
+          <div className="mb-12 text-center">
+            <p className="text-sm uppercase tracking-widest text-muted-foreground mb-3">What you get after every run</p>
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Watch your fitness build in real time.
+              Six lenses on every run, the moment it syncs.
             </h2>
-            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Coach Dean tracks the signal beneath the noise — aerobic efficiency, training load, zone distribution — and surfaces it in a dashboard you can actually read. Not raw data. A picture of whether your training is working.
+            <p className="mx-auto max-w-2xl leading-relaxed text-muted-foreground">
+              Coach Dean weighs all six and texts back whichever one is most worth saying that day. Not every run gets all six. He surfaces the signal, not the noise.
             </p>
           </div>
 
-          {/* Dashboard mock */}
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 md:p-8 space-y-6">
-            {/* Header row */}
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-400 mb-0.5">Dashboard · Last 6 weeks</p>
-                <p className="text-base font-semibold text-gray-900">Sarah M. · NYC Marathon build</p>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[
+              { title: "Aerobic efficiency", body: "You're running 8:45 at 148bpm today. Six weeks ago that was 152. Real fitness, in real numbers." },
+              { title: "Pacing and splits", body: "Your second half was 22 seconds slower per mile. Worth easing the start by 10 seconds next time." },
+              { title: "Effort zone audit", body: "Three of your last four runs landed in the grey zone. No real easy day, no real hard day." },
+              { title: "Load monitoring", body: "You're 38 percent above your four-week average. Friday should be short and easy." },
+              { title: "Cadence and form trends", body: "Cadence has crept down to 166 over the last ten runs. Two short pickups this week will nudge it back." },
+              { title: "Workout vs intent", body: "Today's tempo split came in at marathon pace. Tomorrow we'll re-rack and hit threshold properly." },
+            ].map(({ title, body }) => (
+              <div key={title} className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                <p className="font-semibold text-gray-900 leading-snug">{title}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{body}</p>
               </div>
-              <div className="flex gap-5 text-right shrink-0">
-                <div>
-                  <p className="text-xl font-bold text-green-700 leading-none">+11%</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">aerobic efficiency</p>
-                </div>
-                <div>
-                  <p className="text-xl font-bold text-gray-900 leading-none">42 mi</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">this week</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Run zone strip — dots per run, colored by effort, grouped by week */}
-            <div>
-              <p className="text-xs font-medium text-gray-500 mb-3">Training zones — each dot is a run</p>
-              {/* Dot strip — mirrors production RunZoneStrip exactly */}
-              <svg viewBox="0 0 520 32" className="w-full" aria-label="Run zone history">
-                {/* Week 1: Mar 17 — 5 runs */}
-                <circle cx="10"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="31"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="52"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="73"  cy="10" r="9" fill="#f59e0b" opacity="0.85" />
-                <circle cx="94"  cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <text x="52" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Mar 17</text>
-                {/* Week 2: Mar 24 — 5 runs */}
-                <circle cx="126" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="147" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="168" cy="10" r="9" fill="#ef4444" opacity="0.85" />
-                <circle cx="189" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="210" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <text x="168" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Mar 24</text>
-                {/* Week 3: Mar 31 — 5 runs */}
-                <circle cx="242" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="263" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="284" cy="10" r="9" fill="#f59e0b" opacity="0.85" />
-                <circle cx="305" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="326" cy="10" r="9" fill="#ef4444" opacity="0.85" />
-                <text x="284" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Mar 31</text>
-                {/* Week 4: Apr 7 — 4 runs (deload) */}
-                <circle cx="358" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="379" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="400" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="421" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <text x="389" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Apr 7</text>
-                {/* Week 5: Apr 14 — 4 runs (current, partial) */}
-                <circle cx="453" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="474" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <circle cx="495" cy="10" r="9" fill="#ef4444" opacity="0.85" />
-                <circle cx="516" cy="10" r="9" fill="#22c55e" opacity="0.85" />
-                <text x="484" y="29" textAnchor="middle" fontSize="7" fill="#9ca3af">Apr 14</text>
-              </svg>
-              {/* Legend */}
-              <div className="flex flex-wrap gap-4 mt-3">
-                {[
-                  { label: "Easy", color: "#22c55e" },
-                  { label: "Moderate", color: "#f59e0b" },
-                  { label: "Hard", color: "#ef4444" },
-                  { label: "Race", color: "#3b82f6" },
-                ].map(({ label, color }) => (
-                  <span key={label} className="flex items-center gap-1.5 text-xs text-gray-500">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Zone % breakdown */}
-            <div>
-              <p className="text-xs font-medium text-gray-500 mb-2">Zone distribution — last 4 weeks</p>
-              <div className="flex gap-4 flex-wrap mb-2">
-                {[
-                  { label: "Easy (Z1–2)", pct: 76, color: "#22c55e" },
-                  { label: "Moderate (Z3)", pct: 8, color: "#f59e0b" },
-                  { label: "Hard (Z4–5)", pct: 16, color: "#ef4444" },
-                ].map(({ label, pct, color }) => (
-                  <div key={label} className="flex items-center gap-1.5">
-                    <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                    <span className="text-xs text-gray-600">{label}</span>
-                    <span className="text-xs font-semibold text-gray-900">{pct}%</span>
-                  </div>
-                ))}
-              </div>
-              <div className="h-2 w-full rounded-full overflow-hidden flex">
-                <div className="h-full" style={{ width: "76%", backgroundColor: "#22c55e" }} />
-                <div className="h-full" style={{ width: "8%",  backgroundColor: "#f59e0b" }} />
-                <div className="h-full" style={{ width: "16%", backgroundColor: "#ef4444" }} />
-              </div>
-            </div>
-
-            {/* Aerobic efficiency line */}
-            <div>
-              <p className="text-xs font-medium text-gray-500 mb-2">Aerobic efficiency trend — higher is better</p>
-              <svg viewBox="0 0 560 80" className="w-full" style={{ minWidth: "200px" }} aria-label="Aerobic efficiency trend">
-                {/* Trend line — gentle upward slope matching production LineChart */}
-                <polyline
-                  points="4,68 74,62 144,55 214,50 284,46 354,38 430,30 556,22"
-                  fill="none" stroke="#166534" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
-                />
-                <circle cx="556" cy="22" r="3.5" fill="#166534" />
-              </svg>
-            </div>
+            ))}
           </div>
         </div>
       </section>
@@ -534,11 +441,11 @@ export default function Home() {
           <div className="divide-y">
             {[
               {
-                q: "I already use Runna or TrainingPeaks — do I need Coach Dean?",
+                q: "I already use Runna or TrainingPeaks. Do I need Coach Dean?",
                 a: (
                   <>
-                    <p>Yes — this is actually our most common use case. Runna gives you the plan. Coach Dean gives you the intelligence layer on top of it: a coaching note after every run, load monitoring, and a direct line for training questions. Keep your Runna structure; Coach Dean adds what no app does.</p>
-                    <p className="mt-3">You can upload your plan as a PDF to the dashboard and Coach Dean will reference it directly when giving you feedback. So instead of "you ran 8:45 pace," you get "that was your recovery day — 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday."</p>
+                    <p>Yes, and this is actually our most common use case. Runna gives you the plan. Coach Dean gives you the intelligence layer on top of it: a coaching note after every run, load monitoring, and a direct line for training questions. Keep your Runna structure. Coach Dean adds what no app does.</p>
+                    <p className="mt-3">Text Coach Dean a PDF of your plan and he&apos;ll ingest it automatically, then reference it directly when giving you feedback. So instead of &ldquo;you ran 8:45 pace,&rdquo; you get &ldquo;that was your recovery day, 8:45 with 140bpm HR is exactly right, your legs should feel fresher by Thursday.&rdquo;</p>
                   </>
                 ),
               },
@@ -546,57 +453,59 @@ export default function Home() {
                 q: "Can Coach Dean actually prevent injuries?",
                 a: (
                   <>
-                    <p>Coach Dean is genuinely good at catching the patterns that precede most running injuries — load spikes, declining aerobic efficiency, grey-zone effort distribution — and flagging them early so you can act conservatively. He&apos;s not a physio and can&apos;t diagnose anything, but he&apos;s the early warning system most runners are missing.</p>
-                    <p className="mt-3">When something does flare up, Coach Dean will prescribe specific rehab exercises for common running injuries — IT band, shin splints, plantar fasciitis, hip flexor tightness — and swap affected sessions for cross-training alternatives (pool running, cycling, elliptical) so your fitness doesn&apos;t evaporate while you recover. The goal is to stay in training, not just to rest and hope.</p>
+                    <p>Coach Dean is genuinely good at catching the patterns that precede most running injuries: load spikes, declining aerobic efficiency, and grey-zone effort distribution. He flags them early so you can act conservatively. He&apos;s not a physio and can&apos;t diagnose anything, but he&apos;s the early warning system most runners are missing.</p>
+                    <p className="mt-3">When something does flare up, Coach Dean will prescribe specific rehab exercises for common running injuries (IT band, shin splints, plantar fasciitis, hip flexor tightness) and swap affected sessions for cross-training alternatives like pool running, cycling, or the elliptical so your fitness doesn&apos;t evaporate while you recover. The goal is to stay in training, not just to rest and hope.</p>
                   </>
                 ),
               },
               {
                 q: "Can Coach Dean help me if I'm not training for a specific race?",
-                a: (
-                  <>
-                    <p>Absolutely — no race on the calendar required. Plenty of Coach Dean&apos;s athletes are focused on building consistent mileage, staying healthy through a high-mileage stretch, or returning from injury. If you&apos;re coming back from something, Coach Dean will ask about your current status and build your program around staying healthy first, performance second.</p>
-                    <p className="mt-3">If you just want to run more consistently and stop getting hurt every time you ramp up, that&apos;s a perfectly complete goal. Coach Dean tracks your load, checks in after every run, and flags patterns before they become injuries.</p>
-                  </>
-                ),
+                a: "Yes, especially if you're coming back from injury or trying to stay consistent through a high-mileage stretch. That said, Coach Dean is at his best with a goal on the calendar. If you don't have one yet, tell him where you're at and he'll help you pick something realistic.",
               },
               {
                 q: "What type of races can Coach Dean help me prepare for?",
-                a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. If you're training for a triathlon, he focuses on the run leg — your running program will be dialed in, but for swim and bike you'd want dedicated coaching alongside. Not sure what distance is right for you? Tell Coach Dean where you're at and he'll help you figure it out.",
+                a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. Not sure what distance is right for you? Tell Coach Dean where you're at and he'll help you figure it out.",
               },
               {
-                q: "How does Coach Dean know what paces to assign my workouts?",
+                q: "Do I need Strava or a GPS watch?",
                 a: (
                   <>
-                    <p>The best way is to connect Strava during onboarding. Coach Dean pulls your full activity history — recent paces, long run efforts, workout splits — and uses that to build a real picture of your current fitness before your first plan is written. No questionnaire can replace actual data.</p>
-                    <p className="mt-3">If you don&apos;t use Strava, Coach Dean asks for a recent race time or your comfortable conversational pace and calculates your training zones from there using established pace formulas (the same ones elite coaches use). As you train and share feedback over text, those zones get refined over time.</p>
+                    <p>Technically no, all you need is a phone number. But connecting Strava unlocks the best version of Coach Dean. He pulls your full activity history (recent paces, long run efforts, workout splits) to build a real picture of your fitness before your first plan is written, and sends you coaching feedback within minutes of every run finishing. It&apos;s the feature testers have found most valuable.</p>
+                    <p className="mt-3">If you don&apos;t use Strava, Coach Dean asks for a recent race time or your comfortable conversational pace and calculates your training zones from there using the same pace formulas elite coaches use. Those zones get refined over time as you share feedback over text.</p>
                   </>
                 ),
               },
               {
-                q: "Do I need a GPS watch or Strava to use Coach Dean?",
+                q: "What kinds of insights does Coach Dean give me after a run?",
                 a: (
                   <>
-                    <p>No — all you need is a phone number. Coach Dean works entirely over SMS with no app, account, or device required.</p>
-                    <p className="mt-3">That said, connecting Strava unlocks the best version of Coach Dean. He&apos;ll analyze your history to build a sharper plan from day one, and send you coaching feedback within minutes of every run finishing — pace trends, effort level, whether the workout matched the intent. It&apos;s the feature testers have found most valuable.</p>
+                    <p>Six different lenses, every time your run syncs from Strava. Coach Dean weighs all of them and surfaces whichever one is most worth saying that day:</p>
+                    <ul className="mt-3 space-y-2 list-disc pl-5">
+                      <li><span className="font-semibold text-foreground">Aerobic efficiency.</span> Pace at HR over time, so you can see fitness moving in the data, not just on race day.</li>
+                      <li><span className="font-semibold text-foreground">Pacing and splits.</span> First-half vs second-half, fade detection, whether you went out too hot.</li>
+                      <li><span className="font-semibold text-foreground">Effort zone audit.</span> Catches the grey-zone trap where every run lives at moderate effort and nothing moves forward.</li>
+                      <li><span className="font-semibold text-foreground">Load monitoring.</span> This week vs your four-week average, week-over-week changes, milestone runs (longest in 30 days, YTD totals).</li>
+                      <li><span className="font-semibold text-foreground">Cadence and form trends.</span> 10-run cadence average, with cues if it&apos;s drifting in a direction worth nudging.</li>
+                      <li><span className="font-semibold text-foreground">Workout-vs-intent check.</span> Did today&apos;s tempo land in tempo zone? Did the long run actually stay easy? Coach Dean compares execution to the prescribed effort.</li>
+                    </ul>
                   </>
                 ),
               },
               {
                 q: "Does Coach Dean build me a training plan?",
-                a: "Yes, if you need one — Coach Dean will build a plan from scratch based on your goal, current fitness, and schedule. But plan generation is a starting point, not the product. The real value is what happens after every run: coaching notes, load tracking, and real-time adjustments as your training evolves. If you already follow Runna or TrainingPeaks, Coach Dean works alongside it and you skip the plan setup entirely.",
+                a: "Yes, from scratch, based on your goal, current fitness, and schedule. But the plan is a starting point, not the product. The real value is what happens after every run.",
               },
               {
                 q: "How much does Coach Dean cost?",
-                a: "It's free for the first 7 days — cancel with no penalties. After that, $10/mo on an annual plan or $20/mo month-to-month.",
+                a: "It's free for the first 7 days. Cancel with no penalties. After that, $10/mo on an annual plan or $20/mo month-to-month.",
               },
               {
                 q: "What training philosophy does Coach Dean follow?",
-                a: "Dean applies evidence-based principles used by elite coaches — polarized 80/20 training (easy runs truly easy, hard days genuinely hard), Lydiard-style aerobic base building before race-specific work, and Jack Daniels VDOT pacing for accurate zone calculation. He also incorporates targeted strength and mobility work — single-leg and hip exercises that keep runners healthy and absorbing load through a full season. The specifics are always adapted to your fitness level, schedule, and goal race.",
+                a: "Polarized 80/20 training, Lydiard-style aerobic base building, and Jack Daniels VDOT pacing, with targeted strength and mobility work woven in. The specifics are always adapted to your fitness, schedule, and goal race.",
               },
               {
                 q: "What happens if I miss a workout or need to take a week off?",
-                a: "Just tell Coach Dean. Seriously — text him like you'd text a coach. Whether you missed a run, got sick, or needed a mental break, Coach Dean will adjust your upcoming week to account for it and keep you on track toward your goal. Life happens, and a good coach works around it rather than ignoring it.",
+                a: "Just tell Coach Dean. Seriously, text him like you'd text a coach. Whether you missed a run, got sick, or needed a mental break, Coach Dean will adjust your upcoming week to account for it and keep you on track toward your goal. Life happens, and a good coach works around it rather than ignoring it.",
               },
               {
                 q: "Are there any special commands I can text Coach Dean?",
@@ -604,19 +513,19 @@ export default function Home() {
                   <>
                     <p>Beyond just chatting, a few keywords trigger specific actions:</p>
                     <ul className="mt-3 space-y-2">
-                      <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span> — send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Coach Dean got wrong.</li>
-                      <li><span className="font-mono font-semibold text-foreground">DASHBOARD</span> — get a link to your training dashboard, where you can see your current week and upcoming schedule.</li>
-                      <li><span className="font-mono font-semibold text-foreground">STRAVA CONNECTION</span> — get a link to update your Strava permissions, including adding or removing the coaching notes that appear on each activity.</li>
-                      <li><span className="font-mono font-semibold text-foreground">UNSUBSCRIBE</span> — get a link to cancel your subscription at any time.</li>
-                      <li><span className="font-mono font-semibold text-foreground">STOP</span> — stop all messages immediately. You&apos;ll also receive a link to cancel billing. Text START to resume at any time.</li>
+                      <li><span className="font-mono font-semibold text-foreground">FEEDBACK</span>: send a note directly to the Coach Dean team. Use this to report a bug, share a suggestion, or tell us something Coach Dean got wrong.</li>
+                      <li><span className="font-mono font-semibold text-foreground">STRAVA CONNECTION</span>: get a link to update your Strava permissions, including adding or removing the coaching notes that appear on each activity.</li>
+                      <li><span className="font-mono font-semibold text-foreground">UPDATE PLAN</span>: confirms a full plan rebuild after Coach Dean proposes one. Useful when your goal, schedule, or fitness has shifted.</li>
+                      <li><span className="font-mono font-semibold text-foreground">UNSUBSCRIBE</span>: get a link to cancel your subscription at any time.</li>
+                      <li><span className="font-mono font-semibold text-foreground">STOP</span>: stop all messages immediately. You&apos;ll also receive a link to cancel billing. Text START to resume at any time.</li>
                     </ul>
-                    <p className="mt-3">Everything else is just plain conversation — ask questions, report a run, tell Coach Dean your knee hurts. He handles it.</p>
+                    <p className="mt-3">Everything else is just plain conversation. Ask questions, report a run, tell Coach Dean your knee hurts. He handles it.</p>
                   </>
                 ),
               },
               {
                 q: "Is my data private?",
-                a: "Your training data, pace information, and conversations with Coach Dean are used solely to power your coaching experience — nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is only used to pull your workout history into Coach Dean and optionally add a coaching note to each activity — you control the notes permission during setup. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
+                a: "Your training data, pace information, and conversations with Coach Dean are used solely to power your coaching experience, nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is only used to pull your workout history into Coach Dean and optionally add a coaching note to each activity. You control the notes permission during setup. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
               },
             ].map(({ q, a }) => (
               <details key={q} className="group py-4">
