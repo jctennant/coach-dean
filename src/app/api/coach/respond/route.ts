@@ -917,6 +917,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     trigger === "post_run" ? "suppress" :
     trigger === "weekly_recap" ? "this_week_only" : "full";
   const isMetricUser = (profile?.preferred_units as string) === "metric";
+  const isAnalystMode = (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst';
+  const isComplementMode = (profile as Record<string, unknown> | null)?.coaching_mode === 'complement';
+
+  // Analyst mode = no training plan; skip plan-focused proactive triggers.
+  if (isAnalystMode && trigger === "morning_plan") {
+    console.log(`[coach/respond] skipping morning_plan for analyst user ${userId}`);
+    return NextResponse.json({ ok: true, skipped: "analyst_no_plan" });
+  }
+
   const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only", isMetricUser);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
 
@@ -1756,7 +1765,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return scanned;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode);
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -5305,10 +5314,15 @@ function buildUserMessage(
   nonObviousWins: string[] = [],
   recentRecapObservations: string[] = [],
   recapWeeklyWins: string[] = [],
+  isAnalystMode = false,
+  isComplementMode = false,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
     case "morning_plan":
+      if (isComplementMode) {
+        return "Send a short morning message checking in on what's left in their training week. This athlete follows their own external training plan — treat any sessions in CURRENT TRAINING STATE as their coach's prescribed workouts, not Dean's suggestions. Keep it under 480 characters, warm and supportive. Do not rewrite or prescribe new sessions.";
+      }
       return "Send a short morning message previewing what's left for this week. Reference THIS WEEK'S PLAN in CURRENT TRAINING STATE (weekly mileage target, long run, quality session) and name what's still outstanding given how many miles they've already logged. Suggest the long run or quality session they haven't done yet as options. Keep it under 480 characters, warm and coach-like.";
     case "post_run_onboarding":
       // Handled by early-exit in processCoachRequest; unreachable here.
@@ -5589,7 +5603,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - Remaining work: reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (weekly target, long run, quality session). Note what key sessions (long run, quality session) still need to happen — the athlete picks when. Do NOT reference dated sessions or prescribe a specific day.${storedPlanWeek?.key_workout_2 ? `\n- SECONDARY QUALITY SESSION this week: ${storedPlanWeek.key_workout_2} — this is a second quality session on top of the primary one. Mention it when relevant (e.g. "you still have the tempo and the short interval session this week").` : ""}
 - Do NOT mention NEXT WEEK'S PLAN in post-run feedback — that belongs in the Sunday recap.
 
-${injuryReminder}${planDeviationFlag ? `
+${isAnalystMode ? `\n<rule>ANALYST MODE — NO PLAN: This athlete has no training plan and does not want one. Do NOT reference any plan, weekly mileage target, upcoming sessions, or training schedule. Do NOT say anything like "remaining sessions this week", "your plan calls for", or "THIS WEEK'S PLAN". The PLAN CONSISTENCY RULES and WORKOUT STRUCTURE sections do not apply. Focus purely on analyzing this run and end with one forward-looking observation — but no session prescriptions.</rule>\n` : ""}${isComplementMode ? `\n<rule>COMPLEMENT MODE — EXTERNAL PLAN: This athlete follows their own external training plan (Runna, TrainingPeaks, coach-written, etc.). Do NOT prescribe new sessions, alter their schedule, or suggest changing their upcoming workouts. If CURRENT TRAINING STATE lists sessions, they belong to their external plan — reference them as context only. Your role is post-run analysis. The PLAN CONSISTENCY RULES still apply (don't mention next week), but do not treat Dean as the source of their plan.</rule>\n` : ""}${injuryReminder}${planDeviationFlag ? `
 
 ${planDeviationFlag}` : ""}${skippedNonRunSession ? `
 
@@ -5822,6 +5836,9 @@ Second text: prescribe cross-training and rest only. Include 1–2 gentle test-r
 If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST] with running sessions — only cross-training and test-run probe sessions.
 Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
+        // Complement mode: athlete follows an external plan — don't prescribe Dean's next-week sessions.
+        : isComplementMode
+        ? "\n<rule>COMPLEMENT MODE: This athlete follows their own external training plan. For the second text — DO NOT prescribe specific sessions, a mileage target, or a Dean-generated schedule. Give 1 training observation from this week (e.g. pacing quality, volume trend, aerobic efficiency), then tell them to follow their plan for next week. One sentence pointing them to their plan is enough — no session prescriptions from Dean.</rule>\n"
         // Prefer the arc's stored next-week entry when available.
         // More accurate than re-deriving from periodization math — matches what the dashboard shows.
         : storedNextPlanWeek
@@ -5881,6 +5898,9 @@ Pick a different lens. If the same trend keeps being the most actionable, find a
 If your draft contains any of these, rewrite the sentence with a specific number, trend, or named workout outcome — or cut it entirely.
 
 `;
+      if (isAnalystMode) {
+        return `${recapWinsBlock}${recapAntiRepBlock}${recapForbiddenBlock}${weekMileageContext}${crossTrainRecapBlock}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts reflecting on last week's training. First text: what stood out — lead with the most notable signal (a milestone, a trend, a specific run). Include the total mileage figure. Second text: 1–2 training observations or coaching notes based on what you saw in the data — pacing, aerobic efficiency, recovery quality, or a pattern worth watching. Do NOT prescribe next week's sessions, a mileage target, or a training schedule. This athlete runs without a structured plan; keep it observational and forward-looking without locking them into a schedule.`;
+      }
       return `${macroPositionContext}${recapWinsBlock}${recapAntiRepBlock}${recapForbiddenBlock}${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
 
 PLAN FORMAT (per principle 8 — no day-by-day schedule):

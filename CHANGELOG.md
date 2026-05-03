@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-03 — Analyst and complement mode awareness across triggers
+
+**Type:** Feature / Bug Fix
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** `coaching_mode` was never set during onboarding, so analyst (no-plan) and complement (external plan) users were indistinguishable from standard plan users at trigger time. All triggers treated every user as if they had a Dean-generated plan, causing weekly recaps to build next-week training plans for no-plan users, morning_plan to reference a non-existent schedule, and post-run feedback to reference plan sessions that belonged to an external coach.
+**Fix / Change:**
+- Onboarding now writes `coaching_mode = 'analyst'` for NO_PLAN users and `coaching_mode = 'complement'` for COMPLEMENT users in `training_profiles`
+- `isAnalystMode` and `isComplementMode` are now top-level variables in `processCoachRequest`, derived from the profile
+- `morning_plan` trigger early-exits (skipped) for analyst mode users — they have no schedule to preview
+- `morning_plan` for complement mode uses framing that treats sessions as "your coach's plan", not Dean's
+- `post_run` injects a mode-specific rule block: analyst mode suppresses all plan references; complement mode suppresses session prescriptions
+- `weekly_recap` for analyst mode sends a reflection-only recap (no next-week plan); for complement mode, suppresses the periodization-derived next-week plan and tells Dean to defer to the athlete's own plan
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-05-03 — FAQ pass: em-dash scrub, stale-claim fixes, new "what insights Dean delivers" section
 
 **Type:** Improvement

@@ -352,30 +352,82 @@ export default function Home() {
       </section>
 
       {/* Insights — what Coach Dean delivers after every run */}
-      <section className="border-t bg-muted/40 px-6 py-16 md:py-24">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-12 text-center">
-            <p className="text-sm uppercase tracking-widest text-muted-foreground mb-3">What you get after every run</p>
-            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              Six lenses on every run, the moment it syncs.
+      <section className="border-t bg-muted/40 px-6 py-14 md:py-20">
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-10 text-center">
+            <p className="text-sm uppercase tracking-widest text-muted-foreground mb-3">What he looks at, every run</p>
+            <h2 className="font-serif text-2xl font-normal md:text-3xl">
+              Six lenses on every run.
             </h2>
-            <p className="mx-auto max-w-2xl leading-relaxed text-muted-foreground">
-              Coach Dean weighs all six and texts back whichever one is most worth saying that day. Not every run gets all six. He surfaces the signal, not the noise.
-            </p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:gap-x-8 md:gap-y-8">
             {[
-              { title: "Aerobic efficiency", body: "You're running 8:45 at 148bpm today. Six weeks ago that was 152. Real fitness, in real numbers." },
-              { title: "Pacing and splits", body: "Your second half was 22 seconds slower per mile. Worth easing the start by 10 seconds next time." },
-              { title: "Effort zone audit", body: "Three of your last four runs landed in the grey zone. No real easy day, no real hard day." },
-              { title: "Load monitoring", body: "You're 38 percent above your four-week average. Friday should be short and easy." },
-              { title: "Cadence and form trends", body: "Cadence has crept down to 166 over the last ten runs. Two short pickups this week will nudge it back." },
-              { title: "Workout vs intent", body: "Today's tempo split came in at marathon pace. Tomorrow we'll re-rack and hit threshold properly." },
-            ].map(({ title, body }) => (
-              <div key={title} className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-                <p className="font-semibold text-gray-900 leading-snug">{title}</p>
-                <p className="text-sm text-muted-foreground leading-relaxed">{body}</p>
+              {
+                title: "Aerobic efficiency",
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="3,17 8,12 12,14 16,8 21,5" />
+                    <polyline points="17,5 21,5 21,9" />
+                  </svg>
+                ),
+              },
+              {
+                title: "Pacing and splits",
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="3" y1="20" x2="21" y2="20" />
+                    <rect x="4.5" y="13" width="3" height="7" />
+                    <rect x="9.5" y="9" width="3" height="11" />
+                    <rect x="14.5" y="11" width="3" height="9" />
+                  </svg>
+                ),
+              },
+              {
+                title: "Load and injury risk",
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="3" y1="20" x2="21" y2="20" />
+                    <rect x="4" y="15" width="2.5" height="5" />
+                    <rect x="8" y="12" width="2.5" height="8" />
+                    <rect x="12" y="8" width="2.5" height="12" />
+                    <rect x="16" y="5" width="2.5" height="15" fill="currentColor" />
+                  </svg>
+                ),
+              },
+              {
+                title: "Wins and milestones",
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 3 L13.9 8.6 L19.8 8.6 L15 12.1 L16.9 17.7 L12 14.2 L7.1 17.7 L9 12.1 L4.2 8.6 L10.1 8.6 Z" />
+                  </svg>
+                ),
+              },
+              {
+                title: "Weather and conditions",
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M7 18a4 4 0 1 1 1-7.87 5 5 0 0 1 9.78 1.43A3.5 3.5 0 0 1 17 18 Z" />
+                    <line x1="12" y1="3" x2="12" y2="5" />
+                    <line x1="4.5" y1="6.5" x2="5.9" y2="7.9" />
+                    <line x1="19.5" y1="6.5" x2="18.1" y2="7.9" />
+                  </svg>
+                ),
+              },
+              {
+                title: "How this fits your goal",
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="8" />
+                    <circle cx="12" cy="12" r="3.5" />
+                    <circle cx="12" cy="12" r="0.5" fill="currentColor" />
+                  </svg>
+                ),
+              },
+            ].map(({ title, icon }) => (
+              <div key={title} className="flex flex-col items-center gap-3 text-center">
+                <div className="h-10 w-10 text-[#1a5c35]">{icon}</div>
+                <p className="text-sm font-semibold text-gray-900 leading-snug">{title}</p>
               </div>
             ))}
           </div>
