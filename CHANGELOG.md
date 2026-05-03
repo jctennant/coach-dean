@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-02 — Cut dashboard, simplify plan upload to text context, clean coaching engine
+
+**Type:** Refactor / Feature Removal
+**Reported by:** Internal product decision
+**User feedback:** N/A
+**Root cause:** Dashboard had very low usage; plan upload's structured session extraction added complexity without proportional coaching benefit; Dean already had arc context from storedPlanAllWeeks.
+**Fix / Change:** Deleted 5,300+ lines across dashboard UI, dashboard-insights lib, plan import/week-sync pipeline. Uploaded plans now stored as raw text in `onboarding_data.plan_context` and injected into every coaching prompt so Dean can reference them conversationally. Dean-generated plan arc context (`storedPlanAllWeeks`) is preserved. Billing still uses `dashboard_token` for checkout/cancel URLs.
+**Files changed:** src/app/dashboard/ (all deleted), src/lib/dashboard-insights.ts (deleted), src/app/api/coach/respond/route.ts, src/app/api/plan/upload/route.ts, src/app/api/plan/remove/route.ts, src/app/api/webhooks/linq/route.ts, src/lib/training-plan.ts
+
+---
+
 ## 2026-05-02 — Fix HR BPM targets in cycling prescriptions; strip watts field when no power data
 
 **Type:** Bug Fix
