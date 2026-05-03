@@ -722,7 +722,7 @@ function buildActivityDataGuard(activity: Record<string, unknown> | null): strin
   }
 
   if (activity.activity_type === "TrailRun") {
-    annotations.push("activity_type=TrailRun — trail pace is inherently slower than road pace due to terrain and elevation. Slower pace is expected and correct; do NOT flag it as underperformance. Use grade-adjusted pace (GAP) reasoning rather than raw pace comparisons. Each split in the JSON has a gap_pace field (min/mi) reflecting effort on a flat equivalent — use this when the athlete asks about their pace or how they paced climbs.");
+    annotations.push("activity_type=TrailRun — trail pace is inherently slower than road pace due to terrain and elevation. Slower pace is expected and correct; do NOT flag it as underperformance. Use grade-adjusted pace (GAP) reasoning rather than raw pace comparisons. Splits include a gap_pace field (min/mi) reflecting effort on a flat equivalent — but only when Strava provides grade-adjusted speed data. IMPORTANT: only reference specific GAP figures that are explicitly present in the split JSON. Do not estimate, infer, or fabricate gap_pace values for splits where the field is absent.");
   }
 
   annotations.push("max_heartrate is this session's single-run peak reading — NOT the athlete's physiological maximum heart rate. Do not use it to estimate or assert the athlete's max HR.");
@@ -5252,6 +5252,8 @@ COACHING FORWARD — tell them what it means, not just what happened:
 - If something needs to change: say it now, not in the Sunday recap.
 - CLOSING QUESTION (required): End with ONE specific question tied to the data or their training situation. NOT generic ("how are you feeling?", "how'd it feel?"). Examples of good closing questions: "Any tightness in the legs after that tempo effort?" / "How's the [injury area] holding up after that load?" / "Did that effort feel sustainable given where you are in the build?" / "Was the pace feeling controlled in those final miles?" Choose the question most relevant to this run — injury history, pace execution, fatigue signals, or upcoming key sessions. Skip the closing question ONLY if the injury_reminder block already ends with a question.
 Keep it tight — 3–5 sentences total for the whole message.
+
+MILEAGE OVERAGE — when noting that the athlete has exceeded or is tracking above their weekly target, always name the specific target (e.g. "you're at 38mi against a 32mi target" not "you've exceeded your planned mileage"). Vague overage comments without a number are unhelpful.
 
 MILEAGE ACCURACY — CRITICAL: The WEEK-TO-DATE figure in CURRENT TRAINING STATE is what the athlete has ALREADY RUN this week — it already includes the activity shown above. Use it as the current/completed figure. If you mention a projected end-of-week total, always add the word "on track for" or "projected" to make clear it's not yet achieved. Never say "you're at X miles this week" when X includes future sessions.
 
