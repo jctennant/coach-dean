@@ -27,8 +27,8 @@
     "notes": "Training for Cirque Series Snowbird — 8.9mi, ~4,400ft elevation gain, race altitude ~11,000ft.",
     "recent_activities": [
       { "date": "2026-05-15", "type": "Trail Run", "distance_miles": 7.0, "pace": "11:20/mi", "elevation_gain_ft": 1850 },
-      { "date": "2026-05-11", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:20/mi", "elevation_gain_ft": 120 },
-      { "date": "2026-05-09", "type": "Trail Run", "distance_miles": 6.5, "pace": "11:45/mi", "elevation_gain_ft": 1400 },
+      { "date": "2026-05-10", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:20/mi", "elevation_gain_ft": 120 },
+      { "date": "2026-05-08", "type": "Trail Run", "distance_miles": 6.5, "pace": "11:45/mi", "elevation_gain_ft": 1400 },
       { "date": "2026-05-04", "type": "Long Run", "distance_miles": 9.0, "pace": "10:05/mi", "elevation_gain_ft": 800 },
       { "date": "2026-05-01", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:10/mi", "elevation_gain_ft": 80 }
     ],

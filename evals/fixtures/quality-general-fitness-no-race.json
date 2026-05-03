@@ -44,6 +44,6 @@
     "thursday_is_training_day": true,
     "forbidden_phrases": ["race day", "race prep", "taper", "goal race", "marathon", "half marathon", "5k", "10k", "race week", "pre-race"],
     "required_elements": ["Thursday workout recommendation", "distance or workout type", "pace guidance"],
-    "notes": "Today is Wednesday April 8. Kira has no race — she's running for general fitness. She asked what to do for her Thursday run (tomorrow). Response MUST: (1) give a concrete Thursday workout recommendation (distance + pace), (2) NOT mention races, race prep, or race-specific concepts like taper, (3) frame guidance around her general fitness goal. She's logged 6mi so far this week (Tuesday run), target is 18mi, so ~12mi remaining across Thursday and Saturday. A reasonable Thursday recommendation is 5-6mi easy at around 10:00-10:20/mi."
+    "notes": "Today is Wednesday April 8. Kira has no race — she's running for general fitness. She asked what to do for her Thursday run (tomorrow). Response MUST: (1) give a concrete Thursday workout recommendation (distance + pace), (2) NOT mention races, race prep, or race-specific concepts like taper, (3) frame guidance around her general fitness goal. She's logged 6mi so far this week (Tuesday run), target is 18mi, so ~12mi remaining across Thursday and Saturday. A reasonable Thursday recommendation is 5-6mi easy at around 10:00-10:20/mi. Accept any recommendation in the 4-6mi range as valid."
   }
 }

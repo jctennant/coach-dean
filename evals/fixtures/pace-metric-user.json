@@ -38,11 +38,11 @@
     "vdot": 50,
     "easy_pace_per_mile": "8:45/mi",
     "easy_pace_per_km": "5:26/km",
-    "easy_pace_range_per_km_low": "5:17/km",
-    "easy_pace_range_per_km_high": "5:35/km",
+    "easy_pace_range_per_km_low": "5:25/km",
+    "easy_pace_range_per_km_high": "5:55/km",
     "preferred_units": "metric",
     "must_use_metric": true,
     "forbidden_phrases": ["/mi", "per mile", "min/mile", "miles per hour"],
-    "notes": "Lena has preferred_units: metric. She asked about easy pace. VDOT 50 easy pace is 8:45/mi = 5:26/km. Response MUST give pace in min/km (around 5:20-5:35/km range), NOT min/mi. Must NOT say '8:45 per mile' or '/mi' anywhere. Distance references should use km (e.g. '13km long run' not '8-mile long run'). The conversion: 8:45/mi ÷ 1.609 = ~5:26/km. Easy range is roughly 5:17–5:35/km."
+    "notes": "Lena has preferred_units: metric. She asked about easy pace. VDOT 50 easy pace is 8:45/mi = 5:26/km. The system-computed range (Jack Daniels / route.ts formula) is 5:25–5:55/km. Response MUST give pace in min/km (around 5:25-5:55/km range), NOT min/mi. Must NOT say '8:45 per mile' or '/mi' anywhere. Distance references should use km (e.g. '13km long run' not '8-mile long run')."
   }
 }

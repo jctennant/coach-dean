@@ -92,7 +92,7 @@ function easyPaceRange(paceStr, useMetric = false) {
   if (useMetric) {
     const kmSec = Math.round(totalSec / 1.60934);
     const rounded = Math.round(kmSec / 5) * 5;
-    const upper = rounded + 20;
+    const upper = rounded + 30;
     const fmt = (s) => {
       const min = Math.floor(s / 60);
       const sec = s % 60;
@@ -195,7 +195,9 @@ function buildEvalSystemPrompt(fixture) {
 
   const paces = getVDOTPaces(fixture);
   const phase = user.current_phase || "build";
-  const isDeload = user.is_deload_week || (user.current_week % 4 === 0 && phase !== "taper" && phase !== "peak");
+  // Only mark deload if fixture explicitly sets is_deload_week — don't infer from week % 4
+  // since fixtures are the authoritative source for what week type it is.
+  const isDeload = user.is_deload_week === true;
   const weekMileageSoFar = user.miles_logged_this_week || 0;
   const weeklyTarget = user.weekly_mileage_target || 0;
   const avgWeekly = weeklyTarget || 30;
@@ -390,6 +392,26 @@ ${hrVal ? `- Avg HR: ${hrVal} bpm\n` : ""}${a.elevation_gain_ft ? `- Elevation g
         activityBlock += `\n<rule>DATA GUARD: This run was ${a.distance_miles} miles and has ${a.splits_km.length} km splits. Do NOT reference any mile number beyond ${a.distance_miles} miles. These are kilometer splits — the split index is NOT the mile number. Never say "mile ${a.splits_km.length}" or any mile number that exceeds the run distance.</rule>\n`;
       }
     }
+    // HR zone context — inject when avg HR is available (mirrors route.ts zone calc)
+    if (hrVal) {
+      const maxHR = user.max_heartrate_observed || Math.round(220 - 30); // fallback estimate
+      const hrPct = Math.round(hrVal / maxHR * 100);
+      // Use 80% max as Z2/Z3 boundary (endurance zone standard: Z2 = aerobic/easy effort up to ~80%)
+      let zone;
+      if (hrPct < 80) zone = "Zone 2 (aerobic / easy — correct intensity for base and long runs)";
+      else if (hrPct < 90) zone = "Zone 3/4 (moderate to hard — threshold/tempo range)";
+      else zone = "Zone 5 (max effort / race)";
+      activityBlock += `\nHEART RATE ZONES (max HR = ${maxHR} bpm${user.max_heartrate_observed ? " observed" : " estimated"}):\n`;
+      activityBlock += `- Avg HR this run: ${hrVal} bpm = ${hrPct}% max → ${zone}\n`;
+      activityBlock += `- Zone 2 (aerobic base): <${Math.round(maxHR * 0.80)} bpm\n`;
+      activityBlock += `- Zone 3/4 (moderate/threshold): ${Math.round(maxHR * 0.80)}–${Math.round(maxHR * 0.90)} bpm\n`;
+      activityBlock += `- Zone 5 (hard/max): >${Math.round(maxHR * 0.90)} bpm\n`;
+      // Affirm zone for marathon/half_marathon goal in aerobic zone
+      const isMarathonGoal = ["marathon", "half_marathon"].includes(user.goal || "");
+      if (isMarathonGoal && hrPct < 80) {
+        activityBlock += `\n<rule>AFFIRM ZONE 2: This run was solidly in Zone 2 (aerobic range). For marathon training, Zone 2 runs build the aerobic engine needed for race day. Your response MUST explicitly mention "Zone 2" and connect it to marathon/endurance development. Do NOT say "Zone 3" or imply the effort was too high. Affirm the effort was exactly right.</rule>`;
+      }
+    }
   }
 
   // Fitness tier
@@ -499,8 +521,8 @@ ${user.notes ? `- Athlete notes: ${user.notes}` : ""}${timeConstraintBlock}${str
 ${activitySummary}
 ${activityBlock}
 CURRENT TRAINING STATE:
-- Week ${user.current_week} of training, phase: ${phase.charAt(0).toUpperCase() + phase.slice(1)}${isDeload ? " — RECOVERY WEEK" : ""}
-${isDeload ? `<rule>RECOVERY WEEK: This week's target is ${weeklyTarget} mi — already reflects the recovery volume reduction. Use the stored target, do NOT compute a further reduction from recent average. No new quality sessions. Same number of runs, shorter distances.</rule>\n` : ""}
+- Week ${user.current_week} of training, phase: ${phase.charAt(0).toUpperCase() + phase.slice(1)}${isDeload ? " — DELOAD WEEK" : ""}
+${isDeload ? `<rule>DELOAD WEEK: This week's target is ${weeklyTarget} mi — already reflects the recovery volume reduction. Use the stored target, do NOT compute a further reduction from recent average. No new quality sessions. Same number of runs, shorter distances.</rule>\n` : ""}${phase === "taper" ? `<rule>TAPER PHASE: The athlete is tapering for their race. DO NOT suggest adding volume, extra runs, or hard workouts. If they ask about adding miles or feeling like they're losing fitness: (1) name "taper madness" — the anxious, flat feeling during taper is real and universal, (2) explain the physiology: glycogen supercompensation, muscle repair, and nervous system reset happen during reduced load, (3) affirm the current weekly target is correct coming off peak mileage, (4) redirect to race prep (gear, nutrition, pacing strategy, mental readiness). The weekly mileage target is already set correctly — do NOT suggest they deviate from it.</rule>\n` : ""}
 - Weekly mileage target: ${weeklyTarget ? (user.preferred_units === "metric" ? `${(weeklyTarget * 1.60934).toFixed(0)} km` : weeklyTarget + " mi") : "TBD"}${trigger === "weekly_recap" ? `\n- Progression target for NEXT week (week ${user.current_week + 1}): ~${user.preferred_units === "metric" ? `${(Math.round(avgWeekly * 1.08) * 1.60934).toFixed(0)} km` : Math.round(avgWeekly * 1.08) + " mi"} (8% step up from recent average — use this as the plan total, not the stored weekly target)` : ""}
 <rule>THIS WEEK'S MILEAGE: ${user.preferred_units === "metric" ? (weekMileageSoFar * 1.60934).toFixed(1) + " km" : weekMileageSoFar.toFixed(1) + " mi"} done so far this week (${user.runs_this_week || 0} run${(user.runs_this_week || 0) !== 1 ? "s" : ""}). This is the ONLY authoritative source for current week mileage — computed directly from Strava. NEVER compute week mileage yourself by summing individual run mentions. Each week resets on Monday. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to this figure immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.</rule>
 - Athlete preferred units: ${user.preferred_units || "imperial"}
@@ -509,10 +531,27 @@ ${isDeload ? `<rule>RECOVERY WEEK: This week's target is ${weeklyTarget} mi — 
   Easy ${paces.easyRange}, Tempo ${paces.tempo}, Interval ${paces.interval}
 <rule>PACE SANITY CHECK (extends principle 10): This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or slower is wrong — use the stored Tempo (${paces.tempo}) instead. WU/CD pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit on every pace.</rule>${sessionRows}${remainingPlanLine}${user.weekly_plan?.quality_session ? `\nTHIS WEEK'S PLAN — Quality session: YES — ${user.weekly_plan.quality_session}` : ""}
 ${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}
+
+INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target and stores the hold state. HIGH THRESHOLD: only use for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances". When signaling [INJURY_HOLD], include a brief cross-training week outline (3-4 sessions: easy bike/elliptical/walk, no high-impact) and a mid-week check-in prompt.
+
+INJURY CLEAR: When an athlete who was previously on injury hold (check above for "INJURY HOLD ACTIVE") explicitly says they are recovered and cleared to resume — append [INJURY_CLEAR] at the end of your response. Only use after a confirmed injury hold — not for general "feeling good" messages.
+
+LIGHTER WEEK: When an athlete reports a short-term setback (nagging soreness, minor ache, unexpected fatigue, hectic schedule) that means reduced training but CAN still run some — append [LIGHTER_WEEK] at the end. Threshold: "my knee is nagging", "feeling beat up", "taking a few easy days". Do NOT use if they can't run at all (use [INJURY_HOLD] instead).
 ${conversationBlock}
 MILEAGE FORMAT (per principle 9):
 - When listing planned sessions for a week, the Total line shows ONLY planned future sessions. If the athlete has already run some miles, acknowledge them in a separate sentence.
 - For weekly recaps: planned next week shows a clean single total; last week's completed miles are referenced separately.
+
+${user.goal === "general_fitness" ? `<rule>GENERAL FITNESS GOAL — NO RACE REFERENCES: This athlete is training for general fitness with no race goal. NEVER mention race day, race prep, taper, race week, pacing strategy for a race, or any race-specific concept. Frame all guidance around consistency, health, and sustainable fitness progress. Recommend easy runs, occasional tempo for fitness variety, and consistency. Do not suggest tempo or intervals unless clearly asked — this athlete is in base-building mode.</rule>` : ""}
+
+${trigger === "post_run" ? `POST-RUN RESPONSE RULES:
+Give 1 crisp, goal-tied insight. Use this GOAL LENS based on the athlete's goal:
+- trail_race / mountain race: elevation load, time-on-feet, grade-adjusted pace, vert accumulation vs race demands
+- marathon / half_marathon: aerobic efficiency, long run progression, cardiac drift, Zone 2 quality
+- 5k / 10k / mile: speed session execution, running economy, tempo segment comparison
+- general_fitness: consistency, sustainable effort, aerobic base progress
+<rule>FORBIDDEN: Do NOT use the overall average pace as the workout benchmark when mile splits are available — the overall pace is diluted by warmup and cooldown. Analyze the workout segments (faster miles) vs the warmup/cooldown (slower miles) separately. If a quality session was prescribed, compare actual workout-segment pace to the prescribed pace explicitly.</rule>
+<rule>The warmup and cooldown miles should be read as INTENTIONAL — do NOT flag them as pacing anomalies. Only the prescribed workout segment miles are subject to pace comparison.</rule>` : ""}
 
 COMMUNICATION STYLE:
 You are texting over iMessage. Write like a human coach would text.
@@ -614,12 +653,66 @@ function buildUserMessage(fixture) {
       msg += `- Mile splits: ${a.splits.map(s => `Mile ${s.mile}: ${s.pace}`).join(", ")}\n`;
     }
     msg += `\n<rule>WEEK-TO-DATE (authoritative — from Strava, Monday through now): ${weekSoFar.toFixed(1)} mi total</rule>`;
+    // If mile splits are available and a quality session is prescribed, guide split analysis
+    if (a.splits && a.splits.length > 0 && user.weekly_plan?.quality_session) {
+      // Compute average workout-segment pace (exclude WU/CD as slowest miles)
+      const splits = a.splits;
+      const workoutSplits = splits.filter(s => {
+        const match = (s.pace || "").match(/(\d+):(\d+)/);
+        return match ? parseInt(match[1]) * 60 + parseInt(match[2]) < 600 : false; // < 10:00/mi = likely workout segment
+      });
+      let avgWorkoutPaceStr = "";
+      if (workoutSplits.length > 0) {
+        const totalSec = workoutSplits.reduce((sum, s) => {
+          const m = (s.pace || "").match(/(\d+):(\d+)/);
+          return sum + (m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 0);
+        }, 0);
+        const avgSec = Math.round(totalSec / workoutSplits.length);
+        avgWorkoutPaceStr = `${Math.floor(avgSec / 60)}:${String(avgSec % 60).padStart(2, "0")}/mi`;
+      }
+      msg += `\n\n<rule>SPLIT ANALYSIS — REQUIRED: Mile splits are available for this run. The prescribed quality session is "${user.weekly_plan.quality_session}". Identify warmup and cooldown splits (slower miles) vs the workout segment(s) (faster miles). The workout segment average pace is ~${avgWorkoutPaceStr || "see splits"}. Compare this to the prescribed pace — do NOT use the overall average pace as the benchmark, since it is diluted by warmup and cooldown. State BOTH the actual workout-segment pace AND the prescribed pace explicitly (e.g. "tempo miles came in at ${avgWorkoutPaceStr} — right on your X target"). CRITICAL FORBIDDEN PHRASES: NEVER say "slightly slower", "slightly off", "a bit slow", "a bit off", "marginally off", "just slightly slower", "just off", "didn't quite hit", "missed the target", or any similar phrase that suggests the athlete underperformed. A difference of ≤5 sec/mile is essentially perfect — describe it as "on target", "right on pace", "nailed it", or "essentially perfect execution".</rule>`;
+    }
+    // For trail runs with elevation gain and a race goal, inject vert-per-mile comparison
+    if (a.elevation_gain_ft && (user.goal === "trail_race" || user.goal === "ultra")) {
+      const vertPerMile = Math.round(a.elevation_gain_ft / a.distance_miles);
+      // Extract race vert from notes if available
+      const raceVertMatch = (user.notes || "").match(/~?([\d,]+)\s*ft\s*elevation\s*gain/i);
+      const raceDistMatch = (user.notes || "").match(/([\d.]+)\s*mi/);
+      const raceGoalRace = user.goal_race || "";
+      if (raceVertMatch && raceDistMatch) {
+        const raceVert = parseInt(raceVertMatch[1].replace(",", ""));
+        const raceDist = parseFloat(raceDistMatch[1]);
+        const raceVertPerMile = Math.round(raceVert / raceDist);
+        msg += `\n\n<rule>VERT COMPARISON — REQUIRED: Today's run had ${a.elevation_gain_ft}ft gain in ${a.distance_miles}mi = ${vertPerMile}ft/mile. ${raceGoalRace} demands ~${raceVert}ft in ${raceDist}mi = ~${raceVertPerMile}ft/mile. Frame the response around how today's climbing load builds toward the race's vert demands. Mention the vert, the climbing, and connect explicitly to ${raceGoalRace}.</rule>`;
+      }
+    }
     baseMsg = msg;
   } else if (trigger === "weekly_recap") {
     const weekMiles = user.miles_logged_this_week || 0;
     const nextWeekTarget = Math.round((user.weekly_mileage_target || 35) * 1.08);
     const trainingDays = (user.training_days || []).join(", ");
-    baseMsg = `Weekly recap trigger. Week ${user.current_week} completed with ${weekMiles.toFixed(1)} mi over ${user.runs_this_week || 0} runs. Build week ${user.current_week + 1} plan targeting ~${nextWeekTarget} mi. Training days are: ${trainingDays} — schedule a run on EACH training day including Monday. Do NOT skip any training day.`;
+    const missedRun = fixture.ground_truth?.missed_run;
+    const missedRunNote = missedRun
+      ? ` One planned run was missed (${missedRun}). Acknowledge the missed day briefly and positively — do NOT be preachy. State the correct mileage (${weekMiles.toFixed(1)} mi) not the target.`
+      : "";
+    const hasUploadedPlan = !!fixture.uploaded_plan;
+    if (hasUploadedPlan) {
+      // Compute missed training day for uploaded plan
+      const plannedRunDays = (user.training_days || []).length;
+      const completedRuns = user.runs_this_week || 0;
+      const uploadedMissedNote = completedRuns < plannedRunDays
+        ? ` They missed ${plannedRunDays - completedRuns} planned run(s) this week — acknowledge briefly and positively, then move on.`
+        : "";
+      // Use target range from current week in uploaded plan if available
+      const allWeeks = fixture.uploaded_plan?.all_weeks || [];
+      const currentPlanWeek = allWeeks.find(w => w.week_number === user.current_week);
+      const weekTargetStr = currentPlanWeek?.total_miles_min != null && currentPlanWeek?.total_miles_max != null
+        ? `${currentPlanWeek.total_miles_min}–${currentPlanWeek.total_miles_max} mi`
+        : currentPlanWeek?.total_miles != null ? `~${currentPlanWeek.total_miles} mi` : `~${user.weekly_mileage_target} mi`;
+      baseMsg = `Weekly recap trigger. Week ${user.current_week} is complete. The athlete logged ${weekMiles.toFixed(1)} mi across ${completedRuns} runs this week (plan target range was ${weekTargetStr}).${uploadedMissedNote} First: briefly recap week ${user.current_week} (mention the ${weekMiles.toFixed(1)} mi they logged — do NOT state the exact target as a single number if it's a range). Then: describe week ${user.current_week + 1} sessions from the uploaded plan block below. The athlete is following an UPLOADED TRAINING PLAN — reference the specific workouts listed (intervals, long run, etc.) exactly as prescribed. Do NOT generate different sessions.`;
+    } else {
+      baseMsg = `Weekly recap trigger. Week ${user.current_week} completed with ${weekMiles.toFixed(1)} mi over ${user.runs_this_week || 0} runs.${missedRunNote} Build week ${user.current_week + 1} plan targeting ~${nextWeekTarget} mi. Training days are: ${trainingDays} — schedule a run on EACH training day including Monday. Do NOT skip any training day.`;
+    }
   } else if (trigger === "initial_plan" && fixture.category === "plan_quality") {
     const weekMiles = user.miles_logged_this_week || 0;
     const weeksUntilRace = user.weeks_until_race;
@@ -674,13 +767,16 @@ DATE BOUNDARY: Every session date must fall within the week header you stated. I
       return new Date(Date.UTC(ty, m - 1, d)) >= localTodayUTC;
     });
     if (!hasActiveSessions) {
+      const weekMiStr = `${(user.miles_logged_this_week || 0).toFixed(1)} miles`;
       baseMsg = `The athlete's training week is complete — all stored sessions for this week are in the past. The weekly recap and next-week plan will be sent shortly tonight.
 
-Send a brief end-of-week message (under 200 characters) that:
-1. Acknowledges the week is done — you can mention their week-to-date mileage from CURRENT TRAINING STATE.
-2. Lets them know their plan for next week is coming tonight.
+Send a brief end-of-week check-in message (under 200 characters). You MUST include BOTH of:
+1. A clear statement that this week is DONE or COMPLETE, optionally mentioning their ${weekMiStr} this week.
+2. A clear statement that their next week's plan is coming tonight (e.g. "sending your plan tonight", "plan coming tonight", "new plan on its way tonight").
 
-Do NOT mention a specific workout for tomorrow. Do not invent or guess a session. No markdown.`;
+Example structure: "Week is done — [X miles] in the books. New plan coming tonight."
+
+CRITICAL: Do NOT mention any specific workout distance, pace, or session type. Do NOT say "tomorrow" followed by a workout. The stored plan sessions are all completed — treat them as history only. Never say "long run tomorrow", "easy run tomorrow", or reference any specific miles or paces from prior sessions. No markdown.`;
     } else {
       baseMsg = `Nightly reminder trigger. Send a brief reminder of tomorrow's workout based on the stored sessions and recent conversation.`;
     }

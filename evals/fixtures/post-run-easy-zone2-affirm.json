@@ -29,9 +29,9 @@
     "notes": "First marathon. Goal is sub-3:45.",
     "recent_activities": [
       { "date": "2026-05-13", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:35/mi", "average_heartrate": 138 },
-      { "date": "2026-05-11", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:45/mi", "average_heartrate": 168 },
-      { "date": "2026-05-08", "type": "Long Run", "distance_miles": 12.0, "pace": "9:40/mi", "average_heartrate": 142 },
-      { "date": "2026-05-06", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:28/mi", "average_heartrate": 136 }
+      { "date": "2026-05-10", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:45/mi", "average_heartrate": 168 },
+      { "date": "2026-05-07", "type": "Long Run", "distance_miles": 12.0, "pace": "9:40/mi", "average_heartrate": 142 },
+      { "date": "2026-05-05", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:28/mi", "average_heartrate": 136 }
     ],
     "recent_conversation": []
   },

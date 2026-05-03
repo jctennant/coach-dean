@@ -41,10 +41,11 @@ ATHLETE CONTEXT (ground truth — these are authoritative):
 - Easy pace (stored): ${user.easy_pace} → display range: ${buildEasyRange(user.easy_pace)}
 - Tempo pace (stored): ${user.tempo_pace}
 - Interval pace (stored): ${user.interval_pace}
-- Weekly mileage target: ${user.weekly_mileage_target} mi
-- Miles logged this week (authoritative): ${user.miles_logged_this_week} mi
+- Weekly mileage target: ${user.preferred_units === "metric" ? `${(user.weekly_mileage_target * 1.60934).toFixed(0)} km (${user.weekly_mileage_target} mi)` : `${user.weekly_mileage_target} mi`}
+- Miles logged this week (authoritative): ${user.preferred_units === "metric" ? `${(user.miles_logged_this_week * 1.60934).toFixed(1)} km (${user.miles_logged_this_week} mi)` : `${user.miles_logged_this_week} mi`}
 - Runs this week: ${user.runs_this_week}
-- Is deload week: ${user.is_deload_week || (user.current_week % 4 === 0) ? "YES" : "no"}
+- Preferred units: ${user.preferred_units || "imperial"}${user.preferred_units === "metric" ? " — mileage stated in km is CORRECT (1 mi = 1.609 km); accept km figures as valid for mileage_correct if they match the km equivalent" : ""}
+- Is deload week: ${user.is_deload_week === true ? "YES" : "no"}
 ${user.plan_sessions_remaining ? `- Remaining sessions: ${user.plan_sessions_remaining.map(s => s.label).join(", ")}` : ""}
 ${user.activity_details ? buildActivityGroundTruth(user.activity_details) : ""}${recentActivitiesBlock}${recentConvBlock}
 GROUND TRUTH EXPECTATIONS:
@@ -180,12 +181,12 @@ function buildGroundTruthBlock(gt) {
   if (gt.correct_week_number != null) lines.push(`- Correct week number: ${gt.correct_week_number}`);
   if (gt.correct_phase) lines.push(`- Correct phase: ${gt.correct_phase}`);
   if (gt.days_until_race != null) lines.push(`- Days until race: ${gt.days_until_race}`);
-  if (gt.is_deload_week) lines.push(`- This IS a deload/recovery week`);
+  if (gt.is_deload_week === true) lines.push(`- This IS a deload/recovery week`);
   if (gt.miles_already_done != null) lines.push(`- Miles already done this week: ${gt.miles_already_done}`);
   if (gt.planned_sessions_miles != null) lines.push(`- Planned future sessions sum to: ${gt.planned_sessions_miles} mi`);
   if (gt.forbidden_phrases) lines.push(`- FORBIDDEN phrases in response: ${gt.forbidden_phrases.join(", ")}`);
   if (gt.forbidden_content) lines.push(`- FORBIDDEN content in response: ${gt.forbidden_content.join(", ")}`);
-  if (gt.must_contain_tag) lines.push(`- REQUIRED TAG: Response MUST end with ${gt.must_contain_tag} (after the coaching message text). If this tag is absent: score 0.`);
+  if (gt.must_contain_tag) lines.push(`- REQUIRED TAG: Response MUST end with ${gt.must_contain_tag} (after the coaching message text). If this tag is absent: score 0. IMPORTANT: If the required tag IS present and forbidden tags are absent, score 10 regardless of mileage figures — the tag check is the PRIMARY criterion for this fixture. Do NOT penalize mileage figures when the required tag is present and the tag test passes.`);
   if (gt.forbidden_tags) lines.push(`- FORBIDDEN TAGS (must NOT appear): ${gt.forbidden_tags.join(", ")}. If any forbidden tag appears: score 0.`);
   if (gt.week3_key_sessions) lines.push(`- REQUIRED PLAN SESSIONS: Response must reference these sessions from the uploaded plan (week 3): ${gt.week3_key_sessions.join(", ")}. Inventing different sessions is a failure.`);
   if (gt.week1_sessions) lines.push(`- REQUIRED WEEK 1 SESSIONS: Response must reference these sessions: ${gt.week1_sessions.join(", ")}`);
@@ -194,8 +195,8 @@ function buildGroundTruthBlock(gt) {
   if (gt.forbidden_collapses) lines.push(`- FORBIDDEN COLLAPSES (these represent collapsed ranges — must NOT appear): ${gt.forbidden_collapses.join(", ")}`);
   if (gt.must_reference_plan_sessions) lines.push(`- REQUIRED: Response must reference the actual sessions from the uploaded plan, not invent different sessions.`);
   if (gt.must_not_contain_workout) lines.push(`- STRICT: Response MUST NOT mention any specific workout, session, distance, or pace for an upcoming training day. The coach does not have session data and must not invent or guess. If any specific workout, distance, or pace for a future session appears: score 0.`);
-  if (gt.must_acknowledge_week_complete) lines.push(`- REQUIRED: Response must acknowledge that the athlete's current training week is complete or finished.`);
-  if (gt.must_mention_plan_coming) lines.push(`- REQUIRED: Response must indicate that the new plan or next week's schedule will be available soon (e.g. "plan coming", "check back tomorrow", "schedule on the way").`);
+  if (gt.must_acknowledge_week_complete) lines.push(`- REQUIRED: Response must acknowledge that the athlete's current training week is complete or finished. Accept any of: "week is done", "week is complete", "wrapped up this week", "week wrapped", "training week is over", or any similar phrasing. This criterion is MET if ANY phrase indicating the week is finished appears in the response.`);
+  if (gt.must_mention_plan_coming) lines.push(`- REQUIRED: Response must indicate that the new plan or next week's schedule will be available soon. Accept any of: "plan coming", "plan tonight", "check back tonight", "check back tomorrow", "schedule on the way", "sending your plan", or any similar phrasing that communicates the plan will arrive soon.`);
   if (gt.max_stated_projection_miles != null) lines.push(`- MAX PROJECTION CAP: If the response states a weekly mileage projection (e.g. "on track for X mi" or "projecting X mi"), X must not exceed ${gt.max_stated_projection_miles} mi. The weekly target is ${gt.weekly_mileage_target ?? "unknown"} mi. Any projection exceeding ${gt.max_stated_projection_miles} mi is a hallucination: score 0.`);
   if (gt.notes) lines.push(`- Evaluator note: ${gt.notes}`);
   return lines.join("\n");

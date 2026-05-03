@@ -21,7 +21,7 @@
     "training_days": ["tuesday", "thursday", "saturday"],
     "preferred_units": "imperial",
     "weekly_mileage_target": 22,
-    "miles_logged_this_week": 5,
+    "miles_logged_this_week": 4.1,
     "runs_this_week": 1,
     "injury_notes": "None",
     "weekly_plan": {
@@ -30,9 +30,9 @@
     "notes": "Training for a local 5K, goal sub-21min.",
     "recent_activities": [
       { "date": "2026-05-14", "type": "Tempo Run", "distance_miles": 4.1, "pace": "8:10/mi" },
-      { "date": "2026-05-11", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:50/mi" },
-      { "date": "2026-05-09", "type": "Intervals", "distance_miles": 4.0, "pace": "7:45/mi" },
-      { "date": "2026-05-07", "type": "Easy Run", "distance_miles": 4.5, "pace": "9:45/mi" }
+      { "date": "2026-05-10", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:50/mi" },
+      { "date": "2026-05-07", "type": "Intervals", "distance_miles": 4.0, "pace": "7:45/mi" },
+      { "date": "2026-05-05", "type": "Easy Run", "distance_miles": 4.5, "pace": "9:45/mi" }
     ],
     "recent_conversation": []
   },
