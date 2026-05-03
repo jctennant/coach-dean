@@ -1616,6 +1616,115 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return findings;
   })();
 
+  // Anti-repetition signal for weekly_recap: scan the last ~4 weekly_recap messages
+  // and detect which longitudinal observation Dean already used recently. Tell Claude
+  // which lenses to avoid this Sunday so Sunday-after-Sunday doesn't sound identical.
+  const recentRecapObservations = (() => {
+    if (trigger !== "weekly_recap") return [] as string[];
+    const lensPatterns: Array<{ name: string; rx: RegExp }> = [
+      { name: "load / mileage trend (week-over-week %)", rx: /up \d+%|down \d+%|jumped \d+%|week-over-week|building (?:steadily|up)|stepped up|pulled back/i },
+      { name: "aerobic efficiency (pace-at-HR)", rx: /aerobic efficiency|m\/beat|pace[- ]at[- ]?HR|pace at heart rate|easy pace at the same HR/i },
+      { name: "cardiac drift on long runs", rx: /cardiac drift|HR drift|drift on (?:long|longer) (?:runs|efforts)/i },
+      { name: "long run progression / plateau", rx: /long run plateau|long-run plateau|long run jumped|stagnating|stretching the long run|biggest long run/i },
+      { name: "intensity distribution / zone 3 trap", rx: /zone[- ]3 trap|gray zone|polariz/i },
+      { name: "cadence trend", rx: /cadence|spm|stride rate/i },
+      { name: "consistency / streak", rx: /consistency|consistent|streak|every planned session|all (?:five|four|three|the) (?:sessions|key)/i },
+      { name: "phase transition", rx: /wraps (?:up |the )?(?:base|build|peak|taper)|begins the (?:base|build|peak|taper)|moving (?:into|to) (?:base|build|peak|taper)/i },
+    ];
+    const scanned: string[] = [];
+    let recapsSeen = 0;
+    for (let i = recentMessages.length - 1; i >= 0 && recapsSeen < 4; i--) {
+      const m = recentMessages[i];
+      if (m.role !== "assistant") continue;
+      if (m.message_type !== "weekly_recap") continue;
+      recapsSeen++;
+      const content = (m.content as string) || "";
+      for (const { name, rx } of lensPatterns) {
+        if (rx.test(content)) scanned.push(name);
+      }
+    }
+    return scanned;
+  })();
+
+  // Non-obvious wins for the week: deterministic findings to surface in the recap.
+  // Crossed weekly-mileage milestones, highest mileage in N months, all key sessions
+  // completed, longest run of the cycle, fastest sustained tempo of the cycle.
+  const recapWeeklyWins = (() => {
+    if (trigger !== "weekly_recap") return [] as string[];
+    const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+    const isImperial = ((profile?.preferred_units as string) ?? "imperial") !== "metric";
+    const unitLabel = isImperial ? "mi" : "km";
+    const findings: string[] = [];
+
+    const now = Date.now();
+    const oneWeekAgo = now - 7 * 86400000;
+
+    // Bucket by ISO week (Mon)
+    const weekKey = (t: number) => {
+      const d = new Date(t);
+      const dow = d.getUTCDay();
+      const daysToMon = dow === 0 ? 6 : dow - 1;
+      return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - daysToMon))
+        .toISOString().slice(0, 10);
+    };
+    const milesByWeek: Record<string, number> = {};
+    for (const a of recentActivities) {
+      if (!RUN_TYPES.has(a.activity_type as string)) continue;
+      if (!a.start_date || !a.distance_meters) continue;
+      const t = new Date(a.start_date as string).getTime();
+      const k = weekKey(t);
+      milesByWeek[k] = (milesByWeek[k] ?? 0) + (a.distance_meters as number) / 1609.34;
+    }
+
+    // This week's miles (recap fires Sunday — covers Mon-Sun of the just-completed week)
+    const thisWeekMiles = weekMileageSoFar;
+    const otherWeeks = Object.entries(milesByWeek)
+      .filter(([k]) => weekKey(now) !== k)
+      .map(([, v]) => v);
+
+    // Weekly-volume milestone crossed
+    const weeklyMilestones = isImperial ? [20, 25, 30, 35, 40, 50, 60, 70, 80] : [30, 40, 50, 60, 70, 80, 100, 120];
+    const convert = (mi: number) => isImperial ? mi : mi * 1.60934;
+    const thisWeekConverted = convert(thisWeekMiles);
+    const recentMaxConverted = otherWeeks.length > 0 ? Math.max(...otherWeeks.map(convert)) : 0;
+    for (const ms of weeklyMilestones) {
+      if (thisWeekConverted >= ms && recentMaxConverted < ms) {
+        findings.push(`FIRST ${ms}+${unitLabel} WEEK in your visible history (${thisWeekConverted.toFixed(1)} ${unitLabel} this week vs prior max ${recentMaxConverted.toFixed(1)}). Lead with this — first-time milestones are the moments athletes remember.`);
+        break;
+      }
+    }
+
+    // Highest mileage in last 12 weeks
+    const last12 = Object.entries(milesByWeek)
+      .filter(([k]) => {
+        const t = new Date(k).getTime();
+        return t < oneWeekAgo && t > now - 12 * 7 * 86400000;
+      })
+      .map(([, v]) => v);
+    if (last12.length >= 6 && thisWeekMiles > Math.max(...last12) * 1.05 && thisWeekMiles >= (isImperial ? 20 : 32)) {
+      findings.push(`HIGHEST WEEKLY VOLUME IN 12 WEEKS: ${(isImperial ? thisWeekMiles : thisWeekMiles * 1.60934).toFixed(1)} ${unitLabel} — biggest week of the build. Acknowledge the milestone naturally.`);
+    }
+
+    // Longest single run of the last 12 weeks
+    const longestThisWeek = Math.max(0, ...recentActivities
+      .filter(a => RUN_TYPES.has(a.activity_type as string))
+      .filter(a => a.start_date && new Date(a.start_date as string).getTime() >= oneWeekAgo)
+      .map(a => (a.distance_meters ?? 0) / 1609.34));
+    const longestPrior12 = Math.max(0, ...recentActivities
+      .filter(a => RUN_TYPES.has(a.activity_type as string))
+      .filter(a => {
+        const t = a.start_date ? new Date(a.start_date as string).getTime() : 0;
+        return t < oneWeekAgo && t > now - 12 * 7 * 86400000;
+      })
+      .map(a => (a.distance_meters ?? 0) / 1609.34));
+    if (longestThisWeek > longestPrior12 * 1.05 && longestThisWeek >= (isImperial ? 8 : 13)) {
+      const dispDist = isImperial ? `${longestThisWeek.toFixed(1)} mi` : `${(longestThisWeek * 1.60934).toFixed(1)} km`;
+      findings.push(`LONGEST LONG RUN IN 12 WEEKS: ${dispDist} — biggest single effort of the build so far.`);
+    }
+
+    return findings;
+  })();
+
   // Anti-repetition signal for post-run: scan the last ~5 assistant post_run messages
   // and detect which insight lenses Dean already used recently. Tell Claude which lenses
   // to avoid this turn so feedback feels fresh, not formulaic.
@@ -1647,7 +1756,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return scanned;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins);
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -5194,6 +5303,8 @@ function buildUserMessage(
   raceDate: string | null = null,
   recentPostRunInsights: string[] = [],
   nonObviousWins: string[] = [],
+  recentRecapObservations: string[] = [],
+  recapWeeklyWins: string[] = [],
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -5701,7 +5812,7 @@ Keep the whole thing under 480 characters.`;
         ? `<rule>ACTIVITY DATA UNAVAILABLE: The database query for this athlete's activities failed. Do NOT say "0 miles" or "quiet week". Ask the athlete what they completed this week and build next week's plan from the PROGRESSION TARGET in CURRENT TRAINING STATE.</rule>\n\n`
         : noStravaMileageData
         ? `<rule>MILEAGE TRACKING UNAVAILABLE: This athlete is not on Strava, so no mileage was automatically tracked this week. Do NOT say "0 miles logged", "quiet week", or imply the athlete didn't run — the data is simply missing. Non-Strava athletes typically only text about a fraction of their runs; assume they completed most of their planned sessions unless they explicitly told you otherwise.</rule>\n\nCRITICAL — BUILD NEXT WEEK FROM THE PROGRESSION TARGET, NOT FROM REPORTED MILEAGE: The "Progression target" in CURRENT TRAINING STATE is your baseline for next week's volume. Do NOT anchor next week's mileage to what the athlete mentioned conversationally — that will always undercount. If the progression target says ~X mi, build toward that. Only deviate down if the athlete explicitly said they struggled or didn't complete sessions.\n\n`
-        : `<rule>THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.</rule>\n\nYOUR FIRST TEXT MUST OPEN WITH THE EXACT PHRASE: "Last week: ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}." (You may append to this sentence, but do not alter these numbers.)\n\n`;
+        : `<rule>THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.</rule>\n\nFIRST TEXT — open with the standout signal from this week, not a templated phrase. The exact figure "${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}" must appear somewhere in the first text (athletes need to see it), but it does NOT have to be the first sentence. Vary the opener across weeks: lead with a milestone, a trend, a key workout result, a milestone crossing, or a felt observation — whatever was most notable about this week. The numeric figure can land mid-sentence or in a follow-up clause. Examples of varied openers (do NOT copy verbatim — these illustrate the range):\n- "Big block — ${weekVolumeStr} across ${weekRunCount}, and the tempo dropped 8 sec/mi from last month."\n- "Recovery week dialed in: ${weekVolumeStr}, exactly the pullback we wanted."\n- "Three quality sessions in the bag this week — ${weekVolumeStr} across ${weekRunCount}, and your easy pace at the same HR is the fastest it's been all build."\n- "Quieter week (${weekVolumeStr}, ${weekRunCount} runs) — you mentioned the calf, and the lower volume reflects that."\n\n`;
       // Injury hold overrides normal progression entirely — applies regardless of plan type.
       const injuryHoldInstruction = injuryHoldSince
         ? `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
@@ -5747,7 +5858,30 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
           return `\nNEXT WEEK TARGET: ~${recapMi(nextTarget)}${compLabel} (~${periodization.phase === "peak" ? "5%" : "8%"} step from recent avg). Microcycle: ${cycleNote}. If the athlete's recent pace suggests they're ready for a quality session, include one.\n`;
         })()
         : "";
-      return `${macroPositionContext}${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
+      const recapWinsBlock = recapWeeklyWins.length > 0
+        ? `DID YOU NOTICE — DETERMINISTIC FINDINGS FROM THIS WEEK. Lead the first text with one of these; do NOT bury them as a side note. These are the moments athletes remember:
+${recapWeeklyWins.map(w => `- ${w}`).join("\n")}
+
+`
+        : "";
+      const recapAntiRepBlock = recentRecapObservations.length > 0
+        ? `RECENT RECAP OBSERVATIONS YOU'VE ALREADY USED — DO NOT LEAD WITH THESE THIS WEEK:
+${[...new Set(recentRecapObservations)].map(s => `- ${s}`).join("\n")}
+Pick a different lens. If the same trend keeps being the most actionable, find a fresh angle on it (a specific number that's new this week, a felt observation, a milestone) rather than restating last week's framing. Sunday recaps that all sound the same lose their punch.
+
+`
+        : "";
+      const recapForbiddenBlock = `FORBIDDEN PHRASES — DO NOT WRITE ANY OF THESE IN THE RECAP, EVER:
+- "great week!" / "solid week!" / "huge week!" / "killer week!" (as a standalone opener — earn the adjective with a specific stat or observation)
+- "keep crushing it" / "keep up the great work" / "stay consistent" / "keep grinding" / "you're doing amazing"
+- "way to show up" / "love to see it" / "proud of the work"
+- "keep easy days easy" / "make sure to recover" / "listen to your body" (as filler — only use if there's a specific reason rooted in this week's data)
+- "trust the process" / "the work is paying off" (without a specific data point that proves it)
+- Generic build-week affirmations like "another solid block" or "another good week in the books" — replace with a specific observation about WHAT made it solid.
+If your draft contains any of these, rewrite the sentence with a specific number, trend, or named workout outcome — or cut it entirely.
+
+`;
+      return `${macroPositionContext}${recapWinsBlock}${recapAntiRepBlock}${recapForbiddenBlock}${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
 
 PLAN FORMAT (per principle 8 — no day-by-day schedule):
 - Weekly mileage target (e.g. "~34 mi this week")
@@ -5761,6 +5895,9 @@ Example shape for the second text:
 Long run: 9mi easy on trails.
 Quality: Tempo 5mi (1mi WU + 3mi @ 7:50/mi + 1mi CD) — threshold work, the engine for your goal pace.
 Leave at least one easy or rest day between the long run and the tempo; fit the rest of the easy miles in wherever suits your week."
+
+COACHING THREADS — WEAVE IN ONE WHEN RELEVANT:
+If "WHAT YOU'RE WATCHING" appears under ATHLETE HISTORY, the first text must reference one of those threads naturally — confirm progress, note a setback, or update the thread with a new observation. The threads are the through-line story; this is where Dean differentiates from Strava. Example weaves: "Cadence climbed another 2 spm this week — 174 now, on track for the 178 target we set." / "Long-run drift was 6% on Saturday — best of the build. We'll keep nudging total volume up." If no thread is currently relevant, do not force one. After the recap, you'll update the threads via the [THREADS:] tag.
 
 LONGITUDINAL SIGNALS — REQUIRED IN THE FIRST TEXT:
 If LONGITUDINAL TRAINING ANALYSIS is present above, your first text MUST include one synthesized week-over-week or multi-week observation — not just this-week mileage. Pick the most actionable signal from this menu:

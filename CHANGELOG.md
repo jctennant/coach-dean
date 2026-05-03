@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-03 — Sunday recap variety pass: loosened opener, anti-repetition, weekly wins, forbidden phrases, threads weave-in
+
+**Type:** Improvement
+**Reported by:** Internal audit (carryover from post_run variety work)
+**User feedback:** N/A
+**Root cause:** The Sunday recap had the same five variety risks as post_run before its fix: a hard-coded opener phrase ("Last week: X mi across Y runs"), no anti-repetition signal, no forbidden-phrases block, no detection of "first 30-mi week / longest in 12 weeks / highest weekly volume" milestones, and no explicit instruction to weave coaching threads into the recap.
+**Fix / Change:**
+- **Loosened opener:** Removed the mandatory "YOUR FIRST TEXT MUST OPEN WITH..." rule. Now the figure (`X mi across Y runs`) must appear somewhere in the first text but the opener can vary — examples in prompt: "Big block —", "Recovery week dialed in:", "Three quality sessions in the bag —", "Quieter week (X, Y runs)".
+- **Anti-repetition:** Server-side scan of the last ~4 `weekly_recap` messages detects which observation lens was used (load trend, aerobic efficiency, cardiac drift, long run progression, zone-3 trap, cadence, consistency, phase transition). Recently-used lenses are listed with a "do not lead with these" directive.
+- **Weekly wins (deterministic):** New computation surfaces "FIRST X+mi WEEK in visible history", "HIGHEST WEEKLY VOLUME IN 12 WEEKS", "LONGEST LONG RUN IN 12 WEEKS". When any fire, prompt instructs Dean to lead with the milestone.
+- **Forbidden phrases (recap-specific):** Bans standalone "great week / solid week / huge week / killer week", "keep crushing it / keep grinding / stay consistent", "trust the process", "another solid block / another good week in the books" — must replace with a specific stat or observation.
+- **Coaching threads weave-in:** Recap prompt now explicitly instructs Dean to reference one of the active "WHAT YOU'RE WATCHING" threads from ATHLETE HISTORY in the first text, confirming progress / noting a setback / updating the thread. Then update the threads via the `[THREADS:]` tag.
+**Files changed:** src/app/api/coach/respond/route.ts, CHANGELOG.md
+
+---
+
 ## 2026-05-03 — Post-run variety pass: forbidden cliches, walk-specific framing, anti-repetition, non-obvious wins, coaching threads
 
 **Type:** Feature / Improvement
