@@ -366,25 +366,6 @@ async function handleInboundMessage(
     return;
   }
 
-  // Plan import week sync: if the last assistant message was asking "which week are you on?",
-  // this reply is the answer — extract the week and sync training_state.
-  // Only for onboarded users; during onboarding this can't happen.
-  if (!user.onboarding_step) {
-    const { data: lastAssistantMsg } = await supabase
-      .from("conversations")
-      .select("message_type")
-      .eq("user_id", user.id)
-      .eq("role", "assistant")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (lastAssistantMsg?.message_type === "plan_import_week_ask") {
-      await handlePlanWeekSync(user.id, senderPhone, body, messageId, resolvedChatId);
-      return;
-    }
-  }
-
   // --- Text message path (existing flow) ---
   const messageBody = body || "[Image received]";
 
@@ -500,21 +481,6 @@ async function handleInboundMessage(
       await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start tracking your runs:\n${stravaUrl}\n\nWant Dean to add a coaching note to each activity? Use this link instead:\n${notesUrl}`, messageId);
     }
     return;
-  }
-
-  // Detect "dashboard" keyword — exact match only to avoid false positives.
-  // If token exists, send immediately. If missing, fall through to coach/respond which
-  // will call generateAndSaveFullPlan to regenerate it — don't send a dead-end "not ready" message.
-  const isDashboardIntent = /^dashboard$/i.test(body.trim());
-  if (isDashboardIntent) {
-    const token = user.dashboard_token as string | null;
-    if (token) {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-      await sendAndStore(user.id, senderPhone, `Here's your training plan:\n${appUrl}/dashboard?token=${token}`, messageId);
-      return;
-    }
-    // Token missing — fall through to the debounce + coach/respond path, which will
-    // regenerate the token and send the link.
   }
 
   // Detect "UPDATE PLAN" — user confirming a full plan rebuild that Dean proposed.
@@ -641,8 +607,8 @@ async function handlePDFPlan(
   chatId: string | null
 ) {
   console.log("[linq-webhook] processing PDF plan for user:", userId, "filename:", filename);
+  void chatId;
 
-  // Store the incoming message
   await supabase.from("conversations").insert({
     user_id: userId,
     role: "user",
@@ -651,14 +617,6 @@ async function handlePDFPlan(
       : `[PDF: ${filename || "training plan"}]`,
     message_type: "plan_upload",
   });
-
-  // Check whether user already had a plan before importing — passed to Dean for context
-  const { data: existingPlan } = await supabase
-    .from("training_plans")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  const hadExistingPlan = !!existingPlan;
 
   try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -673,44 +631,32 @@ async function handlePDFPlan(
       }),
     });
 
-    let result: { ok?: boolean; sessionCount?: number; weeks?: number; error?: string };
+    let result: { ok?: boolean; error?: string; message?: string };
     try {
       result = await resp.json() as typeof result;
     } catch {
-      // Vercel timeout or non-JSON error page — surface a useful message
       console.error("[linq-webhook] PDF plan upload non-JSON response, status:", resp.status);
-      await sendAndStore(userId, phone, "That one timed out — the PDF might be too large. Try uploading it at coachdean.ai/dashboard instead, or paste the plan as text.", messageId);
+      await sendAndStore(userId, phone, "That one timed out — the PDF might be too large. Try pasting the plan as text instead.", messageId);
       return;
     }
 
     if (!resp.ok || !result.ok) {
+      const userMsg = result.message ?? "I couldn't read that PDF — make sure it has a readable text layer, or paste the plan as text.";
       console.error("[linq-webhook] PDF plan upload failed:", result.error);
-      await sendAndStore(userId, phone, "I couldn't read that PDF — make sure it's a training plan document and try again, or upload it at coachdean.ai/dashboard.", messageId);
+      await sendAndStore(userId, phone, userMsg, messageId);
       return;
     }
 
-    // Fire plan_import trigger — Dean will ask which week they're on
-    await fetch(`${appUrl}/api/coach/respond`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        trigger: "plan_import",
-        planMeta: {
-          weeks: result.weeks,
-          sessionCount: result.sessionCount,
-          filename: filename ?? undefined,
-          caption: caption ?? undefined,
-          hadExistingPlan,
-        },
-        chatId,
-      }),
-    });
+    const planLabel = filename ? filename.replace(/\.pdf$/i, "") : "your training plan";
+    const ack = caption
+      ? `Got "${planLabel}" — I'll reference it in our sessions. ${caption}`
+      : `Got "${planLabel}" — I'll reference it when giving you feedback. Ask me about any week or workout anytime.`;
+    await sendAndStore(userId, phone, ack, messageId);
 
-    void trackEvent(userId, "plan_uploaded", { source: "sms_pdf", weeks: result.weeks, sessionCount: result.sessionCount });
+    void trackEvent(userId, "plan_uploaded", { source: "sms_pdf" });
   } catch (err) {
     console.error("[linq-webhook] PDF plan processing failed:", err);
-    await sendAndStore(userId, phone, "Something went wrong reading that PDF. Try again or upload it at coachdean.ai/dashboard.", messageId);
+    await sendAndStore(userId, phone, "Something went wrong reading that PDF. Try pasting the plan as text instead.", messageId);
   }
 }
 
@@ -742,8 +688,6 @@ async function handlePDFDuringOnboarding(
   });
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  let weeks = 0;
-  let sessionCount = 0;
 
   try {
     const resp = await fetch(`${appUrl}/api/plan/upload`, {
@@ -752,7 +696,7 @@ async function handlePDFDuringOnboarding(
       body: JSON.stringify({ userId, content: pdfUrl, contentType: "pdf_url", filename: filename || undefined }),
     });
 
-    let result: { ok?: boolean; sessionCount?: number; weeks?: number; error?: string };
+    let result: { ok?: boolean; error?: string; message?: string };
     try {
       result = await resp.json() as typeof result;
     } catch {
@@ -763,34 +707,12 @@ async function handlePDFDuringOnboarding(
 
     if (!resp.ok || !result.ok) {
       console.error("[linq-webhook] onboarding PDF upload failed:", result.error);
-      await sendAndStore(userId, phone, "I couldn't read that PDF — make sure it's a training plan document, or describe the plan here and I'll work alongside it.", messageId);
+      const userMsg = result.message ?? "I couldn't read that PDF — make sure it has a readable text layer, or describe the plan here and I'll work alongside it.";
+      await sendAndStore(userId, phone, userMsg, messageId);
       return;
     }
 
-    weeks = result.weeks ?? 0;
-    sessionCount = result.sessionCount ?? 0;
-
-    // Merge plan metadata into onboarding_data so Dean's next prompt render sees it.
-    const { data: u } = await supabase
-      .from("users")
-      .select("onboarding_data")
-      .eq("id", userId)
-      .single();
-    const existingData = ((u?.onboarding_data as Record<string, unknown>) || {});
-    const updatedData: Record<string, unknown> = {
-      ...existingData,
-      has_existing_plan: true,
-      plan_uploaded: true,
-      plan_filename: filename ?? null,
-      plan_week_count: weeks,
-      plan_session_count: sessionCount,
-    };
-    await supabase
-      .from("users")
-      .update({ onboarding_data: updatedData as unknown as Json })
-      .eq("id", userId);
-
-    void trackEvent(userId, "plan_uploaded", { source: "sms_pdf_onboarding", weeks, sessionCount });
+    void trackEvent(userId, "plan_uploaded", { source: "sms_pdf_onboarding" });
   } catch (err) {
     console.error("[linq-webhook] onboarding PDF processing failed:", err);
     await sendAndStore(userId, phone, "Something went wrong reading that PDF. Try again, or describe the plan here and I'll work alongside it.", messageId);
@@ -798,129 +720,16 @@ async function handlePDFDuringOnboarding(
   }
 
   // Forward a synthetic message to onboarding/handle so Dean acknowledges the
-  // parsed plan and continues intake naturally. The label in brackets signals
-  // to Dean that this is system-injected context, not literal user text.
+  // plan and continues intake naturally.
   const planLabel = filename ? filename.replace(/\.pdf$/i, "") : "their training plan";
   const captionNote = caption ? ` They also said: "${caption}".` : "";
-  const syntheticMessage = `(system: parsed the PDF "${planLabel}" — ${weeks} weeks, ${sessionCount} sessions. Acknowledge you've got the plan and briefly note you'll reference it in post-run feedback, then continue the intake with the next question.${captionNote})`;
+  const syntheticMessage = `(system: received the PDF "${planLabel}" and stored it as plan context. Acknowledge you've got the plan and will reference it in coaching, then continue the intake with the next question.${captionNote})`;
 
   await fetch(`${appUrl}/api/onboarding/handle`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userId, message: syntheticMessage, chatId }),
   });
-}
-
-async function handlePlanWeekSync(
-  userId: string,
-  phone: string,
-  message: string,
-  messageId: string | null,
-  chatId: string | null
-) {
-  console.log("[linq-webhook] handling plan week sync for user:", userId);
-
-  // Store user message
-  await supabase.from("conversations").insert({
-    user_id: userId,
-    role: "user",
-    content: message,
-    message_type: "user_message",
-    external_message_id: messageId,
-  });
-
-  // Extract week number via Haiku
-  const extractResp = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 50,
-    system: `Extract the week number from the user's message. If they say "beginning", "start", "first", "I don't know", or want to start from scratch, return 1. Ordinals: first=1, second=2, third=3, etc. Return only JSON: {"week": <number>}`,
-    messages: [{ role: "user", content: message }],
-  });
-
-  let weekNumber = 1;
-  const extractText = extractResp.content.find(b => b.type === "text")?.text ?? "";
-  const match = extractText.match(/"week"\s*:\s*(\d+)/);
-  if (match) weekNumber = parseInt(match[1], 10);
-
-  // Load the uploaded plan
-  const { data: planData } = await supabase
-    .from("training_plans")
-    .select("weeks, total_weeks")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (!planData) {
-    await sendAndStore(userId, phone, "I don't have a plan stored for you yet — try uploading it again at coachdean.ai/dashboard.", messageId);
-    return;
-  }
-
-  type UploadedSession = { dayOfWeek: string; type: string; targetDistanceMiles?: number | null; targetPace?: string | null; description: string };
-  type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
-  const allWeeks = planData.weeks as UploadedWeek[];
-  const totalWeeks = planData.total_weeks as number;
-
-  weekNumber = Math.max(1, Math.min(weekNumber, totalWeeks));
-
-  const targetWeek = allWeeks.find(w => w.week_number === weekNumber);
-  if (!targetWeek) {
-    await sendAndStore(userId, phone, `Week ${weekNumber} isn't in the plan (it has ${totalWeeks} weeks). Which week should I start you on?`, messageId);
-    return;
-  }
-
-  // Convert uploaded sessions to weekly_plan_sessions format with real calendar dates
-  const DAY_OFFSETS: Record<string, number> = {
-    monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
-  };
-  const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-  // Detect "next week" intent — shift date anchor to next Monday so session dates are correct
-  const isNextWeek = /\bnext week\b/i.test(message);
-
-  const now = new Date();
-  const daysFromMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - daysFromMonday + (isNextWeek ? 7 : 0));
-
-  const weekSessions = targetWeek.sessions
-    .filter(s => s.type !== "off")
-    .map(s => {
-      const offset = DAY_OFFSETS[s.dayOfWeek.toLowerCase()] ?? 0;
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + offset);
-      const distPart = s.targetDistanceMiles ? ` ${s.targetDistanceMiles}mi` : "";
-      const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
-      return {
-        day: DAY_SHORT[offset],
-        date: `${d.getMonth() + 1}/${d.getDate()}`,
-        label: `${s.description}${distPart}${pacePart}`,
-        optional: false,
-      };
-    });
-
-  // Update training_state
-  await supabase.from("training_state").upsert({
-    user_id: userId,
-    current_week: weekNumber,
-    weekly_mileage_target: targetWeek.total_miles || null,
-    weekly_plan_sessions: weekSessions as unknown as Json,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id" });
-
-  // Generate confirmation via Haiku
-  const sessionLines = weekSessions.map(s => `${s.day} ${s.date}: ${s.label}`).join("\n");
-  const confirmResp = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 200,
-    system: `You are Coach Dean, a friendly running coach. The athlete is starting week ${weekNumber} of their ${totalWeeks}-week training plan. Here are this week's sessions:\n\n${sessionLines || "(no sessions found for this week)"}\n\nWrite a brief 2-sentence confirmation: state which week they're on and summarize the sessions inline (not a list). End with "Text me after your runs." Be direct.`,
-    messages: [{ role: "user", content: "confirm" }],
-  });
-
-  const confirmMsg = confirmResp.content.find(b => b.type === "text")?.text
-    ?? `You're on week ${weekNumber} of ${totalWeeks}. ${weekSessions.map(s => s.label).join(" · ")}. Text me after your runs.`;
-
-  if (chatId) await startTyping(chatId);
-  await sendAndStore(userId, phone, confirmMsg, messageId);
-  void trackEvent(userId, "plan_week_synced", { week: weekNumber, totalWeeks, sessionCount: weekSessions.length });
 }
 
 async function handleImageWorkout(

@@ -213,18 +213,14 @@ export function fixKeyWorkoutMath(kw: string, unitLabel: "mi" | "km"): string {
 
 /**
  * Compute the full multi-week training arc and save it to training_plans.
- * Generates a dashboard_token and sets trial_started_at on the user record.
- *
- * @param skipLinkSms - When true, skips the "your plan is ready" SMS (used
- *   for backfill of existing users who already use the app).
+ * Generates a dashboard_token (used for billing checkout/cancel links) and sets trial_started_at.
  */
 export async function generateAndSaveFullPlan(
   userId: string,
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { skipLinkSms = false, prescribedWeek1Miles, bRaces, resetToWeek1 = true, week1Reset = false, preservedSessions, planReadyNote, wantsSpeedWork = false, otherNotes = null, anchorMonday }: {
-    skipLinkSms?: boolean;
+  { prescribedWeek1Miles, bRaces, resetToWeek1 = true, week1Reset = false, preservedSessions, planReadyNote, wantsSpeedWork = false, otherNotes = null, anchorMonday }: {
     prescribedWeek1Miles?: number;
     bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }>;
     /**
@@ -719,21 +715,6 @@ No other text.`,
     dashboard_token: dashboardToken,
     ...(isNewToken ? { trial_started_at: new Date().toISOString() } : {}),
   }).eq("id", userId);
-
-  if (!skipLinkSms) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-    const planUrl = `${appUrl}/dashboard?token=${dashboardToken}`;
-    // For rebuilds, use the caller-supplied context note so the athlete knows exactly
-    // what changed. For new plans (onboarding), use the standard welcome message.
-    const smsBody = planReadyNote
-      ? `Your updated plan is ready: ${planUrl}\n\n${planReadyNote}`
-      : `Your full ${totalWeeks}-week training plan is ready: ${planUrl}\n\nI'll send you the specifics each week and keep this updated as your training progresses.`;
-    try {
-      await sendSMS(phoneNumber, smsBody);
-    } catch (err) {
-      console.error("[generateAndSaveFullPlan] dashboard link SMS failed (non-fatal):", err);
-    }
-  }
 
   return dashboardToken;
 }

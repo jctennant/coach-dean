@@ -16,13 +16,12 @@ import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
-import { generateAndStoreDashboardInsights } from "@/lib/dashboard-insights";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
 import type { ActivityWeatherData } from "@/lib/weather";
 
 export const maxDuration = 120;
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week" | "plan_import";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week";
 
 interface CoachRequest {
   userId: string;
@@ -35,13 +34,6 @@ interface CoachRequest {
   chatId?: string; // Linq chat ID — passed directly so typing indicator works without a DB round-trip
   includeWorkoutCheckin?: boolean; // True when we want to check in on the previous session alongside the reminder (non-Strava users)
   missedRunCheckin?: boolean; // True when Strava user had a scheduled workout but no run came through — check if they got it in
-  planMeta?: { // For plan_import trigger: metadata about the just-imported plan
-    weeks: number;
-    sessionCount: number;
-    filename?: string;
-    caption?: string;
-    hadExistingPlan: boolean;
-  };
 }
 
 interface ActivityRow {
@@ -119,7 +111,7 @@ const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
  * "paces corrected in conversation but plan regenerated from stale profile" failure.
  *
  * Does NOT reset current_week — the athlete stays on their current week in the arc.
- * generateAndSaveFullPlan sends the dashboard link SMS automatically.
+ * generateAndSaveFullPlan regenerates the training arc and updates training_state.
  */
 async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false, adminOverrideMiles?: number): Promise<NextResponse> {
   // Load user and profile.
@@ -358,13 +350,11 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
             bRaces: bCRaces.length > 0 ? bCRaces : undefined,
             wantsSpeedWork,
             prescribedWeek1Miles: rebuildBase,
-            skipLinkSms: silent,
             otherNotes,
             anchorMonday: isWeek1Rebuild ? undefined : week1Monday,
           }
         );
         void trackEvent(userId, "plan_generated", { plan_type: "rebuild" });
-        await generateAndStoreDashboardInsights(userId, "rebuild_plan", planReadyNote ?? "Plan rebuilt.");
       } catch (err) {
         console.error("[handleRebuildPlan] generateAndSaveFullPlan failed:", err);
         void trackEvent(userId, "after_error", { trigger: "rebuild_plan", error: String(err) });
@@ -416,9 +406,6 @@ async function handleInjuryHold(userId: string, dryRun: boolean): Promise<NextRe
       weekly_plan_sessions: null,
     }).eq("user_id", userId);
     void trackEvent(userId, "injury_hold_set", { injury_hold_since: today, pre_injury_mileage_target: currentTarget });
-    void generateAndStoreDashboardInsights(userId, "injury_hold", "Injury hold set — this week's running has been paused.").catch(err =>
-      console.error("[handleInjuryHold] generateAndStoreDashboardInsights failed:", err)
-    );
   }
 
   console.log(`[handleInjuryHold] userId=${userId} — hold set since ${today}, pre-injury target=${currentTarget}`);
@@ -527,14 +514,11 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
         }
       );
       void trackEvent(userId, "plan_generated", { plan_type: "injury_return", weeks_injured: weeksInjured });
-      void generateAndStoreDashboardInsights(userId, "injury_clear", planReadyNote).catch(err =>
-        console.error("[handleInjuryClear] generateAndStoreDashboardInsights failed:", err)
-      );
     } catch (err) {
       console.error("[handleInjuryClear] generateAndSaveFullPlan failed:", err);
       void trackEvent(userId, "after_error", { trigger: "injury_clear", error: String(err) });
       try {
-        await sendSMS(phoneNumber, "Something went wrong updating your plan — text \"dashboard\" to see your current version.");
+        await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again.");
       } catch (smsErr) {
         console.error("[handleInjuryClear] fallback SMS also failed:", smsErr);
       }
@@ -572,71 +556,9 @@ async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextR
       })
       .eq("user_id", userId);
     void trackEvent(userId, "lighter_week_set", { previous_target: currentTarget, new_target: reducedTarget });
-    void generateAndStoreDashboardInsights(userId, "lighter_week", `Lighter week set — target reduced from ${currentTarget} to ${reducedTarget} mi.`).catch(err =>
-      console.error("[handleLighterWeek] generateAndStoreDashboardInsights failed:", err)
-    );
   }
 
   return NextResponse.json({ ok: true, previous_target: currentTarget, new_target: reducedTarget });
-}
-
-/**
- * Handles a just-imported training plan (PDF or image upload).
- * Sends a short acknowledgement via Haiku and asks which week the athlete is on.
- * The reply is handled by handlePlanWeekSync in the Linq webhook.
- */
-async function handlePlanImport(
-  userId: string,
-  planMeta: { weeks: number; sessionCount: number; filename?: string; caption?: string; hadExistingPlan: boolean },
-  requestChatId: string | null,
-  dryRun: boolean
-): Promise<NextResponse> {
-  const { data: user } = await supabase
-    .from("users")
-    .select("id, phone_number, linq_chat_id")
-    .eq("id", userId)
-    .single();
-
-  if (!user?.phone_number) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
-  const { weeks, sessionCount, filename, caption, hadExistingPlan } = planMeta;
-  const planLabel = filename ? filename.replace(/\.pdf$/i, "") : null;
-
-  const captionCtx = caption ? `\n\nThe user said when sending it: "${caption}"` : "";
-  const context = hadExistingPlan
-    ? `The user replaced their existing training plan with "${planLabel ?? "a new plan"}" — ${sessionCount} sessions across ${weeks} weeks.${captionCtx}`
-    : `The user imported their first training plan: "${planLabel ?? "a plan"}" — ${sessionCount} sessions across ${weeks} weeks.${captionCtx}`;
-
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 120,
-    system: `You are Coach Dean, a running coach. ${context}
-
-Write 1-2 sentences: briefly acknowledge you have the plan (you can mention the plan name if provided), then ask which week they're currently on. If the user said they're "thinking of doing" the plan rather than actively following it, acknowledge that and ask if they want to start it. Be warm and brief.`,
-    messages: [{ role: "user", content: "go" }],
-  });
-
-  const msg = response.content.find(b => b.type === "text")?.text
-    ?? `Got it${planLabel ? ` — ${planLabel}` : ""} (${weeks} weeks). Which week are you currently on?`;
-
-  if (dryRun) {
-    return NextResponse.json({ ok: true, message: msg });
-  }
-
-  if (chatId) await startTyping(chatId);
-  await sendSMS(user.phone_number as string, msg);
-  await supabase.from("conversations").insert({
-    user_id: userId,
-    role: "assistant",
-    content: msg,
-    message_type: "plan_import_week_ask",
-  });
-
-  void trackEvent(userId, "plan_import_asked", { weeks, sessionCount, hadExistingPlan });
-  return NextResponse.json({ ok: true, message: msg });
 }
 
 /**
@@ -835,10 +757,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "lighter_week") {
     return await handleLighterWeek(userId, dry_run ?? false);
-  }
-
-  if (trigger === "plan_import") {
-    return await handlePlanImport(userId, body.planMeta!, requestChatId ?? null, dry_run ?? false);
   }
 
   // Fetch user context in parallel
@@ -1075,57 +993,14 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     if (forecast) weatherBlock = buildWeatherBlock(forecast, userTimezone);
   }
 
+  const uploadedPlanContext = (onboardingData.plan_context as string | null) ?? null;
+
   // gpt-4o-search-preview has a 6k TPM hard limit — the full coaching system prompt (~16k tokens)
   // always exceeds it. Only enable web search on Anthropic, which has no such constraint.
   const shouldUseWebSearch = trigger === "user_message" && (process.env.AI_PROVIDER ?? "openai") === "anthropic";
 
-  // "My plan" keyword: short-circuit before any LLM calls.
-  // Must be placed here — before profile extraction — so we don't waste a Haiku call.
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-  let dashboardToken = user.dashboard_token as string | null;
-  let dashboardUrl = dashboardToken ? `${appUrl}/dashboard?token=${dashboardToken}` : null;
-  if (trigger === "user_message") {
-    // recentMessages is oldest-first (DB returns DESC, then reversed at line 239).
-    // Spread-reverse to search newest-first and get the most recent user message.
-    const latestUserMsg = [...recentMessages].reverse().find(m => m.role === "user");
-    // Catch "dashboard" keyword — exact match only.
-    const isPlanRequest = latestUserMsg && /^\s*dashboard\s*$/i.test(latestUserMsg.content);
-    if (isPlanRequest) {
-      if (!dashboardToken) {
-        const bCRaces = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
-        const newToken = await generateAndSaveFullPlan(
-          userId,
-          user.phone_number as string,
-          profile,
-          avgWeeklyMileage,
-          {
-            skipLinkSms: true,
-            prescribedWeek1Miles: (state?.weekly_mileage_target as number | null) ?? undefined,
-            bRaces: bCRaces.length > 0 ? bCRaces : undefined,
-            // "my plan" is only triggered when there's no dashboard token yet — this is
-            // always a first-time plan generation, so start at week 1.
-            resetToWeek1: true,
-          }
-        ).catch(err => {
-          console.error("[coach/respond] generateAndSaveFullPlan failed on my-plan request:", err);
-          return null;
-        });
-        dashboardToken = newToken;
-        dashboardUrl = newToken ? `${appUrl}/dashboard?token=${newToken}` : null;
-      }
-      const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
-      if (chatId) await startTyping(chatId);
-      const linkMsg = dashboardUrl
-        ? `Here's your full training plan: ${dashboardUrl}`
-        : "Having trouble pulling up your plan right now — try again in a few minutes.";
-      if (!dry_run) {
-        await sendSMS(user.phone_number as string, linkMsg);
-        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: linkMsg, message_type: "user_message" });
-        void trackEvent(userId, "plan_link_sent", { source: "my_plan_keyword" });
-      }
-      return NextResponse.json({ ok: true, message: linkMsg });
-    }
-  }
+  const dashboardToken = user.dashboard_token as string | null;
 
   // Race predictor: detect "what would I run X in?" intent and inject prediction context.
   // This adds structured prediction data to the system prompt for user_message handling.
@@ -1368,21 +1243,17 @@ Use this data to:
     lthrData,
     recentActivities,
     activitiesQueryFailed
-  ) + aerobicTrendBlock + strengthRoutineBlock;
+  ) + aerobicTrendBlock + strengthRoutineBlock + (uploadedPlanContext
+    ? `\n\nATHLETE'S UPLOADED TRAINING PLAN (for reference — use this when they ask about their plan, upcoming workouts, or weekly structure; do NOT reproduce it in full; answer specific questions from it directly):\n${uploadedPlanContext}`
+    : "");
 
   // For weekly_recap and user_message, fetch the stored training plan.
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
   // user_message: injects the next-week plan so Dean can propose and commit to adjustments.
   type StoredPlanWeek = { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string };
-  type UploadedPlanSession = { dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null; targetPace?: string | null };
-  type UploadedPlanWeek = { week_number: number; sessions: UploadedPlanSession[]; total_miles: number; total_miles_min?: number; total_miles_max?: number };
   let storedPlanWeek: StoredPlanWeek | null = null;
   let storedNextPlanWeek: StoredPlanWeek | null = null;
   let storedPlanAllWeeks: StoredPlanWeek[] = [];
-  let uploadedPlanAllWeeks: UploadedPlanWeek[] = [];
-  let uploadedCurrentWeek: UploadedPlanWeek | null = null;
-  let uploadedNextWeek: UploadedPlanWeek | null = null;
-  let isUploadedPlan = false;
   let storedPlanId: string | null = null;
   if (trigger === "weekly_recap" || trigger === "user_message") {
     const { data: planData } = await supabase
@@ -1392,36 +1263,12 @@ Use this data to:
       .order("created_at", { ascending: false })
       .limit(1)
       .single();
-    if (planData?.weeks && Array.isArray(planData.weeks)) {
+    if (planData?.weeks && Array.isArray(planData.weeks) && planData.plan_source !== "uploaded") {
       const currentWeekNum = periodization.effectiveWeek;
-      isUploadedPlan = planData.plan_source === "uploaded";
       storedPlanId = planData.id as string;
-      if (isUploadedPlan) {
-        uploadedPlanAllWeeks = planData.weeks as UploadedPlanWeek[];
-        uploadedCurrentWeek = uploadedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
-        uploadedNextWeek = uploadedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
-      } else {
-        storedPlanAllWeeks = planData.weeks as StoredPlanWeek[];
-        storedPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
-        storedNextPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
-      }
-    }
-  }
-
-  // Plan import week sync fallback: when the webhook's handlePlanWeekSync didn't intercept
-  // the user's reply (last assistant msg is still "plan_import_week_ask"), detect the
-  // requested week here and override uploadedNextWeek so Dean sees the right sessions.
-  let planWeekSyncNum: number | null = null;
-  let planWeekSyncNextWeek = false; // user said "next week" — shift date anchor by +7
-  if (isUploadedPlan && trigger === "user_message" && uploadedPlanAllWeeks.length > 0) {
-    const lastAssistantMsg = [...recentMessages].reverse().find(m => m.role === "assistant");
-    if (lastAssistantMsg?.message_type === "plan_import_week_ask") {
-      const latestUserContent = [...recentMessages].reverse().find(m => m.role === "user")?.content ?? "";
-      planWeekSyncNum = extractPlanWeekNumber(latestUserContent, uploadedPlanAllWeeks.length);
-      planWeekSyncNextWeek = /\bnext week\b/i.test(latestUserContent);
-      if (planWeekSyncNum !== null) {
-        uploadedNextWeek = uploadedPlanAllWeeks.find(w => w.week_number === planWeekSyncNum) ?? null;
-      }
+      storedPlanAllWeeks = planData.weeks as StoredPlanWeek[];
+      storedPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
+      storedNextPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
     }
   }
 
@@ -1674,35 +1521,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     ? `\nCROSS-TRAINING THIS WEEK: ${crossTrainWeeklySummary}\nIn your recap, weave in notable cross-training — a hard bike or swim session mid-week provides real aerobic stimulus worth acknowledging (not just "and you cross-trained!"). If they did 2+ cross-training sessions, mention the aerobic base contribution. Do not ignore cross-training when summing up the week's training load.\n`
     : "";
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, dashboardUrl, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, isUploadedPlan, uploadedCurrentWeek, uploadedPlanAllWeeks.length, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock);
-
-  // For uploaded plans in weekly_recap and user_message: inject next week's sessions directly
-  // from the stored plan rather than relying on the periodization engine's inferred values.
-  if (isUploadedPlan && uploadedNextWeek && (trigger === "weekly_recap" || trigger === "user_message")) {
-    const nextWeekNum = uploadedNextWeek.week_number;
-    const totalWeekCount = uploadedPlanAllWeeks.length;
-    const mileageRange = uploadedNextWeek.total_miles_min != null && uploadedNextWeek.total_miles_max != null
-      ? `${uploadedNextWeek.total_miles_min}–${uploadedNextWeek.total_miles_max}mi`
-      : `~${uploadedNextWeek.total_miles}mi`;
-    const sessionLines = uploadedNextWeek.sessions
-      .filter(s => s.type !== "off")
-      .map(s => {
-        const distPart = s.targetDistanceMilesMin != null && s.targetDistanceMilesMax != null
-          ? ` (${s.targetDistanceMilesMin}–${s.targetDistanceMilesMax}mi)`
-          : s.targetDistanceMiles ? ` (${s.targetDistanceMiles}mi)` : "";
-        const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
-        return `  - ${s.dayOfWeek}: ${s.description}${distPart}${pacePart}`;
-      })
-      .join("\n");
-    const weekLabel = planWeekSyncNum !== null
-      ? `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount} (athlete is starting ${planWeekSyncNextWeek ? "next week" : "now"}):\nThe athlete just confirmed they are starting week ${nextWeekNum}${planWeekSyncNextWeek ? " next week" : ""}. Acknowledge you have the plan and briefly describe what week ${nextWeekNum} looks like (key sessions, volume). Then give 1-2 sentences of orientation: explain that you'll have this plan as context every week — after each run you'll debrief against it, and for weekly planning you'll reference the scheduled sessions. Invite them to reach out any time they want to adjust a session, discuss cross training, or ask about anything. ${planWeekSyncNextWeek ? "Mention the start date (next Monday)." : "Keep the tone warm and brief — this is the start of your working relationship with this plan."}`
-      : `UPLOADED PLAN — WEEK ${nextWeekNum} OF ${totalWeekCount}:\nThe athlete is following an external training plan. These are the prescribed sessions for next week. Use these as the plan — don't replace them with different sessions. You may suggest working within the low end of any ranges if the athlete had a hard week, or the high end if they're feeling strong.`;
-    userMessage += `\n\n<uploaded_plan_next_week>
-${weekLabel}
-${sessionLines}
-Weekly total: ${mileageRange}
-</uploaded_plan_next_week>`;
-  }
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock);
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -1745,16 +1564,14 @@ Weekly total: ${mileageRange}
   }
 
   // For initial_plan: generate the training arc BEFORE the Claude call so the SMS and
-  // dashboard show the same long run and quality session. Without this, Claude computes
+  // plan context show the same long run and quality session. Without this, Claude computes
   // its own values independently and they diverge from what the arc stores.
   let initialPlanArcConstraint = "";
-  let preGeneratedDashboardToken: string | null = null;
   if (trigger === "initial_plan") {
     const { data: fpForArc } = await supabase.from("training_profiles").select("*").eq("user_id", userId).single();
     if (fpForArc) profile = fpForArc;
     const bCRacesForArc = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
-    preGeneratedDashboardToken = await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, {
-      skipLinkSms: true,
+    await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, {
       bRaces: bCRacesForArc.length > 0 ? bCRacesForArc : undefined,
       resetToWeek1: true,
       wantsSpeedWork,
@@ -1785,9 +1602,9 @@ Weekly total: ${mileageRange}
       return summary + ".";
     })();
     if (arcLines.length > 0) {
-      initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES (the dashboard already shows them — mismatches confuse athletes):\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.\n\n${fullArcSummary ? `MILEAGE PROGRESSION: ${fullArcSummary}\nAt the end of your message, include one sentence summarizing the overall mileage arc so the athlete knows how their plan builds. Keep it brief and natural.` : ""}</arc_values>`;
+      initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES:\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.\n\n${fullArcSummary ? `MILEAGE PROGRESSION: ${fullArcSummary}\nAt the end of your message, include one sentence summarizing the overall mileage arc so the athlete knows how their plan builds. Keep it brief and natural.` : ""}</arc_values>`;
     }
-    console.log("[initial_plan] arc pre-generated — token:", preGeneratedDashboardToken, "longRun:", arcLongRun, "quality:", arcQuality, "target:", arcTarget);
+    console.log("[initial_plan] arc pre-generated — longRun:", arcLongRun, "quality:", arcQuality, "target:", arcTarget);
   }
   if (initialPlanArcConstraint) userMessage += initialPlanArcConstraint;
 
@@ -2071,51 +1888,6 @@ Weekly total: ${mileageRange}
 
   void trackEvent(userId, "coaching_response_sent", { trigger, onboarding: false });
 
-  // Plan import week sync: if this user_message handled a pending plan_import_week_ask,
-  // sync training_state so morning_plan and post_run see the correct week + sessions.
-  if (planWeekSyncNum !== null && uploadedNextWeek && !dry_run) {
-    const DAY_OFFSETS: Record<string, number> = {
-      monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
-    };
-    const DAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    const syncNow = new Date();
-    const daysFromMonday = syncNow.getDay() === 0 ? 6 : syncNow.getDay() - 1;
-    const syncMonday = new Date(syncNow);
-    syncMonday.setDate(syncNow.getDate() - daysFromMonday + (planWeekSyncNextWeek ? 7 : 0));
-
-    // week1_start_date: back-calculate from the confirmed week number
-    const week1Start = new Date(syncMonday);
-    week1Start.setDate(syncMonday.getDate() - (planWeekSyncNum - 1) * 7);
-    const week1StartStr = week1Start.toISOString().slice(0, 10);
-
-    const syncSessions = uploadedNextWeek.sessions
-      .filter(s => s.type !== "off")
-      .map(s => {
-        const offset = DAY_OFFSETS[s.dayOfWeek.toLowerCase()] ?? 0;
-        const d = new Date(syncMonday);
-        d.setDate(syncMonday.getDate() + offset);
-        const distPart = s.targetDistanceMiles ? ` ${s.targetDistanceMiles}mi` : "";
-        const pacePart = s.targetPace ? ` @ ${s.targetPace}` : "";
-        return {
-          day: DAY_SHORT[offset],
-          date: `${d.getMonth() + 1}/${d.getDate()}`,
-          label: `${s.description}${distPart}${pacePart}`,
-          optional: false,
-        };
-      });
-
-    await supabase.from("training_state").upsert({
-      user_id: userId,
-      current_week: planWeekSyncNum,
-      week1_start_date: week1StartStr,
-      weekly_mileage_target: uploadedNextWeek.total_miles || null,
-      weekly_plan_sessions: syncSessions as unknown as Json,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id" });
-    console.log(`[coach/respond] plan_import_week_ask fallback: synced week=${planWeekSyncNum}, sessions=${syncSessions.length}`);
-    void trackEvent(userId, "plan_week_synced", { week: planWeekSyncNum, source: "coach_respond_fallback" });
-  }
-
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
     const _ipStart = Date.now();
@@ -2153,50 +1925,30 @@ Weekly total: ${mileageRange}
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
-    // The training arc was already generated before the Claude call (see pre-generation block above).
-    // Use the token returned by generateAndSaveFullPlan at that point.
-    const newDashboardToken = preGeneratedDashboardToken;
-    console.log(`[initial_plan] using pre-generated dashboard token: ${newDashboardToken ? "ok" : "missing"}`);
-
-    // Build the dashboard URL from the pre-generated token.
-    const planToken = newDashboardToken ?? dashboardToken;
-    const planUrl = planToken ? `${appUrl}/dashboard?token=${planToken}` : null;
-
-    // Send dashboard link, then "How does this look?" as a third bubble.
-    // Ordering: plan description → dashboard link → "How does this look?"
-    // This way the athlete sees the link first and can open the full plan before responding.
-    const strengthNote = injuryNotes
-      ? "\n\nAlso added strength exercises to your dashboard tailored to your injury history — worth doing 2× a week to stay healthy."
-      : "";
-    const closingMsg = planUrl
-      ? `Your full plan is here: ${planUrl}${strengthNote}\n\nHow does this look? Happy to adjust anything.`
-      : null;
-    if (closingMsg) {
-      if (!dry_run) {
-        if (chatId) await startTyping(chatId);
-        await new Promise((r) => setTimeout(r, 1500));
-        await sendSMS(user.phone_number, closingMsg);
-      }
-      await supabase.from("conversations").insert({
-        user_id: userId,
-        role: "assistant",
-        content: closingMsg,
-        message_type: "initial_plan_link",
-      });
+    // Send a follow-up "How does this look?" bubble after the plan description.
+    const closingMsg = "How does this look? Happy to adjust anything.";
+    if (!dry_run) {
+      if (chatId) await startTyping(chatId);
+      await new Promise((r) => setTimeout(r, 1500));
+      await sendSMS(user.phone_number, closingMsg);
     }
+    await supabase.from("conversations").insert({
+      user_id: userId,
+      role: "assistant",
+      content: closingMsg,
+      message_type: "initial_plan_link",
+    });
   } else if (trigger === "weekly_recap") {
     void trackEvent(userId, "plan_generated", { plan_type: "weekly" });
     // Advance week counter and phase; update mileage target to this week's computed value.
     // During injury hold: advance the clock (calendar keeps moving) but do NOT update
     // the mileage target — it stays at 0 until injury_clear triggers a plan rebuild.
     const isOnInjuryHold = !!(state?.injury_hold_since as string | null);
-    // For uploaded plans, use the plan's prescribed mileage instead of the periodization engine.
-    const uploadedNextWeekMiles = isUploadedPlan && uploadedNextWeek ? uploadedNextWeek.total_miles : null;
     await supabase.from("training_state").update({
       current_week: periodization.effectiveWeek,
       current_phase: periodization.phase,
       ...(!isOnInjuryHold ? {
-        weekly_mileage_target: uploadedNextWeekMiles ?? periodization.suggestedWeeklyMiles ?? undefined,
+        weekly_mileage_target: periodization.suggestedWeeklyMiles ?? undefined,
       } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
@@ -2450,19 +2202,6 @@ Weekly total: ${mileageRange}
         updated_at: new Date().toISOString(),
       })
       .eq("user_id", userId);
-  }
-
-  // Regenerate dashboard insights after runs and weekly/initial plans — async, non-blocking.
-  if (trigger === "post_run" || trigger === "weekly_recap" || trigger === "initial_plan") {
-    after(async () => {
-      try {
-        await generateAndStoreDashboardInsights(userId, trigger, coachMessage);
-      } catch (err) {
-        console.error("[coach/respond] generateAndStoreDashboardInsights failed:", err);
-        const { captureException } = await import("@sentry/nextjs");
-        captureException(err, { tags: { trigger } });
-      }
-    });
   }
 
   return NextResponse.json({ ok: true, message: coachMessage });
@@ -4590,7 +4329,8 @@ ${isConversational ? `PRODUCT CAPABILITIES — what Coach Dean actually supports
 - If an athlete asks how to connect Strava, tell them to text "connect strava" and you'll send them the link.
 - If an athlete asks how to update their Strava permissions, reconnect Strava, or add/remove the activity notes feature, tell them to text "strava connection" and they'll get a re-auth link.
 - If an athlete asks how to connect Garmin, Apple Health, or any other service, tell them clearly: "I only have Strava sync right now — just text me after your workouts and I'll track from there."
-- Communication: SMS only. Athletes can text "dashboard" at any time to receive a link to their full week-by-week training plan dashboard. There is no separate app, calendar export, or email — but the plan link is always available on request. When an athlete asks to see their plan, tell them to text "dashboard" and they'll get the link immediately — do NOT say you cannot send it.
+- Communication: SMS only. If an athlete asks to see their full training plan or arc, Dean describes it in text — stating the current week, phase, and upcoming milestones. There is no separate app, calendar export, or dashboard link.
+- If asked about a web dashboard or dashboard link, tell the athlete that the plan lives here in text — they can ask you about any week, the overall arc, or what's coming up and you'll answer directly.
 - Proactive messages: weekly Sunday recap and post-run coaching notes after every Strava activity. Athletes can text at any time for Q&A and Dean will respond.
 - If asked about a feature that doesn't exist (a web dashboard, export, calendar sync, etc.), say you don't have that yet rather than fabricating instructions.
 ` : ""}
@@ -5163,7 +4903,7 @@ async function persistProfileUpdates(
           const mergedProfile = { ...profile, ...profileUpdate };
           // Race date changed to a new, further-out date — this is a genuinely new plan
           // for a different race, so reset to week 1.
-          await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, { skipLinkSms: true, resetToWeek1: true });
+          await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, { resetToWeek1: true });
           didFullRegenerate = true;
           console.log(`[persistProfileUpdates] race_date updated to ${newRaceDate}, full plan regenerated (${planWeeks.length} → ${newTotalWeeks} weeks)`);
         } else {
@@ -5231,7 +4971,6 @@ async function persistProfileUpdates(
       // Goal change → reset to week 1 (entirely different training paradigm).
       // VDOT-only update → preserve current week, just rebuild arc with new paces.
       await generateAndSaveFullPlan(userId, phoneNumber, mergedProfile, null, {
-        skipLinkSms: true,
         resetToWeek1: hasGoalRaceType,
       });
       console.log(`[persistProfileUpdates] ${hasGoalRaceType ? "goal" : "VDOT"} changed, plan regenerated (resetToWeek1=${hasGoalRaceType})`);
@@ -5257,7 +4996,6 @@ function buildUserMessage(
   storedNextPlanWeek?: { week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string } | null,
   timezoneConfirmed = true,
   storedPlanAllWeeks?: Array<{ week_number: number; phase: string; mileage_target: number; long_run_target: number; key_workout: string; notes: string }>,
-  dashboardUrl?: string | null,
   racePreparednessFlag = "",
   preferredUnits: string = "imperial",
   daysSinceLastCoachMessage: number | null = null,
@@ -5268,9 +5006,6 @@ function buildUserMessage(
   nightlyNoSessions = false,
   skippedNonRunSession: string | null = null,
   planDeviationFlag: string | null = null,
-  isUploadedPlan = false,
-  uploadedCurrentWeek: { week_number: number; sessions: Array<{ dayOfWeek: string; type: string; description: string; targetDistanceMiles?: number | null; targetDistanceMilesMin?: number | null; targetDistanceMilesMax?: number | null }>; total_miles: number; total_miles_min?: number; total_miles_max?: number } | null = null,
-  uploadedTotalWeeks = 0,
   avgWeeklyMileage: number | null = null,
   activitiesQueryFailed = false,
   crossTrainingPostRunContext: string | null = null,
@@ -5553,9 +5288,9 @@ PROJECTED vs TARGET DIRECTION: When comparing a projected total to the weekly ta
 
 MANUALLY-REPORTED ACTIVITY: If earlier in RECENT CONVERSATION you told the athlete you could NOT see a specific activity in Strava, and they then provided the details manually (distance, pace, time, etc.) in a follow-up message — those numbers are athlete-reported, NOT Strava-confirmed. Do NOT say "that matches what I saw from the sync" or any phrasing that implies Strava confirmed the data. Acknowledge it as manually noted: e.g. "Got it — I've noted that manually. If it eventually syncs from Strava, I'll reconcile it then." Falsely attributing athlete-provided data to a Strava sync that never happened damages trust.
 
-FULL PLAN REQUESTS — HARD RULE: If the athlete asks to see their full plan, training schedule, full training arc, or all upcoming weeks — your entire response is the dashboard link${dashboardUrl ? `: ${dashboardUrl}` : " (unavailable — tell them to text \"dashboard\" and the system will send it)"}. One or two sentences max. Do NOT output a week-by-week schedule in the SMS. Do NOT use web search to research the race and build a plan inline. Do NOT promise to send the plan later. This applies even if web search is available — research does not override this rule.
+FULL PLAN REQUESTS: If the athlete asks to see their full plan, training schedule, full training arc, or all upcoming weeks — give a concise arc summary using the FULL TRAINING PLAN ARC data below. State "You're on week X of Y — [phase]," then list 2-3 phase milestones with mileage ranges (e.g. "base through week 6 building to ~45mi/wk, peak at week 10, taper the final 2 weeks"). Keep it under 5 SMS-friendly sentences. Do NOT output every week. Do NOT use web search to build a plan inline.
 
-EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Do NOT send the dashboard link. Handle it using the THIS WEEK SESSION SWAP rules below.
+EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Handle it using the THIS WEEK SESSION SWAP rules below.
 
 WEEK-LEVEL PLAN CHANGES: Because the plan is day-agnostic, "swap days" requests don't apply. If the athlete asks to move, swap, or reschedule a session, gently redirect — the plan has no days assigned, so they can shift their run whenever works. Example: "Since the week is day-agnostic, just do the tempo whenever it fits — no need to swap." No [WEEK_OVERRIDE] or [SKIP_DAY] tags. However, if they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load, treat that as a [LIGHTER_WEEK] per the rules below.
 
@@ -5563,11 +5298,9 @@ RACE COURSE DATA: If the athlete provides course profile details for their race 
 [RACE_COURSE_UPDATE:{"race_id":"<uuid>","elevation_gain_feet":<number>,"elevation_loss_feet":<number>,"race_altitude_ft":<number>,"trail_subtype":"<groomed|mixed|technical|highly_technical>"}]
 Only include fields the athlete actually provided — omit the rest. The race_id is in RACE PREDICTOR DATA or the goal race block. The tag is stripped before SMS delivery. After saving, state how the new data affects the finish time prediction (e.g. "With 8,500ft of gain that moves your projected finish from X to Y").
 
-TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly so the athlete knows their dashboard will reflect it (e.g. "I've updated next week on your dashboard — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
+TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly (e.g. "I've updated next week — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
 
-DASHBOARD UPDATES: When the athlete asks to "update the dashboard", "update the plan", or "update the whole plan" — you CAN do this. Do not say "I can't update the dashboard." This includes situations where the dashboard is showing wrong or mismatched data (e.g. "the dashboard shows 16 miles but you only gave me two short sessions" — that is a plan correction request, not a system bug outside your control). In all cases: describe what you're changing in 1-2 sentences and ask them to confirm. Do NOT say you can't edit the system, can't touch the database, or that the plan is auto-generated.
-
-FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "update the whole plan", "rebuild my plan with more tempo", "add speed work throughout", "the dashboard shows the wrong mileage, can you fix it" — describe what will change in 1-2 sentences, then end with: "Reply UPDATE PLAN to confirm and I'll send you the updated dashboard link." Do NOT include a session list or week-by-week schedule. Do NOT say the plan has already been updated — nothing changes until they confirm. Do NOT use [REBUILD_PLAN].${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
+FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "rebuild my plan with more tempo", "add speed work throughout", "update the whole plan" — describe what will change in 1-2 sentences, then end with: "Reply UPDATE PLAN to confirm." Do NOT include a session list or week-by-week schedule. Do NOT say the plan has already been updated — nothing changes until they confirm. Do NOT use [REBUILD_PLAN].${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
 INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
 
@@ -5678,22 +5411,6 @@ Keep the whole thing under 480 characters.`;
       const recapMi = (miles: number) => recapIsMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
       const storedPlanContext = storedPlanWeek
         ? `STORED TRAINING PLAN — WHAT WAS PLANNED FOR WEEK ${storedPlanWeek.week_number}:\nPhase: ${storedPlanWeek.phase} | Planned mileage: ~${recapMi(storedPlanWeek.mileage_target)} | Long run: ~${recapMi(storedPlanWeek.long_run_target)}\nKey workout: ${storedPlanWeek.key_workout || "n/a"}\nCoaching note: ${storedPlanWeek.notes || "n/a"}\n\nYour job: recap how actual training compared to this plan, then advise on the upcoming week using the arc above as your guide — don't invent the progression from scratch.\n\n`
-        : isUploadedPlan && uploadedCurrentWeek
-        ? (() => {
-            const mileageRange = uploadedCurrentWeek.total_miles_min != null && uploadedCurrentWeek.total_miles_max != null
-              ? `${recapMi(uploadedCurrentWeek.total_miles_min)}–${recapMi(uploadedCurrentWeek.total_miles_max)}`
-              : `~${recapMi(uploadedCurrentWeek.total_miles)}`;
-            const sessionLines = uploadedCurrentWeek.sessions
-              .filter(s => s.type !== "off")
-              .map(s => {
-                const distPart = s.targetDistanceMilesMin != null && s.targetDistanceMilesMax != null
-                  ? ` (${recapMi(s.targetDistanceMilesMin)}–${recapMi(s.targetDistanceMilesMax)})`
-                  : s.targetDistanceMiles ? ` (${recapMi(s.targetDistanceMiles)})` : "";
-                return `  - ${s.dayOfWeek}: ${s.description}${distPart}`;
-              })
-              .join("\n");
-            return `UPLOADED PLAN — WHAT WAS SCHEDULED THIS WEEK (week ${uploadedCurrentWeek.week_number} of ${uploadedTotalWeeks}):\n${sessionLines}\nWeekly total: ${mileageRange}\n\nYour job: recap how actual training compared to these prescribed sessions — what did they complete, what did they adjust or skip? The <uploaded_plan_next_week> block below contains next week's sessions; use those exactly — do not invent different sessions.\n\n`;
-          })()
         : "";
       const isMetric = preferredUnits === "metric";
       const weekVolumeVal = isMetric ? (weekMileageSoFar * 1.60934).toFixed(1) : weekMileageSoFar.toFixed(1);
@@ -5717,13 +5434,7 @@ Second text: prescribe cross-training and rest only. Include 1–2 gentle test-r
 If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST] with running sessions — only cross-training and test-run probe sessions.
 Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
-        // Uploaded plan: next week's sessions come from <uploaded_plan_next_week> appended below.
-        // Do NOT inject periodization overrides — the uploaded plan owns its own week structure.
-        // A "RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION" block would conflict with
-        // whatever the external plan has scheduled (e.g. a peak week with tempo + long run).
-        : isUploadedPlan
-        ? ""
-        // Dean-generated plan: prefer the arc's stored next-week entry when available.
+        // Prefer the arc's stored next-week entry when available.
         // More accurate than re-deriving from periodization math — matches what the dashboard shows.
         : storedNextPlanWeek
         ? (() => {
@@ -5860,7 +5571,7 @@ Rules:
 - optional: true only for explicitly optional sessions, false otherwise
 - Include every session in the upcoming week — do not omit any
 - The tag is stripped before the athlete sees the message — they will never see it
-${dashboardUrl ? `DASHBOARD: At the end of your second bubble, add one short sentence with the dashboard link — e.g. "Your full plan is at ${dashboardUrl}" or "See the full week breakdown at ${dashboardUrl}". Vary the phrasing.` : ""}`;
+`;
     }
     case "workout_image": {
       const imageGuard = buildActivityDataGuard(imageActivity ?? null);
@@ -6039,7 +5750,6 @@ QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality 
 NEVER write "?mi", "X mi", or "check distance" — always compute the number. Meter conversions: 400m = 0.25mi, 800m = 0.5mi, 1200m = 0.75mi, 1600m = 1mi.
 QUALITY SESSION "WHY": For any tempo, interval, or race-pace workout, add a brief purpose clause — e.g. "builds lactate threshold, the engine for your half marathon pace" or "sharpens the speed you'll need at goal pace." Easy runs and long runs do not need this.
 End the second bubble cleanly — no closing question, no invitation to adjust (that's sent as a separate follow-up), no "this number's always open" line.
-<rule>DASHBOARD LINK: Do NOT include the dashboard URL anywhere in your response — it is sent automatically as a separate follow-up message immediately after yours. Including it here causes the link to appear twice.</rule>
 
 ONE QUESTION RULE: Do not ask any questions in this response — no follow-ups about injuries, niggles, schedule, reminders, or anything else. If you want to flag something about an injury or constraint, state it as information ("I've kept this conservative given your hip") not as a question.
 ${!hasStrava ? `

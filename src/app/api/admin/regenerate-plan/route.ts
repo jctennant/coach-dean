@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     profile as Record<string, unknown>,
     avgWeeklyMileage,
     {
-      skipLinkSms: true,
+      
       prescribedWeek1Miles,
       resetToWeek1,
     }

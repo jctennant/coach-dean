@@ -334,79 +334,20 @@ describe("coach/respond — B/C race context in system prompt", () => {
   });
 });
 
-describe("coach/respond — 'dashboard' keyword early-exit", () => {
+describe("coach/respond — 'dashboard' keyword falls through to Claude", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     afterQueue.splice(0);
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
   });
 
-  it("sends dashboard link directly when token exists, skipping Claude", async () => {
-    // Simulate Ian's situation: conversation history with older messages PLUS "My plan"
-    // as the latest message. Conversations are supplied newest-first (as the DB returns
-    // them) — the route internally calls .reverse() to make them oldest-first, so our
-    // fix must re-reverse to find the newest user message.
+  it("routes 'dashboard' message through normal Claude user_message path", async () => {
     setupSupabase({
       user: baseUser({ dashboard_token: "tok-ian-abc" }),
       profile: baseProfile(),
       state: baseState(),
       conversations: [
-        // newest-first (DB order)
-        { role: "user",      content: "dashboard",                                       created_at: "2026-03-30T10:50:00Z" },
-        { role: "assistant", content: "Your training plan isn't ready yet",              created_at: "2026-03-30T10:06:00Z" },
-        { role: "user",      content: "dashboard",                                       created_at: "2026-03-30T10:06:00Z" },
-        { role: "user",      content: "Can you send my full training plan for Philly?",  created_at: "2026-03-30T09:12:00Z" },
-      ],
-    });
-
-    const { sendSMS } = await import("@/lib/linq");
-    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
-    await POST(req);
-    await flush();
-
-    // Link sent directly — no Claude call
-    expect(anthropic.messages.create).not.toHaveBeenCalled();
-    expect(sendSMS).toHaveBeenCalledWith(
-      "+12025550001",
-      expect.stringContaining("http://localhost:3000/dashboard?token=tok-ian-abc")
-    );
-  });
-
-  it("generates a new token and sends link when dashboard_token is null", async () => {
-    const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
-    (generateAndSaveFullPlan as ReturnType<typeof vi.fn>).mockResolvedValue("freshtoken");
-
-    setupSupabase({
-      user: baseUser({ dashboard_token: null }),
-      profile: baseProfile(),
-      state: baseState(),
-      conversations: [
         { role: "user", content: "dashboard", created_at: "2026-03-30T10:50:00Z" },
-        { role: "user", content: "I want to run Philadelphia", created_at: "2026-03-03T04:26:00Z" },
-      ],
-    });
-
-    const { sendSMS } = await import("@/lib/linq");
-    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
-    await POST(req);
-    await flush();
-
-    expect(anthropic.messages.create).not.toHaveBeenCalled();
-    expect(generateAndSaveFullPlan).toHaveBeenCalled();
-    expect(sendSMS).toHaveBeenCalledWith(
-      "+12025550001",
-      expect.stringContaining("freshtoken")
-    );
-  });
-
-  it("does NOT early-exit when latest message is not 'dashboard'", async () => {
-    setupSupabase({
-      user: baseUser({ dashboard_token: "tok-abc" }),
-      profile: baseProfile(),
-      state: baseState(),
-      conversations: [
-        { role: "user", content: "How's my tempo pace looking?", created_at: "2026-03-30T10:50:00Z" },
-        { role: "user", content: "dashboard",                    created_at: "2026-03-30T09:00:00Z" },
       ],
     });
 
@@ -414,36 +355,8 @@ describe("coach/respond — 'dashboard' keyword early-exit", () => {
     await POST(req);
     await flush();
 
-    // Normal Claude path taken
+    // Falls through to Claude — no early-exit
     expect(anthropic.messages.create).toHaveBeenCalled();
-  });
-
-  it("early-exits with dashboard link for 'DASHBOARD' case variants", async () => {
-    const variants = ["Dashboard", "DASHBOARD", " dashboard "];
-
-    const { sendSMS } = await import("@/lib/linq");
-
-    for (const content of variants) {
-      vi.clearAllMocks();
-      setupSupabase({
-        user: baseUser({ dashboard_token: "tok-plan-123" }),
-        profile: baseProfile(),
-        state: baseState(),
-        conversations: [
-          { role: "user", content, created_at: "2026-03-30T10:50:00Z" },
-        ],
-      });
-
-      const req = mockRequest({ userId: "user-001", trigger: "user_message" });
-      await POST(req);
-      await flush();
-
-      expect(anthropic.messages.create).not.toHaveBeenCalled();
-      expect(sendSMS).toHaveBeenCalledWith(
-        "+12025550001",
-        expect.stringContaining("tok-plan-123")
-      );
-    }
   });
 });
 
@@ -606,9 +519,7 @@ describe("coach/respond — initial_plan closing message", () => {
     });
   });
 
-  it("calls generateAndSaveFullPlan with skipLinkSms=true and sends closing message", async () => {
-    // The dashboard link is now included in our own closing message (not sent from
-    // generateAndSaveFullPlan), so skipLinkSms must be true to avoid a duplicate link SMS.
+  it("calls generateAndSaveFullPlan and sends closing message inviting feedback", async () => {
     const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
     const { sendSMS } = await import("@/lib/linq");
 
@@ -622,13 +533,11 @@ describe("coach/respond — initial_plan closing message", () => {
     await POST(req);
     await flush();
 
-    // generateAndSaveFullPlan must be called with skipLinkSms: true
+    // generateAndSaveFullPlan must have been called
     const gpCalls = (generateAndSaveFullPlan as ReturnType<typeof vi.fn>).mock.calls;
     expect(gpCalls.length).toBeGreaterThan(0);
-    const opts = gpCalls[0][4] as Record<string, unknown>;
-    expect(opts.skipLinkSms).toBe(true);
 
-    // Closing message invites feedback
+    // Closing message is always "How does this look? Happy to adjust anything."
     const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
       (c: unknown[]) => c[1] as string
     );

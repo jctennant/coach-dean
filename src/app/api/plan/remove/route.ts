@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import type { Json } from "@/lib/database.types";
 
 export async function POST(request: Request) {
   let body: { userId: string };
@@ -12,11 +13,16 @@ export async function POST(request: Request) {
   const { userId } = body;
   if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 });
 
-  const { data: user } = await supabase.from("users").select("id").eq("id", userId).single();
+  const { data: user } = await supabase.from("users").select("id, onboarding_data").eq("id", userId).single();
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  // Remove all training plans for this user
+  // Remove Dean-generated training plans
   await supabase.from("training_plans").delete().eq("user_id", userId);
+
+  // Clear uploaded plan context from onboarding_data
+  const existingData = ((user.onboarding_data as Record<string, unknown>) || {});
+  const { plan_context: _, plan_filename: __, has_existing_plan: ___, plan_uploaded: ____, ...restData } = existingData;
+  await supabase.from("users").update({ onboarding_data: restData as unknown as Json }).eq("id", userId);
 
   // Reset plan-related fields in training_state
   await supabase.from("training_state").update({

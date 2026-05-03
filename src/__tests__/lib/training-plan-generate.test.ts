@@ -6,7 +6,6 @@
  *  2. The prescribedWeek1Miles option (training_state stays in sync with what
  *     Dean actually told the athlete over text — this prevents the dashboard
  *     showing a different mileage target than Dean's first message)
- *  3. The skipLinkSms flag suppresses the dashboard link SMS
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -114,7 +113,6 @@ describe("generateAndSaveFullPlan — total_weeks from race date", () => {
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true },
     );
 
     expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(19);
@@ -139,7 +137,6 @@ describe("generateAndSaveFullPlan — total_weeks from race date", () => {
       "+12025551234",
       baseProfile({ race_date: RACE_12W }),
       25,
-      { skipLinkSms: true },
     );
 
     expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(13);
@@ -164,7 +161,6 @@ describe("generateAndSaveFullPlan — total_weeks from race date", () => {
       "+12025551234",
       baseProfile(),  // no race_date
       25,
-      { skipLinkSms: true },
     );
 
     expect((insertedPlan as Record<string, unknown>).total_weeks).toBe(12);
@@ -189,7 +185,6 @@ describe("generateAndSaveFullPlan — total_weeks from race date", () => {
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true },
     );
 
     const plan = insertedPlan as Record<string, unknown>;
@@ -232,7 +227,7 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true, prescribedWeek1Miles: 35 },
+      { prescribedWeek1Miles: 35 },
     );
 
     expect(stateUpdateArgs).toHaveLength(1);
@@ -260,7 +255,6 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true },
     );
 
     expect(capturedUpdate).not.toBeNull();
@@ -292,7 +286,7 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true, prescribedWeek1Miles: 20, resetToWeek1: false },
+      { prescribedWeek1Miles: 20, resetToWeek1: false },
     );
 
     // Mid-plan rebuild (neither resetToWeek1 nor week1Reset) must not write to training_state.
@@ -324,7 +318,6 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       baseProfile({ race_date: RACE_18W }),
       30,
       {
-        skipLinkSms: true,
         prescribedWeek1Miles: 35,
         resetToWeek1: false,
         week1Reset: true,
@@ -359,57 +352,10 @@ describe("generateAndSaveFullPlan — prescribedWeek1Miles syncs to training_sta
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true, prescribedWeek1Miles: 35 },
+      { prescribedWeek1Miles: 35 },
     );
 
     expect(capturedPayload).toMatchObject({ user_id: "user-abc" });
-  });
-});
-
-// -----------------------------------------------------------------------
-// skipLinkSms flag
-// -----------------------------------------------------------------------
-
-describe("generateAndSaveFullPlan — skipLinkSms flag", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(FIXED_NOW);
-    (supabase.from as ReturnType<typeof vi.fn>).mockReturnValue(chain({ data: null, error: null }));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.clearAllMocks();
-  });
-
-  it("suppresses the dashboard link SMS when skipLinkSms is true", async () => {
-    await generateAndSaveFullPlan(
-      "user-1",
-      "+12025551234",
-      baseProfile({ race_date: RACE_18W }),
-      30,
-      { skipLinkSms: true },
-    );
-
-    expect(sendSMS).not.toHaveBeenCalled();
-  });
-
-  it("sends the dashboard link SMS when skipLinkSms is false (default)", async () => {
-    // Provide NEXT_PUBLIC_APP_URL so the URL is deterministic.
-    process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
-
-    await generateAndSaveFullPlan(
-      "user-1",
-      "+12025551234",
-      baseProfile({ race_date: RACE_18W }),
-      30,
-      // skipLinkSms defaults to false
-    );
-
-    expect(sendSMS).toHaveBeenCalledWith(
-      "+12025551234",
-      expect.stringContaining("coachdean.ai/dashboard"),
-    );
   });
 });
 
@@ -464,7 +410,7 @@ describe("generateAndSaveFullPlan — plan / text alignment", () => {
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true, prescribedWeek1Miles: 35 },
+      { prescribedWeek1Miles: 35 },
     );
 
     // The training_state target is exactly what Dean said over text.
@@ -499,7 +445,6 @@ describe("generateAndSaveFullPlan — plan / text alignment", () => {
       "+12025551234",
       baseProfile({ race_date: RACE_18W }),
       30,
-      { skipLinkSms: true },
     );
 
     expect((insertedPlan as Record<string, unknown>).race_date).toBe(RACE_18W);
@@ -544,7 +489,6 @@ describe("generateAndSaveFullPlan — beginner mileage cap", () => {
       "+12025551234",
       baseProfile({ fitness_level: "beginner" }),
       16,  // avgWeeklyMileage — stale Strava history; should be ignored for beginners
-      { skipLinkSms: true },
     );
 
     // Plan arc must start at the beginner default (8mi), not the Strava average (16mi)
@@ -570,7 +514,6 @@ describe("generateAndSaveFullPlan — beginner mileage cap", () => {
       "+12025551234",
       baseProfile({ fitness_level: null }),
       16,
-      { skipLinkSms: true },
     );
 
     // Legacy profiles (no explicit fitness_level) use the Strava avg as-is

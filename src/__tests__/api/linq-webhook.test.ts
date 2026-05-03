@@ -409,75 +409,12 @@ describe("POST /api/webhooks/linq — message routing", () => {
     expect(sendSMS).not.toHaveBeenCalled();
   });
 
-  it("'dashboard' with token: sends link immediately, skips coach/respond", async () => {
-    mockTables({
-      conversations: [
-        { data: null, error: null },           // dedup check → no existing
-        { data: { id: "conv-001" }, error: null }, // insert storedMsg
-      ],
-      users: {
-        data: {
-          id: "user-001", onboarding_step: null, timezone: "America/New_York",
-          linq_chat_id: "chat-abc", messaging_opted_out: false,
-          reengagement_sent_at: null, strava_athlete_id: "12345",
-          dashboard_token: "tok-abc123",
-        },
-        error: null,
-      },
-    });
-
-    const req = makeRequest("+12025551234", "dashboard");
-    await POST(req);
-    await flush();
-
-    expect(sendSMS).toHaveBeenCalledWith(
-      "+12025551234",
-      expect.stringContaining("http://localhost:3000/dashboard?token=tok-abc123")
-    );
-    expect(global.fetch).not.toHaveBeenCalledWith(
-      expect.stringContaining("coach/respond"),
-      expect.anything()
-    );
-  });
-
-  it("'dashboard' case-insensitive variants all send the link", async () => {
-    for (const variant of ["Dashboard", "DASHBOARD"]) {
-      vi.clearAllMocks();
-      afterQueue.splice(0);
-      mockTables({
-        conversations: [
-          { data: null, error: null },
-          { data: { id: "conv-001" }, error: null },
-        ],
-        users: {
-          data: {
-            id: "user-001", onboarding_step: null, timezone: "America/New_York",
-            linq_chat_id: "chat-abc", messaging_opted_out: false,
-            reengagement_sent_at: null, strava_athlete_id: null,
-            dashboard_token: "tok-xyz",
-          },
-          error: null,
-        },
-      });
-
-      const req = makeRequest("+12025551234", variant);
-      await POST(req);
-      await flush();
-
-      expect(sendSMS).toHaveBeenCalledWith(
-        "+12025551234",
-        expect.stringContaining("tok-xyz")
-      );
-    }
-  });
-
-  it("'dashboard' with no token: falls through to coach/respond instead of dead-end message", async () => {
+  it("'dashboard' falls through to coach/respond (no dashboard shortcut)", async () => {
     vi.useFakeTimers();
     try {
       mockTables({
         conversations: [
-          { data: null, error: null },           // dedup check
-          { data: null, error: null },           // plan_import_week_ask → no pending import
+          { data: null, error: null },           // dedup check → no existing
           { data: null, error: null },           // content-dedup → no recent duplicate
           { data: { id: "conv-001" }, error: null }, // insert storedMsg
         ],
@@ -485,8 +422,8 @@ describe("POST /api/webhooks/linq — message routing", () => {
           data: {
             id: "user-001", onboarding_step: null, timezone: "America/New_York",
             linq_chat_id: "chat-abc", messaging_opted_out: false,
-            reengagement_sent_at: null, strava_athlete_id: null,
-            dashboard_token: null, // no token yet
+            reengagement_sent_at: null, strava_athlete_id: "12345",
+            dashboard_token: "tok-abc123",
           },
           error: null,
         },
@@ -498,12 +435,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
       await vi.advanceTimersByTimeAsync(25_000);
       await flushPromise;
 
-      // Should NOT send the old dead-end message
-      expect(sendSMS).not.toHaveBeenCalledWith(
-        expect.anything(),
-        expect.stringMatching(/isn't ready yet/i)
-      );
-      // Should fall through to coach/respond for plan generation
+      // "dashboard" is just a regular message now — goes to coach/respond
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining("coach/respond"),
         expect.objectContaining({ method: "POST" })
@@ -517,6 +449,7 @@ describe("POST /api/webhooks/linq — message routing", () => {
     mockTables({
       conversations: [
         { data: null, error: null },               // dedup check
+        { data: null, error: null },               // content-dedup → no recent duplicate
         { data: { id: "conv-001" }, error: null }, // insert storedMsg
       ],
       users: {
@@ -558,7 +491,8 @@ describe("POST /api/webhooks/linq — message routing", () => {
       mockTables({
         conversations: [
           { data: null, error: null },
-          { data: { id: "conv-001" }, error: null },
+          { data: null, error: null },               // content-dedup
+          { data: { id: "conv-001" }, error: null }, // insert storedMsg
         ],
         users: {
           data: {
@@ -590,7 +524,6 @@ describe("POST /api/webhooks/linq — message routing", () => {
       mockTables({
         conversations: [
           { data: null, error: null },               // dedup check → no existing
-          { data: null, error: null },               // plan_import_week_ask → no pending import
           { data: null, error: null },               // content-dedup → no recent duplicate
           { data: { id: "conv-001" }, error: null }, // insert storedMsg
         ],
@@ -659,14 +592,12 @@ describe("POST /api/webhooks/linq — message routing", () => {
       mockTables({
         // conversations calls in order:
         //   [0] pre-after dedup check → no existing row (both webhooks pass)
-        //   [1] plan_import_week_ask → no pending import
-        //   [2] content-dedup → no recent duplicate
-        //   [3] insert storedMsg → returns "conv-zzz" (lexicographically larger id)
-        //   [4] debounce latest-msg check → same id → no newer message, proceed to dedup guard
-        //   [5] external_message_id check → two rows exist (duplicate delivery!) → "conv-aaa" < "conv-zzz"
+        //   [1] content-dedup → no recent duplicate
+        //   [2] insert storedMsg → returns "conv-zzz" (lexicographically larger id)
+        //   [3] debounce latest-msg check → same id → no newer message, proceed to dedup guard
+        //   [4] external_message_id check → two rows exist (duplicate delivery!) → "conv-aaa" < "conv-zzz"
         conversations: [
           { data: null, error: null },                                               // dedup check
-          { data: null, error: null },                                               // plan_import_week_ask
           { data: null, error: null },                                               // content-dedup
           { data: { id: "conv-zzz" }, error: null },                                 // insert storedMsg
           { data: { id: "conv-zzz" }, error: null },                                 // debounce check
@@ -705,11 +636,10 @@ describe("POST /api/webhooks/linq — message routing", () => {
     vi.useFakeTimers();
     try {
       mockTables({
-        // conversations: dedup → null, plan_import_week_ask → null, content-dedup → null,
+        // conversations: dedup → null, content-dedup → null,
         // insert → conv-001, debounce → same id, duplicate guard → single row (no duplicate)
         conversations: [
           { data: null, error: null },                           // dedup check
-          { data: null, error: null },                           // plan_import_week_ask check → no pending import
           { data: null, error: null },                           // content-dedup → no recent duplicate
           { data: { id: "conv-001" }, error: null },             // insert storedMsg
           { data: { id: "conv-001" }, error: null },             // debounce check
