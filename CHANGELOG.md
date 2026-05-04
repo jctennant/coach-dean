@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-04 — Fixed wrong HR percentage quoted for Zone 2 cross-training advice
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "this answer didn't seem right on HR" — Dean said "Zone 2 is typically around 50-65% of your estimated max" and gave a target of 110-130 bpm even though Jake's easy running average HR is 126.7 bpm
+**Root cause:** The fallback HR zone block (used when no LTHR is established) told Claude to use percentages internally to calibrate bpm targets, but had no guard against quoting those percentages to the user. Claude hallucinated "50-65%" (which isn't even in the system prompt — the correct threshold is <75% max) and stated it directly. The resulting bpm range (110-130) was also inconsistent: its lower bound fell below the athlete's own easy-run average HR.
+**Fix / Change:** Added explicit guard to the fallback HR zone block: "never state raw percentages to the athlete." Also added cross-training-specific anchor: "if the athlete asks what HR to target for cross-training, anchor the answer to their actual easy-run average HR from recent activities — that is their Zone 2 reference point." The LTHR block already had this guard; the fallback was missing it.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-05-03 — Analyst and complement mode awareness across triggers
 
 **Type:** Feature / Bug Fix

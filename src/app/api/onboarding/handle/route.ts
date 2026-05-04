@@ -1634,8 +1634,8 @@ async function completeOnboarding(
           lthr_last_updated: new Date().toISOString(),
           hr_zone_method: "lthr",
         } : {}),
-        ...(hasExistingPlan === true ? { coaching_mode: 'complement' } :
-           hasExistingPlan === false && wantsPlan === false ? { coaching_mode: 'analyst' } : {}),
+        coaching_mode: hasExistingPlan === true ? 'complement' :
+          hasExistingPlan === false && wantsPlan === false ? 'analyst' : 'full_coach',
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
