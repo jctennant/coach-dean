@@ -319,6 +319,12 @@ async function processStravaEvent(body: {
                 }).eq("user_id", user.id);
                 console.log(`[strava-webhook] LTHR updated for user ${user.id}: ${lthrResult.lthr} bpm (${lthrResult.confidence})`);
               }
+              if (maxHR != null) {
+                await supabase.from("training_profiles").update({
+                  max_hr_estimate: Math.round(maxHR),
+                  max_hr_estimate_updated_at: new Date().toISOString(),
+                }).eq("user_id", user.id);
+              }
             }
           } catch (lthrErr) {
             console.warn("[strava-webhook] LTHR recompute failed (non-fatal):", lthrErr);

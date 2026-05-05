@@ -314,6 +314,19 @@ export async function GET(request: Request) {
     updatedOnboardingData.strava_lthr_confidence = lthrResult.confidence;
   }
 
+  // Persist the tiered max HR estimate to training_profiles so the coach,
+  // dashboard, and longitudinal analytics share one value (rather than each
+  // recomputing — which can diverge if filtering changes).
+  if (estimatedMaxHR != null) {
+    await supabase
+      .from("training_profiles")
+      .update({
+        max_hr_estimate: Math.round(estimatedMaxHR),
+        max_hr_estimate_updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user.id);
+  }
+
   // Mileage spike detection — largest week-over-week increase in the 4-week window.
   // Recent-to-older: completedWeeks[0] = last week, [1] = 2 weeks ago, etc.
   const completedWeeks = weeklyMilesArr.slice(1, 5);

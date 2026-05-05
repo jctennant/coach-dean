@@ -9,9 +9,12 @@
  * post_run and weekly_recap coaching paths to give Dean longitudinal context.
  */
 
+import { estimateMaxHR } from "./hr-utils";
+
 export interface ActivityForAnalytics {
   start_date: string;
   activity_type: string | null;
+  workout_type: number | null;         // 0/null=run, 1=race, 2=long run, 3=workout
   distance_meters: number | null;
   moving_time_seconds: number | null;
   average_heartrate: number | null;
@@ -376,13 +379,20 @@ export interface IntensityDistributionResult {
 
 /**
  * Classify runs by HR intensity relative to observed max HR.
- * Easy: <76% of max  Moderate (zone 3): 76-88%  Hard: >88%
+ * Easy: <75% of max  Moderate (zone 3): 75-88%  Hard: >88%
  * The "zone 3 trap" = spending most training time in moderate intensity,
  * which accumulates fatigue without the aerobic gains of easy running
  * or the speed gains of hard running.
+ *
+ * Pass `estimatedMaxHR` from `estimateMaxHR()` (hr-utils) for the most accurate
+ * zone classification. If omitted, this function will compute it itself using
+ * the same tiered approach (race > workout > all-runs, with spike filtering).
+ * Never use raw Math.max(max_heartrate) — single-run sensor spikes will inflate
+ * the denominator and shift every classification down a zone.
  */
 export function computeIntensityDistribution(
-  activities: ActivityForAnalytics[]
+  activities: ActivityForAnalytics[],
+  estimatedMaxHR?: number | null
 ): IntensityDistributionResult {
   const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
 
@@ -398,11 +408,7 @@ export function computeIntensityDistribution(
     return { easyPct: 0, moderatePct: 0, hardPct: 0, observedMaxHR: null, inZone3Trap: false, summary: "Insufficient HR data for intensity distribution." };
   }
 
-  // Use stored max_heartrate where available; fall back to max of average HRs
-  const maxHRValues = runsWithHR
-    .map(a => a.max_heartrate ?? a.average_heartrate ?? 0)
-    .filter(h => h > 100);
-  const observedMaxHR = maxHRValues.length > 0 ? Math.max(...maxHRValues) : null;
+  const observedMaxHR = estimatedMaxHR ?? estimateMaxHR(activities);
 
   if (!observedMaxHR || observedMaxHR < 130) {
     return { easyPct: 0, moderatePct: 0, hardPct: 0, observedMaxHR: null, inZone3Trap: false, summary: "Insufficient HR data for intensity distribution." };
@@ -812,14 +818,15 @@ export function buildRunExecutionAnalysis(
  */
 export function buildLongitudinalBlock(
   activities: ActivityForAnalytics[],
-  timezone: string
+  timezone: string,
+  estimatedMaxHR?: number | null
 ): string {
   const load = computeLoadTrend(activities, timezone);
   const acwr = computeACWR(activities, timezone);
   const efficiency = computeAerobicEfficiencyTrend(activities, timezone);
   const drift = computeCardiacDriftTrend(activities);
   const longRun = computeLongRunProgression(activities, timezone);
-  const intensity = computeIntensityDistribution(activities);
+  const intensity = computeIntensityDistribution(activities, estimatedMaxHR);
   const cadence = computeCadenceTrend(activities);
   const elevation = computeElevationLoadTrend(activities, timezone);
 
@@ -868,11 +875,12 @@ export interface LongitudinalSignals {
  */
 export function buildLongitudinalSignals(
   activities: ActivityForAnalytics[],
-  timezone: string
+  timezone: string,
+  estimatedMaxHR?: number | null
 ): LongitudinalSignals {
   const acwr = computeACWR(activities, timezone);
   const longRun = computeLongRunProgression(activities, timezone);
-  const intensity = computeIntensityDistribution(activities);
+  const intensity = computeIntensityDistribution(activities, estimatedMaxHR);
 
   const requiredMentions: string[] = [];
   const hasLoadSpike = acwr.flagged;

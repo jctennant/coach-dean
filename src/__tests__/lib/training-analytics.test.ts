@@ -25,6 +25,7 @@ function makeActivity(opts: {
   efficiency?: number;
   decoupling?: number;
   type?: string;
+  workoutType?: number | null;
 }): ActivityForAnalytics {
   // Anchor in the target TZ's current date (not UTC), since computeLoadTrend /
   // computeLongRunProgression group weeks in the target TZ. Using UTC midnight
@@ -37,6 +38,7 @@ function makeActivity(opts: {
   return {
     start_date: d.toISOString(),
     activity_type: opts.type ?? "Run",
+    workout_type: opts.workoutType ?? null,
     distance_meters: opts.miles * 1609.34,
     moving_time_seconds: opts.miles * 9 * 60, // ~9 min/mi
     average_heartrate: opts.hr ?? null,
@@ -152,6 +154,31 @@ describe("computeIntensityDistribution", () => {
     expect(result.inZone3Trap).toBe(true);
     expect(result.moderatePct).toBeGreaterThan(50);
     expect(result.summary).toContain("gray zone");
+  });
+
+  it("rejects single-run sensor spike when classifying intensity", () => {
+    // Athlete's true max ≈ 180. One spike activity reads max_heartrate 220
+    // (sensor artifact). With the old raw Math.max approach, 220 would become
+    // the denominator: 150/220 = 68% → all runs classified easy (wrong).
+    // With the tiered estimator, the spike's ratio (220/150=1.47) exceeds the
+    // tier-3 cap (1.40), so it's filtered out and 180 is used: 150/180 = 83% → moderate.
+    const activities: ActivityForAnalytics[] = [
+      ...Array.from({ length: 7 }, (_, i) => makeActivity({ daysAgo: i * 3 + 1, miles: 5, hr: 150, maxHr: 180 })),
+      makeActivity({ daysAgo: 25, miles: 5, hr: 150, maxHr: 220 }),
+    ];
+    const result = computeIntensityDistribution(activities);
+    expect(result.observedMaxHR).toBeLessThan(200);
+    expect(result.moderatePct).toBeGreaterThan(50);
+  });
+
+  it("uses caller-supplied estimatedMaxHR when provided", () => {
+    const activities: ActivityForAnalytics[] = Array.from({ length: 6 }, (_, i) =>
+      makeActivity({ daysAgo: i * 3 + 1, miles: 5, hr: 150, maxHr: 180 })
+    );
+    // Caller passes a much higher max → 150 / 200 = 75% → easy boundary
+    const result = computeIntensityDistribution(activities, 200);
+    expect(result.observedMaxHR).toBe(200);
+    expect(result.easyPct + result.moderatePct).toBe(100);
   });
 
   it("identifies good polarized distribution", () => {

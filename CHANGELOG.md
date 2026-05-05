@@ -4,6 +4,38 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-04 — Persist max HR estimate + soften zone-naming when LTHR is unknown
+
+**Type:** Improvement
+**Reported by:** Internal audit (HR data usage), follow-up to the intensity classification fix earlier today.
+**User feedback:** N/A — audit-driven.
+**Root cause:** Two related issues. (1) Every consumer of estimated max HR (Strava callback, Strava webhook, longitudinal analytics, post-run annotation) recomputed independently from a different activity slice, so the dashboard, coach SMS, and intensity dots could disagree on the same athlete. (2) When LTHR was unknown or low-confidence, the prompt instructed Dean to compute zone bands from a noisy estimated max HR and then state specific zone names ("Zone 2"), which is exactly the path that produced the recent Z3-mislabeled-as-Z2 reports.
+**Fix / Change:**
+- Added migration 044 with `training_profiles.max_hr_estimate` + `max_hr_estimate_updated_at`. Updated `database.types.ts`.
+- Strava callback now persists the tiered max HR estimate to `training_profiles` after computing it for onboarding analytics.
+- Strava webhook race-recompute path now writes the recomputed max HR alongside the LTHR update.
+- `coach/respond` reads `profile.max_hr_estimate` for both the longitudinal block and `annotateStravaActivity` (added `maxHrEstimate` to `AnnotationContext` and threaded it through both call sites). Falls back to recomputing if the column is null, and lazily backfills the profile on first compute so existing users self-heal.
+- Softened the no-LTHR / low-confidence-LTHR prompt block: added a ZONE-NAMING UNCERTAINTY rule telling Dean to prefer effort language ("upper aerobic", "comfortably hard", "near-threshold") over specific zone numbers, and to describe runs near a boundary (within ~5 bpm) as straddling two zones rather than picking one.
+**Files changed:** supabase/migrations/044_max_hr_estimate.sql, src/lib/database.types.ts, src/app/api/auth/strava/callback/route.ts, src/app/api/webhooks/strava/route.ts, src/app/api/coach/respond/route.ts
+
+## 2026-05-04 — Fix HR intensity classification using sensor-spike-resistant max HR
+
+**Type:** Bug Fix
+**Reported by:** Internal audit (HR data usage)
+**User feedback:** Multiple recent instances of Dean labeling Z3 runs as Z2.
+**Root cause:** `computeIntensityDistribution()` (training-analytics.ts) used raw `Math.max(max_heartrate)` across recent activities to set the zone-classification denominator. A single Strava sensor spike (e.g. 210–220 bpm dropout) became the "observed max HR," shifting every classification down a zone — a 150 bpm run on a true 180 bpm max athlete would compute as 68% (easy) instead of 83% (moderate/Z3). This fed into the LONGITUDINAL TRAINING ANALYSIS block injected into Dean's prompt, so the zone-3-trap signal silently flipped to look like a polarized 80/20 distribution.
+**Fix / Change:** `computeIntensityDistribution()` now accepts an optional `estimatedMaxHR` and falls back to the tiered `estimateMaxHR()` from hr-utils (race > workout > all-runs, with ratio + gap spike filtering). `buildLongitudinalBlock` and `buildLongitudinalSignals` accept and pass through. The `coach/respond` route now computes `estimateMaxHR(recentActivities)` once and passes it in, so the longitudinal block, dashboard, and post-run analysis share one max HR source. Added `workout_type` to `ActivityForAnalytics`. Added two regression tests covering spike rejection and caller-supplied max HR override.
+**Files changed:** src/lib/training-analytics.ts, src/app/api/coach/respond/route.ts, src/__tests__/lib/training-analytics.test.ts
+
+## 2026-05-04 — Prevent Claude from mislabeling Z3 runs as "Zone 2"
+
+**Type:** Bug Fix
+**Reported by:** Gwyneth Tennant
+**User feedback:** "Dean is now saying my moderate pace is 9:30, ignoring the heart rate of 145"
+**Root cause:** The GRAY ZONE GUARD prevented calling Z2 runs "gray zone," but there was no reciprocal guard preventing the reverse error: calling a Z3 run "Zone 2." On May 2, Dean told Gwyneth her 11:02/mi run at 151 bpm "stayed in Zone 2" — but 151 bpm is ~84% of her estimated max HR (~180), which is solidly in Z3/moderate. Then on May 4, Dean correctly called her 9:31/mi at 145 bpm "moderate." The inconsistency (same bpm range, different labels) is what caused her frustration.
+**Fix / Change:** Added ZONE ACCURACY GUARD to post_run insight rules: Claude must compute the athlete's Z2 ceiling (75% of estimated max HR) before labeling any run. If avg HR exceeds that ceiling, it cannot be called "Zone 2," "easy," or "aerobic base." The HR calculation — not pace — determines the zone label.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-05-04 — Fixed wrong HR percentage quoted for Zone 2 cross-training advice
 
 **Type:** Bug Fix

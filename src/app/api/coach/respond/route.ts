@@ -965,6 +965,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
           splits: storedSplits,
           isAnalystMode: (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst',
           lthrEstimate: (profile?.lthr_estimate as number | null) ?? null,
+          maxHrEstimate: (profile?.max_hr_estimate as number | null) ?? null,
           plannedSessionLabel: dupTodaySession?.label ?? null,
         }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
       }
@@ -979,12 +980,32 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone) ?? weeklyMilesBaseline;
   const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null, weekMileageSoFar);
 
-  // Build longitudinal analysis block for post_run and weekly_recap
+  // Build longitudinal analysis block for post_run and weekly_recap.
+  // Prefer the persisted training_profiles.max_hr_estimate (written by the
+  // Strava callback + race webhook) so the coach, dashboard, and intensity
+  // analytics share one value. Fall back to recomputing if missing — this
+  // also lazily backfills users whose profile predates migration 044.
+  const persistedMaxHR = (profile?.max_hr_estimate as number | null) ?? null;
+  const longitudinalMaxHR = (trigger === "post_run" || trigger === "weekly_recap")
+    ? (persistedMaxHR ?? estimateMaxHR(recentActivities))
+    : null;
+  if (persistedMaxHR == null && longitudinalMaxHR != null) {
+    void supabase
+      .from("training_profiles")
+      .update({
+        max_hr_estimate: Math.round(longitudinalMaxHR),
+        max_hr_estimate_updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId)
+      .then(({ error }) => {
+        if (error) console.warn("[coach/respond] max_hr_estimate lazy backfill failed:", error.message);
+      });
+  }
   const longitudinalBlock = (trigger === "post_run" || trigger === "weekly_recap")
-    ? buildLongitudinalBlock(recentActivities as ActivityForAnalytics[], userTimezone)
+    ? buildLongitudinalBlock(recentActivities as ActivityForAnalytics[], userTimezone, longitudinalMaxHR)
     : "";
   const longitudinalSignals = (trigger === "post_run" || trigger === "weekly_recap")
-    ? buildLongitudinalSignals(recentActivities as ActivityForAnalytics[], userTimezone)
+    ? buildLongitudinalSignals(recentActivities as ActivityForAnalytics[], userTimezone, longitudinalMaxHR)
     : null;
   const stravaStats = (
     user.onboarding_data as Record<string, unknown> | null
@@ -2066,6 +2087,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       splits: storedSplits,
       isAnalystMode: false,
       lthrEstimate: (profile?.lthr_estimate as number | null) ?? null,
+      maxHrEstimate: (profile?.max_hr_estimate as number | null) ?? null,
       plannedSessionLabel: null,
     }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
   }
@@ -4424,7 +4446,11 @@ WHEN PACES ARE TBD (no stored paces, VDOT unknown): If the athlete has recent St
 
 ${lthrData
   ? buildHRZoneContext(lthrData.lthr, lthrData.source, lthrData.confidence)
-  : `HEART RATE ZONES — use when HR data is available: No LTHR has been established yet, so zones are estimated from observed max HR in their Strava activity data (race peaks preferred for reliability, then workout peaks, then all-runs — with artifact filtering). Intensity thresholds based on % of estimated max HR: Easy (Z1–Z2) = avg HR < 75% max, Moderate (Z3 gray zone) = 75–85%, Hard (Z4–Z5) = >85%. These are also the thresholds used on their dashboard intensity dots. Use these percentages INTERNALLY to compute absolute bpm targets — never state raw percentages to the athlete (e.g. never say "50-65% of your max" or "75% of max HR"). If HEART RATE appears in the activity summary, compute the bpm ceiling from observed data and state the absolute bpm value — e.g. if estimated max is ~195 bpm, easy effort is below ~145 bpm. If the athlete asks what HR to target for cross-training (Stairmaster, bike, etc.), anchor the answer to their actual easy-run average HR from recent activities — that is their Zone 2 reference point. Append a bpm target in parens on easy run session lines when it adds value — e.g. "Easy 6mi @ 9:30-10:00/mi (~140 bpm)". Only do this when HR data is present in the summary. If no HR data, use effort language (conversational, comfortably hard) rather than bpm targets.`}
+  : `HEART RATE ZONES — use when HR data is available: No LTHR has been established yet (no qualifying race effort in recent history, or LTHR confidence is too low to trust). Zones are estimated from observed max HR in their Strava activity data (race peaks preferred, then workout peaks, then all-runs — with artifact filtering). Intensity thresholds based on % of estimated max HR: Easy (Z1–Z2) = avg HR < 75% max, Moderate (Z3 gray zone) = 75–85%, Hard (Z4–Z5) = >85%.
+
+<rule>ZONE-NAMING UNCERTAINTY: Because the max HR estimate is derived from observed activity data and not a calibrated test, prefer EFFORT LANGUAGE over specific zone numbers when discussing a single run. Say "upper aerobic effort", "comfortably hard", "moderate / gray-zone", or "near-threshold" rather than "Zone 2" / "Zone 3" / "Zone 4". Only name a specific zone number when the avg HR is clearly inside that zone with margin (e.g. ≥5 bpm from the boundary). When close to a boundary (within ~5 bpm), describe the run as straddling two zones (e.g. "right at the Z2/Z3 boundary") rather than picking one. A short race effort would sharpen the zones — if it comes up naturally, mention this once; do not bring it up unprompted on every post-run message.</rule>
+
+Use these percentages INTERNALLY to compute absolute bpm targets — never state raw percentages to the athlete (e.g. never say "50-65% of your max" or "75% of max HR"). If HEART RATE appears in the activity summary, compute the bpm ceiling from observed data and state the absolute bpm value — e.g. if estimated max is ~195 bpm, easy effort is below ~145 bpm. If the athlete asks what HR to target for cross-training (Stairmaster, bike, etc.), anchor the answer to their actual easy-run average HR from recent activities — that is their Zone 2 reference point. Append a bpm target in parens on easy run session lines when it adds value — e.g. "Easy 6mi @ 9:30-10:00/mi (~140 bpm)". Only do this when HR data is present in the summary. If no HR data, use effort language (conversational, comfortably hard) rather than bpm targets.`}
 
 <rule>MAX HR DATA GUARD — applies to ALL contexts: Any max_heartrate value you see (in activity history, recent workouts, or activity JSON) is a single-run peak reading from that specific session — NOT the athlete's physiological maximum heart rate. Never use a single-activity max_heartrate to estimate or state the athlete's true max HR (e.g. do NOT say "your max is around X based on today's peak" or "based on your recent peak of Y, your max HR appears to be Z"). Describe HR intensity in relative terms (e.g. "zone 4-5", "high aerobic effort", "near-maximal") without asserting a specific max HR figure.${lthrData ? " The HEART RATE ZONES block above uses a separately stored LTHR estimate computed from race history — this is distinct from any single-activity max_heartrate value." : ""}</rule>
 
@@ -5554,6 +5580,7 @@ INSIGHT RULES:
 - Every data point must connect to a decision or action. "Your HR was 152" is not an insight. "Your HR was 152 in 82°F heat — that's equivalent effort to 145 in cooler conditions, so the pace was appropriate" is an insight.
 - EFFORT vs PRESCRIPTION (required when a plan exists): If THIS WEEK'S PLAN lists a quality session and this run appears to be that session, explicitly compare actual pace to prescribed pace — "You hit 8:24/mi on the tempo segment — right on target at 8:30/mi." If the run is an easy day, affirm (or flag) whether pace matched easy pace range. A mismatch with no comment is a coaching miss.
 - GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if avg_heartrate is actually in Z3. If in Z2 or below, do not call it gray zone. If commenting on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it as a trend — never apply it to today's run when today was Z2 or below.
+- ZONE ACCURACY GUARD: Never call a Z3 run "Zone 2" or "easy effort." Compute the athlete's Z2 ceiling (75% of estimated max HR) before labeling any run. If avg_heartrate exceeds that ceiling, the run is at least moderate — do not use "Zone 2," "easy," or "aerobic base" framing. Conversely, never call a Z1/Z2 run "moderate." The HR calculation, not the pace, determines the zone label — a slow pace at Z3 HR is still moderate; a faster pace at Z2 HR is still easy.
 - EASY EFFORT AFFIRMATION (required when HR data is present): When avg HR is in Z1 or Z2 on an easy run, the 1 insight MUST positively affirm correct execution — e.g. "HR sat right in Zone 2 — exactly the aerobic stimulus you're after."
 - FORBIDDEN PHRASES — DO NOT WRITE ANY OF THESE, EVER, REGARDLESS OF DATA AVAILABILITY:
   • "keep easy days easy" / "keep easy runs easy" / "keep your easy runs easy" / "make sure to keep it easy" / "remember to keep it easy"
@@ -6224,6 +6251,7 @@ interface AnnotationContext {
   splits: Array<Record<string, unknown>>;
   isAnalystMode?: boolean;
   lthrEstimate?: number | null;
+  maxHrEstimate?: number | null;
   // Workout-type context for metric selection
   plannedSessionLabel: string | null;
 }
@@ -6323,7 +6351,7 @@ async function annotateStravaActivity(
   ctx: AnnotationContext,
   userLocation?: { city: string; state: string; timezone: string }
 ): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode, lthrEstimate } = ctx;
+  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode, lthrEstimate, maxHrEstimate } = ctx;
 
   // Fetch token + existing description (one Strava call).
   // Splits come from DB-stored summary — no duplicate fetch needed.
@@ -6347,7 +6375,10 @@ async function annotateStravaActivity(
       .order("start_date", { ascending: false })
       .limit(150),
   ]);
-  const userMaxHR = estimateMaxHR(maxHRRow.data ?? []);
+  // Prefer the persisted training_profiles.max_hr_estimate (passed via ctx) so
+  // every coach surface uses the same denominator. Fall back to recomputing
+  // from this query for users whose profile hasn't been backfilled yet.
+  const userMaxHR = maxHrEstimate ?? estimateMaxHR(maxHRRow.data ?? []);
   const efficiencyTrend = computeEfficiencyTrend(maxHRRow.data ?? []);
   const existingDescription = (stravaActivity.description as string) || "";
 

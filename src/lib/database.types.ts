@@ -362,6 +362,8 @@ export type Database = {
           lthr_last_updated: string | null
           lthr_source: string | null
           manual_prs: Json | null
+          max_hr_estimate: number | null
+          max_hr_estimate_updated_at: string | null
           preferred_units: string
           proactive_cadence: string | null
           race_date: string | null
@@ -410,6 +412,8 @@ export type Database = {
           lthr_last_updated?: string | null
           lthr_source?: string | null
           manual_prs?: Json | null
+          max_hr_estimate?: number | null
+          max_hr_estimate_updated_at?: string | null
           preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
@@ -458,6 +462,8 @@ export type Database = {
           lthr_last_updated?: string | null
           lthr_source?: string | null
           manual_prs?: Json | null
+          max_hr_estimate?: number | null
+          max_hr_estimate_updated_at?: string | null
           preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
