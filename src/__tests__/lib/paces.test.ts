@@ -48,6 +48,19 @@ describe("calculateVDOTPaces", () => {
     expect(result.vdot).toBeGreaterThan(35);
     expect(result.vdot).toBeLessThan(41);
   });
+
+  it("never produces a :60 second rollover for any realistic VDOT", () => {
+    // Sweep VDOTs 30–70 across all three intensities. A bug in paceAtVDOTPct
+    // would surface as e.g. "6:60/mi" instead of "7:00/mi" for performances
+    // that round just under a whole minute.
+    for (let timeMin = 14; timeMin <= 35; timeMin += 0.1) {
+      const result = calculateVDOTPaces(5, timeMin);
+      for (const pace of [result.easy, result.tempo, result.interval]) {
+        expect(pace).not.toMatch(/:60\/mi$/);
+        expect(pace).toMatch(/^\d+:[0-5]\d\/mi$/);
+      }
+    }
+  });
 });
 
 describe("easyPaceRange", () => {

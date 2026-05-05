@@ -5512,12 +5512,14 @@ function buildUserMessage(
       if (!cadencePlausible) dataGuards.push("No reliable cadence data is available for this activity (either missing or the recorded value is outside a plausible running range — likely walking, GPS dropout, or device error). Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, range, or coaching cue (e.g. do NOT lecture about overstriding from a suspect low cadence).");
       // Per-split elevation breakdown is not a Strava-provided field — only total elevation gain is.
       dataGuards.push(`Per-${splitUnitLabel} and per-lap elevation breakdowns are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific ${isMetricUser ? "meters" : "footage"} to individual ${splitUnitLabel}s or laps.`);
+      // max_heartrate is this activity's single-run peak, NOT the athlete's physiological maximum.
+      // Do not multiply it by ~1.02 or otherwise derive a "true max HR" estimate from it.
+      if (hasHR) {
+        dataGuards.push("The `max_heartrate` field in the activity JSON is this run's single-activity peak reading, NOT the athlete's physiological maximum heart rate. Do NOT use it to estimate or state the athlete's max HR (e.g. do NOT say 'your max is around X based on today's peak'). If you need to reference HR zones, describe them in relative terms (e.g. 'zone 4-5', 'high aerobic effort') without asserting a specific max HR figure.");
+      }
       // splits_standard gives one split per mile; for metric users we output per-km fields.
       // This guard catches legacy activities with km-based splits stored before splits_standard.
       if (!isMetricUser && hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
-      // max_heartrate is this activity's single-run peak, NOT the athlete's physiological maximum.
-      // Do not multiply it by ~1.02 or otherwise derive a "true max HR" estimate from it.
-      dataGuards.push("The `max_heartrate` field in the activity JSON is this run's single-activity peak reading, NOT the athlete's physiological maximum heart rate. Do NOT use it to estimate or state the athlete's max HR (e.g. do NOT say 'your max is around X based on today's peak'). If you need to reference HR zones, describe them in relative terms (e.g. 'zone 4-5', 'high aerobic effort') without asserting a specific max HR figure.");
         dataGuards.push(`SPLIT UNIT WARNING: This run is ${runDistanceMiles.toFixed(2)} miles but has ${splitCount} split entries — the splits appear to be per-kilometer, not per-mile. Each split's "cumulative_miles" field shows its actual position in the run. NEVER reference "mile ${splitCount}" or any mile number beyond ${Math.ceil(runDistanceMiles)} — that mile does not exist in this run. Use cumulative_miles to describe position (e.g. "around mile 2.5" or "in the final stretch").`);
       }
       const dataGuardBlock = dataGuards.length > 0

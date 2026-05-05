@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-04 — Fixed scoping bug that disabled the `max_heartrate` data guard
+
+**Type:** Bug Fix
+**Reported by:** Internal audit (response-quality review)
+**User feedback:** N/A
+**Root cause:** In `src/app/api/coach/respond/route.ts`, the `dataGuards.push(...)` for the "max_heartrate is a single-run peak, not physiological max HR" guard was originally an unconditional push (commit `ee9dbf4`). A later edit added the km-split-mismatch `if (!isMetricUser && hasSplits && splitCount > Math.ceil(miles) + 1)` block immediately above it but placed the opening brace on the wrong line, accidentally pulling the max-HR guard inside the conditional. The indentation hint was visible (6-space vs 8-space inside the block) but TypeScript happily accepted the structure. As a result, the guard only fired for imperial users with detected km-split mismatches — a rare edge case. For the common path (any HR-equipped activity), Dean had no programmatic guard preventing him from saying things like "based on today's peak of 187, your max appears to be ~190."
+**Fix / Change:** Moved the max-HR guard above the km-split conditional and gated it on `hasHR` instead, so it fires for every activity that has heart-rate data — which is the original intent. The km-split warning remains correctly scoped inside its own block.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-05-04 — Fixed `:60` second rollover in VDOT pace calculation
+
+**Type:** Bug Fix
+**Reported by:** Internal audit (response-quality review)
+**User feedback:** N/A
+**Root cause:** `paceAtVDOTPct` in `src/lib/paces.ts` formatted paces as `${min}:${sec}` where `min = Math.floor(minPerMile)` and `sec = Math.round((minPerMile - min) * 60)`. When `minPerMile` was just under a whole minute (e.g. 6.997), `sec` rounded to 60, producing strings like `"6:60/mi"` instead of `"7:00/mi"`. A VDOT sweep confirmed the bug fires on ~12 distinct VDOT values across the realistic range — including VDOT 49.8 tempo, VDOT 43.7 interval, and VDOT 60.2 tempo. The sibling helper `fmtPace()` had a `:60` rollover guard; `paceAtVDOTPct` did not.
+**Fix / Change:** Round to total seconds first, then derive `min` and `sec` via `Math.floor(totalSec / 60)` and `totalSec % 60`. Added a sweep test in `paces.test.ts` that asserts no pace string ever ends in `:60/mi` across VDOTs derived from 5K times 14:00–35:00.
+**Files changed:** `src/lib/paces.ts`, `src/__tests__/lib/paces.test.ts`
+
+---
+
 ## 2026-05-04 — Reverse free trial mode (env-gated, default off)
 
 **Type:** Feature
@@ -23,7 +45,7 @@ Existing upfront-payment flow is untouched; both modes coexist. Trial period in 
 
 **Files changed:** `supabase/migrations/045_reverse_trial.sql`, `src/lib/database.types.ts`, `src/app/api/signup/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/cron/trial-expiry/route.ts` (new), `src/__tests__/api/signup.test.ts`, `src/__tests__/api/trial-expiry.test.ts` (new)
 
-**Operator steps to enable:** run migration → `npm run gen:types` → add daily cron in Vercel pointing at `/api/cron/trial-expiry` with `Authorization: Bearer $CRON_SECRET` → set `REVERSE_TRIAL_ENABLED=true` in Vercel env when ready.
+**Operator steps to enable:** run migration → `npm run gen:types` → add a daily job in cron-job.org hitting `https://coachdean.ai/api/cron/trial-expiry` with header `Authorization: Bearer $CRON_SECRET` → set `REVERSE_TRIAL_ENABLED=true` in Vercel env when ready.
 
 ---
 

@@ -67,8 +67,9 @@ function paceAtVDOTPct(vdot: number, pct: number): string {
   const c = -(targetVO2 + 4.60);
   const v = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
   const minPerMile = 1609.34 / v;
-  const min = Math.floor(minPerMile);
-  const sec = Math.round((minPerMile - min) * 60);
+  const totalSec = Math.round(minPerMile * 60);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
   return `${min}:${String(sec).padStart(2, "0")}/mi`;
 }
 
