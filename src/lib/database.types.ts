@@ -575,6 +575,7 @@ export type Database = {
           phone_number: string
           plan_update_sent_at: string | null
           reengagement_sent_at: string | null
+          reverse_trial_enabled: boolean
           strava_access_token: string | null
           strava_athlete_id: number | null
           strava_refresh_token: string | null
@@ -604,6 +605,7 @@ export type Database = {
           phone_number: string
           plan_update_sent_at?: string | null
           reengagement_sent_at?: string | null
+          reverse_trial_enabled?: boolean
           strava_access_token?: string | null
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null
@@ -633,6 +635,7 @@ export type Database = {
           phone_number?: string
           plan_update_sent_at?: string | null
           reengagement_sent_at?: string | null
+          reverse_trial_enabled?: boolean
           strava_access_token?: string | null
           strava_athlete_id?: number | null
           strava_refresh_token?: string | null

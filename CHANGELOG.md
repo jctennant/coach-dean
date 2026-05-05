@@ -4,6 +4,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-04 — Reverse free trial mode (env-gated, default off)
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** N/A — new flow.
+**Fix / Change:** Added a "reverse free trial" flow as an opt-in alternative to the upfront-payment flow. New signups with `REVERSE_TRIAL_ENABLED=true` get full coaching access for 7 days without entering payment, then a daily cron flips them to `awaiting_payment` and sends the Stripe checkout link. After expiry, the coach/respond gate enforces a hard cutoff: proactive triggers silently skip; inbound user messages get the existing checkout-link reply.
+
+Implementation:
+- Migration `045_reverse_trial.sql` — new `users.reverse_trial_enabled` boolean (default false, NOT NULL)
+- `signup/route.ts` — reads `REVERSE_TRIAL_ENABLED` env var, stamps the column at user creation (sticky — flipping the env var only affects subsequent signups)
+- `onboarding/handle/route.ts` — completion branch skips `awaiting_payment` for reverse-trial users; stamps `trial_started_at = now` so the coach gate, the trial-expiry cron, and Stripe's `trial_period_days: 0` logic all anchor to the same start time
+- `coach/respond/route.ts` — subscription gate now grants access while `now - trial_started_at < 7d`; Stripe's `trialing`/`active` statuses still pass through
+- New `cron/trial-expiry/route.ts` — daily; finds users past 7 days with no active sub, sends "your free week is up" SMS, flips to `awaiting_payment` so existing payment-reminder + dunning crons take over
+
+Existing upfront-payment flow is untouched; both modes coexist. Trial period in Stripe is implicitly 0 (the existing `hasHadTrial = !!trial_started_at` check in `billing/checkout` handles this — no double-dipping on the 7-day Stripe trial).
+
+**Files changed:** `supabase/migrations/045_reverse_trial.sql`, `src/lib/database.types.ts`, `src/app/api/signup/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/cron/trial-expiry/route.ts` (new), `src/__tests__/api/signup.test.ts`, `src/__tests__/api/trial-expiry.test.ts` (new)
+
+**Operator steps to enable:** run migration → `npm run gen:types` → add daily cron in Vercel pointing at `/api/cron/trial-expiry` with `Authorization: Bearer $CRON_SECRET` → set `REVERSE_TRIAL_ENABLED=true` in Vercel env when ready.
+
+---
+
 ## 2026-05-04 — Cadence sanity guard, race-day acknowledgment, quality session recognition
 
 **Type:** Bug Fix + Improvement

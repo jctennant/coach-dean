@@ -851,11 +851,24 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // Subscription gate — only applies to users with billing_enabled.
   // Grandfathered users (billing_enabled = false) always pass through.
-  // initial_plan is exempt — it's fired by the Stripe webhook right after checkout.
+  // initial_plan is exempt — it's fired by the Stripe webhook right after checkout
+  // AND by onboarding completion for reverse-trial users (who have full access for 7d).
   if (user.billing_enabled && trigger !== "initial_plan") {
     const status = user.subscription_status as string | null;
-    const hasAccess = status === "trialing" || status === "active";
+    const stripeAccess = status === "trialing" || status === "active";
     const isPastDue = status === "past_due";
+
+    // Reverse-trial users get full access for 7 days from trial_started_at.
+    // After that, only an active Stripe sub keeps them in. Hard cutoff.
+    const reverseTrialEnabled = !!user.reverse_trial_enabled;
+    const trialStartedAt = user.trial_started_at as string | null;
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const inReverseTrial =
+      reverseTrialEnabled &&
+      !!trialStartedAt &&
+      Date.now() - new Date(trialStartedAt).getTime() < SEVEN_DAYS_MS;
+
+    const hasAccess = stripeAccess || inReverseTrial;
 
     if (!hasAccess) {
       if (trigger === "user_message") {

@@ -1666,18 +1666,19 @@ async function completeOnboarding(
   // Check if billing gate is needed
   const { data: billingUser } = await supabase
     .from("users")
-    .select("billing_enabled, dashboard_token, phone_number")
+    .select("billing_enabled, reverse_trial_enabled, dashboard_token, phone_number")
     .eq("id", user.id)
     .single();
 
   const billingEnabled = !!(billingUser?.billing_enabled);
+  const reverseTrialEnabled = !!(billingUser?.reverse_trial_enabled);
 
   const userUpdatePayload: Record<string, unknown> = {
     onboarding_data: data as unknown as Json,
   };
   if (name) userUpdatePayload.name = name;
 
-  if (billingEnabled) {
+  if (billingEnabled && !reverseTrialEnabled) {
     let dashboardToken = billingUser?.dashboard_token as string | null;
     if (!dashboardToken) {
       dashboardToken = crypto.randomUUID();
@@ -1687,6 +1688,17 @@ async function completeOnboarding(
     userUpdatePayload.payment_link_sent_at = new Date().toISOString();
   } else {
     userUpdatePayload.onboarding_step = null;
+    // Stamp the trial start so the coach gate and the trial-expiry cron can
+    // measure the 7-day window. Also doubles as the "hasHadTrial" signal in
+    // billing/checkout so Stripe doesn't tack on another 7 days of trial.
+    if (reverseTrialEnabled) {
+      userUpdatePayload.trial_started_at = new Date().toISOString();
+      let dashboardToken = billingUser?.dashboard_token as string | null;
+      if (!dashboardToken) {
+        dashboardToken = crypto.randomUUID();
+        userUpdatePayload.dashboard_token = dashboardToken;
+      }
+    }
   }
 
   const userResult = await supabase
@@ -1754,7 +1766,7 @@ async function completeOnboarding(
       console.error("[onboarding] races insert failed:", racesError);
   }
 
-  if (billingEnabled) {
+  if (billingEnabled && !reverseTrialEnabled) {
     const dashboardToken =
       (userUpdatePayload.dashboard_token as string | null) ??
       (billingUser?.dashboard_token as string | null);

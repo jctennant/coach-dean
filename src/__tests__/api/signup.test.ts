@@ -34,6 +34,7 @@ function buildSupabaseMock(overrides: Record<string, { data: unknown; error: unk
 
   // We need to track call order since the same table is hit multiple times
   let usersCallCount = 0;
+  const insertCapture: { lastUsersInsert: unknown } = { lastUsersInsert: null };
 
   const chain = (response: { data: unknown; error: unknown }) => {
     const c: Record<string, unknown> = {};
@@ -49,12 +50,17 @@ function buildSupabaseMock(overrides: Record<string, { data: unknown; error: unk
       usersCallCount++;
       if (usersCallCount === 1) return chain(resolved.users_select);
       const insertChain = chain(resolved.users_insert);
-      (insertChain["insert"] as ReturnType<typeof vi.fn>).mockReturnValue(insertChain);
+      (insertChain["insert"] as ReturnType<typeof vi.fn>).mockImplementation((payload: unknown) => {
+        insertCapture.lastUsersInsert = payload;
+        return insertChain;
+      });
       return insertChain;
     }
     if (table === "conversations") return chain(resolved.conversations_insert);
     return chain({ data: null, error: null });
   });
+
+  return insertCapture;
 }
 
 describe("POST /api/signup", () => {
@@ -98,6 +104,28 @@ describe("POST /api/signup", () => {
     const [toPhone, message] = (sendSMS as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(toPhone).toBe("+12025551234");
     expect(message).toContain("Coach Dean");
+  });
+
+  it("defaults reverse_trial_enabled to false when env var is unset", async () => {
+    delete process.env.REVERSE_TRIAL_ENABLED;
+    const capture = buildSupabaseMock();
+
+    await POST(mockRequest({ phone: "+12025551234" }));
+    const payload = capture.lastUsersInsert as Record<string, unknown>;
+    expect(payload.reverse_trial_enabled).toBe(false);
+    expect(payload.billing_enabled).toBeUndefined();
+  });
+
+  it("flips reverse_trial_enabled and billing_enabled on when env var is true", async () => {
+    process.env.REVERSE_TRIAL_ENABLED = "true";
+    const capture = buildSupabaseMock();
+
+    await POST(mockRequest({ phone: "+12025551234" }));
+    const payload = capture.lastUsersInsert as Record<string, unknown>;
+    expect(payload.reverse_trial_enabled).toBe(true);
+    expect(payload.billing_enabled).toBe(true);
+
+    delete process.env.REVERSE_TRIAL_ENABLED;
   });
 
   it("returns 500 if user insert fails", async () => {

@@ -29,6 +29,12 @@ export async function POST(request: Request) {
     );
   }
 
+  // Reverse-trial flow: new signups get full coaching for 7 days, then the
+  // trial-expiry cron flips them to awaiting_payment. Default off — the flag
+  // is stamped at user creation and never re-evaluated, so flipping the env
+  // var only affects subsequent signups.
+  const reverseTrialEnabled = process.env.REVERSE_TRIAL_ENABLED === "true";
+
   // Create user with onboarding step
   const { data: user, error } = await supabase
     .from("users")
@@ -36,6 +42,8 @@ export async function POST(request: Request) {
       phone_number: phone,
       onboarding_step: "onboarding",
       onboarding_data: {},
+      reverse_trial_enabled: reverseTrialEnabled,
+      ...(reverseTrialEnabled ? { billing_enabled: true } : {}),
     })
     .select("id")
     .single();
