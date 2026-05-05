@@ -280,9 +280,14 @@ async function processStravaEvent(body: {
         }
       }
 
-      // Recompute LTHR when a new race activity arrives — this is the highest-quality signal.
-      // Runs async and never blocks coaching.
-      if (isNew && activity.workout_type === 1 && user.onboarding_step === null) {
+      // Recompute LTHR + max HR when a new race or quality workout arrives.
+      // Races (workout_type=1) refresh both — LTHR is anchored on race efforts.
+      // Hard workouts (workout_type=3, intervals/tempo) refresh max HR only —
+      // they reliably hit high HR and may legitimately push the peak higher
+      // without producing a clean LTHR signal. Runs async, never blocks coaching.
+      const isRace = activity.workout_type === 1;
+      const isQualityWorkout = activity.workout_type === 3;
+      if (isNew && (isRace || isQualityWorkout) && user.onboarding_step === null) {
         void (async () => {
           try {
             const { data: allActivities } = await supabase
@@ -299,35 +304,37 @@ async function processStravaEvent(body: {
                 average_heartrate: a.average_heartrate ?? null,
                 max_heartrate: a.max_heartrate ?? null,
               })));
-              const lthrResult = estimateLTHRFromRaces(
-                allActivities.map(a => ({
-                  workout_type: a.workout_type ?? null,
-                  average_heartrate: a.average_heartrate ?? null,
-                  moving_time_seconds: a.moving_time_seconds ?? null,
-                  activity_name: a.activity_name ?? null,
-                  start_date: a.start_date ?? null,
-                })),
-                maxHR
-              );
-              if (lthrResult) {
-                await supabase.from("training_profiles").update({
-                  lthr_estimate: lthrResult.lthr,
-                  lthr_source: lthrResult.source,
-                  lthr_confidence: lthrResult.confidence,
-                  lthr_last_updated: new Date().toISOString(),
-                  hr_zone_method: "lthr",
-                }).eq("user_id", user.id);
-                console.log(`[strava-webhook] LTHR updated for user ${user.id}: ${lthrResult.lthr} bpm (${lthrResult.confidence})`);
-              }
               if (maxHR != null) {
                 await supabase.from("training_profiles").update({
                   max_hr_estimate: Math.round(maxHR),
                   max_hr_estimate_updated_at: new Date().toISOString(),
                 }).eq("user_id", user.id);
               }
+              if (isRace) {
+                const lthrResult = estimateLTHRFromRaces(
+                  allActivities.map(a => ({
+                    workout_type: a.workout_type ?? null,
+                    average_heartrate: a.average_heartrate ?? null,
+                    moving_time_seconds: a.moving_time_seconds ?? null,
+                    activity_name: a.activity_name ?? null,
+                    start_date: a.start_date ?? null,
+                  })),
+                  maxHR
+                );
+                if (lthrResult) {
+                  await supabase.from("training_profiles").update({
+                    lthr_estimate: lthrResult.lthr,
+                    lthr_source: lthrResult.source,
+                    lthr_confidence: lthrResult.confidence,
+                    lthr_last_updated: new Date().toISOString(),
+                    hr_zone_method: "lthr",
+                  }).eq("user_id", user.id);
+                  console.log(`[strava-webhook] LTHR updated for user ${user.id}: ${lthrResult.lthr} bpm (${lthrResult.confidence})`);
+                }
+              }
             }
           } catch (lthrErr) {
-            console.warn("[strava-webhook] LTHR recompute failed (non-fatal):", lthrErr);
+            console.warn("[strava-webhook] LTHR/maxHR recompute failed (non-fatal):", lthrErr);
           }
         })();
       }

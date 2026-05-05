@@ -986,10 +986,15 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // analytics share one value. Fall back to recomputing if missing — this
   // also lazily backfills users whose profile predates migration 044.
   const persistedMaxHR = (profile?.max_hr_estimate as number | null) ?? null;
+  // weekly_recap forces a recompute so every athlete gets a fresh value at least
+  // once a week, even if they never race or run quality workouts (which are the
+  // other recompute triggers in the Strava webhook). post_run uses the persisted
+  // value if present, falling back to a one-time recompute that lazily backfills.
+  const shouldRecomputeMaxHR = trigger === "weekly_recap" || persistedMaxHR == null;
   const longitudinalMaxHR = (trigger === "post_run" || trigger === "weekly_recap")
-    ? (persistedMaxHR ?? estimateMaxHR(recentActivities))
+    ? (shouldRecomputeMaxHR ? estimateMaxHR(recentActivities) : persistedMaxHR)
     : null;
-  if (persistedMaxHR == null && longitudinalMaxHR != null) {
+  if (shouldRecomputeMaxHR && longitudinalMaxHR != null) {
     void supabase
       .from("training_profiles")
       .update({
@@ -998,7 +1003,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       })
       .eq("user_id", userId)
       .then(({ error }) => {
-        if (error) console.warn("[coach/respond] max_hr_estimate lazy backfill failed:", error.message);
+        if (error) console.warn("[coach/respond] max_hr_estimate write failed:", error.message);
       });
   }
   const longitudinalBlock = (trigger === "post_run" || trigger === "weekly_recap")

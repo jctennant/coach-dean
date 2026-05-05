@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-04 — Refresh max HR estimate on quality workouts and weekly recap
+
+**Type:** Improvement
+**Reported by:** Internal review (follow-up to persistence work earlier today).
+**User feedback:** N/A.
+**Root cause:** After persisting `max_hr_estimate`, the only refresh paths were initial Strava connect, race webhooks (`workout_type=1`), and a one-time lazy backfill in `coach/respond` (which fires only when the column is null). Athletes who never race — general fitness, return-to-running — would never see the value updated even if their fitness genuinely shifted.
+**Fix / Change:**
+- Strava webhook now recomputes `max_hr_estimate` on quality workouts (`workout_type=3`, intervals/tempo) in addition to races. LTHR remains race-only since only races produce a clean LT signal. Refactored the existing race block so the activity fetch + max HR write are shared and the LTHR step only runs for races.
+- `coach/respond` `weekly_recap` trigger now forces a recompute + write rather than reading the persisted value. Every active athlete gets a fresh number at least once a week.
+**Files changed:** src/app/api/webhooks/strava/route.ts, src/app/api/coach/respond/route.ts
+
 ## 2026-05-04 — Persist max HR estimate + soften zone-naming when LTHR is unknown
 
 **Type:** Improvement
