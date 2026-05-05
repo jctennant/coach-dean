@@ -4,6 +4,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-04 — Cadence sanity guard, race-day acknowledgment, quality session recognition
+
+**Type:** Bug Fix + Improvement
+**Reported by:** User feedback (P0 cadence hallucination + P1 race-day non-responsive feedback)
+**User feedback:**
+- "Coach Dean (post_run): Your cadence averaged 106 spm, which is on the lower side and can impact efficiency. Try increasing your steps per minute by 5-10..." — cadence value was clearly garbage data.
+- Athlete: "Haha Coach Dean, today was the big day! That was my race" — Dean: "Congratulations on race day! It sounds like you ran your half marathon today, and I'm happy to hear you completed it. How did it feel out there?" — read as detached observation rather than warm congratulations.
+
+**Root cause:**
+1. **Cadence:** Strava's `average_cadence` is stored inconsistently across devices (some per-foot ~80–100, some total ~160–200). A walking section, GPS dropout, or device bug produces an out-of-range value (e.g. 106 implied total) that the existing `hasCadence` guard happily passed through to Claude, who then lectured the athlete about overstriding from fictional data.
+2. **Race acknowledgment:** No inbound-keyword path for race-completion phrases in `user_message`, and the `workout_type=1` annotation only said "expect all-out pacing" without requiring celebratory tone — leading Dean to treat the moment analytically.
+3. **Quality session execution:** No explicit rule requiring recognition when the athlete hit prescribed pace on a tempo / interval / threshold session. Dean would dive straight into clinical analysis, missing the win.
+
+**Fix / Change:**
+- Added `cadencePlausible` check before building `activityForClaude` — computes implied total spm (doubling per-foot values <130) and only keeps cadence when it lands in 140–220. Out-of-range values are stripped from the JSON AND blocked by an explicit data guard, preventing both fabrication and overstriding lectures from suspect data.
+- Strengthened `workout_type=1` race annotation: now requires lead-with-explicit-congratulations + ask how it went, and forbids pacing/cadence/zone critiques on race-day post_run feedback.
+- Added `RACE COMPLETION — HIGHEST PRIORITY` block to the `user_message` prompt: when the athlete signals they just raced ("today was the big day", "that was my race", etc.), the first sentence MUST be warm congratulations naming the race, followed by an open question about how it went. Bans detached "It sounds like you ran X today" framing.
+- Added `QUALITY SESSION EXECUTION — RECOGNIZE THE WIN` rule to post_run insight rules. When the athlete hit or beat prescribed pace on a quality session, the insight MUST lead with concrete, specific recognition (names pace, target, what it builds) before any analysis. Distinct from the FORBIDDEN PHRASES rule (which bans empty praise) — this requires earned, specific recognition.
+
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-05-04 — Refresh max HR estimate on quality workouts and weekly recap
 
 **Type:** Improvement

@@ -714,7 +714,7 @@ function buildActivityDataGuard(activity: Record<string, unknown> | null): strin
 
   const workoutType = activity.workout_type as number | null;
   if (workoutType === 1) {
-    annotations.push("workout_type=1 means this was a RACE effort logged in Strava — expect all-out pacing and elevated HR. Do not compare pace to normal training targets.");
+    annotations.push("workout_type=1 means this was a RACE — a major milestone for the athlete. Your response MUST lead with explicit, warm congratulations naming the race distance/effort (e.g. 'Huge — you raced your half today! 🎉'). Then ask how it went / how it felt before any data analysis. Expect all-out pacing and elevated HR; do NOT compare pace to normal training targets, do NOT critique pacing decisions, and do NOT lecture about overstriding, cadence, or zones. Tone is celebratory and curious, not analytical. Save deeper analysis for a follow-up after they share how it went.");
   } else if (workoutType === 2) {
     annotations.push("workout_type=2 means the athlete marked this as a long run in Strava.");
   } else if (workoutType === 3) {
@@ -5387,6 +5387,16 @@ function buildUserMessage(
       // JSON and will cite (or report availability of) values it finds there even if instructed not to.
       const hasHR = !!(activityData?.average_heartrate != null);
       const hasWatts = !!((activityData as Record<string, unknown> | null)?.average_watts != null);
+      // Cadence sanity check. Strava stores average_cadence inconsistently across devices —
+      // some report per-foot (~80–100), some report total spm (~160–200). Compute the
+      // implied total and only trust it if it lands in a plausible running range.
+      // Out-of-range values (e.g. 106 implied total) are usually walking, GPS dropouts, or
+      // device bugs — exposing them to Claude leads to hallucinated overstriding lectures.
+      const rawCadence = activityData?.average_cadence as number | null | undefined;
+      const cadenceImpliedTotal = rawCadence == null
+        ? null
+        : rawCadence >= 130 ? rawCadence : rawCadence * 2;
+      const cadencePlausible = cadenceImpliedTotal != null && cadenceImpliedTotal >= 140 && cadenceImpliedTotal <= 220;
       const activityForClaude = activityData
         ? {
             ...activityData,
@@ -5412,6 +5422,9 @@ function buildUserMessage(
             max_heartrate: hasHR ? (activityData as Record<string, unknown>).max_heartrate : undefined,
             // Strip watts field when no power meter — same pattern as HR above.
             average_watts: hasWatts ? (activityData as Record<string, unknown>).average_watts : undefined,
+            // Strip cadence when the value is outside a plausible running range — see
+            // cadencePlausible computation above. Prevents 106 spm overstriding hallucinations.
+            average_cadence: cadencePlausible ? activityData.average_cadence : undefined,
             elevation_gain_feet: activityData.elevation_gain != null
               ? Math.round((activityData.elevation_gain as number) * 3.28084)
               : null,
@@ -5480,9 +5493,10 @@ function buildUserMessage(
       // If average_watts is populated (power meter, Zwift, etc.) Claude can reference the overall average.
       // hasWatts is computed earlier (before activityForClaude) so the field is also stripped from JSON.
       if (!hasWatts) dataGuards.push(`No power data is available for this activity. Do NOT reference wattage, watts, or power output — not even as a range or estimate. Describe effort using ${hasHR ? "HR, " : ""}elapsed time, and pace-equivalent language only.`);
-      // Cadence guard: only reference cadence when it's stored in the activity record.
-      const hasCadence = !!(activityData?.average_cadence != null);
-      if (!hasCadence) dataGuards.push("No cadence data is available for this activity. Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, or range.");
+      // Cadence guard: only reference cadence when it's stored AND the value is plausible.
+      // cadencePlausible is computed above (140–220 implied total spm). Out-of-range values
+      // are stripped from activityForClaude AND blocked here so Claude can't reference them.
+      if (!cadencePlausible) dataGuards.push("No reliable cadence data is available for this activity (either missing or the recorded value is outside a plausible running range — likely walking, GPS dropout, or device error). Do NOT reference cadence (steps per minute, spm, rpm, or stride rate) — not as a specific value, average, range, or coaching cue (e.g. do NOT lecture about overstriding from a suspect low cadence).");
       // Per-split elevation breakdown is not a Strava-provided field — only total elevation gain is.
       dataGuards.push(`Per-${splitUnitLabel} and per-lap elevation breakdowns are NOT available from Strava. Reference total elevation gain only — do NOT attribute specific ${isMetricUser ? "meters" : "footage"} to individual ${splitUnitLabel}s or laps.`);
       // splits_standard gives one split per mile; for metric users we output per-km fields.
@@ -5584,6 +5598,7 @@ FIXED PRIORITY (overrides goal lens when triggered):
 INSIGHT RULES:
 - Every data point must connect to a decision or action. "Your HR was 152" is not an insight. "Your HR was 152 in 82°F heat — that's equivalent effort to 145 in cooler conditions, so the pace was appropriate" is an insight.
 - EFFORT vs PRESCRIPTION (required when a plan exists): If THIS WEEK'S PLAN lists a quality session and this run appears to be that session, explicitly compare actual pace to prescribed pace — "You hit 8:24/mi on the tempo segment — right on target at 8:30/mi." If the run is an easy day, affirm (or flag) whether pace matched easy pace range. A mismatch with no comment is a coaching miss.
+- QUALITY SESSION EXECUTION — RECOGNIZE THE WIN: When the athlete HIT or BEAT prescribed pace on a quality session (tempo, intervals, hills, threshold, long-run progression segments), the insight MUST explicitly recognize the execution before any analysis. Don't bury it. Lead with what they did — e.g. "Nailed the tempo — 8:24/mi against an 8:30 target. That's threshold work landing exactly where it should." or "You hammered those 800s — averaged 3:12 against a 3:15 target. Real speed showing up." Recognition is concrete (names the pace, the target, what it builds), not generic ("good job"). This is distinct from FORBIDDEN PHRASES — those ban empty praise; this rule REQUIRES specific, earned recognition when the athlete executed a hard session well. A quality session hit on target with no acknowledgement is a coaching miss as serious as a missed mismatch.
 - GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if avg_heartrate is actually in Z3. If in Z2 or below, do not call it gray zone. If commenting on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it as a trend — never apply it to today's run when today was Z2 or below.
 - ZONE ACCURACY GUARD: Never call a Z3 run "Zone 2" or "easy effort." Compute the athlete's Z2 ceiling (75% of estimated max HR) before labeling any run. If avg_heartrate exceeds that ceiling, the run is at least moderate — do not use "Zone 2," "easy," or "aerobic base" framing. Conversely, never call a Z1/Z2 run "moderate." The HR calculation, not the pace, determines the zone label — a slow pace at Z3 HR is still moderate; a faster pace at Z2 HR is still easy.
 - EASY EFFORT AFFIRMATION (required when HR data is present): When avg HR is in Z1 or Z2 on an easy run, the 1 insight MUST positively affirm correct execution — e.g. "HR sat right in Zone 2 — exactly the aerobic stimulus you're after."
@@ -5663,6 +5678,8 @@ PLAN DEVIATION — NON-RUN DAY: Today's plan called for "${skippedNonRunSession}
         ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}${w.key_workout_2 ? ` | 2nd quality: ${w.key_workout_2}` : ''}`).join('\n')}`
         : '';
       return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
+
+RACE COMPLETION — HIGHEST PRIORITY: If the athlete's message indicates they just raced or finished a race today (e.g. "today was the big day", "that was my race", "just raced", "ran my race", "raced this morning", "finished the marathon/half/10k", "race day was today"), your FIRST sentence MUST be explicit, warm congratulations naming the race when known (from ATHLETE HISTORY or context) — e.g. "Huge — congrats on race day! 🎉" or "You did it — congrats on the half!" Then ask an open question about how it went and how they're feeling. Do NOT lead with "It sounds like you ran X today" — that reads as detached observation, not coaching. Do NOT pivot to data analysis, splits, or pacing critique in this turn. Save deeper debrief (pacing, fueling, what they'd change) for after they share how it felt. This is a milestone moment; tone is celebratory and present, not analytical.
 
 DIRECT QUESTIONS — MUST ANSWER: If the athlete's message contains a direct coaching question (e.g. "how do I...", "what should I...", "why is my...", "how do I get faster", "what's the best way to..."), you MUST answer it in your response. Do not address only the recovery or emotional aspect and skip the substantive question. If they ask about speed, answer the speed question with specific tactics. If they ask about a training concept, explain it. A response that ignores a direct question is a coaching failure.
 
