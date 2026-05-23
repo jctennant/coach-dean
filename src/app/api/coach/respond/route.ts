@@ -939,8 +939,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true, skipped: "analyst_no_plan" });
   }
 
-  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only", isMetricUser);
-  const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone);
+  const weekRefDate = weekCalcRefDate(trigger, userTimezone);
+
+  const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only", isMetricUser, weekRefDate);
+  const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone, weekRefDate);
 
   // Dedup guard — if we've already sent a post_run SMS for this activity, skip Claude.
   // Still run the Strava annotation so re-triggers can retry a failed annotation.
@@ -986,7 +988,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     }
   }
 
-  const weekRunCount = computeWeekRunCount(recentActivities, userTimezone);
+  const weekRunCount = computeWeekRunCount(recentActivities, userTimezone, weekRefDate);
   // Fall back to the onboarding-stated mileage baseline for non-Strava users until
   // enough activity history accumulates for a real 6-week average.
   const weeklyMilesBaseline = ((user.onboarding_data as Record<string, unknown> | null)?.weekly_miles as number | null) ?? null;
@@ -1616,13 +1618,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         lthrEstimate: lthrForCT,
         crosstrainingTools: crosstrainingToolsForCT,
         phase: periodization?.phase ?? null,
-        weekAerobicMinutesSoFar: computeWeekCrossTrainingAerobicMinutes(recentActivitiesForCT, userTimezone, lthrForCT),
+        weekAerobicMinutesSoFar: computeWeekCrossTrainingAerobicMinutes(recentActivitiesForCT, userTimezone, lthrForCT, weekRefDate),
         weekRunMileageSoFar: weekMileageSoFar,
         useMetric: isMetricUser,
       })
     : null;
   const crossTrainWeeklySummary = trigger === "weekly_recap"
-    ? buildWeeklyCrossTrainingSummary(recentActivitiesForCT, userTimezone, lthrForCT)
+    ? buildWeeklyCrossTrainingSummary(recentActivitiesForCT, userTimezone, lthrForCT, weekRefDate)
     : "";
   const crossTrainRecapBlock = crossTrainWeeklySummary
     ? `\nCROSS-TRAINING THIS WEEK: ${crossTrainWeeklySummary}\nIn your recap, weave in notable cross-training — a hard bike or swim session mid-week provides real aerobic stimulus worth acknowledging (not just "and you cross-trained!"). If they did 2+ cross-training sessions, mention the aerobic base contribution. Do not ignore cross-training when summing up the week's training load.\n`
@@ -2994,6 +2996,26 @@ function localWeekMonday(date: Date, timezone: string): string {
   return monday.toISOString().slice(0, 10);
 }
 
+/**
+ * Returns the reference date to use for all week-boundary calculations.
+ * For weekly_recap, the cron fires at 01:00 UTC Monday. Users in UTC+ timezones
+ * are already in Monday locally, so localWeekMonday(new Date()) returns the new
+ * empty week (0 runs). Back up to noon UTC of yesterday (Sunday) so we always
+ * recap the just-completed week.
+ */
+function weekCalcRefDate(trigger: string | undefined, timezone: string): Date {
+  if (trigger !== "weekly_recap") return new Date();
+  const now = new Date();
+  const localDateStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now);
+  const [yr, mo, dy] = localDateStr.split("-").map(Number);
+  const dow = new Date(Date.UTC(yr, mo - 1, dy)).getUTCDay();
+  if (dow === 1) {
+    // Already Monday locally — use noon UTC of yesterday (Sunday)
+    return new Date(Date.UTC(yr, mo - 1, dy - 1, 12, 0, 0));
+  }
+  return now;
+}
+
 const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
 
 /** Format a fractional minutes-per-mile value as "M:SS/mi". Safe against :60 rollover. */
@@ -3018,8 +3040,8 @@ function convertPaceStrToKm(paceStr: string): string {
 /**
  * Count run sessions in the current Mon–Sun week in the user's local timezone.
  */
-function computeWeekRunCount(activities: ActivityRow[], timezone: string): number {
-  const thisMonday = localWeekMonday(new Date(), timezone);
+function computeWeekRunCount(activities: ActivityRow[], timezone: string, refDate: Date = new Date()): number {
+  const thisMonday = localWeekMonday(refDate, timezone);
   return activities.filter((a) => {
     if (!RUN_TYPES.has(a.activity_type)) return false;
     const activityDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(a.start_date));
@@ -3123,9 +3145,10 @@ export function computeSessionsStatus(
   activities: ActivityRow[],
   timezone: string,
   plannedLongRunMiles: number | null,
-  plannedQualitySession: string | null
+  plannedQualitySession: string | null,
+  refDate: Date = new Date()
 ): SessionStatus {
-  const thisMonday = localWeekMonday(new Date(), timezone);
+  const thisMonday = localWeekMonday(refDate, timezone);
   const weekRuns = activities.filter((a) => {
     if (!RUN_TYPES.has(a.activity_type)) return false;
     const activityDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(a.start_date));
@@ -3182,8 +3205,8 @@ export function computeSessionsStatus(
   };
 }
 
-function computeWeekMileage(activities: ActivityRow[], timezone: string): number {
-  const thisMonday = localWeekMonday(new Date(), timezone);
+function computeWeekMileage(activities: ActivityRow[], timezone: string, refDate: Date = new Date()): number {
+  const thisMonday = localWeekMonday(refDate, timezone);
   return activities
     .filter((a) => {
       if (!RUN_TYPES.has(a.activity_type)) return false;
@@ -3277,7 +3300,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
 /**
  * Compute weekly mileage, pace trends, and run type breakdown from recent activities.
  */
-function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number, recentWorkoutsMode: "full" | "suppress" | "this_week_only" = "full", useMetric = false): string {
+function buildActivitySummary(activities: ActivityRow[], timezone: string, excludeStartMs?: number, recentWorkoutsMode: "full" | "suppress" | "this_week_only" = "full", useMetric = false, refDate: Date = new Date()): string {
   const actDistStr = (miles: number) => useMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
   const actPaceStr = (minPerMile: number) => {
     const pace = useMetric ? minPerMile / 1.60934 : minPerMile;
@@ -3317,7 +3340,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
   // CURRENT TRAINING STATE as the authoritative "Mileage so far this week" figure.
   // Including it here too (with different framing) causes Dean to confuse past
   // weeks with the current one.
-  const thisWeekKey = localWeekMonday(new Date(), timezone);
+  const thisWeekKey = localWeekMonday(refDate, timezone);
   const sortedWeeks = Object.entries(weeks)
     .filter(([week]) => week < thisWeekKey)
     .sort(([a], [b]) => b.localeCompare(a))
@@ -3401,7 +3424,7 @@ function buildActivitySummary(activities: ActivityRow[], timezone: string, exclu
     const recent = excludeStartMs !== undefined
       ? recentRaw.filter(a => new Date(a.start_date).getTime() !== excludeStartMs)
       : recentRaw;
-    const currentWeekKey = localWeekMonday(new Date(), timezone);
+    const currentWeekKey = localWeekMonday(refDate, timezone);
     const filteredRecent = recentWorkoutsMode === "this_week_only"
       ? recent.filter(a => localWeekMonday(new Date(a.start_date), timezone) === currentWeekKey)
       : recent;
@@ -4402,11 +4425,13 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   // Week session completion status: deterministic match of week's runs against planned
   // long run and quality session. Lets Dean say "you've got the tempo left this week"
   // without guessing whether the athlete already did it.
+  const weekRefDate = weekCalcRefDate(trigger, timezone ?? "UTC");
   const sessionsStatus = computeSessionsStatus(
     recentActivities,
     timezone ?? "UTC",
     (state?.weekly_long_run_miles as number | null) ?? null,
-    (state?.weekly_quality_session as string | null) ?? null
+    (state?.weekly_quality_session as string | null) ?? null,
+    weekRefDate
   );
   const sessionsStatusBlock = (() => {
     const lines: string[] = [];

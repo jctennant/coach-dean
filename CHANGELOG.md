@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-23 — Fix weekly recap showing 0.0 mi for UTC+ timezone users
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Gwyneth)
+**User feedback:** "Dean says on Saturday: 'This week's load of 19.4 miles is above your planned volume.' Then on Sunday he says: 'Last week was a bit quieter with 0.0 mi across 0 runs, focusing more on recovery.'"
+**Root cause:** The Sunday recap cron fires at 01:00 UTC Monday. For UK users (BST = UTC+1), this is 02:00 AM Monday locally — the user is already in a new week. When `localWeekMonday(new Date(), "Europe/London")` was called, it returned the current (empty) Monday, so all runs from the just-completed week appeared to belong to "last week" and were excluded, yielding 0 runs / 0.0 mi.
+**Fix / Change:** Extracted a `weekCalcRefDate(trigger, timezone)` helper. For `weekly_recap` trigger, if the user's local day is already Monday (dow === 1), the helper backs up to noon UTC of yesterday (Sunday) so all week-boundary calculations (`computeWeekMileage`, `computeWeekRunCount`, `buildActivitySummary`, `computeSessionsStatus`, `computeWeekCrossTrainingAerobicMinutes`, `buildWeeklyCrossTrainingSummary`) look at the just-completed Mon–Sun week.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/cross-training.ts`
+
 ## 2026-05-23 — Per-mile split context for follow-up questions + repetitive easy-effort reminder fix
 
 **Type:** Bug Fix / Improvement

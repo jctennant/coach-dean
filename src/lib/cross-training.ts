@@ -192,9 +192,9 @@ export function computeWeekCrossTrainingAerobicMinutes(
   activities: ActivitySummary[],
   timezone: string,
   lthrEstimate: number | null,
+  refDate: Date = new Date(),
 ): number {
-  const now = new Date();
-  const currentMonday = weekMonday(now, timezone);
+  const currentMonday = weekMonday(refDate, timezone);
   let total = 0;
   for (const a of activities) {
     if (!a.activity_type || !a.moving_time_seconds) continue;
@@ -221,9 +221,9 @@ export function buildWeeklyCrossTrainingSummary(
   activities: ActivitySummary[],
   timezone: string,
   lthrEstimate: number | null,
+  refDate: Date = new Date(),
 ): string {
-  const now = new Date();
-  const currentMonday = weekMonday(now, timezone);
+  const currentMonday = weekMonday(refDate, timezone);
   const runTypes = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
 
   const sessions = activities
