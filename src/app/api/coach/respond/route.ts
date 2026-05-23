@@ -1390,6 +1390,65 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return `<rule>MOST RECENT RUN: ${dayName} (${daysAgo} days ago). Always reference as "${dayName}'s run" — do NOT say "yesterday". Yesterday was ${yesterdayDayName}${yesterdayHadRun ? " (also a run day)" : " (a rest day — no runs)"}.</rule>`;
   })();
 
+  // For user_message: fetch the most recent run's per-mile split data so Dean can answer
+  // specific follow-up questions about GAP, per-mile pace, HR by mile, etc.
+  let mostRecentRunSplitsBlock: string | null = null;
+  if (trigger === "user_message") {
+    const RUN_TYPES_SPLITS = new Set(["Run", "TrailRun", "VirtualRun"]);
+    const latestRun = [...recentActivities]
+      .filter(a => RUN_TYPES_SPLITS.has(a.activity_type as string))
+      .sort((a, b) => (b.start_date as string).localeCompare(a.start_date as string))[0];
+    if (latestRun) {
+      const { data: actWithSplits } = await supabase
+        .from("activities")
+        .select("summary, activity_type, aerobic_efficiency, cardiac_decoupling_pct")
+        .eq("user_id", userId)
+        .eq("start_date", latestRun.start_date as string)
+        .maybeSingle();
+      if (actWithSplits) {
+        const rawSum = actWithSplits.summary as { splits?: unknown[] } | null;
+        const splits = Array.isArray(rawSum?.splits) ? rawSum.splits as Array<Record<string, unknown>> : null;
+        const splitLines: string[] = [];
+        if (splits && splits.length > 0) {
+          for (const s of splits) {
+            const transformed = transformSplitForClaude(s, isMetricUser);
+            if (!transformed.pace) continue; // skip stalled/paused splits
+            const parts: string[] = [];
+            const cumField = isMetricUser ? "cumulative_km" : "cumulative_miles";
+            const pos = transformed[cumField] ?? transformed.split;
+            parts.push(`${isMetricUser ? "km" : "mi"} ${pos}: ${transformed.pace}`);
+            if (transformed.gap_pace) parts.push(`GAP ${transformed.gap_pace}`);
+            if (typeof transformed.average_heartrate === "number") parts.push(`HR ${Math.round(transformed.average_heartrate)}`);
+            const elevField = isMetricUser ? "elevation_difference_m" : "elevation_difference_feet";
+            if (typeof transformed[elevField] === "number") {
+              const elev = transformed[elevField] as number;
+              if (Math.abs(elev) >= 5) parts.push(`elev ${elev > 0 ? "+" : ""}${Math.round(elev)}${isMetricUser ? "m" : "ft"}`);
+            }
+            splitLines.push(parts.join(", "));
+          }
+        }
+        const effNum = actWithSplits.aerobic_efficiency as number | null;
+        const decouplingNum = actWithSplits.cardiac_decoupling_pct as number | null;
+        const metricLines: string[] = [];
+        if (effNum !== null) metricLines.push(`Aerobic efficiency: ${effNum.toFixed(2)} m/beat (grade-adjusted speed ÷ HR; higher = more economical)`);
+        if (decouplingNum !== null) metricLines.push(`Cardiac decoupling: ${decouplingNum.toFixed(1)}% drift (< 5% = aerobic held steady; 5–10% = moderate drift; > 10% = significant)`);
+        if (splitLines.length > 0 || metricLines.length > 0) {
+          const parts: string[] = [`MOST RECENT RUN — DETAILED METRICS (use these to answer any follow-up questions about this run's data):`];
+          if (metricLines.length > 0) parts.push(...metricLines);
+          if (splitLines.length > 0) {
+            const hasGap = splits?.some(s => {
+              const t = transformSplitForClaude(s, isMetricUser);
+              return !!t.gap_pace;
+            });
+            parts.push(`Per-${isMetricUser ? "km" : "mile"} splits${hasGap ? " (GAP = grade-adjusted pace, flat-equivalent effort)" : ""}:`);
+            parts.push(...splitLines);
+          }
+          mostRecentRunSplitsBlock = parts.join("\n");
+        }
+      }
+    }
+  }
+
   // For initial_plan: pre-compute the remaining training days in the current week so we can
   // inject them explicitly into the user message. This prevents Claude from scheduling runs
   // on non-training days (e.g. picking "tomorrow=Friday" when Friday isn't a training day).
@@ -1782,7 +1841,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       { name: "cadence", rx: /cadence|spm|stride rate/i },
       { name: "cardiac decoupling/drift", rx: /decoupling|cardiac drift|HR (?:climbed|drifted)|heart rate (?:climbed|drifted)/i },
       { name: "aerobic efficiency (pace-at-HR)", rx: /aerobic efficiency|m\/beat|pace[- ]at[- ]?HR|pace at heart rate|pace per beat/i },
-      { name: "HR zone affirmation", rx: /Zone\s?[12]\b|\bZ[12]\b|aerobic stimulus|stayed aerobic/i },
+      { name: "HR zone affirmation / easy effort", rx: /Zone\s?[12]\b|\bZ[12]\b|aerobic stimulus|stayed aerobic|easy effort|truly easy|keep.*easy|easy run|aerobic base|conversational effort|aerobic system held/i },
       { name: "pacing/negative split/fade", rx: /negative split|positive split|\bfade(?:d)?\b|even splits|pacing discipline|pacing was/i },
       { name: "GAP / grade-adjusted", rx: /grade[- ]adjusted|\bGAP\b/i },
       { name: "vert / elevation load", rx: /\bvert\b|elevation gain|vert per mile|climbing legs/i },
@@ -1804,7 +1863,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return scanned;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock);
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -2047,12 +2106,20 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // right behavior when we don't have a session-derived projection to compare against.
   const computedProjection = null;
   const mileageCorrectedBase = trigger === "post_run"
-    ? correctProjectedTotal(stripped, computedProjection, weeklyMileageTargetForCap)
+    ? correctWeekToDateTotal(
+        correctProjectedTotal(stripped, computedProjection, weeklyMileageTargetForCap),
+        weekMileageSoFar,
+        isMetricUser
+      )
     : trigger === "user_message"
-      ? correctProjectedTotal(
-          correctMileageTotal(stripped, alreadyCompletedMiles),
-          computedProjection,
-          weeklyMileageTargetForCap
+      ? correctWeekToDateTotal(
+          correctProjectedTotal(
+            correctMileageTotal(stripped, alreadyCompletedMiles),
+            computedProjection,
+            weeklyMileageTargetForCap
+          ),
+          weekMileageSoFar,
+          isMetricUser
         )
       : correctMileageTotal(stripped, alreadyCompletedMiles);
   // SESSION_LIST correction removed — no day-level session list in responses anymore.
@@ -2577,6 +2644,30 @@ function computeProjectedWeekMiles(
  * as a sanity cap — if Claude states a projection that's >50% over the target,
  * replace it with the target to prevent alarming numbers like "on track for 77mi".
  */
+/**
+ * Post-processing guard: if the message states a week-to-date total ("X mi for the week",
+ * "you're at X mi this week", etc.) that differs from the system-computed weekMileageSoFar,
+ * rewrite the number. Skips projection phrasings ("on track for", "projected") which are
+ * handled by correctProjectedTotal.
+ */
+function correctWeekToDateTotal(message: string, weekMileageSoFar: number | null, isMetric: boolean): string {
+  if (weekMileageSoFar == null || weekMileageSoFar < 0) return message;
+  const correctValue = isMetric
+    ? Math.round(weekMileageSoFar * 1.60934 * 10) / 10
+    : Math.round(weekMileageSoFar * 10) / 10;
+  const unitGroup = isMetric ? "km" : "mi(?:les?)?";
+  const projectionLeadIn = /(?:on\s+track\s+for|on\s+pace\s+for|projected|aiming\s+for|target(?:ing)?|to\s+hit|should\s+hit|expecting|projecting)\s+~?\s*$/i;
+  const pattern = new RegExp(`(\\d+(?:\\.\\d+)?)(\\s*${unitGroup}[ \\t]*(?:for|this)[ \\t]+(?:the[ \\t]+)?week\\b)`, "gi");
+  return message.replace(pattern, (full, num, suffix, offset) => {
+    const stated = parseFloat(num);
+    if (Math.abs(stated - correctValue) <= 0.4) return full;
+    const before = message.slice(Math.max(0, offset - 40), offset);
+    if (projectionLeadIn.test(before)) return full;
+    console.warn(`[correctWeekToDateTotal] stated ${stated} WTD, system says ${correctValue} — correcting`);
+    return `${correctValue}${suffix}`;
+  });
+}
+
 function correctProjectedTotal(message: string, projectedWeekMiles: number | null, weeklyMileageTarget?: number | null): string {
   // Fallback cap: when session data is unavailable (projectedWeekMiles = null),
   // use the weekly target to catch wildly wrong Claude projections.
@@ -5360,6 +5451,7 @@ function buildUserMessage(
   recapWeeklyWins: string[] = [],
   isAnalystMode = false,
   isComplementMode = false,
+  mostRecentRunSplitsBlock: string | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -5547,10 +5639,10 @@ function buildUserMessage(
 - Keep the response shorter than a run response (2–3 sentences), and warmer / less analytical. A walk doesn't need 4 sentences of metrics.</rule>\n`
         : "";
       const weekMileageContext = isRunActivity
-        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it.</rule>\n`
+        ? `\n<rule>WEEK-TO-DATE (this run included): ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This is the exact, computed total — do not add or subtract anything from it. If you reference week mileage in your response, you MUST quote the figure "${weekVolumeDisplay}" verbatim — do not round differently, do not estimate, do not generate a new number.</rule>\n`
         : crossTrainingPostRunContext
         ? `\n${crossTrainingPostRunContext}\n`
-        : `\n<rule>WEEK-TO-DATE RUNNING: ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total.</rule>\n`;
+        : `\n<rule>WEEK-TO-DATE RUNNING: ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. This counts ONLY running activities — the ${(activityData?.type as string) ?? "non-run"} activity above is NOT included. Do NOT add its distance to this total. If you reference week mileage, quote "${weekVolumeDisplay}" verbatim.</rule>\n`;
 
       const dataGlossaryUnits = isMetricUser
         ? "All paces are min/km. Elevation in meters. Distances in km (distance_km field) and meters (distance_meters field)."
@@ -5560,7 +5652,9 @@ function buildUserMessage(
 
       const activitySemanticGuard = buildActivityDataGuard(activityForClaude as Record<string, unknown> | null);
 
-      return `A workout just synced from Strava. ${dateNote}${weekMileageContext}${walkCoachingBlock}
+      return `WEEK-TO-DATE: ${weekVolumeDisplay} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""} (computed from Strava — quote this exact figure if you reference week mileage; never invent a different number).
+
+A workout just synced from Strava. ${dateNote}${weekMileageContext}${walkCoachingBlock}
 
 CONTEXT CHECK: Before writing, scan the RECENT CONVERSATION above. If there is ALREADY a coach response (from you) about this same workout — same activity date or discussing the same run — do NOT give full post-run feedback again. This happens when the athlete texts about a run before Strava syncs, and then Strava triggers this message an hour later. In that case, send only 1-2 sentences acknowledging the sync and adding what's new from Strava data (specific pace, HR, splits, or elevation not yet covered). e.g. "Saw it come through — 5:06/km avg, HR held at 148, nice negative split." Skip anything already discussed. Also applies if the athlete texted about this run and you responded.
 
@@ -5616,9 +5710,10 @@ INSIGHT RULES:
 - QUALITY SESSION EXECUTION — RECOGNIZE THE WIN: When the athlete HIT or BEAT prescribed pace on a quality session (tempo, intervals, hills, threshold, long-run progression segments), the insight MUST explicitly recognize the execution before any analysis. Don't bury it. Lead with what they did — e.g. "Nailed the tempo — 8:24/mi against an 8:30 target. That's threshold work landing exactly where it should." or "You hammered those 800s — averaged 3:12 against a 3:15 target. Real speed showing up." Recognition is concrete (names the pace, the target, what it builds), not generic ("good job"). This is distinct from FORBIDDEN PHRASES — those ban empty praise; this rule REQUIRES specific, earned recognition when the athlete executed a hard session well. A quality session hit on target with no acknowledgement is a coaching miss as serious as a missed mismatch.
 - GRAY ZONE GUARD: Only flag today's run as "gray zone" effort if avg_heartrate is actually in Z3. If in Z2 or below, do not call it gray zone. If commenting on a gray zone PATTERN from AEROBIC METRICS HISTORY, frame it as a trend — never apply it to today's run when today was Z2 or below.
 - ZONE ACCURACY GUARD: Never call a Z3 run "Zone 2" or "easy effort." Compute the athlete's Z2 ceiling (75% of estimated max HR) before labeling any run. If avg_heartrate exceeds that ceiling, the run is at least moderate — do not use "Zone 2," "easy," or "aerobic base" framing. Conversely, never call a Z1/Z2 run "moderate." The HR calculation, not the pace, determines the zone label — a slow pace at Z3 HR is still moderate; a faster pace at Z2 HR is still easy.
-- EASY EFFORT AFFIRMATION (required when HR data is present): When avg HR is in Z1 or Z2 on an easy run, the 1 insight MUST positively affirm correct execution — e.g. "HR sat right in Zone 2 — exactly the aerobic stimulus you're after."
+- EASY EFFORT AFFIRMATION (required when HR data is present): When avg HR is in Z1 or Z2 on an easy run, the 1 insight MUST positively affirm correct execution. Vary HOW you affirm it based on what else is in the data — e.g. tie it to cardiac decoupling ("HR stayed in Zone 2 and barely drifted — aerobic system held all the way through"), or cadence ("Zone 2 HR and 174 spm — exactly the kind of run that builds base"), or week context ("HR controlled the whole way — good timing with a quality session coming up"). Do NOT default to a generic easy-effort reminder every run. If you already used easy-effort affirmation in recent post_run messages (check RECENT INSIGHTS), pick a different angle and anchor it to a different data point.
 - FORBIDDEN PHRASES — DO NOT WRITE ANY OF THESE, EVER, REGARDLESS OF DATA AVAILABILITY:
   • "keep easy days easy" / "keep easy runs easy" / "keep your easy runs easy" / "make sure to keep it easy" / "remember to keep it easy"
+  • "make your easy runs truly easy" / "easy runs truly easy" / "run them truly easy" / "truly easy effort"
   • "great work" / "nice job" / "solid effort" / "way to get out the door" / "good run!" / "love to see it"
   • "keep it up" / "keep crushing it" / "stay consistent" (as a standalone closer)
   • "make sure to recover" / "rest up" / "listen to your body" (as filler — only use if there's a specific reason rooted in this run's data)
@@ -5772,7 +5867,7 @@ FEEDBACK MESSAGES: If the athlete's message starts with "Feedback:" or "FEEDBACK
 - If it's something you can act on as their coach (e.g. "I want more interval sessions", "the mileage feels too low", "can we add tempo runs") — skip any acknowledgment of the feedback label entirely. Just respond as their coach and make the adjustment. Don't say "thanks for the feedback". Act on it.
 - If it's a product suggestion or something outside your control as a coach (e.g. "you should add midday check-ins", "the app should let me set my own paces", "I think the schedule format should change") — respond with something like: "Got it — I'll pass that along and someone will follow up." One sentence, then stop. Don't coach on it.
 
-${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
+${mostRecentRunRef ? `${mostRecentRunRef}\n` : ""}${mostRecentRunSplitsBlock ? `\n${mostRecentRunSplitsBlock}\n` : ""}${daysSinceLastCoachMessage !== null && daysSinceLastCoachMessage >= 2 ? `
 
 CONTACT GAP: Your last message to this athlete was ${daysSinceLastCoachMessage} days ago. If they seem to be checking in or acknowledging the silence, acknowledge the gap briefly and naturally — don't act like you've been watching in real time.` : ""}${fullArcContext}`;
     }

@@ -4,6 +4,36 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-23 — Per-mile split context for follow-up questions + repetitive easy-effort reminder fix
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake Tennant
+**User feedback:** "(1) He doesn't seem to actually have a metric if I ask (Grade Adjusted Pace, Efficiency, etc.) (2) He keeps telling my wife the same thing post run (make your easy runs truly easy)"
+**Root cause:**
+1. For `user_message` triggers (follow-up texts), the system prompt had no per-mile split data — only aggregate run stats. When an athlete asked "what was the GAP for each mile?" Dean had no data to answer with and gave a generic definition instead.
+2. "Make your easy runs truly easy" was not in the FORBIDDEN PHRASES list, so Claude kept writing it on easy Z2 runs. The anti-repetition regex for easy-effort affirmations only caught Zone 1/2 label mentions, not the many variations Dean used.
+**Fix / Change:**
+1. Added a new DB fetch for `user_message` trigger: after identifying the most recent run from the activity cache, fetches its `summary` (splits) and `aerobic_efficiency` / `cardiac_decoupling_pct` from the activities table. Transforms splits through `transformSplitForClaude` (pace, GAP, HR, elevation per split) and injects as a `MOST RECENT RUN — DETAILED METRICS` block in the user_message prompt. Dean can now answer specific per-mile or per-km questions with actual data.
+2. Added "make your easy runs truly easy" / "easy runs truly easy" / "run them truly easy" / "truly easy effort" to FORBIDDEN PHRASES.
+3. Broadened the `recentPostRunInsights` anti-repetition regex for easy-effort affirmations to catch: "easy effort", "truly easy", "keep.*easy", "easy run", "aerobic base", "conversational effort", "aerobic system held". This flags easy-effort coaching as a recently-used lens so Dean rotates to a different insight angle on the next run.
+4. Updated EASY EFFORT AFFIRMATION rule to require varying the delivery angle (tie to decoupling, cadence, or week context) rather than defaulting to a generic easy-effort reminder every Z2 run.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `CHANGELOG.md`
+
+---
+
+## 2026-05-05 — Hardened week-to-date mileage against hallucination
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "got this message from dean this morning, but I was only at ~2.3 miles for the week: … 'You're now at 5.8 miles for the week.'"
+**Root cause:** Dean's morning Strava sync triggered a post_run response. The system prompt computed week-to-date correctly (Morning Run 3,803m = 2.36 mi; the 0-distance Workout activity from Monday was correctly excluded) and the `WEEK-TO-DATE (this run included): 2.4 mi across 1 run` rule was present. Sonnet ignored the rule and stated "5.8 miles for the week" — a clean hallucination with no arithmetic source in the prompt. The existing `correctMileageTotal` / `correctProjectedTotal` guards target session-list math and "on track for X mi" projections, neither of which fires on a stated week-to-date completed total.
+**Fix / Change:** Two layers.
+1. **Prompt lift:** Prepend the post_run user message with `WEEK-TO-DATE: <X> across <N> runs (computed from Strava — quote this exact figure if you reference week mileage; never invent a different number)` so the authoritative figure is the freshest token before generation. Strengthened the inline `WEEK-TO-DATE` rule to demand verbatim quoting.
+2. **Post-gen guard:** New `correctWeekToDateTotal` function — regex-finds `\d+(\.\d+)? mi(les)? for/this (the )?week` in Dean's response, compares to `weekMileageSoFar`, rewrites the number if off by >0.4 (mi or km). Skips projection lead-ins ("on track for", "projected", etc.) so it doesn't double-correct projections. Wired into the post-processing pipeline for `post_run` and `user_message` triggers.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-05-04 — Fixed scoping bug that disabled the `max_heartrate` data guard
 
 **Type:** Bug Fix
