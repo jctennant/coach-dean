@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-23 — Force metric citations in post-run and recap (no more vague trend language)
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Internal observation
+**User feedback:** Dean kept saying "your HR is getting better for your pace" without sharing any actual numbers
+**Root cause:** The longitudinal analysis block passes actual m/beat values and % changes to Claude, but there was no instruction requiring Claude to cite those numbers. Claude was summarizing the trend in natural language and dropping the values.
+**Fix / Change:** Added CITE THE NUMBER rules to both the post_run and weekly_recap prompts. Each named metric (aerobic efficiency, cardiac drift, ACWR, cadence, week-over-week mileage) now has an explicit example showing the required format with the actual value, and a "NOT" counter-example banning the vague alternative. Applied to both triggers.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-05-23 — Tighten post-run messages: shorter format, metric-first, question variety, strength prescriptions
 
 **Type:** Improvement

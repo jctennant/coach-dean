@@ -854,9 +854,9 @@ export function buildLongitudinalBlock(
 
   if (lines.length === 0) return "";
 
-  return `LONGITUDINAL TRAINING ANALYSIS (8-week trends — use this context to make insights actionable, not just descriptive):
+  return `LONGITUDINAL TRAINING ANALYSIS (8-week trends):
 ${lines.join("\n")}
-Use these signals to inform your coaching — e.g. flag a load spike, acknowledge improving aerobic efficiency, or note if long-run HR drift is improving. Do not just repeat these stats verbatim — synthesize them into 1 actionable coaching observation.
+CITATION RULE: When referencing any value from this block, quote it directly — do NOT paraphrase or round it. Only cite a metric if its value appears explicitly above. If a metric is not listed here, do not reference it at all.
 
 `;
 }
