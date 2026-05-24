@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-24 — Restructure post-run prompt: examples-first, no accumulating ban lists
+
+**Type:** Improvement
+**Reported by:** Jake (user feedback on response quality)
+**User feedback:** "The message is optimizing for completeness instead of resonance. It hits every checkbox (praise, pace stat, cadence stat, strength prescription) but has no point of view. A real coach doesn't open with 'Great job managing that elevation' — that's a participation trophy. A coach says something that makes you think 'huh, they actually watched my run.' The stats don't say anything. '~7:02/mi segment' — which segment? Was that intentional? Was it a problem? 156 spm cadence — is that good, bad, expected for trails? The numbers are being reported rather than interpreted."
+**Root cause:** The prompt had accumulated ~60 lines of "do NOT" rules and ban lists that described the failure mode in detail but didn't show the model what good looks like. Claude optimized for rule compliance (hit every checkbox) rather than resonance. The strength block fired after every routine easy run regardless of context.
+**Fix / Change:**
+- Replaced the NO OPENER PRAISE + INTERPRET DON'T REPORT + FORBIDDEN PHRASES + EASY EFFORT AFFIRMATION rules with 4 concrete example messages showing the correct tone, style, and interpretation depth. Examples cover: easy trail run with elevation, tempo on target, aerobic efficiency trend, load warning.
+- Collapsed the INSIGHT RULES section — the long bullet list is gone; structural accuracy rules (EXECUTION CHECK, ZONE GUARD, CITE THE NUMBER) remain since examples can't replace them.
+- Combined CADENCE and CARDIAC DECOUPLING interpretation guidance directly into the PICK ONE METRIC list instead of separate sections.
+- STRENGTH AFTER RUN changed from "fire after every easy/moderate run when no fatigue" to contextual-only: injury flag active + site stressed, athlete explicitly asked, or designated recovery day. Routine runs end after the main insight.
+- Removed duplicate TOTAL LENGTH line.
+- Net result: ~65 lines of rules replaced with ~30 lines of examples + condensed rules.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-05-23 — Tests for computeWeekSessions, current_week parsing, and priorPostRunCount
 
 **Type:** Refactor
