@@ -4,6 +4,35 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-24 — Add 4 post-run eval fixtures for new coaching behaviors
+
+**Type:** Infra / Eval
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** The post-run prompt changes (examples-first, no opener praise, contextual-only strength, interpret-don't-report) had no eval coverage — no way to catch regression back to old behavior.
+**Fix / Change:** Added 4 fixtures in `evals/fixtures/`: `post-run-no-opener-praise` (opener must be a metric, not praise), `post-run-stat-interpretation` (numbers must be interpreted in context, not just cited), `post-run-no-strength-prescription` (routine easy run — strength block must NOT fire), `post-run-strength-active-injury` (active hamstring + tempo — strength block MUST fire with specific exercises). Also added `average_cadence` and `cardiac_decoupling_pct` support to the eval runner so fixture 2 can exercise those fields.
+**Files changed:** `evals/fixtures/post-run-no-opener-praise.json`, `evals/fixtures/post-run-stat-interpretation.json`, `evals/fixtures/post-run-no-strength-prescription.json`, `evals/fixtures/post-run-strength-active-injury.json`, `evals/run-evals.mjs`, `CLAUDE.md`
+
+---
+
+## 2026-05-24 — Injury auto-detection, specific exercise guidance, and missed-message safety net
+
+**Type:** Feature / Bug Fix
+**Reported by:** Internal observation (conversation audit)
+**User feedback:** N/A
+**Root cause (injury):** `active_injury` was never set automatically — it required a manual `injury_hold` trigger. Haiku extraction wrote to `injury_notes` and `injury_body_parts` but never escalated to the full ACTIVE INJURY coaching mode. Dean also gave generic "strengthen it" advice instead of specific exercises.
+**Root cause (missed messages):** `after()` in the Linq webhook swallows crashes silently — if `coach/respond` fails, the user gets no reply and there is no retry mechanism.
+**Fix / Change:**
+- Added `injury_severity` ("mild"/"moderate"/"severe") to the Haiku profile extraction prompt. When severity is moderate or severe, `active_injury`, `injury_body_part`, `injury_severity`, and `injury_start_date` are now auto-set in `training_profiles` without needing a manual trigger.
+- Auto-clears `active_injury` when the athlete explicitly reports the injury is resolved (existing `injury_resolved` extraction).
+- Escalates `injury_severity` if athlete describes worsening symptoms in a follow-up message.
+- Added `BODY_PART_EXERCISES` lookup (12 body parts) injected into the system prompt when body parts are flagged — covers IT band, hamstring, knee, shin, calf, foot, hip, piriformis, glute, back, ankle. Dean now gives concrete exercises instead of vague "strengthen it".
+- Exercises appear in both the ACTIVE INJURY block and the RECURRING INJURY ALERT block.
+- New cron endpoint `GET /api/cron/missed-messages`: scans for `user_message` rows in the 3–90 min window with no assistant reply and re-fires `coach/respond`. Set up on cron-job.org every 30 minutes.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/cron/missed-messages/route.ts`
+
+---
+
 ## 2026-05-24 — Restructure post-run prompt: examples-first, no accumulating ban lists
 
 **Type:** Improvement

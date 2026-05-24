@@ -170,7 +170,7 @@ The GH Actions workflow runs `npm test` on every push. A commit that breaks test
 
 Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound SMS. The runner (`evals/run-evals.mjs`) builds a realistic coaching system prompt from the fixture data, calls Claude Sonnet for the response, then calls Claude Opus as the judge. Results go to `evals/results/` (gitignored).
 
-**19 fixtures across 7 categories:**
+**23 fixtures across 7 categories:**
 
 | Category | What it catches | Fixture count |
 |---|---|---|
@@ -179,10 +179,10 @@ Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound
 | `split_distance_accuracy` | Coach says "mile 5" on a 3.1mi run — km splits misread as mile splits | 3 |
 | `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 3 |
 | `mileage_format` | Additive total format ("Total: 25mi + your 15mi already") | 2 |
-| `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed, morning plan attributes activity to wrong day | 3 |
+| `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed, morning plan attributes activity to wrong day; post-run opener praise; numbers cited without interpretation; strength block fires when it shouldn't; strength block absent when injury is active | 7 |
 | `plan_quality` | Plan structure: volume ramp, long run, quality sessions, safe progression — and for metric users, correct km units throughout | 1 |
 
-**Current baseline (2026-04-02):** 22/22 passing, avg 9.5/10. No known failures. (Baseline pre-dates `plan-half-marathon-metric` fixture — run evals to establish new baseline.)
+**Current baseline (2026-04-02):** 22/22 passing, avg 9.5/10. No known failures. (Baseline pre-dates `plan-half-marathon-metric` and 4 post-run quality fixtures added 2026-05-24 — run evals to establish new baseline.)
 
 ### When to update evals
 

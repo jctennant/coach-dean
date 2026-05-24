@@ -648,6 +648,8 @@ function buildUserMessage(fixture) {
     msg += `- Distance: ${a.distance_miles} miles\n`;
     msg += `- Avg pace: ${a.pace || "N/A"}\n`;
     if (hrVal) msg += `- Avg HR: ${hrVal} bpm\n`;
+    if (a.average_cadence != null) msg += `- Avg cadence: ${a.average_cadence} steps/foot (multiply by 2 for total spm)\n`;
+    if (a.cardiac_decoupling_pct != null) msg += `- Cardiac drift (decoupling): ${a.cardiac_decoupling_pct}%\n`;
     if (a.elevation_gain_ft) msg += `- Elevation gain: ${a.elevation_gain_ft} ft\n`;
     if (a.splits && a.splits.length > 0) {
       msg += `- Mile splits: ${a.splits.map(s => `Mile ${s.mile}: ${s.pace}`).join(", ")}\n`;

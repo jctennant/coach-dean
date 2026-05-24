@@ -1,0 +1,58 @@
+{
+  "id": "post-run-strength-active-injury",
+  "description": "Tempo run for a runner with an active hamstring injury that flares after hard efforts. A contextual strength recommendation with hamstring-specific exercises MUST appear as a second message.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-05-24",
+  "user": {
+    "name": "Jordan",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "NYC Half",
+    "goal_race_date": "2026-09-13",
+    "current_week": 9,
+    "current_phase": "build",
+    "vdot": 46,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:38/mi",
+    "interval_pace": "6:54/mi",
+    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 34,
+    "miles_logged_this_week": 8.5,
+    "runs_this_week": 2,
+    "injury_notes": "Left hamstring tightness — active, monitoring. Flares up after tempo efforts.",
+    "weekly_plan": {
+      "quality_session": "Tempo 5mi (1mi WU + 3mi @ 7:38/mi + 1mi CD)"
+    },
+    "recent_activities": [
+      { "date": "2026-05-24", "type": "Tempo Run", "distance_miles": 5.5, "pace": "7:42/mi", "average_heartrate": 171 },
+      { "date": "2026-05-21", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:35/mi", "average_heartrate": 141 },
+      { "date": "2026-05-18", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:28/mi", "average_heartrate": 138 }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-05-24",
+    "type": "Tempo Run",
+    "distance_miles": 5.5,
+    "pace": "7:42/mi",
+    "duration_minutes": 42,
+    "average_heartrate": 171,
+    "splits": [
+      { "mile": 1, "pace": "9:28/mi" },
+      { "mile": 2, "pace": "7:44/mi" },
+      { "mile": 3, "pace": "7:41/mi" },
+      { "mile": 4, "pace": "7:39/mi" },
+      { "mile": 5, "pace": "9:35/mi" }
+    ]
+  },
+  "ground_truth": {
+    "notes": "CONTEXTUAL STRENGTH TEST: Jordan has an active left hamstring injury that flares after tempo efforts, and just ran a tempo. Dean MUST include a strength recommendation as a second message with hamstring-specific exercises — named specifically with sets/reps (e.g. Nordic hamstring curl 3×6, single-leg Romanian deadlift 3×10/leg, glute bridge 3×15, hip hinge work). 'Do some hamstring exercises' without specifics fails. The first message should address tempo execution — actual tempo segment pace was ~7:41/mi (miles 2-4) vs prescribed 7:38/mi, essentially on target (3 sec/mi over is not a miss). A response with no strength recommendation at all after a tempo run on an active hamstring injury should score below 7. The strength block is the key criterion for this fixture.",
+    "must_compare_actual_vs_prescribed": true,
+    "prescribed_tempo_pace": "7:38/mi",
+    "actual_tempo_pace": "7:41/mi",
+    "forbidden_phrases": ["missed the target", "slightly slow", "a bit off", "didn't hit"]
+  }
+}

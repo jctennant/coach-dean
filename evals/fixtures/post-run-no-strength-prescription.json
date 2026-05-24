@@ -1,0 +1,59 @@
+{
+  "id": "post-run-no-strength-prescription",
+  "description": "Routine easy run with no injury flag and no user request. No strength prescription should appear — the strength block is contextual-only (injury site, explicit ask, or recovery day), not a default after easy runs.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-05-24",
+  "user": {
+    "name": "Sam",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-10-11",
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 44,
+    "easy_pace": "9:48/mi",
+    "tempo_pace": "7:54/mi",
+    "interval_pace": "7:06/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 28,
+    "miles_logged_this_week": 6.0,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "recent_activities": [
+      { "date": "2026-05-24", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:50/mi", "average_heartrate": 142 },
+      { "date": "2026-05-21", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:45/mi", "average_heartrate": 140 },
+      { "date": "2026-05-19", "type": "Long Run", "distance_miles": 10.0, "pace": "10:00/mi", "average_heartrate": 146 }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-05-24",
+    "type": "Easy Run",
+    "distance_miles": 6.0,
+    "pace": "9:50/mi",
+    "duration_minutes": 59,
+    "average_heartrate": 142
+  },
+  "ground_truth": {
+    "forbidden_content": [
+      "If you have 10 min",
+      "clamshells",
+      "hip thrust",
+      "Copenhagen plank",
+      "lateral band",
+      "split squat",
+      "step-up",
+      "Nordic",
+      "deadlift",
+      "3×",
+      "2×",
+      "sets",
+      "reps"
+    ],
+    "notes": "NO STRENGTH PRESCRIPTION TEST: Routine easy 6mi run, no injury, no fatigue signal, no user request for strength work. Dean MUST NOT append a strength exercise block. The correct response is the main insight (1-2 sentences) plus an optional closing question — nothing more. If any strength exercises, sets/reps, or 'If you have 10 min' appears in the response, this is a failure and should score below 5. The strength block is a contextual feature (injury site, explicit ask), not a default follow-up for easy runs."
+  }
+}

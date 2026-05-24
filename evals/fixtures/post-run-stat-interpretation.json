@@ -1,0 +1,46 @@
+{
+  "id": "post-run-stat-interpretation",
+  "description": "Long run with cadence and cardiac drift data. The cited metric must be interpreted in context — not just reported as a raw number. Tests 'interpret, don't report' behavior.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-05-24",
+  "user": {
+    "name": "Dana",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Denver Half Marathon",
+    "goal_race_date": "2026-09-20",
+    "current_week": 10,
+    "current_phase": "build",
+    "vdot": 50,
+    "easy_pace": "8:48/mi",
+    "tempo_pace": "7:02/mi",
+    "interval_pace": "6:20/mi",
+    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 38,
+    "miles_logged_this_week": 11.5,
+    "runs_this_week": 2,
+    "injury_notes": "None",
+    "recent_activities": [
+      { "date": "2026-05-24", "type": "Long Run", "distance_miles": 11.5, "pace": "8:52/mi", "average_heartrate": 148 },
+      { "date": "2026-05-21", "type": "Tempo Run", "distance_miles": 6.5, "pace": "7:06/mi", "average_heartrate": 171 },
+      { "date": "2026-05-18", "type": "Easy Run", "distance_miles": 5.0, "pace": "8:55/mi", "average_heartrate": 140 }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-05-24",
+    "type": "Long Run",
+    "distance_miles": 11.5,
+    "pace": "8:52/mi",
+    "duration_minutes": 102,
+    "average_heartrate": 148,
+    "average_cadence": 86,
+    "cardiac_decoupling_pct": 7.8
+  },
+  "ground_truth": {
+    "notes": "METRIC INTERPRETATION TEST: Dana ran 11.5mi with cadence 86 steps/foot (172 spm total) and cardiac drift 7.8%. Whichever metric the response picks, it MUST be accompanied by what it means — not just cited. Correct for drift: '7.8% drift — some cardiovascular drift, normal for an 11-mile effort' or '7.8% cardiac drift — aerobic system held reasonably well over the distance.' Incorrect: '7.8% cardiac drift' with nothing more, or 'your drift was 7.8%' with no interpretation. Correct for cadence: '172 spm — right in the efficient range' or '172 spm — solid turnover for a long run.' Incorrect: 'your cadence was 172 spm' with no judgment. The response only needs to pick ONE metric per the priority list (cardiac drift has priority over cadence). But whatever is cited, the number must be accompanied by its meaning in this context. A response that cites a number without interpreting it should score below 7."
+  }
+}

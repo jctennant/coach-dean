@@ -1,0 +1,51 @@
+{
+  "id": "post-run-no-opener-praise",
+  "description": "Routine easy run for a marathon runner. Response must open with a specific metric or observation — never with praise or any affirmation phrase. Tests the core 'start with the observation' behavior.",
+  "category": "response_quality",
+  "trigger": "post_run",
+  "today": "2026-05-24",
+  "user": {
+    "name": "Alex",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Portland Marathon",
+    "goal_race_date": "2026-10-04",
+    "current_week": 8,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:02/mi",
+    "tempo_pace": "7:13/mi",
+    "interval_pace": "6:29/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 40,
+    "miles_logged_this_week": 7.2,
+    "runs_this_week": 1,
+    "injury_notes": "None",
+    "notes": "First marathon. Goal is sub-3:45.",
+    "recent_activities": [
+      { "date": "2026-05-24", "type": "Easy Run", "distance_miles": 7.2, "pace": "9:05/mi", "average_heartrate": 141 },
+      { "date": "2026-05-21", "type": "Tempo Run", "distance_miles": 6.0, "pace": "7:18/mi", "average_heartrate": 169 },
+      { "date": "2026-05-19", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:08/mi", "average_heartrate": 139 },
+      { "date": "2026-05-17", "type": "Long Run", "distance_miles": 14.0, "pace": "9:12/mi", "average_heartrate": 144 }
+    ],
+    "recent_conversation": []
+  },
+  "activity_details": {
+    "date": "2026-05-24",
+    "type": "Easy Run",
+    "distance_miles": 7.2,
+    "pace": "9:05/mi",
+    "duration_minutes": 65,
+    "average_heartrate": 141
+  },
+  "ground_truth": {
+    "forbidden_phrases": [
+      "great run", "nice run", "great work", "nice work", "solid run", "solid effort",
+      "well done", "impressive", "love to see", "good run", "way to get out",
+      "that's a solid", "great job", "nice job"
+    ],
+    "notes": "OPENER TEST: Alex ran a routine easy 7.2mi at 9:05/mi with HR 141. The response MUST open with a specific metric or observation — e.g. 'HR held at 141 — solidly aerobic for 7 miles' or '7.2 miles at 9:05/mi — HR stayed at 141 the whole way.' A response that opens with ANY affirmation phrase ('Great run', 'Nice work', 'Solid effort', 'That's a solid easy day', etc.) FAILS this test and should score below 7 regardless of factual accuracy. The metric or observation should be the first clause of the first sentence. Short and specific is correct. The response should connect to marathon training but must not add a strength prescription (no injury flag, routine easy run)."
+  }
+}

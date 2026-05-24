@@ -21,6 +21,28 @@ import type { ActivityWeatherData } from "@/lib/weather";
 
 export const maxDuration = 120;
 
+// Specific rehab exercises injected into the system prompt when body parts are flagged.
+// Keeps Dean's exercise advice concrete and consistent rather than generic "strengthen it".
+const BODY_PART_EXERCISES: Record<string, string[]> = {
+  it_band:      ["Hip abductor clamshells 3×15", "Lateral band walks 2×20 steps each way", "Foam roll TFL (avoid rolling the IT band directly)", "Single-leg squats with slow descent 3×10"],
+  hamstring:    ["Eccentric Nordic hamstring curls 3×8 (use a towel under knees)", "Romanian single-leg deadlifts 3×10 each", "Prone hamstring raises 3×12", "Glute bridges with 2-second hold 3×15"],
+  knee:         ["Straight-leg raises 3×15 (tighten quad first)", "Wall sit 3×30s", "Step-ups with slow 3-second descent 3×10 each", "Terminal knee extensions with band 3×15"],
+  shin:         ["Eccentric calf raises off a step (straight knee) 3×15", "Tibialis anterior raises: stand with back to wall, lift toes 3×15", "Calf stretching bent + straight knee 3×30s each", "Slow toe taps on a stair 2×20"],
+  calf:         ["Eccentric heel drops off step — straight knee 3×15, bent knee 3×15", "Standing calf raises (single-leg) 3×20", "Soleus stretch (bent knee) 3×30s hold", "Ankle circles 2×10 each direction"],
+  foot:         ["Frozen water bottle rolling under arch 2 min each foot", "Towel toe curls 3×15", "Eccentric calf raises 3×15", "Short-foot arch activation 3×10"],
+  hip:          ["Hip flexor stretch in lunge position 3×30s each", "Glute bridges 3×15", "Lateral band walks 2×20 steps", "Pigeon pose 2×60s each side"],
+  piriformis:   ["Figure-4 stretch lying down 3×60s each side", "Pigeon pose 2×60s each side", "Seated piriformis stretch 3×30s", "Clamshells with band 3×15"],
+  glute:        ["Clamshells 3×15", "Single-leg glute bridges 3×12 each", "Hip thrusts (body weight or barbell) 3×15", "Side-lying hip abduction 3×15"],
+  back:         ["Cat-cow 10 slow reps", "Bird-dog 3×10 each side", "Child's pose 2×60s", "Dead bug 3×8 each side"],
+  ankle:        ["Eccentric calf raises off step 3×15", "Single-leg balance on unstable surface 3×30s", "Resistance band dorsiflexion 3×15", "Ankle alphabet (draw A–Z slowly with foot)"],
+};
+
+function getBodyPartExercises(bodyPart: string): string {
+  const exercises = BODY_PART_EXERCISES[bodyPart.toLowerCase()];
+  if (!exercises) return "";
+  return `\n  Targeted exercises for ${bodyPart.replace(/_/g, " ")}: ${exercises.join(" | ")}`;
+}
+
 type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week";
 
 interface CoachRequest {
@@ -4669,13 +4691,14 @@ ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after t
   const protocol = (profile?.injury_return_protocol as string | null) || null;
   return `<rule>ACTIVE INJURY — APPLIES TO EVERY MESSAGE THIS TURN:
 - Body part: ${bodyPart}
-- Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}
+- Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}${getBodyPartExercises(bodyPart)}
 Coaching adjustments:
 - ${severity === "severe" ? "No running prescribed. Cross-training and gentle test probes only — do not advise running through this." : severity === "moderate" ? "Modify aggressively: reduce volume, drop quality sessions, and frame runs as pain-monitored. Stop-immediately-if-pain language belongs on every prescription." : "Run modified — easy efforts only, no quality work, monitor the area on every run."}
+- When the athlete asks what they should do for the injury, give them the specific targeted exercises listed above — be concrete, not generic.
 - Proactively go/no-go: when discussing today's or tomorrow's run, check this state first before suggesting a session.
 - If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.
 </rule>\n`;
-})()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest they consult a physical therapist or sports medicine doctor before pushing through — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.` : ""; })()}
+})()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest specific targeted exercises (see below) rather than just telling them to "strengthen it". (4) suggest they consult a physical therapist or sports medicine doctor if it keeps recurring — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.\n  Targeted rehab exercises by body part:${parts.map(p => getBodyPartExercises(p)).filter(Boolean).join("")}` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}${(() => {
   const threads = (profile?.coaching_threads as string | null) || null;
   if (!threads || !threads.trim()) return "";
@@ -5029,6 +5052,7 @@ type ExtractedProfileData = {
   injury_notes?: string | null;
   injury_resolved?: boolean | null;
   injury_body_part?: string | null;
+  injury_severity?: "mild" | "moderate" | "severe" | null;
   new_crosstraining?: string[] | null;
   other_notes?: string | null;
   recent_race_distance_km?: number | null;
@@ -5079,7 +5103,7 @@ async function extractProfileData(message: string, timezone?: string): Promise<E
       system: `Today is ${todayName}. Extract structured data from an athlete's message to their coach.
 
 Extract ONLY explicitly stated NEW information:
-- A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week") AND injury_body_part (the primary body part: one normalized lowercase term, e.g. "knee", "ankle", "shin", "glute", "hamstring", "calf", "foot", "hip", "back", "it_band"). Only set injury_body_part if the pain/soreness is clearly related to running (not e.g. a cold).
+- A new or changed injury, pain, or physical limitation → injury_notes (brief: type + status, e.g. "IT band tightness, started this week") AND injury_body_part (the primary body part: one normalized lowercase term, e.g. "knee", "ankle", "shin", "glute", "hamstring", "calf", "foot", "hip", "back", "it_band") AND injury_severity ("mild" = tightness/soreness/ache that doesn't stop running; "moderate" = pain during/after runs, athlete is still running but concerned; "severe" = sharp pain, can't run, limping, or athlete says they stopped). Only set injury_body_part if the pain/soreness is clearly related to running (not e.g. a cold).
 - Athlete explicitly states a previously mentioned injury or concern is now resolved, healed, or no longer an issue (e.g. "my knee is all better now", "the cramp is gone", "no more issues with my hip", "it's resolved") → injury_resolved: true. Do NOT set this for one-run reports ("it didn't hurt today") — only when they're clearly saying it's gone for good.
 - New cross-training activities or equipment access mentioned (pool, bike, gym, yoga, etc.) → new_crosstraining (array of normalized strings)
 - New training preferences, goals, or constraints (e.g. "I want more hill work", "please add strength training", "I can't run Tuesdays anymore") → other_notes
@@ -5106,7 +5130,7 @@ Extract ONLY explicitly stated NEW information:
 - Explicitly requests Coach Dean to respond in a specific language (e.g. "speak French", "parle en français", "je veux que tu me parles en français", "respond in Spanish", "réponds en français", "Tu parles en français") → preferred_language as ISO 639-1 code ("fr" for French, "es" for Spanish, "de" for German, "pt" for Portuguese, "it" for Italian)
 - Explicitly requests to stop Coach Dean from posting notes to Strava activity descriptions (e.g. "don't post to my Strava", "stop writing to my activities", "never do it again" in context of Strava notes, "I don't want you posting on my Strava", "never post on my behalf") → strava_write_enabled: false
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -5223,6 +5247,34 @@ async function persistProfileUpdates(
       if (!existingParts.includes(extracted.injury_body_part as string)) {
         profileUpdate.injury_body_parts = [...existingParts, extracted.injury_body_part as string];
       }
+      // Auto-activate the injury state for moderate/severe reports so the full
+      // ACTIVE INJURY block fires in the system prompt without requiring a manual trigger.
+      const severity = extracted.injury_severity;
+      if ((severity === "moderate" || severity === "severe") && !profile?.active_injury) {
+        profileUpdate.active_injury = true;
+        profileUpdate.injury_body_part = extracted.injury_body_part;
+        profileUpdate.injury_severity = severity;
+        profileUpdate.injury_start_date = new Date().toISOString().slice(0, 10);
+        console.log(`[persistProfileUpdates] auto-activating injury: ${extracted.injury_body_part} (${severity})`);
+      }
+      // If injury was already active and severity escalated, update severity
+      if (profile?.active_injury && severity && profile.injury_severity !== severity) {
+        const severityOrder = { mild: 0, moderate: 1, severe: 2 };
+        const current = severityOrder[profile.injury_severity as keyof typeof severityOrder] ?? -1;
+        const incoming = severityOrder[severity as keyof typeof severityOrder] ?? -1;
+        if (incoming > current) {
+          profileUpdate.injury_severity = severity;
+          console.log(`[persistProfileUpdates] escalating injury severity to ${severity}`);
+        }
+      }
+    }
+    // Auto-clear active_injury when athlete reports full resolution
+    if (hasInjuryResolved && profile?.active_injury) {
+      profileUpdate.active_injury = false;
+      profileUpdate.injury_severity = null;
+      profileUpdate.injury_body_part = null;
+      profileUpdate.injury_start_date = null;
+      console.log(`[persistProfileUpdates] auto-clearing active_injury on resolution report`);
     }
     if (hasCrosstraining) {
       const existing = (profile?.crosstraining_tools as string[]) || [];
