@@ -20,8 +20,8 @@
     "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
     "preferred_units": "imperial",
     "weekly_mileage_target": 40,
-    "miles_logged_this_week": 7.2,
-    "runs_this_week": 1,
+    "miles_logged_this_week": 18.2,
+    "runs_this_week": 3,
     "injury_notes": "None",
     "notes": "First marathon. Goal is sub-3:45.",
     "recent_activities": [
@@ -46,6 +46,6 @@
       "well done", "impressive", "love to see", "good run", "way to get out",
       "that's a solid", "great job", "nice job"
     ],
-    "notes": "OPENER TEST: Alex ran a routine easy 7.2mi at 9:05/mi with HR 141. The response MUST open with a specific metric or observation — e.g. 'HR held at 141 — solidly aerobic for 7 miles' or '7.2 miles at 9:05/mi — HR stayed at 141 the whole way.' A response that opens with ANY affirmation phrase ('Great run', 'Nice work', 'Solid effort', 'That's a solid easy day', etc.) FAILS this test and should score below 7 regardless of factual accuracy. The metric or observation should be the first clause of the first sentence. Short and specific is correct. The response should connect to marathon training but must not add a strength prescription (no injury flag, routine easy run)."
+    "notes": "OPENER TEST: Alex ran a routine easy 7.2mi at 9:05/mi with HR 141. The response MUST open with a specific metric or observation — e.g. 'HR held at 141 — solidly aerobic for 7 miles' or '7.2 miles at 9:05/mi — HR stayed at 141 the whole way.' PASSING opener: first word/phrase is a number, data point, or named metric ('7.2 miles...', 'HR held at 141...', 'Zone 2 HR...'). FAILING opener: first word is a praise/affirmation word with no data ('Great run', 'Nice work', 'Solid effort', 'That's a solid easy day'). Note: 'solidly in Zone 2' or 'exactly in Zone 2' AFTER a number is acceptable — the qualifier is modifying the metric, not serving as an opener. Score below 7 only if the message opens with pure praise before any data point. Miles logged this week is 18.2mi (7.2 today + 6.0 Wednesday + 5.0 Monday — authoritative figure)."
   }
 }

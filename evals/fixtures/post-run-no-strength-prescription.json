@@ -20,8 +20,8 @@
     "training_days": ["tuesday", "thursday", "saturday", "sunday"],
     "preferred_units": "imperial",
     "weekly_mileage_target": 28,
-    "miles_logged_this_week": 6.0,
-    "runs_this_week": 1,
+    "miles_logged_this_week": 21.0,
+    "runs_this_week": 3,
     "injury_notes": "None",
     "recent_activities": [
       { "date": "2026-05-24", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:50/mi", "average_heartrate": 142 },
