@@ -1865,7 +1865,37 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return scanned;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock);
+  // Track the last 3 closing questions Dean asked in post_run messages so we can tell Claude
+  // to vary the question or skip it entirely if the same type has been asked recently.
+  const recentPostRunQuestions = (() => {
+    if (trigger !== "post_run") return [] as string[];
+    const questionPatterns: Array<{ name: string; rx: RegExp }> = [
+      { name: "tightness/soreness check", rx: /tightness|soreness|sore|tight|ache|hurt|pain|feel.*legs|legs.*feel/i },
+      { name: "effort/sustainability check", rx: /sustainable|effort feel|feel sustainable|felt controlled|pace.*feel|feel.*pace/i },
+      { name: "injury check", rx: /holding up|how.*hip|how.*knee|how.*[Aa]chilles|how.*shin|injury.*area/i },
+      { name: "fueling/nutrition check", rx: /fuel|nutrition|eat|carb|gel|hydrat/i },
+      { name: "sleep/recovery check", rx: /sleep|rest|recover|fatigue|feel.*fresh|fresh.*feel/i },
+      { name: "race/goal check", rx: /race.*goal|goal.*race|feel.*ready|building.*toward|how.*goal/i },
+      { name: "plan/schedule check", rx: /want.*adjust|adjust.*plan|change.*plan|recalibrate|too.*conservative/i },
+    ];
+    const questions: string[] = [];
+    let postRunsSeen = 0;
+    for (let i = recentMessages.length - 1; i >= 0 && postRunsSeen < 3; i--) {
+      const m = recentMessages[i];
+      if (m.role !== "assistant") continue;
+      if (m.message_type !== "post_run") continue;
+      postRunsSeen++;
+      const content = (m.content as string) || "";
+      // Only look at the last sentence (likely the question)
+      const lastSentence = content.split(/[.!]\s+/).pop() || "";
+      for (const { name, rx } of questionPatterns) {
+        if (rx.test(lastSentence)) questions.push(name);
+      }
+    }
+    return questions;
+  })();
+
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions);
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -4798,7 +4828,7 @@ ${!isReminder && !isPostRun ? `STRENGTH, MOBILITY & CROSS-TRAINING — include o
 - Include a strength/mobility session when the athlete has injury notes, has asked for strength or stretching, or has gym/yoga listed as cross-training. Tailor exercises to their specific injury or needs.
 - Include cross-training when they've listed tools (bike, pool, elliptical, yoga, etc.) or asked for it.
 - If none of the above apply, do NOT add strength or cross-training unprompted.
-- STRENGTH SESSION SPECIFICS: Whenever you include a strength or mobility session, follow the session list with a separate bubble giving 3–5 specific exercises. Default to runner-specific hip stability and glute work (e.g. single-leg deadlifts, hip thrusts, clamshells, Copenhagen plank, lateral band walks). Adjust for any injury notes or stated preferences. Keep this bubble short — under 480 chars. Example: "For the strength block: single-leg deadlifts 3×10, glute bridges 3×15, clamshells 3×20/side, Copenhagen plank 3×20 sec." Never leave a strength session at just "30 min" with no detail — runners won't know what to do with that.
+- STRENGTH SESSION SPECIFICS: Whenever you include a strength or mobility session, follow the session list with a separate bubble giving exactly 3–4 exercises — always with sets × reps or sets × duration. Never list an exercise without the volume. Vary the exercise selection based on injury history and goal — do not default to the same list every time. Runner-appropriate pool (pick 3–4 per session, rotate): single-leg deadlift 3×8/leg, Copenhagen plank 3×20–30 sec/side, Bulgarian split squat 3×8/leg, lateral band walk 3×15 steps/direction, single-leg hip thrust 3×10/leg, clamshell 3×20/side, step-up with knee drive 3×10/leg, Nordic hamstring curl 3×6, pistol squat progression 3×5/leg, side-lying hip abduction 3×15/side. Adjust selection for injury notes (e.g. Achilles → heavy calf raises 3×12/leg; IT band → clamshells + hip abduction; hip flexor → hip thrusts + split squats). Keep this bubble short — under 480 chars. Example: "For the strength block: single-leg deadlifts 3×8/leg, Copenhagen plank 3×25 sec/side, Bulgarian split squat 3×8/leg." Never leave a strength session at just "30 min" with no detail — runners won't know what to do with that.
 - VOLUME ADJUSTMENT FOR ATHLETES DOING CONSISTENT STRENGTH TRAINING: If an athlete is doing 2+ days/week of strength or gym work alongside running, their total training load is meaningfully higher than a running-only athlete. Reduce peak running volume by 10–15% compared to a comparable running-only athlete at the same base mileage. For example: a runner averaging 32 mi/week who also lifts 2x/week should peak around 42–48mi/week running, not 55+. Strength days count as training load — don't ignore them when projecting the volume arc.
 - SCHEDULING AROUND STRENGTH DAYS: Never schedule a hard quality run (tempo, intervals, long run) the day before or the day of a scheduled strength session. Easy runs are fine on strength days. Hard running + hard lifting on the same or adjacent days leads to under-recovery and injury.
 ${crosstrainingTools && crosstrainingTools.length > 0 ? `CROSS-TRAINING PRESCRIPTION — this athlete has: ${crosstrainingTools.join(", ")}. When prescribing cross-training sessions:
@@ -5477,6 +5507,7 @@ function buildUserMessage(
   isAnalystMode = false,
   isComplementMode = false,
   mostRecentRunSplitsBlock: string | null = null,
+  recentPostRunQuestions: string[] = [],
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -5698,7 +5729,7 @@ If THIS WEEK'S PLAN in CURRENT TRAINING STATE lists a quality session (e.g. "Tem
 If no plan is stored or this run doesn't match the planned quality session, describe the split pattern as observed (e.g. "your first mile was a touch slower, then you settled into a strong rhythm") without inferring intent.
 - LAP PACE SANITY CHECK: If lap data is available and the FINAL lap is faster than the middle (main effort) laps, do NOT confidently label it a "cooldown" — a cooldown is by definition slower than the main set. If the paces contradict the expected warmup→main effort→cooldown structure, flag the anomaly instead of asserting the wrong label: e.g. "Your last lap was actually your fastest — was that intentional, or did the structure shift?" Never apply a workout structure label that contradicts the pace data.
 
-Provide post-run feedback in 2–4 sentences. Surface 1 crisp, goal-tied insight — the most important signal from this specific run. A stat without a "so what" is noise, not coaching.
+Provide post-run feedback in 2–3 sentences maximum (not counting an optional closing question). Lead with the number — state the metric first, then what it means. A stat without a "so what" is noise, not coaching. Do NOT pad with a third sentence if two say everything.
 
 ${nonObviousWins.length > 0
   ? `DID YOU NOTICE — DETERMINISTIC FINDINGS FROM THIS RUN. Lead your response with one of these; do NOT bury them as a side note. These are exactly the things a real coach paying attention would catch and Strava cannot:
@@ -5768,11 +5799,20 @@ CADENCE — when average_cadence is present (stored as steps/minute per foot; mu
 - 85–90 (170–180 total spm): affirm it's solid, mention it builds running economy over time.
 - Above 90 (> 180 total spm): strong — only mention if it's notable context (e.g. they maintained it despite fatigue on a long run).
 
-COACHING FORWARD — tell them what it means, not just what happened:
-- Connect the run to where they're going. If they've been building volume for weeks: is it time for a quality session?
-- If something needs to change: say it now, not in the Sunday recap.
-- CLOSING QUESTION (required): End with ONE specific question tied to the data or their training situation. NOT generic ("how are you feeling?", "how'd it feel?"). Examples of good closing questions: "Any tightness in the legs after that tempo effort?" / "How's the [injury area] holding up after that load?" / "Did that effort feel sustainable given where you are in the build?" / "Was the pace feeling controlled in those final miles?" Choose the question most relevant to this run — injury history, pace execution, fatigue signals, or upcoming key sessions. Skip the closing question ONLY if the injury_reminder block already ends with a question.
-Keep it tight — 3–5 sentences total for the whole message.
+COACHING FORWARD — fold the forward-looking thought INTO the insight sentence rather than adding a separate sentence. "4.2% cardiac drift — aerobic system held all 8mi, which is the base you need for the long run next week." One sentence, two jobs.
+
+CLOSING QUESTION — optional, not required:
+${recentPostRunQuestions.length > 0
+  ? `RECENT QUESTIONS ASKED (last ${recentPostRunQuestions.length} post-run messages):
+${[...new Set(recentPostRunQuestions)].map(q => `- ${q}`).join("\n")}
+Do NOT ask the same type of question again. Either pick a clearly different angle below — OR skip the question entirely. Skipping is often the right call after several consecutive runs.`
+  : "A closing question is appropriate here since you haven't asked one recently."}
+
+When a question IS warranted: pick the ONE most specific angle for this run — injury history, pace execution, upcoming key session, or load management. NOT generic ("how are you feeling?", "how'd it feel?"). Examples of specific questions: "Any tightness in the quads after that tempo effort?" / "Was that effort sustainable given the heat?" / "Ready for the long run later this week?" / "Did that feel controlled in the final miles?"
+
+Skip the closing question when: the injury_reminder block already ends with a question; you've asked a similar question in the last 2–3 post-run messages; the run data is self-explanatory and there's nothing meaningful to ask; or asking would feel formulaic given the conversation context.
+
+TOTAL LENGTH: 2 sentences max + optional 1-sentence question. Hard cap — do not add a third sentence just to fill space.
 
 MILEAGE OVERAGE — when noting that the athlete has exceeded or is tracking above their weekly target, always name the specific target (e.g. "you're at 38mi against a 32mi target" not "you've exceeded your planned mileage"). Vague overage comments without a number are unhelpful.
 
@@ -5789,7 +5829,11 @@ ${isAnalystMode ? `\n<rule>ANALYST MODE — NO PLAN: This athlete has no trainin
 
 ${planDeviationFlag}` : ""}${skippedNonRunSession ? `
 
-PLAN DEVIATION — NON-RUN DAY: Today's plan called for "${skippedNonRunSession}", but the athlete ran instead. Briefly acknowledge this naturally — don't lecture, but do mention the skipped session once, casually. Offer to reschedule it this week if there's room. Example framing: "Today was pencilled in as a strength day — want me to slot that in later this week?" or "The plan had strength work today — easy to shift that to [next available day] if you're up for it." Keep it one sentence. Do not make the athlete feel bad about the swap.` : ""}`;
+PLAN DEVIATION — NON-RUN DAY: Today's plan called for "${skippedNonRunSession}", but the athlete ran instead. Briefly acknowledge this naturally — don't lecture, but do mention the skipped session once, casually. Offer to reschedule it this week if there's room. Example framing: "Today was pencilled in as a strength day — want me to slot that in later this week?" or "The plan had strength work today — easy to shift that to [next available day] if you're up for it." Keep it one sentence. Do not make the athlete feel bad about the swap.` : ""}
+
+STRENGTH AFTER RUN — add a second bubble with a quick strength block when ALL of these are true: (1) this was an easy or moderate run (not a quality session or long run), (2) there are no strong fatigue signals (no high ACWR, no >10% cardiac drift), (3) you haven't suggested post-run strength in the last 2–3 post-run messages. Keep it SHORT — 3 exercises, 2–3 sets, specific reps. Tailor to the athlete's injury history if present; otherwise default to hip stability and glute activation. Do NOT use generic names — give the exact exercise with sets × reps. Examples: "Copenhagen plank 3×20 sec/side", "Single-leg hip thrust 3×10/leg", "Lateral band walk 3×15 steps/direction", "Bulgarian split squat 3×8/leg", "Clamshells 3×20/side", "Step-up with knee drive 3×10/leg". Format: "If you have 10 min: [exercise 1], [exercise 2], [exercise 3]." One bubble, no intro fluff. Do NOT add this bubble if this was a hard workout, a long run, or fatigue signals are elevated — those days call for recovery, not more load.
+
+PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific (an injury, fatigue, scheduling conflict, or direct question about the plan). Do NOT proactively suggest plan changes after every run. If they mention something, one sentence is enough: e.g. "That hip tightness is worth watching — I can pull back Tuesday's session if it's still there tomorrow." If nothing is mentioned, stay quiet on plan adjustments.`;
     }
     case "user_message": {
       const umIsMetric = preferredUnits === "metric";

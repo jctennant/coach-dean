@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-23 — Tighten post-run messages: shorter format, metric-first, question variety, strength prescriptions
+
+**Type:** Improvement
+**Reported by:** Internal observation
+**User feedback:** N/A
+**Root cause:** Post-run messages were too long (3–5 sentences), asked the same closing question type repeatedly, and strength recommendations lacked sets/reps detail. No mechanism existed to vary closing questions or suggest post-run strength.
+**Fix / Change:**
+- Hard cap: 2 sentences max + optional 1-sentence question (down from 3–5)
+- Lead-with-metric instruction: number first, meaning second in same sentence
+- COACHING FORWARD merged into the insight sentence instead of being a separate sentence
+- CLOSING QUESTION changed from required to conditional: tracks last 3 post-run questions asked and skips/varies when the same type has been used recently
+- New STRENGTH AFTER RUN block: occasional second bubble after easy runs suggesting 3 specific exercises with sets × reps (only when no fatigue signals, not after hard/long runs)
+- New PLAN ADJUSTMENTS rule: only suggest plan changes when the athlete explicitly mentions something — not proactively after every run
+- STRENGTH SESSION SPECIFICS improved: always requires sets × reps, provides a diverse exercise pool with injury-specific variations, no more generic "clamshells and hip thrusts" every time
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-05-23 — Fix weekly recap showing 0.0 mi for UTC+ timezone users
 
 **Type:** Bug Fix
