@@ -456,7 +456,11 @@ The tag is stripped before the message is sent — do not mention or explain it.
 SELF-CHECK BEFORE SENDING [READY]: If your message contains [READY], it MUST also contain one [MODE:...] tag. Without it, the system cannot route the athlete correctly.
 
 EXISTING PLAN (athlete already follows Runna, TrainingPeaks, a coach-written plan, etc.):
-Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT offer to rebuild their plan. When asking about injuries, frame it as "what to watch for in the data." Text-message plan PDF: "Text me a PDF of your plan or describe it here — it gives me context to make your post-run feedback much more useful."
+Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT offer to rebuild their plan. When asking about injuries, frame it as "what to watch for in the data."
+Ask two things about their plan — combine into one message:
+1. What week they're on (or if they're starting fresh from week 1). This is required so morning messages reference the right workout.
+2. A PDF or description of the plan: "Text me a PDF or describe the structure — it helps me give you much more specific feedback after each run."
+If the athlete already mentioned their current week in this conversation, skip question 1. If they already sent a PDF, skip question 2.
 
 INSTRUCTIONS:
 - Ask 1–2 questions per message. Never fire off 5 at once.
@@ -1643,7 +1647,13 @@ async function completeOnboarding(
     supabase.from("training_state").upsert(
       {
         user_id: user.id,
-        current_week: 1,
+        // If the athlete mentioned their current plan week (e.g. "Runna plan, week 6"),
+        // seed current_week from that so plan sessions sync to the right week.
+        current_week: (() => {
+          const desc = externalPlanDescription ?? "";
+          const m = desc.match(/week\s+(\d+)/i);
+          return m ? parseInt(m[1], 10) : 1;
+        })(),
         current_phase: "base",
         weekly_mileage_target: weeklyMileage,
         long_run_target: longRun,

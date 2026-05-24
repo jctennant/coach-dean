@@ -292,3 +292,95 @@ describe("coach/respond — metric unit conversion in prompts", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// priorPostRunCount — first/repeat run prompt injection
+// ---------------------------------------------------------------------------
+describe("coach/respond — post_run prompt injection (priorPostRunCount)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  function postRunConversations(count: number): Array<Record<string, unknown>> {
+    // Returned newest-first (as the DB would); route reverses them to oldest-first.
+    return Array.from({ length: count }, (_, i) => ({
+      role: "assistant",
+      message_type: "post_run",
+      content: `Great run #${count - i}!`,
+      created_at: new Date(Date.now() - (i + 1) * 60_000).toISOString(),
+    }));
+  }
+
+  it("injects FIRST COACHING SESSION when there are no prior post_run messages", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: [],
+    });
+
+    // No activityId: avoids the dedup guard that would short-circuit the Claude call
+    const req = mockRequest({ userId: "user-001", trigger: "post_run" });
+    await POST(req);
+    await flush();
+
+    const message = captureUserMessage();
+    expect(message).toContain("FIRST COACHING SESSION");
+    expect(message).not.toContain("METRIC FOLLOW-UP HINT");
+  });
+
+  it("injects METRIC FOLLOW-UP HINT on run #2 (1 prior post_run)", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: postRunConversations(1),
+    });
+
+    // No activityId: avoids the dedup guard that would short-circuit the Claude call
+    const req = mockRequest({ userId: "user-001", trigger: "post_run" });
+    await POST(req);
+    await flush();
+
+    const message = captureUserMessage();
+    expect(message).not.toContain("FIRST COACHING SESSION");
+    expect(message).toContain("METRIC FOLLOW-UP HINT");
+  });
+
+  it("injects METRIC FOLLOW-UP HINT on run #5 (4 prior post_runs, upper edge)", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: postRunConversations(4),
+    });
+
+    // No activityId: avoids the dedup guard that would short-circuit the Claude call
+    const req = mockRequest({ userId: "user-001", trigger: "post_run" });
+    await POST(req);
+    await flush();
+
+    const message = captureUserMessage();
+    expect(message).not.toContain("FIRST COACHING SESSION");
+    expect(message).toContain("METRIC FOLLOW-UP HINT");
+  });
+
+  it("injects neither on run #6 (5 prior post_runs, outside hint window)", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: postRunConversations(5),
+    });
+
+    // No activityId: avoids the dedup guard that would short-circuit the Claude call
+    const req = mockRequest({ userId: "user-001", trigger: "post_run" });
+    await POST(req);
+    await flush();
+
+    const message = captureUserMessage();
+    expect(message).not.toContain("FIRST COACHING SESSION");
+    expect(message).not.toContain("METRIC FOLLOW-UP HINT");
+  });
+});

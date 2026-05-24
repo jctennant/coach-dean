@@ -730,6 +730,95 @@ No other text.`,
  * Called at the end of weekly_recap so the next week's targets are live in
  * training_state before the next morning_plan or reminder fires.
  */
+// ─── Uploaded plan session utilities ─────────────────────────────────────────
+
+export interface UploadedPlanSession {
+  day: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+  label: string;
+}
+
+export interface UploadedPlanWeek {
+  week_number: number;
+  sessions: UploadedPlanSession[];
+}
+
+/**
+ * Given a week's sessions (day-of-week + label) and the Monday date of that week,
+ * compute absolute M/D dates for each session so they can be stored in
+ * training_state.weekly_plan_sessions and shown in morning_plan.
+ */
+export function computeWeekSessions(
+  allWeeks: UploadedPlanWeek[],
+  weekNumber: number,
+  timezone: string
+): Array<{ day: string; date: string; label: string }> {
+  const week = allWeeks.find(w => w.week_number === weekNumber);
+  if (!week) return [];
+
+  const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+
+  // Find this week's Monday in the user's timezone.
+  const tz = timezone || "America/New_York";
+  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  const [ty, tm, td] = localStr.split("-").map(Number);
+  const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
+  const daysFromMonday = todayDow === 0 ? 6 : todayDow - 1;
+  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday));
+
+  return week.sessions
+    .filter(s => s.day in dayOffset)
+    .map(s => {
+      const offset = dayOffset[s.day]!;
+      const d = new Date(Date.UTC(
+        mondayUTC.getUTCFullYear(),
+        mondayUTC.getUTCMonth(),
+        mondayUTC.getUTCDate() + offset
+      ));
+      return {
+        day: s.day,
+        date: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`,
+        label: s.label,
+      };
+    });
+}
+
+/**
+ * Read plan_sessions_all_weeks from the user's onboarding_data, compute absolute
+ * dates for the given week number, and write to training_state.weekly_plan_sessions.
+ * Called at upload time (week 1) and on each Sunday recap to advance to the next week.
+ */
+export async function syncWeekFromUploadedPlan(
+  userId: string,
+  weekNumber: number,
+  timezone: string
+): Promise<void> {
+  const { data: user } = await supabase
+    .from("users")
+    .select("onboarding_data")
+    .eq("id", userId)
+    .single();
+
+  if (!user) return;
+
+  const allWeeks = ((user.onboarding_data as Record<string, unknown> | null)
+    ?.plan_sessions_all_weeks as UploadedPlanWeek[] | null) ?? [];
+
+  if (!allWeeks.length) return;
+
+  const sessions = computeWeekSessions(allWeeks, weekNumber, timezone);
+  if (!sessions.length) {
+    console.log(`[syncWeekFromUploadedPlan] no sessions found for week ${weekNumber} (plan has ${allWeeks.length} weeks)`);
+    return;
+  }
+
+  await supabase
+    .from("training_state")
+    .update({ weekly_plan_sessions: sessions as unknown as Json, updated_at: new Date().toISOString() })
+    .eq("user_id", userId);
+
+  console.log(`[syncWeekFromUploadedPlan] wrote ${sessions.length} sessions for week ${weekNumber} to training_state`);
+}
+
 export async function syncWeekFromArc(userId: string, weekNum: number): Promise<void> {
   const { data: plan } = await supabase
     .from("training_plans")

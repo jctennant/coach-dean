@@ -9,7 +9,7 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock, fetchActivityWeather } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions } from "@/lib/plan-validation";
 import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
@@ -1923,11 +1923,16 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // First-run detection: if this is the athlete's first post_run coaching message,
   // add a warmer tone instruction so it feels like the start of a relationship.
   if (trigger === "post_run") {
-    const hasAnyPriorPostRun = recentMessages.some(
+    const priorPostRunCount = recentMessages.filter(
       m => m.role === "assistant" && (m as Record<string, unknown>).message_type === "post_run"
-    );
-    if (!hasAnyPriorPostRun) {
+    ).length;
+    if (priorPostRunCount === 0) {
       userMessage += `\n\nFIRST COACHING SESSION: This is the first run you've coached for this athlete — you've never sent them a post-run note before. Tone should feel like the start of a coaching relationship: warm, specific to their data, and ending with one question that helps you understand them better (their goals, how they felt, what they're working on). Reference their name naturally if you know it. Make this feel like the beginning of something, not a generic coaching note.`;
+    }
+    // On runs 2–5, add a one-time hint that the athlete can ask follow-up questions about the metrics.
+    // This teaches the SMS-as-coach behavior without being repetitive — only shown early in the relationship.
+    if (priorPostRunCount >= 1 && priorPostRunCount <= 4) {
+      userMessage += `\n\nMETRIC FOLLOW-UP HINT: If your response cites a specific metric (aerobic efficiency, cardiac drift, ACWR, cadence, pace trend), add one short closing line after the main message — a new bubble — inviting the athlete to ask more: e.g. "Reply if you want to dig into any of these numbers." Keep it to one sentence, no more. Do NOT add this if you did not cite a named metric in your response. Do NOT add it on every run — only include it when the metric you cited is one the athlete might want to understand better.`;
     }
   }
 
@@ -2412,6 +2417,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           // Advance simplified week-level plan state from the training arc.
           await syncWeekFromArc(userId, periodization.effectiveWeek);
           console.log(`[weekly_recap] synced arc week ${periodization.effectiveWeek} to training_state`);
+
+          // For complement-mode users with an uploaded plan, advance weekly_plan_sessions
+          // to the next week so morning_plan can name today's specific session.
+          if (isComplementMode) {
+            await syncWeekFromUploadedPlan(userId, periodization.effectiveWeek, userTimezone);
+            console.log(`[weekly_recap] synced uploaded plan week ${periodization.effectiveWeek} to training_state`);
+          }
         }
       } catch (err) {
         console.error("[coach/respond] weekly_recap after() failed:", err);
@@ -5513,7 +5525,7 @@ function buildUserMessage(
   switch (trigger) {
     case "morning_plan":
       if (isComplementMode) {
-        return "Send a short morning message checking in on what's left in their training week. This athlete follows their own external training plan — treat any sessions in CURRENT TRAINING STATE as their coach's prescribed workouts, not Dean's suggestions. Keep it under 480 characters, warm and supportive. Do not rewrite or prescribe new sessions.";
+        return `Send a short morning message naming today's specific workout from their plan. Check CURRENT TRAINING STATE → TODAY'S PLANNED SESSION. If a session is listed for today, name it explicitly — the exact session, distance, and any structure (e.g. "Today's plan has a 6mi tempo — 1mi WU, 4mi @ 8:30/mi, 1mi CD"). If no session is listed for today, look at UPCOMING SESSIONS THIS WEEK and name tomorrow's next workout instead. Keep it under 480 characters, warm and direct. Do not rewrite or alter the session — their coach prescribed it.`;
       }
       return "Send a short morning message previewing what's left for this week. Reference THIS WEEK'S PLAN in CURRENT TRAINING STATE (weekly mileage target, long run, quality session) and name what's still outstanding given how many miles they've already logged. Suggest the long run or quality session they haven't done yet as options. Keep it under 480 characters, warm and coach-like.";
     case "post_run_onboarding":

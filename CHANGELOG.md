@@ -4,6 +4,51 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-23 — Tests for computeWeekSessions, current_week parsing, and priorPostRunCount
+
+**Type:** Refactor
+**Reported by:** Internal (test coverage for features added this session)
+**User feedback:** N/A
+**Root cause:** Three features added without test coverage: `computeWeekSessions` date mapping, `current_week` regex parsing from `external_plan_description` at [READY], and `priorPostRunCount` prompt injection (FIRST COACHING SESSION / METRIC FOLLOW-UP HINT).
+**Fix / Change:** Added 8 tests for `computeWeekSessions` (dates, edge cases, month boundary), 3 tests for `current_week` seeding at onboarding completion (week 6, default to 1, case-insensitive), and 4 tests for `priorPostRunCount` (0 prior → FIRST COACHING SESSION, 1–4 prior → METRIC FOLLOW-UP HINT, 5+ → neither). Total: 437 tests passing.
+**Files changed:** `src/__tests__/lib/training-plan.test.ts`, `src/__tests__/api/onboarding-handle.test.ts`, `src/__tests__/api/coach-respond-metric.test.ts`
+
+---
+
+## 2026-05-23 — Seed current_week from athlete's stated plan week at onboarding completion
+
+**Type:** Bug Fix
+**Reported by:** Internal (found while building plan session sync)
+**User feedback:** N/A
+**Root cause:** `training_state.current_week` was hardcoded to `1` at onboarding completion regardless of what the athlete said. If someone said "I'm on week 8 of my Runna plan," the value was stored in `external_plan_description` conversationally but never parsed, so plan session sync would always start from week 1.
+**Fix / Change:** At onboarding completion, parse `external_plan_description` for "week N" and use that as the initial `current_week` value. Falls back to 1 if no week is mentioned.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+## 2026-05-23 — Structured extraction of uploaded training plans (all weeks, not just blob)
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Uploaded plans were stored as raw text blobs only. `weekly_plan_sessions` (the structured JSON used by morning_plan and post_run to surface today's session) was never populated for complement-mode users — only for Dean-generated plans. The `plan_source = "uploaded"` handler in `syncWeekFromArc` was dead code with nothing writing to it.
+**Fix / Change:**
+- At upload time, Haiku now extracts the full plan into structured JSON (`{ week_number, sessions: [{ day, label }] }`) and stores it in `onboarding_data.plan_sessions_all_weeks`.
+- Current week's sessions are immediately written to `training_state.weekly_plan_sessions` with absolute M/D dates computed from this week's Monday, so morning_plan can surface today's session right away.
+- New `computeWeekSessions()` and `syncWeekFromUploadedPlan()` utilities in `training-plan.ts` handle date computation and DB writes.
+- On each Sunday recap, `syncWeekFromUploadedPlan` advances `weekly_plan_sessions` to the next week from the stored arc — no LLM needed at query time.
+- Extraction is non-fatal: if Haiku fails, the raw text blob still works for conversational Q&A.
+**Files changed:** `src/app/api/plan/upload/route.ts`, `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
+## 2026-05-23 — Complement morning plan names today's specific session; metric follow-up hint on early runs
+
+**Type:** Feature / Improvement
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** (1) Complement-mode morning_plan sent a generic "check in on the week" instead of naming the athlete's actual prescribed session for today. The data was already in CURRENT TRAINING STATE but the instruction didn't tell Dean to use it. (2) Users with no coaching history don't know they can ask follow-up questions about cited metrics.
+**Fix / Change:**
+- Complement morning_plan now explicitly tells Dean to find TODAY'S PLANNED SESSION in CURRENT TRAINING STATE and name it (distance, structure, paces). Falls back to tomorrow's session if today has none.
+- On post-run messages 2–5, if Dean cited a named metric, a second bubble invites the athlete to ask follow-up questions ("Reply if you want to dig into any of these numbers"). Gated: only fires when a metric was actually cited, and only during the early relationship window so it doesn't become repetitive.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-05-23 — Force metric citations in post-run and recap (no more vague trend language)
 
 **Type:** Bug Fix / Improvement

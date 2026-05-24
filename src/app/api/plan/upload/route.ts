@@ -15,6 +15,7 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import type { Json } from "@/lib/database.types";
+import { computeWeekSessions, type UploadedPlanWeek } from "@/lib/training-plan";
 
 export const maxDuration = 120;
 
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
 
   const { data: user } = await supabase
     .from("users")
-    .select("id, onboarding_data")
+    .select("id, onboarding_data, timezone")
     .eq("id", userId)
     .single();
 
@@ -65,6 +66,15 @@ export async function POST(request: Request) {
     const truncated = planText.length > 15_000;
     const storedText = truncated ? planText.slice(0, 15_000) + "\n[truncated]" : planText;
 
+    // Extract all weeks into structured JSON — fire-and-forget, non-fatal if it fails.
+    let allWeeks: UploadedPlanWeek[] = [];
+    try {
+      allWeeks = await extractAllPlanWeeks(storedText);
+      console.log(`[plan/upload] extracted ${allWeeks.length} weeks of structured sessions for user ${userId}`);
+    } catch (err) {
+      console.error("[plan/upload] structured extraction failed (non-fatal):", err);
+    }
+
     const existingData = ((user.onboarding_data as Record<string, unknown>) || {});
     const updatedData: Record<string, unknown> = {
       ...existingData,
@@ -72,12 +82,39 @@ export async function POST(request: Request) {
       plan_filename: filename ?? null,
       has_existing_plan: true,
       plan_uploaded: true,
+      ...(allWeeks.length > 0 ? { plan_sessions_all_weeks: allWeeks } : {}),
     };
 
     await supabase
       .from("users")
       .update({ onboarding_data: updatedData as unknown as Json })
       .eq("id", userId);
+
+    // Seed training_state.weekly_plan_sessions with the current week's sessions so
+    // morning_plan and post_run can surface today's specific workout immediately.
+    if (allWeeks.length > 0) {
+      try {
+        const { data: stateRow } = await supabase
+          .from("training_state")
+          .select("current_week")
+          .eq("user_id", userId)
+          .maybeSingle();
+        const currentWeek = (stateRow?.current_week as number | null) ?? 1;
+        const timezone = (user.timezone as string | null) ?? "America/New_York";
+        const sessions = computeWeekSessions(allWeeks, currentWeek, timezone);
+        if (sessions.length > 0) {
+          await supabase
+            .from("training_state")
+            .upsert(
+              { user_id: userId, weekly_plan_sessions: sessions as unknown as Json, updated_at: new Date().toISOString() },
+              { onConflict: "user_id" }
+            );
+          console.log(`[plan/upload] seeded ${sessions.length} sessions for week ${currentWeek} into training_state`);
+        }
+      } catch (err) {
+        console.error("[plan/upload] training_state seed failed (non-fatal):", err);
+      }
+    }
 
     console.log(`[plan/upload] stored plan context for user ${userId}${filename ? ` (${filename})` : ""} — ${storedText.length} chars${truncated ? " (truncated)" : ""}`);
 
@@ -128,6 +165,56 @@ async function extractTextFromPDF(base64: string): Promise<string> {
   }
 
   return rawText;
+}
+
+async function extractAllPlanWeeks(planText: string): Promise<UploadedPlanWeek[]> {
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 3000,
+    system: `Extract every training week from this plan and call save_plan_weeks.
+For each week include every session with its day of week and a concise label (type + distance/duration + any structure).
+Use "Rest" as the label for rest days. Skip weeks with no sessions.
+Day must be one of: Mon, Tue, Wed, Thu, Fri, Sat, Sun.`,
+    messages: [{ role: "user", content: planText }],
+    tools: [{
+      name: "save_plan_weeks",
+      description: "Save all extracted training weeks.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          weeks: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                week_number: { type: "number" },
+                sessions: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      day: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+                      label: { type: "string" },
+                    },
+                    required: ["day", "label"],
+                  },
+                },
+              },
+              required: ["week_number", "sessions"],
+            },
+          },
+        },
+        required: ["weeks"],
+      },
+    }],
+    tool_choice: { type: "tool" as const, name: "save_plan_weeks" },
+  });
+
+  const toolBlock = response.content.find(b => b.type === "tool_use" && b.name === "save_plan_weeks");
+  if (!toolBlock || toolBlock.type !== "tool_use") return [];
+  const input = toolBlock.input as { weeks?: unknown };
+  if (!Array.isArray(input.weeks)) return [];
+  return input.weeks as UploadedPlanWeek[];
 }
 
 async function extractTextFromImage(base64Image: string): Promise<string> {

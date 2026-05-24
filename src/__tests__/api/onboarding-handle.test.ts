@@ -506,3 +506,124 @@ describe("POST /api/onboarding/handle — awaiting_payment step", () => {
     expect(sendSMS).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// current_week seeded from external_plan_description at [READY]
+// ---------------------------------------------------------------------------
+describe("POST /api/onboarding/handle — current_week seeded from external_plan_description", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Drains the microtask + macrotask queue so async work started by `void fn()`
+  // inside after() has a chance to complete before assertions run.
+  async function flushAsync() {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  function buildSetup(externalPlanDescription: string | null) {
+    // trackable training_state chain so we can inspect upsert payloads
+    const tsChain = chain({ data: null, error: null });
+    const stateUpserts: Array<Record<string, unknown>> = [];
+    (tsChain.upsert as ReturnType<typeof vi.fn>).mockImplementation(
+      (payload: Record<string, unknown>) => {
+        stateUpserts.push(payload);
+        return tsChain;
+      }
+    );
+
+    const userData = onboardingUser({
+      onboarding_data: {
+        goal: "half_marathon",
+        training_days: ["tuesday", "thursday", "saturday"],
+        has_existing_plan: externalPlanDescription !== null,
+        wants_plan: externalPlanDescription === null,
+        strava_connected: true, // required to pass the Strava gate before completeOnboarding
+        ...(externalPlanDescription ? { external_plan_description: externalPlanDescription } : {}),
+      },
+    });
+
+    const counters: Record<string, number> = {};
+    const tables: Record<string, { data: unknown; error: unknown } | Array<{ data: unknown; error: unknown }>> = {
+      users: [
+        { data: userData, error: null },
+        // fresh user fetch inside completeOnboarding
+        { data: { onboarding_data: userData.onboarding_data }, error: null },
+        // billing check
+        { data: { billing_enabled: false, reverse_trial_enabled: false, dashboard_token: "tok-abc", phone_number: "+12025551234" }, error: null },
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null },
+      races: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    };
+
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "training_state") return tsChain;
+      const def = tables[table];
+      if (!def) return chain({ data: null, error: null });
+      if (Array.isArray(def)) {
+        const idx = counters[table] ?? 0;
+        counters[table] = idx + 1;
+        return chain(def[idx] ?? { data: null, error: null });
+      }
+      return chain(def);
+    });
+
+    return { stateUpserts };
+  }
+
+  it("seeds current_week: 6 when external_plan_description contains 'week 6'", async () => {
+    const { stateUpserts } = buildSetup("Runna 16-week HM plan, week 6, ~35mi/week");
+
+    mockToolResponse("save_training_fields", {
+      name: "Jake",
+      goal: "half_marathon",
+      training_days: ["tuesday", "thursday", "saturday"],
+      timezone: "America/New_York",
+    });
+    mockLLMResponse("Let's go! I'll work alongside your Runna plan.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "yes, week 6" }));
+    await flushAsync();
+
+    const stateWrite = stateUpserts.find(u => u.current_week != null);
+    expect(stateWrite?.current_week).toBe(6);
+  });
+
+  it("defaults to current_week: 1 when external_plan_description has no week number", async () => {
+    const { stateUpserts } = buildSetup(null);
+
+    mockToolResponse("save_training_fields", {
+      name: "Jake",
+      goal: "half_marathon",
+      training_days: ["tuesday", "thursday", "saturday"],
+      timezone: "America/New_York",
+    });
+    mockLLMResponse("Great, I'll build you a plan from scratch!\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "starting from the beginning" }));
+    await flushAsync();
+
+    const stateWrite = stateUpserts.find(u => u.current_week != null);
+    expect(stateWrite?.current_week).toBe(1);
+  });
+
+  it("parses week number case-insensitively ('Week 12')", async () => {
+    const { stateUpserts } = buildSetup("Nike Run Club plan, Week 12 of 18");
+
+    mockToolResponse("save_training_fields", {
+      name: "Jake",
+      goal: "marathon",
+      training_days: ["monday", "wednesday", "friday", "sunday"],
+      timezone: "America/Chicago",
+    });
+    mockLLMResponse("Perfect — I'll work alongside your Nike plan.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "yes, week 12" }));
+    await flushAsync();
+
+    const stateWrite = stateUpserts.find(u => u.current_week != null);
+    expect(stateWrite?.current_week).toBe(12);
+  });
+});

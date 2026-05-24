@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { computePhaseForPlan } from "@/lib/training-plan";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { computePhaseForPlan, computeWeekSessions, type UploadedPlanWeek } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -153,5 +153,110 @@ describe("fixKeyWorkoutMath", () => {
     const kw = "Tempo 2km (1km WU + 1.5km @ threshold + 1km CD)";
     const result = fixKeyWorkoutMath(kw, "km");
     expect(result).toBe("Tempo 3.5km (1km WU + 1.5km @ threshold + 1km CD)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeWeekSessions
+// ---------------------------------------------------------------------------
+describe("computeWeekSessions", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Pin system time to Wednesday 2026-05-27 so week dates are deterministic.
+  // Week starts Mon 5/25, ends Sun 5/31.
+  function pinToWednesday() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00Z")); // Wednesday UTC
+  }
+
+  const sampleWeeks: UploadedPlanWeek[] = [
+    {
+      week_number: 1,
+      sessions: [
+        { day: "Mon", label: "Rest" },
+        { day: "Tue", label: "Easy 6mi" },
+        { day: "Wed", label: "Tempo 8mi (2mi WU + 4mi @ 7:45/mi + 2mi CD)" },
+        { day: "Thu", label: "Easy 5mi" },
+        { day: "Fri", label: "Rest" },
+        { day: "Sat", label: "Long run 14mi" },
+        { day: "Sun", label: "Easy 4mi recovery" },
+      ],
+    },
+    {
+      week_number: 2,
+      sessions: [
+        { day: "Tue", label: "Easy 7mi" },
+        { day: "Thu", label: "Intervals 6mi" },
+        { day: "Sat", label: "Long run 16mi" },
+      ],
+    },
+  ];
+
+  it("returns correct M/D dates for each day of the week", () => {
+    pinToWednesday();
+    const result = computeWeekSessions(sampleWeeks, 1, "UTC");
+
+    expect(result).toHaveLength(7);
+    expect(result.find(s => s.day === "Mon")?.date).toBe("5/25");
+    expect(result.find(s => s.day === "Tue")?.date).toBe("5/26");
+    expect(result.find(s => s.day === "Wed")?.date).toBe("5/27");
+    expect(result.find(s => s.day === "Thu")?.date).toBe("5/28");
+    expect(result.find(s => s.day === "Fri")?.date).toBe("5/29");
+    expect(result.find(s => s.day === "Sat")?.date).toBe("5/30");
+    expect(result.find(s => s.day === "Sun")?.date).toBe("5/31");
+  });
+
+  it("preserves session labels unchanged", () => {
+    pinToWednesday();
+    const result = computeWeekSessions(sampleWeeks, 1, "UTC");
+
+    expect(result.find(s => s.day === "Wed")?.label).toBe(
+      "Tempo 8mi (2mi WU + 4mi @ 7:45/mi + 2mi CD)"
+    );
+  });
+
+  it("returns only the sessions for the requested week", () => {
+    pinToWednesday();
+    const result = computeWeekSessions(sampleWeeks, 2, "UTC");
+
+    expect(result).toHaveLength(3);
+    expect(result.map(s => s.day)).toEqual(["Tue", "Thu", "Sat"]);
+  });
+
+  it("returns [] when week_number is not found", () => {
+    pinToWednesday();
+    expect(computeWeekSessions(sampleWeeks, 99, "UTC")).toEqual([]);
+  });
+
+  it("returns [] for empty allWeeks array", () => {
+    pinToWednesday();
+    expect(computeWeekSessions([], 1, "UTC")).toEqual([]);
+  });
+
+  it("computes correct Monday when today is Sunday", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-31T12:00:00Z")); // Sunday
+    const result = computeWeekSessions(sampleWeeks, 1, "UTC");
+    // Monday of the week containing Sun 5/31 is Mon 5/25
+    expect(result.find(s => s.day === "Mon")?.date).toBe("5/25");
+    expect(result.find(s => s.day === "Sun")?.date).toBe("5/31");
+  });
+
+  it("computes correct Monday when today is Monday", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-25T12:00:00Z")); // Monday
+    const result = computeWeekSessions(sampleWeeks, 1, "UTC");
+    expect(result.find(s => s.day === "Mon")?.date).toBe("5/25");
+  });
+
+  it("handles month boundary correctly (Mon in one month, Sun in next)", () => {
+    vi.useFakeTimers();
+    // Wednesday 2026-06-03 → week is Mon 6/1 – Sun 6/7
+    vi.setSystemTime(new Date("2026-06-03T12:00:00Z"));
+    const result = computeWeekSessions(sampleWeeks, 1, "UTC");
+    expect(result.find(s => s.day === "Mon")?.date).toBe("6/1");
+    expect(result.find(s => s.day === "Sun")?.date).toBe("6/7");
   });
 });
