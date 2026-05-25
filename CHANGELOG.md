@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-24 — Stronger specificity rules for Sunday weekly recap
+
+**Type:** Improvement
+**Reported by:** Jake (user feedback on their own recap)
+**User feedback:** "example of what I just got that I think could be more specific: Your pace continues to improve. This week you logged 41.6 miles across 6 runs, and your pace has been tackling elevation smoothly. Watch your load, as this week's mileage is 18% above your recent weekly average of 35.1 miles. Keeping an eye on your leg recovery is crucial, especially after pushing distances and vert recently. Next week, aim to maintain this progress safely."
+**Root cause:** The recap prompt had CITE THE NUMBER and LONGITUDINAL SIGNALS rules, but lacked a "WHAT GOOD LOOKS LIKE" section anchoring expected specificity with concrete examples — so Claude would satisfy the rules technically but still produce vague improvement language instead of real coaching observations.
+**Fix / Change:** Added a WHAT GOOD LOOKS LIKE block with three full examples showing the number→meaning→response pattern (high-mileage week with aerobic efficiency numbers, load-spike intervention with ACWR and specific action, quality session recap with actual pace comparison). Also added explicit "do not" guidance to CITE THE NUMBER for easy pace, elevation, and load warnings, requiring actual values rather than qualitative improvement claims.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-05-24 — Add 4 post-run eval fixtures for new coaching behaviors
 
 **Type:** Infra / Eval

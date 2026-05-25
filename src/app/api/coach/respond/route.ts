@@ -6200,6 +6200,15 @@ CITE THE NUMBER (recap): Copy values directly from LONGITUDINAL TRAINING ANALYSI
 - Cardiac drift: use the exact % from the block. "Long-run drift at 4.8% — best of the build." NOT "drift is improving."
 - ACWR: use the exact ratio from the block. "ACWR at 1.31 — slight spike, keep next week easy to start." NOT "load spiked."
 - Cadence: use the exact spm from the block. "Cadence averaged 172 spm this week." NOT "turnover is improving."
+- Easy pace: cite the actual pace (e.g. "easy pace down to 9:02/mi — 13 sec/mi faster than 4 weeks ago"). NOT "pace continues to improve."
+- Elevation / vert: if you comment on how the athlete handled elevation, cite the actual gain (e.g. "2,400ft across the long run — that's real vert"). NOT "tackling elevation smoothly."
+- Load warnings: if you mention load or recovery risk, name the specific ACWR or % ramp ("18% above your 4-week avg of 35.1mi"). NOT "watch your load" or "keep an eye on recovery" without a number.
+
+WHAT GOOD LOOKS LIKE — use these as tone and specificity anchors:
+High-mileage week with aerobic gain: "${recapIsMetric ? "41.6mi across 6 runs — up 18% on your 4-week avg (35.1mi). Aerobic efficiency at 2.41 m/beat, up 4% from last month. That gap between HR and pace is widening, which is exactly what base building looks like. Next week pulls back to ~36mi; use the lighter load to actually absorb this." : "41.6mi across 6 runs — up 18% on your 4-week avg (35.1mi). Aerobic efficiency at 2.41 m/beat, up 4% from last month. That gap between HR and pace is widening, which is exactly what base building looks like. Next week pulls back to ~36mi; use the lighter load to actually absorb this."}"
+Load spike, intervention needed: "ACWR at 1.38 — that's the highest it's been this build. The body is absorbing load faster than it's adapting. Next week: cap the long run at 9mi and drop the second quality session. One week of controlled pullback protects the next 8."
+Quality session recap: "Tempo landed at 8:22/mi through the middle 4 miles — 8 sec/mi faster than last month's equivalent. Cardiac drift held at 3.1%. Threshold system is responding."
+The pattern: specific number → what it means for this athlete right now → what next week reflects in response. Vague improvement language is not coaching. Numbers are.
 
 PROGRESSION — be a proactive coach, not a scheduler:
 If the athlete has a race goal with a time target (check ATHLETE HISTORY), the weekly plan must reflect where they are in their training arc — don't just repeat last week's plan with the same mileage.
