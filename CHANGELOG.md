@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-24 — Wrist HR artifact detection and softer HR language when data quality is uncertain
+
+**Type:** Improvement
+**Reported by:** Internal / product direction
+**User feedback:** N/A
+**Root cause:** Strava doesn't expose whether HR came from a wrist optical sensor or chest strap. Wrist sensors can produce artifact spikes (contact loss, motion interference) that inflate the max HR reading and distort cardiac drift calculations. The coaching prompt previously used HR data with equal confidence regardless of data quality.
+**Fix / Change:** Added a server-side artifact risk heuristic: if max_heartrate / average_heartrate > 1.45 on a non-quality-session run (where a high ratio is physiologically normal), the activity is flagged as having potential HR artifact risk. When the flag fires, a DATA AVAILABILITY GUARD is injected instructing Dean to use effort language rather than specific bpm/zone labels, and to caveat cardiac drift as directional only. A general wrist HR note was also added to the HR metric section so Dean knows to soften language and defer to chest strap confirmation when the athlete mentions it.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-05-24 — Richer metric explanations for intermediate athletes across post-run, recap, and HR zones
+
+**Type:** Improvement
+**Reported by:** Internal / product direction
+**User feedback:** N/A
+**Root cause:** Metrics were surfaced as numbers or zone labels without consistently explaining what they mean for training approach. HR zones were named (Z2, Z3) but not described in terms of what each zone builds or costs. Post-run had 7 pick-one options with no structure; intermediate athletes who don't know what "cardiac decoupling" or "m/beat" means would find the feedback opaque.
+**Fix / Change:** Four targeted changes: (1) Reorganized post-run "PICK ONE METRIC" into 5 named core metrics (Training Load, Heart Rate, Aerobic Efficiency, Pacing/Execution, Cadence) with explicit "what this means for training" requirements for every metric, especially HR. (2) Added training-adaptation purpose to each HR zone in both the LTHR-based and fallback zone blocks — Z2 explains why easy miles there, Z3 explains the gray zone trap, etc. (3) Aerobic efficiency and cardiac drift blocks now require the plain-language translation ("your heart is working 6% less to hold the same pace") not just the number. (4) Weekly recap longitudinal signals updated to require the same number + meaning standard. All metric examples rewritten to show what good looks like for an intermediate runner.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/hr-zones.ts`
+
 ## 2026-05-24 — Stronger specificity rules for Sunday weekly recap
 
 **Type:** Improvement

@@ -1262,10 +1262,11 @@ Cardiac decoupling = % drift in efficiency from first to second half of run — 
 ${rows}${trendNote}
 
 Use this data to:
-- Proactively note when efficiency is trending up ("your aerobic economy has improved noticeably over the last few weeks")
-- Flag when decoupling has been consistently high across multiple runs (a sign of accumulated fatigue, not just one hard day)
-- Explain what these metrics mean in plain English when the athlete asks — no jargon
-- If efficiency is falling AND decoupling is rising across recent runs, suggest the athlete consider an easier week before adding more load`;
+- When efficiency is trending up, always translate it for the athlete — don't just name the trend. Example: "Aerobic efficiency up 6% — your heart is working 6% less to hold the same pace, which is exactly what base training builds." Never say "efficiency is improving" without the number and the plain-language meaning.
+- When citing cardiac drift, always give the % AND explain what it means in plain English. Examples: "4.2% drift — your heart held steady the whole run, which means your aerobic system matched the demand perfectly." / "11% drift — your heart was working noticeably harder in the second half, which means the run pushed slightly beyond your aerobic ceiling. Next easy run, aim to keep HR steady throughout." Never say "drift was low/high" without both the number and its meaning.
+- Flag when decoupling has been consistently high across multiple runs (a sign of accumulated fatigue, not just one hard day): "Drift has been averaging 8–12% across your last 4 runs — that pattern usually means your aerobic system is a step behind the current load."
+- If efficiency is falling AND decoupling is rising across recent runs, suggest the athlete consider an easier week before adding more load
+- When the athlete asks what these metrics mean, explain in plain English: aerobic efficiency = "how much pace you get per heartbeat"; cardiac drift = "how much harder your heart had to work to hold the same pace in the second half of the run"`;
     }
   }
 
@@ -4644,9 +4645,15 @@ WHEN PACES ARE TBD (no stored paces, VDOT unknown): If the athlete has recent St
 
 ${lthrData
   ? buildHRZoneContext(lthrData.lthr, lthrData.source, lthrData.confidence)
-  : `HEART RATE ZONES — use when HR data is available: No LTHR has been established yet (no qualifying race effort in recent history, or LTHR confidence is too low to trust). Zones are estimated from observed max HR in their Strava activity data (race peaks preferred, then workout peaks, then all-runs — with artifact filtering). Intensity thresholds based on % of estimated max HR: Easy (Z1–Z2) = avg HR < 75% max, Moderate (Z3 gray zone) = 75–85%, Hard (Z4–Z5) = >85%.
+  : `HEART RATE ZONES — use when HR data is available: No LTHR has been established yet (no qualifying race effort in recent history, or LTHR confidence is too low to trust). Zones are estimated from observed max HR in their Strava activity data (race peaks preferred, then workout peaks, then all-runs — with artifact filtering). Intensity thresholds based on % of estimated max HR:
+- Z1 (<60% max): very easy, recovery — active rest only
+- Z2 (60–75% max): easy aerobic base zone — THIS is where aerobic fitness is built; fat burning, cardiac efficiency, endurance foundation; most easy runs should be here; conversational pace
+- Z3 (75–85% max): gray zone — comfortably hard; above aerobic threshold but below lactate threshold; too hard to recover well, not hard enough to develop race-pace fitness; the zone most athletes drift into without realizing it
+- Z4–Z5 (>85% max): threshold and above — appropriate for quality sessions only; comfortably hard to near-maximal
 
-<rule>ZONE-NAMING UNCERTAINTY: Because the max HR estimate is derived from observed activity data and not a calibrated test, prefer EFFORT LANGUAGE over specific zone numbers when discussing a single run. Say "upper aerobic effort", "comfortably hard", "moderate / gray-zone", or "near-threshold" rather than "Zone 2" / "Zone 3" / "Zone 4". Only name a specific zone number when the avg HR is clearly inside that zone with margin (e.g. ≥5 bpm from the boundary). When close to a boundary (within ~5 bpm), describe the run as straddling two zones (e.g. "right at the Z2/Z3 boundary") rather than picking one. A short race effort would sharpen the zones — if it comes up naturally, mention this once; do not bring it up unprompted on every post-run message.</rule>
+When explaining zones to an athlete, always pair the bpm with the plain-language meaning: "Your HR averaged 148 — that's in the gray zone (Z3). That's above easy effort but not hard enough to build race speed, which means next easy run we want to pull it down below ~[Z2 ceiling] bpm." Never tell an athlete just their zone number without explaining what it means for their training.
+
+<rule>ZONE-NAMING UNCERTAINTY: Because the max HR estimate is derived from observed activity data and not a calibrated test, prefer EFFORT LANGUAGE over specific zone numbers when discussing a single run. Say "upper aerobic effort", "gray zone", "comfortably hard", or "near-threshold" rather than "Zone 2" / "Zone 3" / "Zone 4". Only name a specific zone number when the avg HR is clearly inside that zone with margin (e.g. ≥5 bpm from the boundary). When close to a boundary (within ~5 bpm), describe the run as straddling two zones (e.g. "right at the easy/gray-zone boundary") rather than picking one. A short race effort would sharpen the zones — if it comes up naturally, mention this once; do not bring it up unprompted on every post-run message.</rule>
 
 Use these percentages INTERNALLY to compute absolute bpm targets — never state raw percentages to the athlete (e.g. never say "50-65% of your max" or "75% of max HR"). If HEART RATE appears in the activity summary, compute the bpm ceiling from observed data and state the absolute bpm value — e.g. if estimated max is ~195 bpm, easy effort is below ~145 bpm. If the athlete asks what HR to target for cross-training (Stairmaster, bike, etc.), anchor the answer to their actual easy-run average HR from recent activities — that is their Zone 2 reference point. Append a bpm target in parens on easy run session lines when it adds value — e.g. "Easy 6mi @ 9:30-10:00/mi (~140 bpm)". Only do this when HR data is present in the summary. If no HR data, use effort language (conversational, comfortably hard) rather than bpm targets.`}
 
@@ -5612,6 +5619,15 @@ function buildUserMessage(
       // JSON and will cite (or report availability of) values it finds there even if instructed not to.
       const hasHR = !!(activityData?.average_heartrate != null);
       const hasWatts = !!((activityData as Record<string, unknown> | null)?.average_watts != null);
+      // Wrist HR artifact risk: max/avg ratio > 1.45 on non-race activities is a reliable
+      // signal that optical HR produced a spike (momentary dropout, poor contact, etc.).
+      // Race efforts and quality sessions naturally have a higher ratio, so we only flag
+      // easy/unknown workout types. We can't detect wrist vs chest strap from Strava's API.
+      const maxHR = hasHR ? (activityData as Record<string, unknown>)?.max_heartrate as number | null : null;
+      const avgHR = hasHR ? activityData?.average_heartrate as number | null : null;
+      const isQualityWorkout = (activityData?.workout_type as number | null) === 2 || (activityData?.workout_type as number | null) === 3;
+      const hrArtifactRisk = hasHR && maxHR != null && avgHR != null && avgHR > 100 && !isQualityWorkout
+        && (maxHR / avgHR) > 1.45;
       // Cadence sanity check. Strava stores average_cadence inconsistently across devices —
       // some report per-foot (~80–100), some report total spm (~160–200). Compute the
       // implied total and only trust it if it lands in a plausible running range.
@@ -5729,6 +5745,9 @@ function buildUserMessage(
       if (hasHR) {
         dataGuards.push("The `max_heartrate` field in the activity JSON is this run's single-activity peak reading, NOT the athlete's physiological maximum heart rate. Do NOT use it to estimate or state the athlete's max HR (e.g. do NOT say 'your max is around X based on today's peak'). If you need to reference HR zones, describe them in relative terms (e.g. 'zone 4-5', 'high aerobic effort') without asserting a specific max HR figure.");
       }
+      if (hrArtifactRisk) {
+        dataGuards.push(`HR ARTIFACT RISK: The max HR (${maxHR} bpm) is unusually high relative to average HR (${avgHR} bpm) — ratio ${(maxHR! / avgHR!).toFixed(2)}x. This pattern is characteristic of wrist optical HR sensor spikes (momentary contact loss or high-cadence artifacts). Strava does not tell us whether a chest strap or wrist sensor was used. Treat HR data with appropriate caution: (1) Use soft language for zone analysis ("your HR was in the easy range" not "you were in Z2"); (2) Avoid citing cardiac drift as a precise signal — it may be distorted by the spike; (3) Do NOT comment on the high max HR — it's noise, not a meaningful peak. If the athlete asks about HR accuracy, explain that wrist sensors can be inconsistent and a chest strap would give more reliable data for zone and drift analysis.`);
+      }
       // splits_standard gives one split per mile; for metric users we output per-km fields.
       // This guard catches legacy activities with km-based splits stored before splits_standard.
       if (!isMetricUser && hasSplits && runDistanceMiles != null && splitCount > Math.ceil(runDistanceMiles) + 1) {
@@ -5811,14 +5830,33 @@ ${nonObviousWins.map(w => `- ${w}`).join("\n")}
   ? `RECENT INSIGHTS YOU'VE ALREADY USED — DO NOT REPEAT THESE THIS TURN:
 ${[...new Set(recentPostRunInsights)].map(s => `- ${s}`).join("\n")}
 Pick a DIFFERENT lens from the menu below. If the only available lens for this run was already used recently, surface a non-obvious finding (YTD milestone, route comparison, week-over-week pace-at-HR change, first-time-this-month effort) instead of repeating. The athlete should never feel like they're getting the same coaching note twice.\n\n`
-  : ""}PICK ONE METRIC (first with data wins):
-1. Cadence — stored as steps/foot; multiply by 2 for total spm. <170: flag overstriding, suggest "shorter quicker stride." 170–180: affirm. >180: only note if remarkable (e.g. held through heavy fatigue). On trail: note if it dipped on climbs vs held on flats — that distinction is worth saying.
-2. Cardiac drift (cardiac_decoupling_pct in activity JSON) — always translate: <5% = "aerobic system held"; 5–10% = "some drift, normal for longer or warmer efforts"; >10% = "signal to back off next easy run." Cite the exact % alongside the translation. If not in activity JSON, skip entirely.
-3. Aerobic efficiency trend — cite exact m/beat + % change from LONGITUDINAL block. Only when multi-week history exists.
-4. HR zone (Z2 ceiling = 75% of estimated max HR) — affirm Z1/Z2; flag Z3. HR determines the zone, not pace: slow pace at Z3 is still moderate; fast pace at Z2 is still easy. If using zone affirmation, anchor it to another data point (drift, cadence, week context) and vary the angle run over run.
-5. Pacing / GAP — prefer grade-adjusted on hilly or trail runs. Compare to prescribed pace if this matches a quality session.
-6. Best efforts / course PR (if flagged in data).
-7. Week-over-week: same run type, pace/HR trend (always available).
+  : ""}5 CORE METRICS — pick the most relevant for this run (don't use the same lens two runs in a row):
+
+1. TRAINING LOAD — check first; overrides other metrics if flagging
+   When to surface: ACWR >1.3 or weekly mileage >10% above 4-week avg. Cite the exact ratio and name the implication plainly: "ACWR at 1.38 — that's a 38% load spike. The next 2 easy days matter more than the next workout."
+
+2. HEART RATE — the most important signal for whether easy runs are truly easy. Treat HR zone and cardiac drift as one lens; pick the most useful for this run.
+   WRIST HR NOTE: Strava doesn't tell us if HR came from a wrist sensor or chest strap. Most athletes use wrist optical sensors, which are adequate for zone awareness but can produce artifacts (contact loss, motion interference). If DATA AVAILABILITY GUARD above flagged HR artifact risk, switch to effort language ("ran at an easy aerobic effort") rather than specific bpm or zone labels — don't say "your HR was in Z2" when the data may be noisy. If no artifact flag, use HR normally. If the athlete mentions using a chest strap, note that their data is more reliable.
+   a) HR zone (use bpm ceiling from HEART RATE ZONES block, never raw percentages):
+      - Z1/Z2 (easy, aerobic base): Affirm AND explain what it builds — never just name the zone. "HR held at 138 — that's your aerobic base zone, where your body is building the engine for everything else. This is exactly what easy miles are for." Vary the angle across consecutive runs; don't give the same Z2 affirmation every time.
+      - Z3 (gray zone, moderate): Flag clearly with plain-language consequence — "HR averaged in the gray zone (around [bpm]). That's above easy effort but not hard enough to build race-pace fitness — it's the zone most athletes drift into without realizing it. Next easy run, aim to keep HR below [Z2 ceiling] bpm to stay in true base-building territory."
+      - Z4/Z5 (threshold/near-max): Appropriate for quality sessions — affirm if prescribed, flag if it was supposed to be easy.
+   b) Cardiac drift (cardiac_decoupling_pct in activity JSON):
+      Always cite the exact % AND translate it to plain English — never state the number without its meaning. Skip entirely if not in activity JSON. If HR artifact risk was flagged in DATA AVAILABILITY GUARD, add a brief caveat — "drift numbers can be affected by wrist sensor artifacts, so treat this as directional."
+      - <5%: "X% drift — your heart held steady the whole [N] miles. That means your aerobic system matched the demand, which is exactly what you want on an easy/long run."
+      - 5–10%: "X% drift — your HR worked progressively harder through the run. Normal for [longer distance / heat], and means you were near the edge of your aerobic ceiling by the end."
+      - >10%: "X% drift — your heart was working noticeably harder in the second half. The run pushed a bit beyond your aerobic ceiling. Nothing alarming, but it's worth easing off on the next easy run and letting the system reset."
+
+3. AEROBIC EFFICIENCY (pace-at-HR trend) — the best long-term fitness signal
+   Only use when multi-week history exists (≥3 comparable runs). Cite exact m/beat + % change from LONGITUDINAL block. Always translate: "Aerobic efficiency up 6% — your heart is working 6% less to hold the same pace. That's what base training builds." Or: "Efficiency dipped this week — your pace needed more HR to hold, which usually signals accumulated fatigue rather than fitness loss."
+
+4. PACING / EXECUTION — did you run the right effort?
+   Pace vs plan (if quality session), split pattern, grade-adjusted pace on hilly/trail. Never give a bare number — say what it means: "8:24/mi through the tempo — 6 seconds under target, which is landing right at lactate threshold where it needs to be."
+
+5. CADENCE — running economy; only surface when flagged or notable
+   <170 spm: flag with plain-language reason — "164 spm — a shorter, quicker stride reduces the braking force each footstrike creates, which is less energy wasted per mile. Try focusing on landing under your hips." 170–180: affirm only when it adds value (held through fatigue, difficult terrain). On trail: note if it dipped on climbs vs held on flats.
+
+BEST EFFORTS / COURSE PRs — use as the primary lens when flagged in data (supersedes the 5 above).
 
 GOAL LENS:
 - trail / mountain: elevation load (vert/mi vs race demands), GAP execution, time-on-feet
@@ -6187,13 +6225,14 @@ If "WHAT YOU'RE WATCHING" appears under ATHLETE HISTORY, the first text must ref
 
 LONGITUDINAL SIGNALS — REQUIRED IN THE FIRST TEXT:
 If LONGITUDINAL TRAINING ANALYSIS is present above, your first text MUST include one synthesized week-over-week or multi-week observation — not just this-week mileage. Pick the most actionable signal from this menu:
-- Load: week-over-week mileage % change ("up 12% on last week"), 4-week trend direction (building / steady / declining)
-- Aerobic efficiency: pace-at-HR trend across the last 6+ weeks ("your easy pace at the same HR is ~10s/mi quicker than 6 weeks ago — base work is paying off")
-- Cardiac drift: improving / worsening on long runs
+- Load: week-over-week mileage % change + what it means ("up 12% on last week — good build, but next week should level off before adding again")
+- Aerobic efficiency: pace-at-HR trend — always translate: "Aerobic efficiency up 4% — your heart is working 4% less to hold the same pace, which is exactly what base training builds" (not just "efficiency is improving")
+- Cardiac drift: improving / worsening on long runs — always state % + meaning: "Long-run drift at 4.8% — your aerobic system held steady through the whole long run, which means the base is solid"
+- Heart rate trend: if easy-run HR is trending down at the same pace, surface it: "Easy pace held the same but HR dropped 5 bpm — your aerobic system is adapting"
 - Long run progression: stagnating (4+ weeks no growth) or jumping (>25%)
-- Intensity distribution: zone-3 trap if flagged
-- Cadence: only if flagged low
-Pick ONE — don't list multiple. Translate the number into what it means for the athlete and what the next week reflects in response. If LONGITUDINAL TRAINING ANALYSIS is empty (low data), skip this and recap from this week's runs only.
+- Intensity distribution: zone-3 trap if flagged — explain plainly: "A lot of this week's miles landed in the gray zone (Z3) — that's the effort level that's too hard to recover well from but not hard enough to build race-pace fitness. Next week: slow down on easy days so you actually recover"
+- Cadence: only if flagged low, with plain-language fix: "Cadence averaging 164 spm — a quicker, shorter stride would make easy miles more efficient"
+Pick ONE — don't list multiple. Every metric must include both the number AND what it means for this athlete's training — a number without context is not coaching. If LONGITUDINAL TRAINING ANALYSIS is empty (low data), skip this and recap from this week's runs only.
 
 CITE THE NUMBER (recap): Copy values directly from LONGITUDINAL TRAINING ANALYSIS above — do not paraphrase, round, or infer. If a metric's value does not appear in that block, do not reference the metric at all.
 - Aerobic efficiency: use the exact m/beat and % from the block. "Aerobic efficiency up to 2.31 m/beat — 6% better than last month." NOT "pace at the same HR is improving."
