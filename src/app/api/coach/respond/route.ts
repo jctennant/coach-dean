@@ -1866,7 +1866,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       { name: "cadence", rx: /cadence|spm|stride rate/i },
       { name: "cardiac decoupling/drift", rx: /decoupling|cardiac drift|HR (?:climbed|drifted)|heart rate (?:climbed|drifted)/i },
       { name: "aerobic efficiency (pace-at-HR)", rx: /aerobic efficiency|m\/beat|pace[- ]at[- ]?HR|pace at heart rate|pace per beat/i },
-      { name: "HR zone affirmation / easy effort", rx: /Zone\s?[12]\b|\bZ[12]\b|aerobic stimulus|stayed aerobic|easy effort|truly easy|keep.*easy|easy run|aerobic base|conversational effort|aerobic system held/i },
+      { name: "HR zone affirmation / easy effort", rx: /Zone\s?[12]\b|\bZ[12]\b|aerobic stimulus|stayed aerobic|easy effort|truly easy|aerobic base|conversational effort|aerobic system held/i },
+      { name: "Z3 gray zone / run easier advice", rx: /gray zone|zone[- ]?3\b|\bZ3\b|above easy effort|keep HR below|run easier|slow(?:er)? on easy|pull.*HR down|aim.*easier|next easy run.*HR|next easy.*easier|ease off|ease back/i },
       { name: "pacing/negative split/fade", rx: /negative split|positive split|\bfade(?:d)?\b|even splits|pacing discipline|pacing was/i },
       { name: "GAP / grade-adjusted", rx: /grade[- ]adjusted|\bGAP\b/i },
       { name: "vert / elevation load", rx: /\bvert\b|elevation gain|vert per mile|climbing legs/i },
@@ -5840,6 +5841,7 @@ Pick a DIFFERENT lens from the menu below. If the only available lens for this r
    a) HR zone (use bpm ceiling from HEART RATE ZONES block, never raw percentages):
       - Z1/Z2 (easy, aerobic base): Affirm AND explain what it builds — never just name the zone. "HR held at 138 — that's your aerobic base zone, where your body is building the engine for everything else. This is exactly what easy miles are for." Vary the angle across consecutive runs; don't give the same Z2 affirmation every time.
       - Z3 (gray zone, moderate): Flag clearly with plain-language consequence — "HR averaged in the gray zone (around [bpm]). That's above easy effort but not hard enough to build race-pace fitness — it's the zone most athletes drift into without realizing it. Next easy run, aim to keep HR below [Z2 ceiling] bpm to stay in true base-building territory."
+        FREQUENCY LIMIT: If "Z3 gray zone / run easier advice" appears in RECENT INSIGHTS (above), you MUST NOT give this advice again. Pick a different lens entirely — HR has been covered. Repeating "run easier" run after run without a break is nagging, not coaching.
       - Z4/Z5 (threshold/near-max): Appropriate for quality sessions — affirm if prescribed, flag if it was supposed to be easy.
    b) Cardiac drift (cardiac_decoupling_pct in activity JSON):
       Always cite the exact % AND translate it to plain English — never state the number without its meaning. Skip entirely if not in activity JSON. If HR artifact risk was flagged in DATA AVAILABILITY GUARD, add a brief caveat — "drift numbers can be affected by wrist sensor artifacts, so treat this as directional."
@@ -5874,6 +5876,7 @@ CITE THE NUMBER: Copy values directly from LONGITUDINAL TRAINING ANALYSIS — ne
 - ACWR: exact ratio. NOT "your load spiked."
 - Cadence: exact spm. NOT "your turnover is improving."
 - Mileage trend: exact weekly figures. NOT "mileage is up."
+- "Same pace at easier HR" / "pace-at-HR improvement": you MUST cite: today's pace (MM:SS/mi), today's avg HR (bpm), the comparison baseline (avg pace MM:SS/mi at similar HR bpm across N prior runs), and the improvement delta (Xs/mi faster). If you cannot produce all four values from the LONGITUDINAL block, do NOT make this claim. Saying "you held the same pace at an easier HR" without numbers is not coaching, it's a vague pat on the back.
 
 EXECUTION CHECK: When a plan is stored and this run matches a quality session in THIS WEEK'S PLAN, compare actual vs prescribed pace explicitly. Easy day? Confirm effort matched easy pace range. When the athlete hit or beat the target, say so concretely: "Nailed the tempo — 8:24/mi against an 8:30 target. That's threshold work landing exactly where it should." A mismatch with no comment is a coaching miss. If any split shows pace >90 sec/mi faster than the run average, flag it — don't present it as a normal sprint finish.
 

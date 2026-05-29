@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-28 — Limit "run easier" advice frequency; require actual metrics for pace-at-HR claims
+
+**Type:** Improvement
+**Reported by:** User feedback
+**User feedback:** "Dean still keeps telling people to run easier — there should be a limit on the same type of message. Also getting 'you ran the same pace at an easier HR' over and over without any actual metrics. It needs actual metrics!"
+**Root cause:** (1) The Z3 gray-zone "run easier" advice was not included in the `recentPostRunInsights` anti-repetition tracking, so it could appear on every consecutive run with no limit. (2) The prompt had no enforcement rule requiring specific numbers when making pace-at-HR improvement claims — Claude would generate the observation without citing today's pace, HR, baseline average, or the delta.
+**Fix / Change:** Added `Z3 gray zone / run easier advice` as a tracked lens in `recentPostRunInsights` (with regex matching gray zone, Z3, "keep HR below", "run easier", etc.). Added a `⚠️ FREQUENCY LIMIT` warning in the Z3 prompt instruction: if this lens was already used in recent post-run messages, skip it and pick a different lens. Added a hard rule in the `CITE THE NUMBER` block: any "same pace at easier HR" / pace-at-HR-improvement claim must cite today's pace (MM:SS/mi), today's avg HR (bpm), the baseline avg pace at similar HR across N prior runs, and the improvement delta — otherwise the claim must not be made.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-05-24 — Wrist HR artifact detection and softer HR language when data quality is uncertain
 
 **Type:** Improvement
