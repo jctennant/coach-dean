@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-28 — Positive-only coaching style preference
+
+**Type:** Feature
+**Reported by:** User feedback
+**User feedback:** "I have a few folks that say 'just tell me good job and whatever else you noticed, not keep runs easier'"
+**Root cause:** No way to persistently store or respect a per-athlete preference for affirming-only feedback.
+**Fix / Change:** Added `coaching_style` column (default `'standard'`) to `training_profiles`. When an athlete says something like "just tell me good job" or "stop telling me to run easier", Dean responds warmly and appends `[POSITIVE_ONLY]` which writes `coaching_style = 'positive_only'` to the DB. Athletes in positive-only mode get data and observations but no effort corrections (Z3 gray zone, "run easier", cardiac drift "ease off" advice). Added `[STANDARD_COACHING]` tag to revert. Prompt injection block and tag detection/stripping wired throughout the post-run path.
+**Files changed:** `supabase/migrations/046_coaching_style.sql`, `src/lib/database.types.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-05-28 — Remove passive metric CTA; ban filler openers and restatement conclusions
+
+**Type:** Improvement
+**Reported by:** User feedback
+**User feedback:** "I don't like the 'reply if you want to dig into any of these numbers'. [Examples of messages with robotic openers, filler conclusions like 'keep the momentum going', 'fitness is clearly on the rise', and passive invite endings.]"
+**Root cause:** A `METRIC FOLLOW-UP HINT` was being injected for runs 2–5 telling Claude to add a passive "Reply if you want to dig into any of these numbers" bubble. Separately, no explicit rule banned the filler restatement pattern ("keep the momentum going", "fitness is clearly on the rise") or the robotic opener phrases ("Saw your run come through", "Saw the run sync through").
+**Fix / Change:** Removed the METRIC FOLLOW-UP HINT injection entirely. Added "Saw your run come through" / "Saw the run sync through" to the banned openers list. Added a rule against trailing restatement sentences — if the numbers have been cited, the conclusion is implicit; do not add a summary sentence after the insight. Also banned passive CTA endings ("Reply if you want to dig into...", "Feel free to ask for more details").
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond-metric.test.ts`
+
+---
+
 ## 2026-05-28 — Limit "run easier" advice frequency; require actual metrics for pace-at-HR claims
 
 **Type:** Improvement

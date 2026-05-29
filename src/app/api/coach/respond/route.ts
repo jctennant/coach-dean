@@ -954,6 +954,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const isMetricUser = (profile?.preferred_units as string) === "metric";
   const isAnalystMode = (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst';
   const isComplementMode = (profile as Record<string, unknown> | null)?.coaching_mode === 'complement';
+  const isPositiveOnlyStyle = (profile?.coaching_style as string | null) === 'positive_only';
 
   // Analyst mode = no training plan; skip plan-focused proactive triggers.
   if (isAnalystMode && trigger === "morning_plan") {
@@ -1919,7 +1920,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return questions;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle);
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -1952,11 +1953,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     ).length;
     if (priorPostRunCount === 0) {
       userMessage += `\n\nFIRST COACHING SESSION: This is the first run you've coached for this athlete — you've never sent them a post-run note before. Tone should feel like the start of a coaching relationship: warm, specific to their data, and ending with one question that helps you understand them better (their goals, how they felt, what they're working on). Reference their name naturally if you know it. Make this feel like the beginning of something, not a generic coaching note.`;
-    }
-    // On runs 2–5, add a one-time hint that the athlete can ask follow-up questions about the metrics.
-    // This teaches the SMS-as-coach behavior without being repetitive — only shown early in the relationship.
-    if (priorPostRunCount >= 1 && priorPostRunCount <= 4) {
-      userMessage += `\n\nMETRIC FOLLOW-UP HINT: If your response cites a specific metric (aerobic efficiency, cardiac drift, ACWR, cadence, pace trend), add one short closing line after the main message — a new bubble — inviting the athlete to ask more: e.g. "Reply if you want to dig into any of these numbers." Keep it to one sentence, no more. Do NOT add this if you did not cite a named metric in your response. Do NOT add it on every run — only include it when the metric you cited is one the athlete might want to understand better.`;
     }
   }
 
@@ -2113,6 +2109,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const wantsInjuryHold = /\[INJURY_HOLD\]/i.test(rawText);
   const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
+  const wantsPositiveOnly = /\[POSITIVE_ONLY\]/i.test(rawText);
+  const wantsStandardCoaching = /\[STANDARD_COACHING\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
   const weekOverrideMatch = rawText.match(/\[WEEK_OVERRIDE:\s*([^\]]+)\]/i);
   const tagWeekOverrideDays = weekOverrideMatch
@@ -2134,6 +2132,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .replace(/\[INJURY_HOLD\]/gi, "")
       .replace(/\[INJURY_CLEAR\]/gi, "")
       .replace(/\[LIGHTER_WEEK\]/gi, "")
+      .replace(/\[POSITIVE_ONLY\]/gi, "")
+      .replace(/\[STANDARD_COACHING\]/gi, "")
       .replace(/\[SESSION_LIST:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[SESSION_UPDATE:\s*\[[\s\S]*?\]\]/gi, "")
       .replace(/\[WEEK_OVERRIDE:[^\]]+\]/gi, "")
@@ -2544,6 +2544,18 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
             const { captureException } = await import("@sentry/nextjs");
             captureException(err, { tags: { trigger: "lighter_week_trigger" } });
           }
+        });
+      }
+      // Persist coaching style preference changes
+      if (wantsPositiveOnly || wantsStandardCoaching) {
+        const newStyle = wantsPositiveOnly ? "positive_only" : "standard";
+        after(async () => {
+          const { error } = await supabase
+            .from("training_profiles")
+            .update({ coaching_style: newStyle })
+            .eq("user_id", userId);
+          if (error) console.error(`[coach/respond] coaching_style update failed:`, error);
+          else void trackEvent(userId, "coaching_style_changed", { coaching_style: newStyle });
         });
       }
       // Persist race course data if Dean emitted a [RACE_COURSE_UPDATE] tag
@@ -4777,8 +4789,9 @@ LENGTH — this is the most important rule:
 - Do not volunteer information the athlete didn't ask for just to fill space. Answer what was asked, then stop.
 
 TONE:
-- Cut filler openers. Never start with "Great job!", "Awesome!", "That's fantastic!" — get straight to the substance. Specific, earned praise ("That negative split shows real fitness") is fine; generic openers are not.
-- No sign-offs, no "Let me know if you have questions", no "You've got this!" at the end.
+- Open directly with the observation. The first sentence should be the insight, not a preamble. "Pace-at-HR dropped 38s/mi from last month at the same effort — that's the aerobic base paying off." beats "Saw your run come through — here's what I noticed." If there's a specific, earned compliment, lead with it: "That negative split shows real discipline in the back half." Generic praise ("Great job!", "Awesome!") isn't a compliment, it's a filler.
+- End on the insight, not after it. The last sentence should be the coaching point or forward-look — not a recap of what you just said. "8:58/mi at HR 153 — your pace-at-HR has improved 38s/mi from the same effort a month ago, which means the base work is landing. Long run this week is the next test." stops at the right place. Adding "Keep the momentum going" or "Your fitness is clearly on the rise" after that just dilutes it.
+- No sign-offs or passive invitations at the end — no "Let me know if you have questions", no "You've got this!", no "Reply if you want to dig into these numbers." The message is complete. If the athlete wants to ask something, they will.
 - Sound like a knowledgeable friend, not a customer service bot.
 - Use specific numbers for paces and distances.
 - One emoji max per response. Often none is better.
@@ -5580,6 +5593,7 @@ function buildUserMessage(
   isComplementMode = false,
   mostRecentRunSplitsBlock: string | null = null,
   recentPostRunQuestions: string[] = [],
+  isPositiveOnlyStyle = false,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -5904,7 +5918,12 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - Remaining work: reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (weekly target, long run, quality session). Note what key sessions (long run, quality session) still need to happen — the athlete picks when. Do NOT reference dated sessions or prescribe a specific day.${storedPlanWeek?.key_workout_2 ? `\n- SECONDARY QUALITY SESSION this week: ${storedPlanWeek.key_workout_2} — this is a second quality session on top of the primary one. Mention it when relevant (e.g. "you still have the tempo and the short interval session this week").` : ""}
 - Do NOT mention NEXT WEEK'S PLAN in post-run feedback — that belongs in the Sunday recap.
 
-${isAnalystMode ? `\n<rule>ANALYST MODE — NO PLAN: This athlete has no training plan and does not want one. Do NOT reference any plan, weekly mileage target, upcoming sessions, or training schedule. Do NOT say anything like "remaining sessions this week", "your plan calls for", or "THIS WEEK'S PLAN". The PLAN CONSISTENCY RULES and WORKOUT STRUCTURE sections do not apply. Focus purely on analyzing this run and end with one forward-looking observation — but no session prescriptions.</rule>\n` : ""}${isComplementMode ? `\n<rule>COMPLEMENT MODE — EXTERNAL PLAN: This athlete follows their own external training plan (Runna, TrainingPeaks, coach-written, etc.). Do NOT prescribe new sessions, alter their schedule, or suggest changing their upcoming workouts. If CURRENT TRAINING STATE lists sessions, they belong to their external plan — reference them as context only. Your role is post-run analysis. The PLAN CONSISTENCY RULES still apply (don't mention next week), but do not treat Dean as the source of their plan.</rule>\n` : ""}${injuryReminder}${planDeviationFlag ? `
+${isAnalystMode ? `\n<rule>ANALYST MODE — NO PLAN: This athlete has no training plan and does not want one. Do NOT reference any plan, weekly mileage target, upcoming sessions, or training schedule. Do NOT say anything like "remaining sessions this week", "your plan calls for", or "THIS WEEK'S PLAN". The PLAN CONSISTENCY RULES and WORKOUT STRUCTURE sections do not apply. Focus purely on analyzing this run and end with one forward-looking observation — but no session prescriptions.</rule>\n` : ""}${isComplementMode ? `\n<rule>COMPLEMENT MODE — EXTERNAL PLAN: This athlete follows their own external training plan (Runna, TrainingPeaks, coach-written, etc.). Do NOT prescribe new sessions, alter their schedule, or suggest changing their upcoming workouts. If CURRENT TRAINING STATE lists sessions, they belong to their external plan — reference them as context only. Your role is post-run analysis. The PLAN CONSISTENCY RULES still apply (don't mention next week), but do not treat Dean as the source of their plan.</rule>\n` : ""}${isPositiveOnlyStyle ? `\n<rule>POSITIVE-FIRST COACHING STYLE: This athlete has asked for affirming feedback — they want to know what went well and any notable observations, not corrections about effort or pace. Follow these rules:
+- Lead with what's working. Find the genuine win in this run — fitness progress, execution, consistency, conditions handled well — and lead with it.
+- Skip effort corrections. Do NOT tell them to run easier, pull their HR down, slow down on easy days, or flag Z3/gray zone effort. If HR was elevated, skip the HR lens entirely and pick a different one.
+- Skip cardiac drift "ease off" advice. Do not suggest they ease off next run based on drift.
+- Still give real data — pace, distance, HR observations are fine as facts, just not as critiques. "8:58/mi at HR 153 — your pace-at-HR has improved 38s/mi over last month" is affirming and data-rich. "Your HR was in the gray zone, aim to keep it below 145 next run" is not.
+- If the athlete asks what [POSITIVE_ONLY] or [STANDARD_COACHING] mean, explain: "[POSITIVE_ONLY] means I'll focus on what's going well and skip the effort corrections. Say [STANDARD_COACHING] anytime to get the full analysis back."</rule>\n` : ""}${injuryReminder}${planDeviationFlag ? `
 
 ${planDeviationFlag}` : ""}${skippedNonRunSession ? `
 
@@ -5990,6 +6009,8 @@ INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — 
 When signaling [INJURY_HOLD], your response MUST include a brief cross-training week outline — 3–4 sessions using ONLY the athlete's available tools (check "cross-training tools" in their profile; if none listed, suggest walking and easy elliptical as universally accessible options). Format as a compact daily suggestion: "Mon/Wed/Fri — easy 30min bike or elliptical; Thu — optional swim if available. No high-impact activity — focus on blood flow and recovery." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week."
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
+
+COACHING STYLE PREFERENCES: When an athlete asks for more positive/affirming feedback — e.g. "just tell me good job", "stop telling me to run easier", "I don't need the corrections, just what went well", "less criticism" — acknowledge it warmly and append [POSITIVE_ONLY] at the end of your response. This updates their preference permanently. Example response: "Got it — I'll keep the feedback focused on what's going well. Your data and observations will still be there, just without the effort corrections." If they're already in positive-only mode and want the full analysis back — e.g. "go back to normal", "give me the full feedback" — append [STANDARD_COACHING] instead.
 
 LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and offer cross-training (easy bike, elliptical, swim) as an option for any days they'd otherwise skip. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
 

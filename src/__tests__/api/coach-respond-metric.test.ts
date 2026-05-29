@@ -327,10 +327,9 @@ describe("coach/respond — post_run prompt injection (priorPostRunCount)", () =
 
     const message = captureUserMessage();
     expect(message).toContain("FIRST COACHING SESSION");
-    expect(message).not.toContain("METRIC FOLLOW-UP HINT");
   });
 
-  it("injects METRIC FOLLOW-UP HINT on run #2 (1 prior post_run)", async () => {
+  it("does not inject FIRST COACHING SESSION after first run (1 prior post_run)", async () => {
     setupSupabase({
       user: baseUser(),
       profile: baseProfile(),
@@ -338,49 +337,11 @@ describe("coach/respond — post_run prompt injection (priorPostRunCount)", () =
       conversations: postRunConversations(1),
     });
 
-    // No activityId: avoids the dedup guard that would short-circuit the Claude call
     const req = mockRequest({ userId: "user-001", trigger: "post_run" });
     await POST(req);
     await flush();
 
     const message = captureUserMessage();
     expect(message).not.toContain("FIRST COACHING SESSION");
-    expect(message).toContain("METRIC FOLLOW-UP HINT");
-  });
-
-  it("injects METRIC FOLLOW-UP HINT on run #5 (4 prior post_runs, upper edge)", async () => {
-    setupSupabase({
-      user: baseUser(),
-      profile: baseProfile(),
-      state: baseState(),
-      conversations: postRunConversations(4),
-    });
-
-    // No activityId: avoids the dedup guard that would short-circuit the Claude call
-    const req = mockRequest({ userId: "user-001", trigger: "post_run" });
-    await POST(req);
-    await flush();
-
-    const message = captureUserMessage();
-    expect(message).not.toContain("FIRST COACHING SESSION");
-    expect(message).toContain("METRIC FOLLOW-UP HINT");
-  });
-
-  it("injects neither on run #6 (5 prior post_runs, outside hint window)", async () => {
-    setupSupabase({
-      user: baseUser(),
-      profile: baseProfile(),
-      state: baseState(),
-      conversations: postRunConversations(5),
-    });
-
-    // No activityId: avoids the dedup guard that would short-circuit the Claude call
-    const req = mockRequest({ userId: "user-001", trigger: "post_run" });
-    await POST(req);
-    await flush();
-
-    const message = captureUserMessage();
-    expect(message).not.toContain("FIRST COACHING SESSION");
-    expect(message).not.toContain("METRIC FOLLOW-UP HINT");
   });
 });
