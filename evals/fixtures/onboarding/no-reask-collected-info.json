@@ -33,6 +33,6 @@
   "strava_context": "STRAVA: Not connected yet.",
   "inbound_message": "Tuesday through Thursday and Saturday and Sunday.",
   "ground_truth": {
-    "notes": "Name, goal (trail_race / Cirque Series Snowbird), race date, and training days are ALL already collected. Dean must not ask about any of these again. He should acknowledge the training days and ask for the next missing thing: fitness baseline (recent race PR or current pace) and/or Strava connection. Asking 'which days work for training?' or 'what is your main race?' would be a clear failure."
+    "notes": "Name, goal (trail_race / Cirque Series Snowbird), race date, and training days are ALL already collected. Dean must not ask about any of these again.\n\nCorrect next question: per the conversation flow, after training days the next step is training context ('Are you working from a plan already, or starting fresh?') and then Strava. Asking the training context question is correct at this point in the conversation. Asking for Strava is also acceptable.\n\nFailure modes: asking 'which days work for training?' (already collected), asking 'what is your main race?' (already collected), or asking for race date (already collected). Also failure: re-introducing Dean or using greeting phrases."
   }
 }

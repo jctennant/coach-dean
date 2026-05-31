@@ -1,0 +1,25 @@
+{
+  "id": "onboarding-injury-history-race-goal",
+  "description": "User has a race goal (half marathon) but discloses significant injury history and explicitly says staying healthy is the priority. Dean must probe the injury history specifically — not just acknowledge and move on.",
+  "category": "injury_handling",
+  "is_first_response": false,
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it meant, whether to push or back off, and what's coming. What's your name, and what are you training for?"
+    },
+    {
+      "role": "user",
+      "content": "Maya. Training for a half marathon in October — but honestly finishing healthy is more important to me than time. I had a stress fracture two years ago that wiped out six months of running and I really can't go through that again."
+    }
+  ],
+  "collected": {
+    "name": "Maya",
+    "goal": "half_marathon"
+  },
+  "strava_context": "STRAVA: Not connected yet.",
+  "inbound_message": "Maya. Training for a half marathon in October — but honestly finishing healthy is more important to me than time. I had a stress fracture two years ago that wiped out six months of running and I really can't go through that again.",
+  "ground_truth": {
+    "notes": "Maya has two things in this message: a race goal (half marathon, October) and a critical injury history signal (stress fracture, 6 months lost, explicit fear of re-injury). The injury history is load-bearing for the coaching relationship and Dean must engage it specifically.\n\nCorrect behavior: Acknowledge the race goal briefly, then ask ONE specific follow-up about the injury history — e.g. 'Where was the stress fracture — shin, foot?' or 'Are you fully back to normal mileage now, or still building back since then?' or 'Have you been running consistently since it healed, or has it been on and off?' A single targeted question is correct.\n\nDo NOT just say 'noted, we'll be careful' and move on to Strava or race planning. That is the exact failure mode this fixture tests.\n\nDo NOT give generic injury-prevention advice ('we'll keep your buildup gradual'). That is not a follow-up question — it is dismissal dressed as acknowledgment.\n\nDo NOT ask multiple questions in the same response.\n\nThe correct framing is curiosity-driven: Dean needs to understand the injury in order to coach well, and that understanding starts here. The race is 5 months away — there is time for one good question.\n\nThe goal bucket is 'half_marathon'. The injury history must surface in the coaching context before [READY] can be signaled."
+  }
+}

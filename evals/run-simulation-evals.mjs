@@ -15,6 +15,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -24,11 +25,46 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures", "simulation");
 const RESULTS_DIR = path.join(__dirname, "results");
 
+const PROVIDER = process.env.AI_PROVIDER ?? "openai";
+
 const DEAN_MODEL = "claude-sonnet-4-5-20250929";
 const AGENT_MODEL = "claude-haiku-4-5-20251001";
 const JUDGE_MODEL = "claude-opus-4-5";
 
-const client = new Anthropic();
+const OPENAI_MODEL_MAP = {
+  "claude-haiku-4-5-20251001": "gpt-4o-mini",
+  "claude-sonnet-4-5-20250929": "gpt-4o",
+  "claude-sonnet-4-6": "gpt-4o",
+  "claude-opus-4-5": "gpt-4o",
+};
+
+const client = PROVIDER === "anthropic"
+  ? new Anthropic()
+  : (() => {
+      const oai = new OpenAI();
+      return {
+        messages: {
+          async create({ model, max_tokens, system, messages, tools }) {
+            const hasWebSearch = (tools ?? []).some(
+              (t) => t.type === "web_search_20250305"
+            );
+            const oaiModel = hasWebSearch ? "gpt-4o-search-preview" : (OPENAI_MODEL_MAP[model] ?? "gpt-4o");
+            const oaiMessages = [];
+            if (system) oaiMessages.push({ role: "system", content: system });
+            for (const m of messages) {
+              oaiMessages.push({ role: m.role, content: typeof m.content === "string" ? m.content : m.content });
+            }
+            const resp = await oai.chat.completions.create({
+              model: oaiModel,
+              max_tokens: Math.min(max_tokens ?? 4096, 16384),
+              messages: oaiMessages,
+            });
+            const text = resp.choices?.[0]?.message?.content ?? "";
+            return { content: [{ type: "text", text }] };
+          },
+        },
+      };
+    })();
 
 const VALID_GOAL_BUCKETS = new Set([
   "mile", "5k", "10k", "half_marathon", "marathon", "trail_race",

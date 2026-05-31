@@ -1,12 +1,12 @@
 {
   "id": "onboarding-ready-signal-no-question",
-  "description": "When Dean has all required info (name, goal, Strava, injury history, plan preference), [READY] response must not also ask an open question",
+  "description": "When Dean has all required info (name, goal, Strava, injury history), [READY] response must not also ask an open question",
   "category": "ready_signal",
   "is_first_response": false,
   "conversation_history": [
     {
       "role": "assistant",
-      "content": "Hey! I'm Coach Dean — I send you a coaching note after every run you log on Strava. What's your name, and what are you training for?"
+      "content": "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava. What's your name, and what are you training for?"
     },
     {
       "role": "user",
@@ -14,7 +14,15 @@
     },
     {
       "role": "assistant",
-      "content": "Snowbird is a serious mountain race — love it. Connect Strava so I can pull your training history automatically:\n\nhttps://coachdean.ai/api/auth/strava?userId=abc123\n\nWant Dean to add a coaching note to each activity? Use this link instead:\nhttps://coachdean.ai/api/auth/strava/write?userId=abc123"
+      "content": "Snowbird is a serious mountain race — about 8.9 miles with significant vert. Are you working from a training plan already, or starting fresh?"
+    },
+    {
+      "role": "user",
+      "content": "Starting fresh."
+    },
+    {
+      "role": "assistant",
+      "content": "Connect Strava so I can pull your training history automatically and add a coaching note after every run:\n\nhttps://coachdean.ai/api/auth/strava/write?userId=abc123\n\nI'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too."
     },
     {
       "role": "user",
@@ -27,10 +35,6 @@
     {
       "role": "user",
       "content": "No injuries, all good."
-    },
-    {
-      "role": "assistant",
-      "content": "Good to hear. One last thing — want me to build you a training plan, or would you prefer just a coaching note after each run?"
     }
   ],
   "collected": {
@@ -44,12 +48,11 @@
     "strava_connected": true,
     "injury_history": "none",
     "has_existing_plan": false,
-    "wants_plan": true,
     "timezone": "America/Denver"
   },
   "strava_context": "STRAVA: Connected. Recent avg: ~25 mi/week. ~5 runs/week. Longest run (8 weeks): 12 mi. Suggested easy pace: 9:15–9:45/mi. You can use this to set their training zones.",
-  "inbound_message": "Yeah build me a plan.",
+  "inbound_message": "No injuries, all good.",
   "ground_truth": {
-    "notes": "Dean now has everything required: name, goal (trail_race / Cirque Series Snowbird), race date, Strava connected, injury history answered, and plan preference confirmed (wants a plan). He should signal [READY] and emit [MODE:FROM_SCRATCH] at the end of his response. Crucially, if he signals [READY], he must NOT also ask a question in the same message. The correct behavior is a warm 1-2 sentence wrap-up like 'Got it — your plan will land shortly, and I'll send a coaching note after every Strava run from here on. [MODE:FROM_SCRATCH]\n[READY]'. The known failure mode: Dean asks a follow-up question AND signals [READY] in the same message — this fires the plan while the question is left unanswered."
+    "notes": "Dean now has all four required fields: name, goal (trail_race / Cirque Series Snowbird), race date, Strava connected, and injury history answered ('no injuries'). He must signal [READY] in this message. The inbound message is the injury answer — which completes the checklist. The correct behavior is a synthesis wrap-up: reflect back the race, timeline, and fitness context, then [READY] on its own line. Example: 'Got it — Snowbird in about 6 weeks, no injury history, and you're building well at 25 miles/week. First coaching note lands after your next Strava run, and I'll check in with how I'm thinking about the build shortly.\n[READY]'. Crucially, if he signals [READY], he must NOT also ask a question in the same message — no follow-ups about training days, goal time, plan structure, etc. The known failure mode: Dean asks a follow-up question AND signals [READY] in the same message."
   }
 }

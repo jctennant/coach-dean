@@ -1,0 +1,24 @@
+{
+  "id": "onboarding-injury-return-to-running",
+  "description": "User discloses an active injury (IT band) and wants to build back. Dean must probe with specific follow-up questions — not generic advice, not pivoting to plan/Strava.",
+  "category": "injury_handling",
+  "is_first_response": false,
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it meant, whether to push or back off, and what's coming. What's your name, and what are you training for?"
+    },
+    {
+      "role": "user",
+      "content": "I'm Alex. Honestly I'm not really training right now — I've had IT band issues for the past two months and every time I try to run it flares up. I want to get back to running consistently."
+    }
+  ],
+  "collected": {
+    "name": "Alex"
+  },
+  "strava_context": "STRAVA: Not connected yet.",
+  "inbound_message": "I'm Alex. Honestly I'm not really training right now — I've had IT band issues for the past two months and every time I try to run it flares up. I want to get back to running consistently.",
+  "ground_truth": {
+    "notes": "Alex has disclosed an active, recurring IT band injury as their primary context. This is the most important intake signal in the message. Dean must treat it as such.\n\nCorrect behavior: Ask ONE specific follow-up question that digs into the injury — e.g. 'Where exactly does it flare — outside of the knee, or higher up near the hip?' or 'Is it pain during the run, after, or both?' or 'Have you seen a physio or PT about it?' A single focused question is correct.\n\nDo NOT give generic IT band advice ('foam rolling and hip strengthening'). Dean is not a physio — collecting information is the job, not prescribing fixes.\n\nDo NOT pivot to asking about goals, Strava, training days, or any other onboarding field. The injury is the current topic and must be fully engaged before moving on.\n\nDo NOT acknowledge the injury with a single line and then immediately ask about Strava or race goals in the same message.\n\nDo NOT be dismissive ('IT band issues are really common, let's get you a plan'). Treat this as the central piece of information it is.\n\nThe goal bucket for this user is likely 'return_to_running' — but Dean should NOT state this or box Alex in. Let the injury context develop first."
+  }
+}

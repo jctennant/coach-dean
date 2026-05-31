@@ -13,6 +13,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -21,9 +22,33 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures/extraction");
 const RESULTS_DIR = path.join(__dirname, "results");
 
+const PROVIDER = process.env.AI_PROVIDER ?? "openai";
+
 const EXTRACTION_MODEL = "claude-haiku-4-5-20251001";
 
-const client = new Anthropic();
+const client = PROVIDER === "anthropic"
+  ? new Anthropic()
+  : (() => {
+      const oai = new OpenAI();
+      return {
+        messages: {
+          async create({ model, max_tokens, system, messages }) {
+            const oaiMessages = [];
+            if (system) oaiMessages.push({ role: "system", content: system });
+            for (const m of messages) {
+              oaiMessages.push({ role: m.role, content: typeof m.content === "string" ? m.content : m.content });
+            }
+            const resp = await oai.chat.completions.create({
+              model: model === "claude-haiku-4-5-20251001" ? "gpt-4o-mini" : "gpt-4o",
+              max_tokens: Math.min(max_tokens ?? 4096, 16384),
+              messages: oaiMessages,
+            });
+            const text = resp.choices?.[0]?.message?.content ?? "";
+            return { content: [{ type: "text", text }] };
+          },
+        },
+      };
+    })();
 
 // ─────────────────────────────────────────────
 // Exact prompt from maybeUpdatePlanSessions in route.ts
