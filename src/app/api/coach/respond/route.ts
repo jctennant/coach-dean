@@ -1016,6 +1016,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   // enough activity history accumulates for a real 6-week average.
   const weeklyMilesBaseline = ((user.onboarding_data as Record<string, unknown> | null)?.weekly_miles as number | null) ?? null;
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone) ?? weeklyMilesBaseline;
+  const coachingFocus = ((user.onboarding_data as Record<string, unknown> | null)?.coaching_focus as string | null) ?? null;
   const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null, weekMileageSoFar);
 
   // Build longitudinal analysis block for post_run and weekly_recap.
@@ -1317,7 +1318,16 @@ Use this data to:
     lthrData,
     recentActivities,
     activitiesQueryFailed
-  ) + aerobicTrendBlock + strengthRoutineBlock + (uploadedPlanContext
+  ) + aerobicTrendBlock + strengthRoutineBlock + (coachingFocus
+    ? `\n\nATHLETE COACHING FOCUS (stored from a previous conversation — use this to weight your coaching lens):
+Focus: ${coachingFocus}
+- "aerobic_base_and_zones": Athlete wants to understand and build their aerobic base. HR zone analysis, cardiac drift, and aerobic efficiency trends are welcome.
+- "pacing_and_execution": Athlete cares most about hitting prescribed paces and race execution. Prioritize pacing analysis over HR zone lectures.
+- "strength_and_form": Athlete wants to focus on strength work, running economy, and cadence. Surface these over HR zone or volume analysis.
+- "consistency": Athlete just wants to keep showing up. Celebrate consistency, avoid overthinking metrics, keep it motivational.
+- "no_zones": Athlete prefers effort-based running and doesn't want HR zone analysis. Skip zone labels and Z3 advice entirely — use pace and effort language instead.
+Apply this to bias which metric lens you pick and what advice you give proactively. When in doubt, respect what the athlete said they want.`
+    : "") + (uploadedPlanContext
     ? `\n\nATHLETE'S UPLOADED TRAINING PLAN (for reference — use this when they ask about their plan, upcoming workouts, or weekly structure; do NOT reproduce it in full; answer specific questions from it directly):\n${uploadedPlanContext}`
     : "");
 
@@ -1928,6 +1938,12 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     if (longitudinalSignals?.requiredMentions.length) {
       userMessage += `\n⚠️ REQUIRED ACKNOWLEDGMENT: The following signals from LONGITUDINAL TRAINING ANALYSIS are high-priority — you MUST address them in your response. Do not skip or omit: ${longitudinalSignals.requiredMentions.join("; ")}.`;
     }
+  }
+
+  // Coaching focus check-in: once the athlete has 3+ weeks of history and hasn't stated
+  // a coaching preference, ask naturally at the end of the weekly recap.
+  if (trigger === "weekly_recap" && !coachingFocus && (storedPlanWeek?.week_number ?? 0) >= 3) {
+    userMessage += `\n\nCOACHING FOCUS CHECK-IN: If it fits naturally (e.g. after the plan), ask the athlete what they'd most like you to focus on in your coaching. One casual sentence is enough — not clinical, not a menu: "One thing that helps me tailor this — is there one area you'd like me to pay more attention to? Like building aerobic base, hitting your paces, strength and form, or just staying consistent?" Skip this if the recap is already addressing an injury, a major training issue, or you just asked a question of this type. This only appears until they tell you — once stored, you won't see this instruction again.`;
   }
 
   // Append race predictor context to user_message prompts.
@@ -4650,7 +4666,7 @@ ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within th
 
 1. AEROBIC BASE FIRST (Lydiard / Uphill Athlete): For athletes still building their base, don't rush to intensity — build the aerobic engine patiently before adding quality work. For athletes with an established high-volume history, the base is already there; plan accordingly.
 
-2. 80/20 INTENSITY DISTRIBUTION (Fitzgerald / Seiler / Roche): ~80% of all training at genuinely easy, conversational effort. Avoid the moderate "gray zone" — it accumulates fatigue without driving meaningful adaptation. Easy runs are truly easy. Hard days are genuinely hard.
+2. 80/20 INTENSITY DISTRIBUTION (Fitzgerald / Seiler / Roche): The research-backed default is ~80% of training at easy, conversational effort. This is a guideline, not a mandate. Respect what the athlete tells you: if they say they prefer training at a comfortably hard effort, or don't want to focus on slowing down, acknowledge it and shift your coaching focus to execution, load management, or strength. The real problem to avoid is the *unintentional* gray zone — athletes who think they're running easy but are actually at a moderate effort. An athlete who deliberately chooses moderate intensity and understands it is a different situation from one who's drifting there unknowingly.
 
 3. VDOT-CALIBRATED PACING (Jack Daniels): Use the stored training paces from CURRENT TRAINING STATE — these are pre-computed from the athlete's race times using Jack Daniels' formula. Never calculate or look up VDOT yourself. Never assign arbitrary paces. Pace zones should reflect the stored values, not aspirational targets.
 
@@ -5105,6 +5121,7 @@ type ExtractedProfileData = {
   preferred_units?: "imperial" | "metric" | null;
   preferred_language?: string | null;
   strava_write_enabled?: boolean | null;
+  coaching_focus?: string | null;
 };
 
 /**
@@ -5150,8 +5167,9 @@ Extract ONLY explicitly stated NEW information:
 - Explicitly requests using miles/imperial (e.g. "use miles", "in miles please") → preferred_units: "imperial"
 - Explicitly requests Coach Dean to respond in a specific language (e.g. "speak French", "parle en français", "je veux que tu me parles en français", "respond in Spanish", "réponds en français", "Tu parles en français") → preferred_language as ISO 639-1 code ("fr" for French, "es" for Spanish, "de" for German, "pt" for Portuguese, "it" for Italian)
 - Explicitly requests to stop Coach Dean from posting notes to Strava activity descriptions (e.g. "don't post to my Strava", "stop writing to my activities", "never do it again" in context of Strava notes, "I don't want you posting on my Strava", "never post on my behalf") → strava_write_enabled: false
+- A stated coaching focus or preference — what aspect of training they want Dean to emphasize (e.g. "I want to focus on HR zones and aerobic base", "I care more about hitting my paces", "I want help with strength and form", "I just want to stay consistent", "I don't care about heart rate, I run by feel", "focus on cadence") → coaching_focus as a brief normalized string: "aerobic_base_and_zones" (HR zone work, aerobic base), "pacing_and_execution" (hitting prescribed paces, race execution), "strength_and_form" (strength work, cadence, running economy), "consistency" (just keep showing up, avoid overthinking), or "no_zones" (athlete prefers effort-based running over HR data). Only set when the athlete explicitly states a preference; not from inference.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -5201,7 +5219,8 @@ async function persistProfileUpdates(
     const hasPreferredUnits = !!(extracted.preferred_units);
     const hasPreferredLanguage = !!(extracted.preferred_language);
     const hasStravaWriteDisable = extracted.strava_write_enabled === false;
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable) return;
+    const hasCoachingFocus = !!(extracted.coaching_focus);
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable && !hasCoachingFocus) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -5356,6 +5375,10 @@ async function persistProfileUpdates(
       updatedOnboardingData.preferred_language = extracted.preferred_language;
       console.log(`[persistProfileUpdates] preferred_language updated to ${extracted.preferred_language}`);
     }
+    if (hasCoachingFocus) {
+      updatedOnboardingData.coaching_focus = extracted.coaching_focus;
+      console.log(`[persistProfileUpdates] coaching_focus updated to ${extracted.coaching_focus}`);
+    }
 
     // Write manual workout to activities table if reported.
     // Skip for Strava users — their runs come in via webhook automatically, and writing
@@ -5399,7 +5422,7 @@ async function persistProfileUpdates(
     }
 
     const userUpdate: Record<string, unknown> = {};
-    if (hasOtherNotes || hasPreferredLanguage) userUpdate.onboarding_data = updatedOnboardingData;
+    if (hasOtherNotes || hasPreferredLanguage || hasCoachingFocus) userUpdate.onboarding_data = updatedOnboardingData;
     if (hasTimezone) userUpdate.timezone = extracted.timezone;
     if (hasStravaWriteDisable) {
       userUpdate.strava_write_enabled = false;
@@ -5850,12 +5873,12 @@ Pick a DIFFERENT lens from the menu below. If the only available lens for this r
 1. TRAINING LOAD — check first; overrides other metrics if flagging
    When to surface: ACWR >1.3 or weekly mileage >10% above 4-week avg. Cite the exact ratio and name the implication plainly: "ACWR at 1.38 — that's a 38% load spike. The next 2 easy days matter more than the next workout."
 
-2. HEART RATE — the most important signal for whether easy runs are truly easy. Treat HR zone and cardiac drift as one lens; pick the most useful for this run.
-   WRIST HR NOTE: Strava doesn't tell us if HR came from a wrist sensor or chest strap. Most athletes use wrist optical sensors, which are adequate for zone awareness but can produce artifacts (contact loss, motion interference). If DATA AVAILABILITY GUARD above flagged HR artifact risk, switch to effort language ("ran at an easy aerobic effort") rather than specific bpm or zone labels — don't say "your HR was in Z2" when the data may be noisy. If no artifact flag, use HR normally. If the athlete mentions using a chest strap, note that their data is more reliable.
+2. HEART RATE — an important lens for easy runs, when data is reliable. Treat HR zone and cardiac drift as one lens; pick the most useful for this run.
+   WRIST HR NOTE: Strava doesn't tell us if HR came from a wrist sensor or chest strap. Most athletes use wrist optical sensors, which are adequate for zone awareness but can produce artifacts (contact loss, motion interference). If DATA AVAILABILITY GUARD above flagged HR artifact risk, skip zone labels and use pace-based context instead (see PACING ALTERNATIVE below). If the athlete mentions using a chest strap, HR data is more reliable and you can be more precise.
+   PACING ALTERNATIVE (use when wrist HR artifact risk was flagged, or when you'd otherwise repeat a Z3 correction): If the athlete's recent easy runs are visible in RECENT WORKOUTS, reference their typical easy-run pace instead of HR zone. Example: "This came in at 9:10/mi — your recent easy runs have averaged 9:30-9:50/mi, so a bit on the brisker side. How did it feel?" This is more actionable than wrist HR zones and doesn't require a chest strap.
    a) HR zone (use bpm ceiling from HEART RATE ZONES block, never raw percentages):
       - Z1/Z2 (easy, aerobic base): Affirm AND explain what it builds — never just name the zone. "HR held at 138 — that's your aerobic base zone, where your body is building the engine for everything else. This is exactly what easy miles are for." Vary the angle across consecutive runs; don't give the same Z2 affirmation every time.
-      - Z3 (gray zone, moderate): Flag clearly with plain-language consequence — "HR averaged in the gray zone (around [bpm]). That's above easy effort but not hard enough to build race-pace fitness — it's the zone most athletes drift into without realizing it. Next easy run, aim to keep HR below [Z2 ceiling] bpm to stay in true base-building territory."
-        FREQUENCY LIMIT: If "Z3 gray zone / run easier advice" appears in RECENT INSIGHTS (above), you MUST NOT give this advice again. Pick a different lens entirely — HR has been covered. Repeating "run easier" run after run without a break is nagging, not coaching.
+      - Z3 (gray zone, moderate): Use this lens sparingly. ONLY flag Z3 when: (a) wrist HR artifact risk was NOT flagged, AND (b) "Z3 gray zone / run easier advice" does NOT appear in RECENT INSIGHTS. When you do flag it, frame as an observation + question, not a prescription — "HR ran a bit above easy effort today (around [bpm]). Was that intentional, or just how it felt?" If the athlete responds that they prefer running at that intensity, respect it — never repeat the slow-down advice after they've acknowledged it. Do NOT say "most athletes drift into this" — it's condescending. Skip this lens if you're at risk of harping.
       - Z4/Z5 (threshold/near-max): Appropriate for quality sessions — affirm if prescribed, flag if it was supposed to be easy.
    b) Cardiac drift (cardiac_decoupling_pct in activity JSON):
       Always cite the exact % AND translate it to plain English — never state the number without its meaning. Skip entirely if not in activity JSON. If HR artifact risk was flagged in DATA AVAILABILITY GUARD, add a brief caveat — "drift numbers can be affected by wrist sensor artifacts, so treat this as directional."

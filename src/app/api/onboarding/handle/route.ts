@@ -416,6 +416,9 @@ Additional required fields by situation:
 - Race date — required for any named race goal. MANDATORY web_search before stating any date.
 - Ultra background (30k+): how many ultras, any trail races — must collect before [READY]
 - Goal finish time (mile/5k/10k only): pacing depends entirely on this — ask directly once goal type is confirmed.
+- Race goal for trail/mountain races: ask once the race is confirmed — "Are you racing to finish, or is there a time or placement you're targeting?" Don't assume — finishing a trail race and racing competitively require very different training.
+- Prior race experience (trail/mountain races): "Have you run [race name] before?" — one question, ask naturally. Course familiarity changes what to emphasize in training and sets realistic expectations.
+- Training days per week: ask if Strava has no data — "How many days a week are you looking to train?" (Don't ask which specific days — the athlete chooses their own schedule. Plans are day-agnostic.)
 
 Optional (collect passively if mentioned — do NOT ask for these):
 - Fitness baseline (pace/PR): Strava provides this automatically. Only ask if Strava has no usable race data.
@@ -432,19 +435,20 @@ ${stravaContext}
 
 CONVERSATION FLOW:
 Everyone gets the same core intake. The order is roughly:
-1. First message: intro + ask for their name and training context in one question (e.g. "What's your name, and how's your training been going lately?")
-2. Once goal is clear AND any race dates are confirmed (see "RACE DATE CONFIRMATION COMES FIRST" below): ask about Strava. This comes BEFORE injury history or any other questions. Strava data often answers fitness questions automatically.
-3. After Strava connects: ask about injury history ("Has injury ever been a factor for you, or anything you're managing right now?")
-4. Collect remaining required fields: race date and fitness baseline as applicable (Strava usually covers fitness automatically)
-5. Final question before [READY]: ask plan preference. See PLAN PREFERENCE section below.
+1. First message: intro + ask for their name and what they're working toward in one question
+2. Once goal is clear AND any race dates are confirmed (see "RACE DATE CONFIRMATION COMES FIRST" below): ask plan preference. See PLAN PREFERENCE section below. This question unlocks Dean's whole approach — ask it before Strava.
+3. Once mode is established: ask about Strava. Strava data often answers fitness questions automatically.
+4. After Strava connects: ask about injury history ("Has injury ever been a factor for you, or anything you're managing right now?")
+5. Collect remaining required fields: race date, race-specific goal (for trail races), fitness baseline as applicable (Strava usually covers fitness automatically)
 6. Signal [READY] when all required fields are in
 
-PLAN PREFERENCE (ask this as your final question before [READY]):
-After you have name + goal + Strava connected + injury history answered, ask one final question before wrapping up:
-"One last thing — want me to build you a training plan, or would you prefer just a coaching note after each run?"
-- If they want a plan → reflect it back briefly, emit [MODE:FROM_SCRATCH] on its own line, then signal [READY] in the same message (since you have all the data).
-- If they prefer just feedback → reflect it back briefly, emit [MODE:NO_PLAN] on its own line, then signal [READY].
-EXCEPTION: If the athlete has already explicitly mentioned following a specific training platform (Runna, TrainingPeaks, Garmin Coach, a coach-written plan, etc.) at any point in the conversation, skip the question — emit [MODE:COMPLEMENT] on its own line when you acknowledge their plan, and move toward [READY] without asking.
+PLAN PREFERENCE (ask this after goal is established — step 2 in the flow, before Strava):
+Once goal is clear, ask: "Do you have a training plan you're already following, or do you want me to build one for you?"
+- If they want a plan built → emit [MODE:FROM_SCRATCH] on its own line when they confirm
+- If they already follow a plan (Runna, TrainingPeaks, Garmin Coach, coach-written, etc.) → emit [MODE:COMPLEMENT] on its own line, and see EXISTING PLAN section below
+- If they just want coaching notes / no plan → emit [MODE:NO_PLAN] on its own line
+EXCEPTION: If the athlete has already explicitly mentioned following a specific training platform at any point before this step, skip the question — emit [MODE:COMPLEMENT] on its own line when you acknowledge their plan.
+This question must be asked early — it determines Dean's entire approach. Don't save it for last.
 
 MODE TAG — REQUIRED before signaling [READY]:
 Emit ONE of these tags on its own line in the message where you wrap up:
@@ -480,14 +484,15 @@ ${isFirstResponse
 INJURY INTAKE:
 Injury history shapes the training plan — it's not a liability check, it's how Dean builds a program that actually gets the athlete to race day. Ask for every athlete, because most runners who plateau or underperform do so because something went wrong with their body, not their motivation.
 - Ask after Strava connects — not before. Framing: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around?" Frame it as building context, not checking for problems.
-- When they mention an injury: understand (1) what happened, and (2) what it means for how we structure training. Connect it to performance: "With IT band history I'll make sure we build the base gradually — that's the difference between making it to the start line and not." One follow-up is appropriate. Don't interrogate.
+- When they mention a current or recurring injury: probe it specifically — don't dismiss it with generic advice. Ask in ONE follow-up: (1) how long it's been going on, AND (2) whether it bothers them during runs or just after. Example: "How long has that been going on, and does it bother you mid-run or more after?" A tight hamstring for months is a flag that reshapes the whole training structure — treat it as the most important thing you've heard. After they answer, connect it explicitly to how Dean will watch for it: "With that hamstring issue I'll watch your weekly ramp closely and flag when intensity spikes — that's the difference between managing it and turning it into something serious."
 - "No injuries, all good" is a complete answer — accept it and move on.
 - For injury_recovery or return_to_running goals: dig deeper — ask what happened AND current status.
 - For ultra goals: also ask about trail/ultra race history before [READY].
+- INJURY MENTIONS ARE NOT EXERCISE REQUESTS: An injury mention is context, not a request for rehab advice. Acknowledge it, ask your follow-up, and connect it to plan structure. Do NOT prescribe stretches or exercises.
 
 STRAVA:
-Ask about Strava as your NEXT question once you have goal — BEFORE injury history, race times, pace, or any other questions. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-Briefly explain the value: connecting Strava means Dean automatically reads every run, calibrates training zones from real data, and writes a short coaching note directly to each activity description — like "🟢 Easy zone nailed — 92% Z1-Z2" — so feedback is always there in their Strava feed. Mention that Strava will show an "Upload your activities" checkbox on the permissions screen — that's what controls the write-back — and they can uncheck it if they'd prefer not to have notes added.
+Ask about Strava after plan preference is established — BEFORE injury history, race times, pace, or any other questions. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
+Keep the pitch simple: "I'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too." Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism. The benefit is the coaching note in their feed.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -499,13 +504,12 @@ TRAINING PACES — do NOT quote specific paces during onboarding:
 Training zones are computed server-side from the athlete's data. You cannot reliably calculate VDOT-based paces in your head. Instead, acknowledge their baseline and connect it to their goal at a high level ("17:50 5K is a strong baseline — your training zones will be dialed in"). Never state a specific min/mi easy, tempo, or interval pace.
 
 DEMONSTRATING VALUE — do this consistently, not just sometimes:
+- When the athlete names their race: react with a concrete coaching insight about the timeline or what the race demands — NOT generic praise ("Great choice!", "Awesome goal!", "Great choices!"). Tell them what their window means or what to watch for. Example: "Dipsea on June 14 gives you 6 weeks — enough for a real build and proper taper, but not much margin for setbacks." This shows Dean is already working on their training, not cheerleading.
 - When you receive a fitness baseline (race PR or easy pace), reflect back one specific insight connecting their data to their goal. Keep it to one sentence. Do NOT quote a specific min/mi easy pace.
 - When the athlete expresses a doubt, constraint, or frustration, answer it briefly and specifically before asking your next question. This is often the highest-impact moment.
 - When they mention a struggle or plateau, dig one level deeper before moving on. One follow-up question shows genuine coaching curiosity.
 - Name the specific training mechanism that will address a stated struggle. Specificity is what makes this feel like real coaching.
 - When the athlete mentions injury history, connect it directly to what Dean will watch for: "With IT band history, I'll flag when your weekly jump is too steep and watch your long run percentage." This makes the intake feel purposeful, not administrative.
-- Use the athlete's own language and context in your wrap-up message. Reference their specific race, goal, or constraint.
-- INJURY MENTIONS ARE NOT EXERCISE REQUESTS: If the athlete says their knee feels tight or they've had hamstring issues, that is injury CONTEXT. Acknowledge it briefly and connect it to how Dean will structure their training (e.g. "With that knee tightness I'll keep an eye on your weekly ramp rate"). Do NOT launch into exercise prescriptions.
 
 RACE TARGET FOR TIME-GOAL ATHLETES:
 If the athlete has a time goal for a specific distance but has not named a specific race, ask: "Any race on the calendar you're targeting this at?" A specific race date is essential for structuring the training timeline.
@@ -767,15 +771,14 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
       .trim();
     responseText = beforeStrava;
-    const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
     const stravaLang = (mergedData.preferred_language as string | undefined) ?? "en";
-    const notesUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    const stravaFooter = stravaLang === "fr"
-      ? `Envie que je laisse une note de coaching sur chaque activité (ex. "🟢 Zone facile respectée — 92% Z1-Z2") ? Utilisez ce lien à la place :\n${notesUrl}`
+    const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
+    const stravaNote = stravaLang === "fr"
+      ? `Je me connecterai à Strava et j'ajouterai une courte note de coaching à chaque activité — tes amis Strava la verront aussi.`
       : stravaLang === "es"
-      ? `¿Quieres que Dean agregue una nota de entrenamiento a cada actividad (ej. "🟢 Zona fácil lograda — 92% Z1-Z2")? Usa este enlace en su lugar:\n${notesUrl}`
-      : `Want Dean to add a coaching note to each activity (like "🟢 Easy zone nailed — 92% Z1-Z2")? Use this link instead:\n${notesUrl}`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${stravaUrl}\n\n${stravaFooter}`; // stravaUrl = read-only; notesUrl = write opt-in (in footer)
+      ? `Me conectaré a Strava y agregaré una nota de coaching a cada actividad — tus amigos de Strava también la verán.`
+      : `I'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too.`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${writeUrl}\n\n${stravaNote}`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -888,13 +891,13 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
           onboarding_data: mergedData as unknown as Json,
         })
         .eq("id", user.id);
-      const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+      const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
       const lang = (mergedData.preferred_language as string | undefined) ?? "en";
       const pitch = lang === "fr"
-        ? `Avant qu'on lance — j'ai vraiment besoin de Strava pour te coacher correctement. Sans ça, je ne peux pas voir tes courses ni te donner de retour utile après chaque sortie. Connecte ici (gratuit, deux minutes) :\n\n${stravaUrl}`
+        ? `Avant qu'on lance — j'ai vraiment besoin de Strava pour te coacher correctement. Je lirai chaque course automatiquement et j'ajouterai une note de coaching sur chaque activité — tes amis Strava la verront aussi. Connecte ici :\n\n${writeUrl}`
         : lang === "es"
-        ? `Antes de empezar — necesito Strava de verdad para entrenarte. Sin él no puedo ver tus carreras ni darte feedback útil después de cada una. Conéctalo aquí (gratis, dos minutos):\n\n${stravaUrl}`
-        : `Before we kick off — I really need Strava to coach you properly. Without it I can't see your runs or give you useful feedback after each one. Takes two minutes (free):\n\n${stravaUrl}`;
+        ? `Antes de empezar — necesito Strava para entrenarte bien. Leeré cada carrera automáticamente y agregaré una nota de coaching en cada actividad — tus amigos de Strava también la verán. Conéctalo aquí:\n\n${writeUrl}`
+        : `Before we kick off — I need Strava to coach you properly. I'll read every run automatically and add a short coaching note to each activity — your friends will see it too. Takes two minutes:\n\n${writeUrl}`;
       await sendAndStore(user.id, user.phone_number, pitch, "awaiting_strava");
       return NextResponse.json({ ok: true });
     }
@@ -1190,18 +1193,18 @@ async function handleStrava(
   onboardingData: Record<string, unknown>,
   _chatId?: string | null
 ): Promise<NextResponse> {
-  const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
+  const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
 
   // If asking about Strava — explain what it is and re-send the link
   const isAskingAboutStrava = /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
   if (isAskingAboutStrava || (/strava/i.test(message) && message.includes("?"))) {
-    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run you do and send you a personalized coaching note after each one.\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.`;
+    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run and add a short coaching note to each activity. Your friends on Strava will see it too.\n\n${writeUrl}`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
 
   // Any other message while awaiting Strava — re-send the link
-  const reply = `Connect Strava so I can read your runs automatically:\n\n${stravaUrl}\n\nHeads up: Strava will ask to allow "Upload activities" — that's just their label for letting me add a coaching note and additional metrics to each of your runs. You can uncheck it if you'd prefer not.`;
+  const reply = `Connect Strava so I can read your runs automatically and add a coaching note after each one:\n\n${writeUrl}`;
   await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
   return NextResponse.json({ ok: true });
 }

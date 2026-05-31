@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-24 — Coaching focus preference; reduce Z3 harping; wrist HR artifact detection; improved metric explanations
+
+**Type:** Feature + Improvement
+**Reported by:** Jake (internal observation + user feedback pattern)
+**User feedback:** "Can you make sure we don't harp on the 'make your runs truly easy' too much? I've noticed a lot of athletes using Coach Dean get annoyed by this because either (1) wrist based HR is not accurate - maybe solution for this one is to give better pacing guidance based on their strava data (2) They don't actually want to always run super slow. I'm curious if it would make sense to check in and see if the user is liking focus on one thing versus another (HR zones vs strength vs a good warmup routine vs focusing on cadence, etc."
+**Root cause:** (1) Z3/gray-zone advice was firing too aggressively and prescriptively, regardless of HR data quality or athlete preference. (2) No mechanism to detect wrist HR sensor spikes that inflate max HR readings. (3) Metric explanations gave numbers without plain-English meaning. (4) No way to store or act on per-athlete coaching focus preferences.
+**Fix / Change:**
+- **Wrist HR artifact detection**: Computes `max_heartrate / average_heartrate` ratio for non-quality runs. If > 1.45, injects an HR ARTIFACT RISK data guard so Dean avoids zone-based prescriptions for that run.
+- **Z3 gray zone**: Changed from prescriptive mandate ("next easy run, aim for below X bpm") to observational question ("you were in the gray zone — does that match how it felt?"). Only fires when no artifact risk AND the recent-insights dedup block isn't already flagging it.
+- **80/20 softened**: Reframed as guideline, not mandate. Explicitly respects athlete intent — if they don't want to focus on slowing down, Dean acknowledges it rather than repeating the advice.
+- **Coaching focus preference**: Added `coaching_focus` field to `onboarding_data` JSON. Haiku extraction detects when an athlete expresses a preference (HR zones, pacing, strength/form, consistency, no zones) and stores it. Injected into system prompt to weight the coaching lens. Weekly recap prompts a check-in if focus is unset after week 3.
+- **Core metrics restructured**: Post-run now uses 5 clear priority metrics (training load, HR, aerobic efficiency, pacing/execution, cadence) with explicit instructions to translate every number into plain English.
+- **HR zone descriptions**: Updated Z1–Z5 to explain the training-adaptation purpose of each zone, not just the bpm range.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/hr-zones.ts`
+
+---
+
 ## 2026-05-28 — Positive-only coaching style preference
 
 **Type:** Feature
