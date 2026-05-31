@@ -339,7 +339,9 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     expect(sendSMS).toHaveBeenCalledTimes(1);
   });
 
-  it("[MODE:FROM_SCRATCH] tag: sets has_existing_plan=false and wants_plan=true", async () => {
+  it("legacy [MODE:...] tags are stripped from SMS even if model emits them", async () => {
+    // Safety net: model may emit [MODE:...] tags from stale training. They should be stripped
+    // from the SMS — the system no longer routes on them, they're just internal artifacts.
     mockTables({
       users: { data: onboardingUser(), error: null },
       conversations: { data: [], error: null },

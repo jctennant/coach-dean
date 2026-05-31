@@ -6422,21 +6422,15 @@ CRITICAL — COMMUNICATE THE PARTIAL WEEK TO THE ATHLETE: In your first bubble, 
       const weekMilesBudgetNote = weekMileageSoFar > 0
         ? `\n<rule>ALREADY COMPLETED THIS WEEK: The athlete has already logged ${weekMileageSoFar.toFixed(1)} miles this week. ${weekBudgetExhausted ? `Their weekly budget is essentially met — do NOT prescribe a long run or quality session today. Acknowledge the miles already done and tell them Sunday's full plan will kick off their first complete training week.` : `Any additional sessions you prescribe must be feasible on top of that — do NOT prescribe a long run or quality session that would push their weekly total well beyond a safe ramp from their average. If combined miles would be excessive, keep the remaining sessions light or simply say Sunday's full plan will cover next week.`}</rule>`
         : "";
-      return `This athlete just finished onboarding. Send them a brief training framework — not a day-by-day schedule. The coaching relationship starts now; the framework is just context to get them started.
+      return `This athlete just finished onboarding. Send them a brief conversational first-week orientation — not a plan document. The coaching relationship starts now.
 
 <rule>NEVER refer to yourself as "Dean" in any part of this response. Never write "Dean is calibrated", "Dean will", "Dean has been", etc. You are the coach — always use "I".</rule>
 
-BUBBLE 1: One concise sentence — just what happens next. Use "I" (first person only). No "Welcome aboard", no enthusiasm about the baseline. Example: "I'll be watching every run and sending you a note after each one — let's build toward [race/goal]." 2 sentences max.
+BUBBLE 1: One sentence grounding them in where they are and where this is going. Reference their specific race and timeline if there is one. Example: "Dipsea in 6 weeks — I'll be watching every run and calibrating as we go." 2 sentences max, no generic "Welcome aboard."
 
-BUBBLE 2: Their starting training framework — ${weekBudgetExhausted ? `two things only. The week is essentially over — do NOT mention a long run or quality session for this week, not even as a description of "what week 1 looks like." Instead:
-- Acknowledge the miles already done this week
-- What the first FULL week (starting Monday) will look like: weekly mileage target and rough structure` : `three things only:
-- Weekly mileage target (grounded in their current volume from Strava or stated mileage)
-- One quality session this week: just the type and rough structure (e.g. "a tempo run — 20 min at a comfortably hard effort" or "strides at the end of one easy run"), not a full schedule
-- Long run target for this week`}
+BUBBLE 2: How you're thinking about the next 1-2 weeks. Conversational, not a day-by-day schedule. ${weekBudgetExhausted ? `The week is essentially done — just orient them to next week's structure (weekly mileage, one quality session). Keep it brief.` : `Three things: what the weekly mileage target looks like this week, one quality session to slot in, and what the long run should be. Frame it as your thinking, not a prescription — "this week I'd aim for X miles, one quality session mid-week, and a longer easy run on the weekend." Invite them to push back: "Text me if anything needs adjusting."` }
 
-The weekly recap on Sunday sends the full plan. This is just a starting framework.
-Invite them to adjust: "Text me if anything needs tweaking — this is a starting point."
+This is not a plan delivery. Dean calibrates every week based on what actually happens. The Sunday recap will be the primary touchpoint for week-to-week structure going forward.
 ${weekMilesBudgetNote}
 
 ${weekBoundaryNote}

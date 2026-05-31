@@ -84,22 +84,20 @@ The old discrete step flow is gone. Onboarding is now a **unified conversation**
 | `null` | Onboarding complete |
 
 **What Dean collects in the unified conversation (rough order):**
-1. Name
-2. Goal (specific race/event or general fitness)
-3. Strava (asked after name + goal — before any manual fitness data)
-4. Training tools currently in use (Runna, TrainingPeaks, Garmin, self-directed, etc.)
-5. Road / trail / mixed terrain
-6. Existing training plan (yes/no — if yes, Dean works alongside it)
-7. Training days (specific days of week, not just count)
-8. Race date (web_search required for any named race — never state from memory)
-9. Fitness baseline: recent race PR, easy pace, or Strava covers it automatically
-10. Current weekly mileage (only if Strava not connected)
-11. Weekly recap preference (asked naturally before signaling [READY])
-12. *(Ultra goals only)* Ultra/trail race background + injuries
-13. *(return_to_running / injury_recovery only)* Injury details + current status
-14. *(Short races: mile / 5k / 10k only)* Goal finish time
+1. Name + goal (combined in first message)
+2. Training context: "Are you working from a plan already, or starting fresh?" (just context — no routing decision)
+3. Strava (mandatory — write-access link used for coaching note annotation)
+4. Injury history (required for all athletes, asked after Strava connects)
+5. Race date (web_search required for any named race — never state from memory)
+6. *(Trail/mountain races)* Race goal (finish vs. competitive placement) + prior race experience
+7. *(Ultra goals 30k+)* Ultra/trail race background
+8. *(return_to_running / injury_recovery)* Injury details + current status
+9. *(Short races: mile / 5k / 10k)* Goal finish time
+10. Training days per week (if Strava has no data)
 
-When all required fields are collected, Claude appends `[READY]` to its final message. The system strips the tag, stores the data, and fires the `initial_plan` trigger (or sends a complement-mode welcome for users with existing plans).
+**Required for [READY]:** Name + goal + Strava connected + injury history answered. No mode question.
+
+When all required fields are collected, Claude appends `[READY]` to its final message. The system strips the tag, stores the data, and fires the `initial_plan` trigger for ALL users. `coaching_mode = 'adaptive'` for all new users — one mode, responsive coaching toward the race.
 
 ## Patterns to know
 

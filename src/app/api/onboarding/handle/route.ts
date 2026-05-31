@@ -33,52 +33,6 @@ function langCodeToName(code: string): string {
   return names[code] ?? code;
 }
 
-/**
- * Fallback parser for working mode when Dean fails to emit [MODE:...].
- * Only fires when the last assistant message asked the three-options question —
- * otherwise a "1" reply could mean anything. This is a safety net for model
- * tag-compliance failures; the tag emission in the prompt is still the primary path.
- */
-function parseModeFallback(
-  userMessage: string,
-  lastAssistantMessage: string | null
-): "FROM_SCRATCH" | "COMPLEMENT" | "NO_PLAN" | null {
-  if (!lastAssistantMessage) return null;
-  const askedMode =
-    /three different ways|trois mani[eè]res|trois façons/i.test(lastAssistantMessage) ||
-    (/\(1\)/.test(lastAssistantMessage) &&
-      /\(2\)/.test(lastAssistantMessage) &&
-      /\(3\)/.test(lastAssistantMessage));
-  if (!askedMode) return null;
-
-  const msg = userMessage.trim().toLowerCase();
-
-  if (/^(1|one|option\s*1|first|#1|\(1\))[.!\s]*$/i.test(msg)) return "FROM_SCRATCH";
-  if (/^(2|two|option\s*2|second|#2|\(2\))[.!\s]*$/i.test(msg)) return "COMPLEMENT";
-  if (/^(3|three|option\s*3|third|#3|\(3\))[.!\s]*$/i.test(msg)) return "NO_PLAN";
-
-  if (/\bfrom scratch\b|\bbuild (me )?(a |one|it)|\bbuild one\b/i.test(msg)) return "FROM_SCRATCH";
-  // French FROM_SCRATCH patterns: "pars de zéro", "depuis zéro", "crée(r) un plan", "sans plan", "pas de plan"
-  if (/\b(pars?|partir|depuis|de) (de )?z[eé]ro\b|\bcr[eé][eé](r)? (un |mon )?(plan|programme)\b|\bsans plan\b|\bpas de plan\b/i.test(msg)) return "FROM_SCRATCH";
-  if (
-    /\b(runna|trainingpeaks|training peaks|garmin coach)\b/i.test(msg) ||
-    /\b(i (have|follow|use|am on|'?m on)|already (have|follow|using))\b.*\b(plan|coach|program)\b/i.test(msg) ||
-    /\bwork alongside\b|\balongside (my|a) plan\b/i.test(msg) ||
-    // French COMPLEMENT patterns: "j'ai (déjà) un plan", "je suis un plan", "travaille avec mon plan"
-    /\bj'ai (déjà |un )?plan\b|\bje suis (déjà |un )?plan\b|\btravaille.{0,10}(avec|sur) (mon|un) plan\b/i.test(msg)
-  )
-    return "COMPLEMENT";
-  if (
-    /\bno (set )?(plan|schedule)\b|\bjust (coaching )?(notes|feedback)\b|\bpost.run (notes?|feedback) only\b|\bfeedback only\b/i.test(
-      msg
-    ) ||
-    // French NO_PLAN patterns: "sans planning", "juste des notes", "retours après chaque course"
-    /\bsans (planning|programme fixe)\b|\bjuste des notes\b|\bjuste un (retour|feedback)\b|\bret(our|ours) apr[eè]s chaque (course|run)\b/i.test(msg)
-  )
-    return "NO_PLAN";
-
-  return null;
-}
 
 interface OnboardingRequest {
   userId: string;
@@ -436,35 +390,21 @@ ${stravaContext}
 CONVERSATION FLOW:
 Everyone gets the same core intake. The order is roughly:
 1. First message: intro + ask for their name and what they're working toward in one question
-2. Once goal is clear AND any race dates are confirmed (see "RACE DATE CONFIRMATION COMES FIRST" below): ask plan preference. See PLAN PREFERENCE section below. This question unlocks Dean's whole approach — ask it before Strava.
-3. Once mode is established: ask about Strava. Strava data often answers fitness questions automatically.
+2. Once goal is clear AND any race dates are confirmed (see "RACE DATE CONFIRMATION COMES FIRST" below): ask about training tools/plan context. See TRAINING CONTEXT section below.
+3. Ask about Strava. Strava data often answers fitness questions automatically.
 4. After Strava connects: ask about injury history ("Has injury ever been a factor for you, or anything you're managing right now?")
 5. Collect remaining required fields: race date, race-specific goal (for trail races), fitness baseline as applicable (Strava usually covers fitness automatically)
 6. Signal [READY] when all required fields are in
 
-PLAN PREFERENCE (ask this after goal is established — step 2 in the flow, before Strava):
-Once goal is clear, ask: "Do you have a training plan you're already following, or do you want me to build one for you?"
-- If they want a plan built → emit [MODE:FROM_SCRATCH] on its own line when they confirm
-- If they already follow a plan (Runna, TrainingPeaks, Garmin Coach, coach-written, etc.) → emit [MODE:COMPLEMENT] on its own line, and see EXISTING PLAN section below
-- If they just want coaching notes / no plan → emit [MODE:NO_PLAN] on its own line
-EXCEPTION: If the athlete has already explicitly mentioned following a specific training platform at any point before this step, skip the question — emit [MODE:COMPLEMENT] on its own line when you acknowledge their plan.
-This question must be asked early — it determines Dean's entire approach. Don't save it for last.
-
-MODE TAG — REQUIRED before signaling [READY]:
-Emit ONE of these tags on its own line in the message where you wrap up:
-- [MODE:FROM_SCRATCH] — athlete wants Dean to build them a plan
-- [MODE:COMPLEMENT] — athlete already follows a plan (Runna, TrainingPeaks, coach, etc.)
-- [MODE:NO_PLAN] — athlete wants post-run coaching notes only, no plan
-The tag is stripped before the message is sent — do not mention or explain it. Never emit it speculatively before you know their preference.
-
-SELF-CHECK BEFORE SENDING [READY]: If your message contains [READY], it MUST also contain one [MODE:...] tag. Without it, the system cannot route the athlete correctly.
+TRAINING CONTEXT (ask this after goal is established — step 2, before Strava):
+Once goal is clear, ask: "Are you working from a training plan already — like Runna or TrainingPeaks — or are you starting fresh?" This is context, not a product decision. Dean coaches everyone the same way: run annotation after every Strava run, weekly calibration toward the race. The difference is framing — athletes with an existing plan get Dean working alongside it; athletes starting fresh get Dean building their week structure from scratch each week.
+- If they mention a specific platform (Runna, TrainingPeaks, Garmin Coach, etc.): acknowledge it briefly, note that Dean works alongside their plan, and move on. Do NOT offer to rebuild their plan.
+- If they're starting fresh: acknowledge briefly and move on.
+- If they're unclear ("I don't really have one"): treat as starting fresh.
+EXCEPTION: If the athlete has already mentioned a specific platform earlier in the conversation, skip the question — just note it and continue.
 
 EXISTING PLAN (athlete already follows Runna, TrainingPeaks, a coach-written plan, etc.):
-Dean is a post-run analyst, not a plan builder. Confirm Dean works alongside their plan, not as a replacement. Do NOT offer to rebuild their plan. When asking about injuries, frame it as "what to watch for in the data."
-Ask two things about their plan — combine into one message:
-1. What week they're on (or if they're starting fresh from week 1). This is required so morning messages reference the right workout.
-2. A PDF or description of the plan: "Text me a PDF or describe the structure — it helps me give you much more specific feedback after each run."
-If the athlete already mentioned their current week in this conversation, skip question 1. If they already sent a PDF, skip question 2.
+Dean works alongside their plan — no competing structure, no rebuilding. Acknowledge it briefly and continue onboarding normally. The plan context informs how Dean frames morning suggestions and weekly calibration ("your Runna plan has you doing X — I'd add Y to complement that"). Do NOT offer to rebuild their plan or ask them to justify it.
 
 INSTRUCTIONS:
 - Ask 1–2 questions per message. Never fire off 5 at once.
@@ -556,24 +496,25 @@ If no web_search tool is available to you in this context and the athlete has me
 
 NEVER PROMISE ASYNC WORK YOU CAN'T DELIVER:
 You cannot say "let me pull that up", "give me a moment", "I'll check and get back to you", "one sec while I look", or anything implying you'll send a follow-up message later. There is no async loop — every reply you send is the only reply that turn. If you need information you don't have (a race date, course profile, etc.), either (a) call the web_search tool inline this turn so the answer is in this same reply, or (b) ask the athlete for it directly. Do not narrate the lookup as if it were happening in the background. The user will be left staring at silence.
+
+NEVER SEND STANDALONE HOLDING MESSAGES:
+"Give me a sec", "One moment", "Got it, let me think", "Pulling that up" — these are dead-end UX moments when sent as standalone messages. There is no follow-up message coming from you. Never send an acknowledgment message and then analysis in a separate message — that's two turns that should be one. If you're doing something substantial (Strava analysis, race date lookup), use the waiting moment to ask a question so the analysis arrives after at least one exchange — making it feel earned, not automated.
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
-READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these five items:
+READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these four items:
 1. Name ✓
 2. Goal (+ race date if a named race) ✓
 3. Strava connected ✓ (shown as "STRAVA: Connected" in the context above)
 4. Injury history — any answer including "no injuries" ✓
-5. Plan preference confirmed ✓ (shown as "Plan preference: …" in WHAT YOU ALREADY KNOW)
 
-If ALL FIVE are present: signal [READY] in THIS message immediately. Do not ask ANY follow-up question — not training days, not strength work, not weekly mileage, not anything. Plans are day-agnostic; asking which days they train is explicitly forbidden because it delays the athlete unnecessarily. Write a warm 1-2 sentence wrap-up, emit [MODE:...] on its own line, then [READY] on its own line. Nothing else.
+If ALL FOUR are present: signal [READY] in THIS message immediately. Do not ask ANY follow-up question — not training days, not strength work, not weekly mileage, not anything. Write a warm 1-2 sentence wrap-up, then [READY] on its own line. Nothing else.
 
-If plan preference hasn't been confirmed yet: ask "One last thing — want me to build you a training plan, or would you prefer just a coaching note after each run?" and wait for their answer before signaling [READY].
 The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
-[READY] IS REQUIRED ON ANY WRAP-UP: If your message says anything like "you're all set", "ready to kick off", "we're good to go", or otherwise signs off without a question, you MUST include [READY] and [MODE:...] on their own lines.
+[READY] IS REQUIRED ON ANY WRAP-UP: If your message says anything like "you're all set", "ready to kick off", "we're good to go", or otherwise signs off without a question, you MUST include [READY] on its own line.
 Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
 CRITICAL — [READY] means zero open questions: [READY] can only appear in a message that contains NO questions of any kind — required or optional, soft or hard. The moment you add a question mark to a message, [READY] is off the table for that turn, no matter how minor the question seems. If you realize you still need to ask something (pace calibration, goal time, any follow-up), ask it in this message WITHOUT [READY] and wait for the athlete's response. Then wrap up and signal [READY] in your next turn. Signaling [READY] while an unanswered question is in the same message fires the plan immediately — the athlete never gets to respond.
-When you signal [READY], wrap up warmly in 1-2 sentences: tell them their first coaching note will arrive after their next run on Strava (and if they asked for a plan, it will arrive shortly too). Tie it to their specific goal or race. Use first person only — never refer to yourself as "Dean". Keep it brief.
+When you signal [READY], open with a synthesis sentence that reflects back the key facts you heard: race name, how many weeks out, the most important constraint or injury (if any), and their current fitness level from Strava. Example: "Got it — Dipsea in 6 weeks, hamstring needs watching, and your Strava shows you're building well at 38 miles/week." This moment makes the athlete feel genuinely heard before their first run even happens. Then a second sentence: "First coaching note lands after your next Strava run, and I'll check in with how I'm thinking about the build shortly." Use first person only — never refer to yourself as "Dean". Keep it brief.
 WORD ACCURACY: The term is "aerobic" (related to oxygen use / endurance). Never write "aerodynamic" — that's about airflow over a bike or car, not running physiology. Double-check this word before sending.
 
 ULTRA AND INJURY GOALS — extra required fields:
@@ -707,47 +648,6 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
   // Treat it as implicit [READY] so a missing [READY] on a terminal message
   // doesn't leave the athlete stuck in "onboarding" with no plan generated.
   const isReady = /\[READY\]/i.test(rawText) || wantsDashboardLink;
-
-  // Parse deterministic working-mode tag. Dean emits [MODE:FROM_SCRATCH|COMPLEMENT|NO_PLAN]
-  // the moment the athlete confirms their working mode. This replaces Haiku
-  // inference for has_existing_plan / wants_plan — those are downstream of a
-  // single explicit choice, so a free-text extraction is the wrong tool.
-  const modeMatch = rawText.match(/\[MODE:(FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/i);
-  if (modeMatch) {
-    const mode = modeMatch[1].toUpperCase();
-    if (mode === "FROM_SCRATCH") {
-      mergedData.has_existing_plan = false;
-      mergedData.wants_plan = true;
-    } else if (mode === "COMPLEMENT") {
-      mergedData.has_existing_plan = true;
-      mergedData.wants_plan = false;
-    } else if (mode === "NO_PLAN") {
-      mergedData.has_existing_plan = false;
-      mergedData.wants_plan = false;
-    }
-  } else if (mergedData.has_existing_plan == null && mergedData.wants_plan == null) {
-    // Safety net: Dean occasionally forgets the [MODE:...] tag even after
-    // reflecting the mode back in prose. Parse the athlete's reply against the
-    // previous assistant message if it was the three-options question.
-    const lastAssistantMsg =
-      [...history].reverse().find((m) => m.role === "assistant")?.content ?? null;
-    const inferred = parseModeFallback(message, lastAssistantMsg);
-    if (inferred) {
-      console.warn(
-        `[onboarding] [MODE] tag missing — inferred ${inferred} from athlete reply`
-      );
-      if (inferred === "FROM_SCRATCH") {
-        mergedData.has_existing_plan = false;
-        mergedData.wants_plan = true;
-      } else if (inferred === "COMPLEMENT") {
-        mergedData.has_existing_plan = true;
-        mergedData.wants_plan = false;
-      } else if (inferred === "NO_PLAN") {
-        mergedData.has_existing_plan = false;
-        mergedData.wants_plan = false;
-      }
-    }
-  }
 
   // Build responseText and (when Strava is requested) a separate stravaMsg.
   // Split at the paragraph containing [STRAVA_LINK] so:
@@ -902,34 +802,6 @@ IMPORTANT: Because this is a question, do NOT include [READY] in this same messa
       return NextResponse.json({ ok: true });
     }
 
-    // Mode guard: never silently default to plan-building when the athlete's
-    // working mode is unresolved. If both has_existing_plan and wants_plan are
-    // null at [READY], the downstream completeOnboarding path falls through to
-    // initial_plan generation — which is wrong if the athlete actually wanted
-    // post-run notes only. Re-ask the mode question explicitly instead.
-    const modeUnresolved =
-      mergedData.has_existing_plan == null && mergedData.wants_plan == null;
-    if (modeUnresolved) {
-      console.warn("[onboarding] [READY] fired but mode unresolved — re-asking mode question");
-      await supabase.from("users")
-        .update({ onboarding_data: mergedData as unknown as Json })
-        .eq("id", user.id);
-      const modeLang = (mergedData.preferred_language as string | undefined) ?? "en";
-      const modeQuestion = modeLang === "fr"
-        ? "Dernière chose — est-ce que vous voulez que je vous construise un plan d'entraînement, ou préférez-vous juste une note de coaching après chaque course ?"
-        : modeLang === "es"
-        ? "Una última cosa — ¿quieres que te construya un plan de entrenamiento, o prefieres solo una nota de entrenamiento después de cada carrera?"
-        : "One last thing — want me to build you a training plan, or would you prefer just a coaching note after each run?";
-      // Only append the fallback mode question if Claude's response doesn't already contain it
-      // (Claude may have asked naturally, and appending again causes duplication).
-      const alreadyAsked = /want me to build|coaching note after each run|just a coaching note/i.test(cleanedResponse ?? "");
-      const combined = alreadyAsked
-        ? (cleanedResponse ?? modeQuestion)
-        : (cleanedResponse ? `${cleanedResponse}\n\n${modeQuestion}` : modeQuestion);
-      await sendAndStore(user.id, user.phone_number, combined, "onboarding");
-      return NextResponse.json({ ok: true });
-    }
-
     // Save final data and complete onboarding
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
@@ -991,14 +863,10 @@ function summarizeCollected(data: Record<string, unknown>): string {
   }
   if (data.terrain_type) lines.push(`Terrain: ${data.terrain_type}`);
   if (data.has_existing_plan != null) {
-    const planPref = data.has_existing_plan
+    const planCtx = data.has_existing_plan
       ? "has existing plan (Dean works alongside it)"
-      : data.wants_plan === false
-      ? "no plan, wants post-run coaching notes only"
-      : data.wants_plan === true
-      ? "wants Dean to build a plan from scratch"
       : "no existing plan";
-    lines.push(`Plan preference: ${planPref} — do NOT ask about this again`);
+    lines.push(`Training context: ${planCtx}`);
   }
   if (data.plan_uploaded) {
     const name = data.plan_filename ? ` ("${(data.plan_filename as string).replace(/\.pdf$/i, "")}")` : "";
@@ -1559,8 +1427,7 @@ async function completeOnboarding(
 
   const trainingTools = (data.training_tools as string[] | null) || [];
   const terrainType = (data.terrain_type as string | null) || null;
-  const hasExistingPlan = (data.has_existing_plan as boolean | null) ?? null;
-  const wantsPlan = (data.wants_plan as boolean | null) ?? null;
+  const hasExistingPlan = !!(data.has_existing_plan as boolean | null); // context only — affects framing in initial_plan
   const externalPlanDescription = (data.external_plan_description as string | null) || null;
   const crossTrainingActivities = (data.cross_training_activities as string[] | null) || (data.crosstraining_tools as string[] | null) || [];
   // Combine injury history + current niggles into injury_notes if not already set
@@ -1641,8 +1508,7 @@ async function completeOnboarding(
           lthr_last_updated: new Date().toISOString(),
           hr_zone_method: "lthr",
         } : {}),
-        coaching_mode: hasExistingPlan === true ? 'complement' :
-          hasExistingPlan === false && wantsPlan === false ? 'analyst' : 'full_coach',
+        coaching_mode: 'adaptive',
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
@@ -1803,46 +1669,6 @@ async function completeOnboarding(
 
   if (opts?.skipInitialPlan) {
     void trackEvent(user.id, "onboarding_completed", { goal, plan_skipped: true });
-    return;
-  }
-
-  // For users with an existing plan (Runna, TP, etc.), skip Dean's plan generation.
-  // Dean's [READY] wrap-up already told them what to expect — no follow-up message needed.
-  if (hasExistingPlan === true) {
-    void trackEvent(user.id, "onboarding_completed", { goal, mode: "complement" });
-    const { data: complementUser } = await supabase
-      .from("users")
-      .select("dashboard_token")
-      .eq("id", user.id)
-      .single();
-    let dashboardToken = complementUser?.dashboard_token as string | null;
-    if (!dashboardToken) {
-      dashboardToken = crypto.randomUUID();
-      await supabase.from("users").update({
-        dashboard_token: dashboardToken,
-        trial_started_at: new Date().toISOString(),
-      }).eq("id", user.id);
-    }
-    return;
-  }
-
-  // User has no existing plan and doesn't want one — post-run feedback only, no schedule.
-  // Dean's [READY] wrap-up already told them what to expect — no follow-up message needed.
-  if (hasExistingPlan === false && wantsPlan === false) {
-    void trackEvent(user.id, "onboarding_completed", { goal, mode: "no_plan" });
-    const { data: noPlanUser } = await supabase
-      .from("users")
-      .select("dashboard_token")
-      .eq("id", user.id)
-      .single();
-    let dashboardToken = noPlanUser?.dashboard_token as string | null;
-    if (!dashboardToken) {
-      dashboardToken = crypto.randomUUID();
-      await supabase.from("users").update({
-        dashboard_token: dashboardToken,
-        trial_started_at: new Date().toISOString(),
-      }).eq("id", user.id);
-    }
     return;
   }
 

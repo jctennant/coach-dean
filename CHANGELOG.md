@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-30 — Mode collapse: one coaching mode for all users; onboarding no longer gates on plan choice
+
+**Type:** Feature / Refactor
+**Reported by:** Jake (product direction feedback)
+**User feedback:** "One mode. Call it something like 'race-focused coaching' internally. From there Dean operates as a responsive coach: suggests the week's structure conversationally ('this week I'm thinking 4 runs, ~35 miles, one quality session — does that fit your schedule?'), annotates each run as it happens, and adjusts based on what actually occurs. Not a plan, not pure analysis — ongoing calibration toward a race."
+**Root cause:** FROM_SCRATCH/COMPLEMENT/NO_PLAN mode gates created a product decision upfront that most users aren't equipped to make. Complement mode was too restrictive (no session prescription) and no-plan mode gave up too much value.
+**Fix / Change:** Removed [MODE:...] tags from onboarding entirely. All users now fire `initial_plan` after onboarding. `coaching_mode` = 'adaptive' for new users (no ANALYST/COMPLEMENT restrictions). Existing plan context (`has_existing_plan`, `external_plan_notes`) still informs how Dean frames suggestions, but doesn't gate what he does. `initial_plan` message changed from plan-document delivery to conversational first-week orientation. `parseModeFallback` function removed. COMPLEMENT/NO_PLAN early exits from `completeOnboarding` removed.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/coach/respond/route.ts, src/__tests__/api/onboarding-handle.test.ts
+
+---
+
+## 2026-05-30 — Onboarding overhaul: single Strava link, deeper injury probing, earlier plan preference, synthesis wrap-up
+
+**Type:** Improvement
+**Reported by:** Jake (direct user feedback after observing onboarding conversations)
+**User feedback:** "The two Strava auth links is a real problem. Making the user choose between read vs. read+write is a technical decision they shouldn't have to make. Most users won't understand the distinction... Default to write access and explain the benefit in plain English: 'I'll connect to Strava and add a short coaching note to each activity — your friends will see it too.' 'Great choices, Jake!' is the wrong register. A coach doesn't praise race selection. They react to it with information. The hamstring disclosure is underhandled... A coach would probe: how long exactly, does it hurt during runs or just after, have you seen anyone about it, does it affect your gait? The final question is too late and too binary. 'Want me to build you a training plan, or just coaching notes?' should come earlier... There's no synthesis moment at the end. The 'Give me a sec' message is a dead-end UX moment."
+**Root cause:** Multiple onboarding prompt and UX issues: (1) two-link Strava pattern confused users with a technical choice they didn't understand; (2) injury mentions dismissed with generic advice instead of probed; (3) plan preference question asked last when it determines Dean's whole approach; (4) coach responses praised race choices instead of reacting with information; (5) no synthesis at [READY] to make the user feel heard; (6) holding messages ("Give me a sec") created dead-end UX.
+**Fix / Change:** Single Strava write link everywhere (read-only link removed), with plain English copy about coaching notes in the feed. Injury intake updated to require specific follow-up (how long, during/after). Plan preference question moved to step 2 (before Strava), reworded from "want a plan or coaching notes?" to "do you have a plan already or want me to build one?". Race reaction now leads with coaching insight not praise. [READY] wrap-up must include a synthesis sentence. Added explicit "no standalone holding messages" rule.
+**Files changed:** src/app/api/onboarding/handle/route.ts
+
+---
+
 ## 2026-05-24 — Coaching focus preference; reduce Z3 harping; wrist HR artifact detection; improved metric explanations
 
 **Type:** Feature + Improvement
