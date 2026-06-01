@@ -415,8 +415,8 @@ export async function GET(request: Request) {
         ? `Strava connected${firstName}! Just read your last 8 weeks — ${stravaSyncedDetails}. I'll factor it all into your coaching going forward.`
         : `Strava connected${firstName}! I'll pull in your training history and factor it into your plan going forward. Just keep doing what you're doing — I've got it from here.`)
     : (stravaSyncedDetails
-        ? `Strava connected${firstName}! Just read your last 8 weeks — ${stravaSyncedDetails}. Give me a sec to pull the rest in.`
-        : `Strava connected${firstName}! Give me a moment to pull in your history.`);
+        ? `Strava connected${firstName}! Just read your last 8 weeks — ${stravaSyncedDetails}.`
+        : `Strava connected${firstName}!`);
 
   // Only send "Strava connected" the first time — skip on re-auth flows where
   // the token was already present. This prevents duplicate messages when users

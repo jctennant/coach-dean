@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-05-31 — Onboarding architecture: dedicated post-Strava stages for data synthesis and injury intake
+
+**Type:** Feature / Refactor
+**Reported by:** Jake (direct user experience feedback after going through onboarding himself)
+**User feedback:** "1. The mode question is redundant after removing complement/no-plan modes — it can just go. 2. After Strava connects, there's no synthesis moment. Dean says nothing opinionated. Just 'Great! I can see your data' and moves on. 3. Injury intake is too passive — Dean acknowledges and moves on instead of probing. 4. The completion message feels templated and unearned. 5. 'Give me a sec to pull the rest in' is a false promise — there's no async loop."
+**Root cause:** Monolithic system prompt let the LLM control conversation flow, leading to mode questions fired after injury disclosures, generic platitudes about injury history, no real synthesis of Strava data, and a completion message built from LLM discretion instead of structured data.
+**Fix / Change:** Added a `stage` field to `onboarding_data` and two dedicated handlers in `onboarding/handle/route.ts`: (1) `handleDataAnalysis` — fires when `(strava connected)` arrives, generates opinionated Strava synthesis connecting weekly mileage/HR zones to the race timeline, asks one injury question, sets `stage: "injury_intake"`; (2) `handleInjuryIntake` — receives injury response, uses Haiku to generate one specific follow-up OR immediately calls `buildDeterministicCompletion` if no follow-up needed; (3) `buildDeterministicCompletion` — template-built final message from structured data (race+timeline, training observation, injury note, "First coaching note lands after your next run"). Goals-stage prompt updated: removed mode question, removed training-days as a required field, added injury-in-dedicated-stage note, updated SIGNALING READY to 3-item check (name + goal + Strava). Removed "Give me a sec to pull the rest in" from Strava callback confirmation message.
+**Files changed:** src/app/api/onboarding/handle/route.ts, src/app/api/auth/strava/callback/route.ts, evals/run-onboarding-evals.mjs, evals/run-simulation-evals.mjs, evals/fixtures/onboarding/no-reask-collected-info.json, evals/fixtures/onboarding/injury-history-race-goal.json
+
+---
+
 ## 2026-05-30 — Mode collapse: one coaching mode for all users; onboarding no longer gates on plan choice
 
 **Type:** Feature / Refactor

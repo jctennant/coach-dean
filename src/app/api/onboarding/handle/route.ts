@@ -207,12 +207,6 @@ async function handleConversation(
   // True if Dean has never replied yet in this onboarding conversation
   const isFirstResponse = !history.some((m) => m.role === "assistant");
 
-  // True if Dean has already asked the pace calibration question in this conversation.
-  // Used to suppress re-asking rather than relying on a prompt instruction.
-  const alreadyAskedPaceCalibration = history.some(
-    (m) => m.role === "assistant" && /road\s+(5k|10k|half marathon)/i.test(m.content)
-  );
-
   // ---- EXTRACT FIRST -------------------------------------------------------
   // Run Haiku extraction on the conversation including the user's current message
   // BEFORE building the system prompt or doing race-date pre-search. This lets the
@@ -345,6 +339,21 @@ async function handleConversation(
 
   const collected = summarizeCollected(mergedData);
 
+  // ── Stage dispatch ──────────────────────────────────────────────────────────
+  // Route to dedicated handlers BEFORE building the goals-stage system prompt.
+  // Each stage has one job, its own focused prompt, and explicit completion logic
+  // controlled by app code rather than the LLM.
+  const currentStage = mergedData.stage as string | undefined;
+  if (message === "(strava connected)" && mergedData.strava_connected) {
+    // Post-Strava: opinionated data synthesis + ask about injury.
+    return handleDataAnalysis(user, mergedData, stravaContext, chatId);
+  }
+  if (currentStage === "injury_intake") {
+    // Injury intake: one focused follow-up probe, then deterministic completion.
+    return handleInjuryIntake(user, message, mergedData, chatId);
+  }
+  // Falls through to goals stage (collect name + goal + race date + Strava).
+
   const onbLang = (mergedData.preferred_language as string | undefined) ?? "en";
   const langInstruction = onbLang !== "en"
     ? `\nLANGUAGE: This athlete communicates in ${langCodeToName(onbLang)}. You MUST respond in ${langCodeToName(onbLang)} for every message. Do not switch to English. When the instructions below specify exact English wording (e.g. the three-options question), translate it into ${langCodeToName(onbLang)} while preserving all options and their structure.\n`
@@ -363,8 +372,7 @@ Required before signaling [READY] — for ALL athletes:
 - Athlete's name — ask in your FIRST message, combined with the training context question. Never address the athlete as "Athlete" or use a placeholder — if you don't have their name, you must ask.
 - Training goal (specific race/event name and type, or general fitness/consistency). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
 - Strava — REQUIRED. Ask right after goal is established, BEFORE injury history or any other questions. Strava is the primary data source and answers fitness questions automatically. Do NOT offer a skip option.
-- Injury history — REQUIRED FOR ALL ATHLETES. Must ask and receive an answer before [READY]. Frame naturally: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around before?" Even "no injuries at all" is a complete and valid answer. Ask AFTER Strava connects — not before.
-- Plan preference — your final question before [READY]. See PLAN PREFERENCE section below.
+- Injury history — REQUIRED FOR ALL ATHLETES. Handled in a dedicated stage after Strava connects — do NOT ask about it here. If the athlete volunteers injury info, acknowledge it briefly and continue.
 
 Additional required fields by situation:
 - Race date — required for any named race goal. MANDATORY web_search before stating any date.
@@ -390,21 +398,12 @@ ${stravaContext}
 CONVERSATION FLOW:
 Everyone gets the same core intake. The order is roughly:
 1. First message: intro + ask for their name and what they're working toward in one question
-2. Once goal is clear AND any race dates are confirmed (see "RACE DATE CONFIRMATION COMES FIRST" below): ask about training tools/plan context. See TRAINING CONTEXT section below.
-3. Ask about Strava. Strava data often answers fitness questions automatically.
-4. After Strava connects: ask about injury history ("Has injury ever been a factor for you, or anything you're managing right now?")
-5. Collect remaining required fields: race date, race-specific goal (for trail races), fitness baseline as applicable (Strava usually covers fitness automatically)
-6. Signal [READY] when all required fields are in
+2. Once goal is clear and any race dates are confirmed: ask about Strava. No other questions first.
+3. After Strava connects: a dedicated stage handles training analysis and injury intake automatically — you don't need to ask about it.
+4. Signal [READY] when name + goal + Strava are confirmed (injury handled in dedicated stage).
 
-TRAINING CONTEXT (ask this after goal is established — step 2, before Strava):
-Once goal is clear, ask: "Are you working from a training plan already — like Runna or TrainingPeaks — or are you starting fresh?" This is context, not a product decision. Dean coaches everyone the same way: run annotation after every Strava run, weekly calibration toward the race. The difference is framing — athletes with an existing plan get Dean working alongside it; athletes starting fresh get Dean building their week structure from scratch each week.
-- If they mention a specific platform (Runna, TrainingPeaks, Garmin Coach, etc.): acknowledge it briefly, note that Dean works alongside their plan, and move on. Do NOT offer to rebuild their plan.
-- If they're starting fresh: acknowledge briefly and move on.
-- If they're unclear ("I don't really have one"): treat as starting fresh.
-EXCEPTION: If the athlete has already mentioned a specific platform earlier in the conversation, skip the question — just note it and continue.
-
-EXISTING PLAN (athlete already follows Runna, TrainingPeaks, a coach-written plan, etc.):
-Dean works alongside their plan — no competing structure, no rebuilding. Acknowledge it briefly and continue onboarding normally. The plan context informs how Dean frames morning suggestions and weekly calibration ("your Runna plan has you doing X — I'd add Y to complement that"). Do NOT offer to rebuild their plan or ask them to justify it.
+EXISTING PLAN (athlete mentions Runna, TrainingPeaks, a coach-written plan, etc.):
+Dean works alongside their plan — no competing structure, no rebuilding. Never ask "are you working from a training plan?" as a standalone question. If they volunteer it, acknowledge briefly and continue. Plan context is captured passively and informs how Dean frames coaching.
 
 INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list. If you need multiple things, prioritize and ask the single most important one.
@@ -422,20 +421,12 @@ ${isFirstResponse
   ? `- This is your FIRST message. Lead with the Strava/post-run differentiator, then broaden the goal framing beyond just racing. Example: "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it means, whether to push or back off, and what's coming. My job is to make sure your training actually adds up to something, whether that's a race PR, staying healthy, or just running more consistently." Then close with a single question that asks for BOTH their name and what they're working toward — e.g. "What's your name, and what are you training for?" or "What's your name and what are you working toward?" Do NOT ask for name and goal as two separate questions — combine them into one. Do NOT reference specific tools like Runna or TrainingPeaks in the intro. Do NOT use the phrase "SMS running coach" — use "AI running coach" instead.`
   : ""}
 
-INJURY INTAKE:
-Injury history shapes the training plan — it's not a liability check, it's how Dean builds a program that actually gets the athlete to race day. Ask for every athlete, because most runners who plateau or underperform do so because something went wrong with their body, not their motivation.
-- Ask after Strava connects — not before. Framing: "Has injury ever been a factor for you?" or "Anything you're managing right now or have had to work around?" Frame it as building context, not checking for problems.
-- INJURY VOLUNTEERED EARLY: If the athlete mentions a current injury, recurring injury, or significant injury history at ANY point in the conversation — even before Strava, even in their first message — stop and engage it before continuing. Do NOT defer it by asking about Strava or anything else first. The standard flow is suspended until the injury context is understood.
-- When they mention a current or recurring injury: probe it specifically — don't dismiss it with generic advice. Ask ONE follow-up question targeting the injury: e.g. "Where does it flare — outside the knee, or higher up toward the hip?" or "Is it pain during the run, after, or both?" or "Are you currently running at all, or fully resting it?" One specific question is correct — not a list, not an essay.
-- A tight hamstring for months is a flag that reshapes the whole training structure. A stress fracture history is a load-bearing coaching constraint. Treat injury disclosures as the most important thing you've heard — not a checkbox to tick.
-- After they answer the follow-up, connect the injury explicitly to how Dean will coach around it: "With that history I'll watch your weekly ramp closely and flag when intensity spikes — that's the difference between managing it and turning it into something serious."
-- "No injuries, all good" is a complete answer — accept it and move on.
-- For injury_recovery or return_to_running goals: dig deeper — ask what happened AND current status.
-- For ultra goals: also ask about trail/ultra race history before [READY].
-- INJURY MENTIONS ARE NOT EXERCISE REQUESTS: An injury mention is context, not a request for rehab advice. Ask ONE specific follow-up question. Do NOT prescribe stretches, exercises, or link to rehab content. Do NOT say generic things like "we'll focus on gradual progression", "listen to your body", "we'll be careful with ramp-up", or "that's something we'll keep in mind." These are platitudes that dismiss rather than engage. One specific question is worth ten reassurances.
+INJURY MENTIONS IN GOALS STAGE:
+Injury intake happens in a dedicated stage after Strava connects — do not probe for details here. If the athlete mentions an injury or health concern, acknowledge it specifically (not generically) and continue. Example: "A stress fracture that wiped out six months — that history will shape how we structure your build." Do NOT say "we'll be careful", "gradual progression", "training safe and progressive", "we'll keep you healthy", or any generic reassurance. One concrete acknowledgment, then move on to the next question.
+EXCEPTION — injury_recovery or return_to_running goals: If the athlete's goal IS recovery from an injury or return to running (including messages like "I want to get back to running", "I've been dealing with X for months", "I'm not really training right now"), you must collect injury context before moving on. Ask ONE specific question about the injury — where exactly it hurts, when it flares (during/after runs), or whether they've seen a physio or PT. Do NOT ask about cross-training, general recovery, or other onboarding fields until you understand the injury. Do NOT give advice or suggest treatments — just collect information.
 
 STRAVA:
-Ask about Strava after plan preference is established — BEFORE injury history, race times, pace, or any other questions. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
+Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 Keep the pitch simple: "I'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too." Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism. The benefit is the coaching note in their feed.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
@@ -464,18 +455,8 @@ If the athlete confirms they are cycling-only and not interested in running, wis
 If the athlete is training for a triathlon, clarify your role upfront: "For triathlons I handle the run leg — I'll build your running program and check in after every run workout. For swim and bike you'd want dedicated coaching, but I'll make sure your run is dialed in."
 Also ask about any physical limitations or injury history before signaling [READY] for triathlon goals — this directly affects run-specific programming.
 
-STRAVA CONTEXT:
-When Strava connects, give a genuine analytical read of the data — this is a taste of the post-run coaching they'll get ongoing. Lead with the performance story: what does this training history tell you about where this athlete is and where they can go? Use specific numbers. Pick 2–3 observations:
-- Volume + trend: the mileage progression tells you how the base is developing. ("You've been building — 22, 25, 28, 30 miles over the last four weeks — that's a solid platform.") Connect it to their goal.
-- Long run proportion: is the longest run appropriately long for their goal distance? Note it as a performance factor.
-- Frequency: consistency of training is often the biggest predictor of improvement. ("5 days consistently — that's where aerobic gains compound.")
-- Elevation: for trail athletes, elevation load = specificity. ("Averaging 500ft per run is solid prep for Dipsea's terrain.")
-- HR zones (if present): frame this as performance insight, not a warning label. High Z1-2 is a strong aerobic base — the engine that gets you faster. High Z3+ means they're working harder than the base phase calls for, which limits how much fitness they can absorb. Be direct but frame it as "here's what this means for your training": "85% of your runs are in Z1-2 — that's a genuinely strong aerobic base, your fitness will compound well" or "About half your runs are running at threshold or harder — that's leaving gains on the table. Keeping the easy days easy is usually the fastest path to a PR."
-- Mileage spike (if ⚠️ spike warning is present): surface it with specific numbers from the weekly progression above. Identify the exact mileage jump (e.g. "You went from 22 to 38 miles") by comparing adjacent values in the weekly progression line. Approximate the week date by counting back from today. Do NOT say "there was a notable one recently" — be concrete: "You jumped from X to Y miles the week of [approximate date] — that's a Z% spike. Worth watching as we ramp." Don't open with the warning — let it land after the positive read.
-- Multiple races (if athlete has 2+ races): name ALL of them in the calibration summary and explain the periodization logic. E.g. "With Dipsea on June 1 and the 10K + Cirque Series in July, I'll prioritize climbing strength and aerobic efficiency in May, then shift to speed sharpening in June." Don't let secondary races silently disappear.
-End with one forward-looking sentence connecting their data to their goal — UNLESS the PACE CALIBRATION section below requires asking a road race question in this message. In that case, the pace calibration question is the final sentence; do NOT add a separate forward-looking sentence after it.
-Do NOT narrate all the stats like a report. Pick what's most interesting and make it feel like a real coach read the data — the performance picture first, risk context woven in.
-If the inbound message is "(strava connected)", that is a system trigger — not something the user typed. Do not reference or repeat it. Just continue the conversation naturally from where you left off.
+STRAVA CONNECTED:
+If the inbound message is "(strava connected)", that is a system trigger that fires a dedicated data-analysis stage — it will never reach this goals-stage prompt. Ignore this line; it's here for reference only.
 
 RACE DATE CONFIRMATION COMES FIRST:
 Whenever a "RACE DATE PRE-LOOKUP" or "RACE DATE LOOKUP FAILED" line appears anywhere in this prompt (injected at the end), your VERY NEXT message MUST address those race dates before anything else — before Strava, before any other step in the flow.
@@ -507,33 +488,24 @@ NEVER SEND STANDALONE HOLDING MESSAGES:
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
-READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these four items:
+READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these three items:
 1. Name ✓
 2. Goal (+ race date if a named race) ✓
 3. Strava connected ✓ (shown as "STRAVA: Connected" in the context above)
-4. Injury history — any answer including "no injuries" ✓
 
-If ALL FOUR are present: signal [READY] in THIS message immediately. Do not ask ANY follow-up question — not training days, not strength work, not weekly mileage, not anything. Write a warm 1-2 sentence wrap-up, then [READY] on its own line. Nothing else.
+Injury history is collected in a dedicated injury intake stage AFTER Strava connects — do NOT wait for it here.
+
+If all three are present: signal [READY] in THIS message. Do not ask ANY follow-up question. Write a synthesis wrap-up that references the specific race (or goal), the timeline (how many weeks away), and one key observation from Strava or the conversation — then [READY] on its own line. Example: "Got it — Snowbird in 6 weeks, solid 25 miles/week base. First coaching note lands after your next run." Keep it to 1–2 sentences.
 
 The [READY] tag is stripped before sending — do not reference or explain it. Do not include [READY] if you still need to ask something essential.
 [READY] IS REQUIRED ON ANY WRAP-UP: If your message says anything like "you're all set", "ready to kick off", "we're good to go", or otherwise signs off without a question, you MUST include [READY] on its own line.
-Name is always required — if the user hasn't told you their name yet, ask before signaling [READY]. If you asked for the name but the user deflected or skipped it, circle back and ask again before wrapping up.
-CRITICAL — [READY] means zero open questions: [READY] can only appear in a message that contains NO questions of any kind — required or optional, soft or hard. The moment you add a question mark to a message, [READY] is off the table for that turn, no matter how minor the question seems. If you realize you still need to ask something (pace calibration, goal time, any follow-up), ask it in this message WITHOUT [READY] and wait for the athlete's response. Then wrap up and signal [READY] in your next turn. Signaling [READY] while an unanswered question is in the same message fires the plan immediately — the athlete never gets to respond.
-When you signal [READY], open with a synthesis sentence that reflects back the key facts you heard: race name, how many weeks out, the most important constraint or injury (if any), and their current fitness level from Strava. Example: "Got it — Dipsea in 6 weeks, hamstring needs watching, and your Strava shows you're building well at 38 miles/week." This moment makes the athlete feel genuinely heard before their first run even happens. Then a second sentence: "First coaching note lands after your next Strava run, and I'll check in with how I'm thinking about the build shortly." Use first person only — never refer to yourself as "Dean". Keep it brief.
-WORD ACCURACY: The term is "aerobic" (related to oxygen use / endurance). Never write "aerodynamic" — that's about airflow over a bike or car, not running physiology. Double-check this word before sending.
+Name is always required — if the user hasn't told you their name yet, ask before signaling [READY].
+CRITICAL — [READY] means zero open questions: [READY] can only appear in a message that contains NO questions of any kind. The moment you add a question mark to a message, [READY] is off the table for that turn.
+WORD ACCURACY: The term is "aerobic" (related to oxygen use / endurance). Never write "aerodynamic" — that's about airflow over a bike or car, not running physiology.
 
 ULTRA AND INJURY GOALS — extra required fields:
-For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history AND any injuries or physical limitations before signaling [READY]. "Any prior ultras or trail races?" covers both.
-For return_to_running or injury_recovery goals: you MUST ask about the injury/limitation and current status before [READY].
-
-${alreadyAskedPaceCalibration
-  ? `PACE CALIBRATION — trail race on Strava:
-You already asked about road race times earlier in this conversation. Do NOT ask again. Accept whatever pace data the athlete has provided and proceed.`
-  : `PACE CALIBRATION — trail race on Strava:
-If Strava is connected and the STRAVA note says "this is a trail race", you MUST ask about road race times in THIS message — do not defer it to a later turn. Trail paces are slower than road paces due to elevation, so the suggested easy pace from Strava is only a rough estimate until we get a road benchmark. Reference the specific race from the STRAVA note by its label and date (e.g. "I can see a [label] from [date] in your Strava history"). Then explain that since it was a trail race, elevation makes trail paces slower than road paces, so you'd love a recent road 5K, 10K, or half marathon time for more accurate training zones — but no worries if they don't have one.
-Do NOT use vague phrases like "your best Strava effort" without naming the specific race. Do NOT state the suggested easy pace as settled or confident — frame it as preliminary until the calibration question is answered.
-Do NOT ask this if a recent road race PR is already listed under "WHAT YOU ALREADY KNOW" (easy_pace or recent race already provided).
-IMPORTANT: Because this is a question, do NOT include [READY] in this same message. Wait for the athlete's response — even "I don't have one" is sufficient — then signal [READY] in the next turn.`}`;
+For ultra goals (30k, 50k, 50mi, 100k, 100mi): you MUST ask about their ultra/trail race history before signaling [READY].
+For return_to_running or injury_recovery goals: you MUST ask about the injury/limitation and current status before [READY].`;
 
   // Treat a stored first-of-month date as suspect (month-only guess) and re-search.
   const isFirstOfMonth = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-01$/.test(d);
@@ -1054,6 +1026,246 @@ Rules:
   }
   console.error("[onboarding] extractFields: no tool_use block returned");
   return {};
+}
+
+// ---------------------------------------------------------------------------
+// Data Analysis Stage — post-Strava opinionated synthesis + injury question
+// ---------------------------------------------------------------------------
+
+async function handleDataAnalysis(
+  user: { id: string; phone_number: string; name: string | null },
+  data: Record<string, unknown>,
+  stravaContext: string,
+  chatId?: string | null
+): Promise<NextResponse> {
+  void chatId;
+  const rawName = (data.name as string | null) || user.name || null;
+  const firstName = rawName ? rawName.split(" ")[0] : null;
+  const raceName = data.race_name as string | null;
+  const raceDate = data.race_date as string | null;
+  const goal = data.goal as string | null;
+  const otherRaces = (data.other_races as Array<{ name?: string | null; date?: string | null; priority: string }> | null) ?? [];
+
+  // Build race context for the prompt
+  let raceContext = "";
+  if (raceName && raceDate) {
+    const weeksUntil = Math.round(
+      (new Date(raceDate + "T12:00:00Z").getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)
+    );
+    raceContext = `${raceName} on ${raceDate} (${weeksUntil} week${weeksUntil !== 1 ? "s" : ""} away)`;
+    const otherWithDates = otherRaces.filter(r => r.name && r.date);
+    if (otherWithDates.length > 0) {
+      const others = otherWithDates.map(r => {
+        const w = Math.round((new Date(r.date! + "T12:00:00Z").getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000));
+        return `${r.name} (${w}w)`;
+      }).join(", ");
+      raceContext += `. Secondary: ${others}`;
+    }
+  } else if (goal) {
+    raceContext = goal.replace(/_/g, " ");
+  }
+
+  const systemPrompt = `You are Coach Dean, an AI running coach. ${firstName ? firstName + "'s" : "An athlete's"} Strava just connected.
+
+ATHLETE CONTEXT:
+${raceContext ? `Race/Goal: ${raceContext}` : "Goal: general fitness"}
+${stravaContext}
+
+YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
+
+Write 3–4 sentences:
+1. One insight that connects their training data to the race timeline. Use the actual numbers. Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
+2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
+3. One forward-looking sentence about what the coaching will watch.
+
+Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"
+
+Rules:
+- Do NOT ask for road race times — training zones calibrate from Strava data
+- Do NOT narrate all the stats — pick 2–3 meaningful facts and make them mean something
+- Avoid: "solid base", "great foundation", "exciting", "strong work", "keep it up"
+- 4 sentences max before the injury question
+- Plain text, no markdown`;
+
+  const response = await anthropic.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 400,
+    system: systemPrompt,
+    messages: [{ role: "user", content: "(strava connected)" }],
+  });
+
+  const synthesisText = response.content
+    .filter(b => b.type === "text")
+    .map(b => (b as { type: "text"; text: string }).text)
+    .join("")
+    .trim();
+
+  const finalText = synthesisText || "Your training data is in. Has injury ever been a factor for you, or anything you're managing right now?";
+
+  // Advance to injury intake stage
+  const updatedData = { ...data, stage: "injury_intake" };
+
+  await supabase.from("conversations").insert({
+    user_id: user.id,
+    role: "user",
+    content: "(strava connected)",
+    message_type: "user_message",
+  });
+
+  await supabase.from("users")
+    .update({ onboarding_data: updatedData as unknown as Json })
+    .eq("id", user.id);
+
+  await sendAndStore(user.id, user.phone_number, finalText, "onboarding");
+
+  return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Injury Intake Stage — one focused probe, then deterministic completion
+// ---------------------------------------------------------------------------
+
+async function handleInjuryIntake(
+  user: { id: string; phone_number: string; name: string | null },
+  message: string,
+  data: Record<string, unknown>,
+  chatId?: string | null
+): Promise<NextResponse> {
+  const followUpAlreadySent = !!(data.injury_follow_up_sent as boolean | null);
+
+  // Extract injury details from this message
+  const extracted = await extractFields([{ role: "user", content: message }]);
+  const mergedData: Record<string, unknown> = { ...data };
+  for (const [k, v] of Object.entries(extracted)) {
+    if (v !== null && v !== undefined) {
+      if (Array.isArray(v) && (v as unknown[]).length === 0) continue;
+      mergedData[k] = v;
+    }
+  }
+
+  // Store user message
+  await supabase.from("conversations").insert({
+    user_id: user.id,
+    role: "user",
+    content: message,
+    message_type: "user_message",
+  });
+
+  // Detect "no injury" responses
+  const noInjury = /\b(no (injury|injuries|issues|pain|niggles|problems)|all good|nothing|clean|healthy|fine|never|n\/a)\b/i.test(message);
+  const shouldComplete = followUpAlreadySent || noInjury;
+
+  if (shouldComplete) {
+    const completionMsg = buildDeterministicCompletion(mergedData);
+    await supabase.from("users")
+      .update({ onboarding_data: mergedData as unknown as Json })
+      .eq("id", user.id);
+    await sendAndStore(user.id, user.phone_number, completionMsg, "onboarding");
+    await completeOnboarding(user, mergedData, chatId);
+    return NextResponse.json({ ok: true });
+  }
+
+  // First injury response — generate ONE specific follow-up question via Haiku
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 120,
+    system: `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question.
+
+Target: how long it's been happening, whether pain is during runs or after, whether it's limiting training.
+
+ONE question only. No advice, no stretches, no reassurance ("we'll be careful", "listen to your body"). Just the question.
+Plain text, 1–2 sentences max.`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const followUpText = response.content
+    .filter(b => b.type === "text")
+    .map(b => (b as { type: "text"; text: string }).text)
+    .join("")
+    .trim() || "How long has it been bothering you, and do you feel it during runs, after, or both?";
+
+  const updatedData = { ...mergedData, injury_follow_up_sent: true };
+  await supabase.from("users")
+    .update({ onboarding_data: updatedData as unknown as Json })
+    .eq("id", user.id);
+  await sendAndStore(user.id, user.phone_number, followUpText, "onboarding");
+  return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic completion message — built from structured data, not LLM
+// ---------------------------------------------------------------------------
+
+function buildDeterministicCompletion(data: Record<string, unknown>): string {
+  const rawName = (data.name as string) || "";
+  const firstName = rawName.split(" ")[0] || "Hey";
+  const raceName = data.race_name as string | null;
+  const raceDate = data.race_date as string | null;
+  const avgMiles = data.strava_avg_weekly_miles as number | null;
+  const hrZones = data.strava_hr_zone_pct as { z1: number; z2: number; z3: number; z4: number; z5: number } | null;
+  const currentNiggles = data.current_niggles as string | null;
+  const injuryHistory = data.injury_history as string | null;
+  const mileageTrend = data.strava_mileage_trend as string | null;
+  const otherRaces = (data.other_races as Array<{ name?: string | null; date?: string | null; priority: string }> | null) ?? [];
+
+  // Race + timeline opening
+  let opening = "";
+  if (raceName && raceDate) {
+    const weeksUntil = Math.round(
+      (new Date(raceDate + "T12:00:00Z").getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)
+    );
+    const timelineStr = weeksUntil <= 1 ? "this week" : weeksUntil === 2 ? "2 weeks out" : `${weeksUntil} weeks out`;
+    const nextOther = otherRaces.find(r => r.name && r.date);
+    if (nextOther) {
+      const nextWeeks = Math.round((new Date(nextOther.date! + "T12:00:00Z").getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000));
+      opening = `${firstName}, ${raceName} ${timelineStr} then ${nextOther.name} ${nextWeeks} weeks later.`;
+    } else {
+      opening = `${firstName}, ${raceName} ${timelineStr}.`;
+    }
+  } else if (raceName) {
+    opening = `${firstName}, ${raceName} is locked in.`;
+  } else {
+    opening = `${firstName}, you're set up.`;
+  }
+
+  // Key training observation from Strava data
+  let observation = "";
+  if (hrZones && avgMiles) {
+    const highZ = hrZones.z3 + hrZones.z4 + hrZones.z5;
+    if (highZ > 50) {
+      observation = `Your ${avgMiles} mi/week base is there — keeping the easy days truly easy is the main lever right now.`;
+    } else {
+      observation = `Your aerobic base at ${avgMiles} mi/week is well-paced — good platform to build from.`;
+    }
+  } else if (avgMiles) {
+    const trendNote = mileageTrend === "building" ? ", trending up" : "";
+    observation = `Your base at ${avgMiles} mi/week${trendNote} gives us room to work.`;
+  }
+
+  // Injury note — body-part specific
+  let injuryNote = "";
+  if (currentNiggles) {
+    const text = currentNiggles.toLowerCase();
+    const bodyPart = text.includes("hamstring") ? "Hamstring"
+      : text.includes("shin") ? "Shin"
+      : text.includes("knee") ? "Knee"
+      : text.includes("achilles") ? "Achilles"
+      : text.includes("it band") || text.includes("itb") ? "IT band"
+      : text.includes("hip") ? "Hip"
+      : text.includes("calf") ? "Calf"
+      : text.includes("plantar") ? "Plantar fascia"
+      : "That";
+    injuryNote = `${bodyPart} is on my radar — I'll watch the load and flag anything that looks risky.`;
+  } else if (injuryHistory && !/\b(none|no injury|no injuries|healthy|fine)\b/i.test(injuryHistory)) {
+    injuryNote = "Injury history noted — I'll monitor patterns and flag anything worth managing.";
+  }
+
+  const parts = [opening];
+  if (observation) parts.push(observation);
+  if (injuryNote) parts.push(injuryNote);
+  parts.push("First coaching note lands after your next run — go run.");
+
+  return parts.join(" ");
 }
 
 // ---------------------------------------------------------------------------

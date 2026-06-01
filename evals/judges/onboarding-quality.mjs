@@ -50,8 +50,12 @@ ${firstMessageCriteria}
 
 4. no_reask: Does the response avoid asking for information that's already collected above?
    - true = no question about any field already shown under "WHAT DEAN ALREADY KNOWS"
-   - false = asks about training_days, goal, race_name, or another field already collected
-   - Key things to check: if training_days collected → must not ask about schedule; if goal/race_name collected → must not ask about A-race
+   - false = asks about a field that IS already shown under "WHAT DEAN ALREADY KNOWS"
+   - IMPORTANT DISTINCTIONS:
+     * goal TYPE (e.g., "half_marathon", "trail_race") is NOT the same as a specific race name. If goal type is collected but race_name is NOT, asking "What specific race are you targeting?" is CORRECT — it is asking for race_name, which hasn't been collected yet.
+     * For trail/mountain races: asking about race INTENT ("Are you racing to finish, or targeting a placement?") is asking for a NEW field (finish_vs_competitive) — this is NOT re-asking for the goal type.
+     * Only flag no_reask=false if the response asks for something explicitly listed in the "WHAT DEAN ALREADY KNOWS" section above.
+   - Key things to check: if training_days collected → must not ask about schedule; if race_name (specific event) collected → must not ask about it again
 
 5. ready_behavior: ${category === "ready_signal"
     ? `This is a ready_signal fixture — evaluate carefully:
