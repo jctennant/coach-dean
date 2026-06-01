@@ -1,0 +1,40 @@
+{
+  "id": "strava-pace-trend-race-history",
+  "description": "Athlete with improving easy pace trend and strong race history (half marathon background, now targeting a marathon). Dean should reference the race history to show he's read the full picture, and use the pace trend as a positive signal.",
+  "category": "strava_analysis",
+  "athlete": {
+    "name": "Elena",
+    "goal": "marathon",
+    "race_name": "Chicago Marathon",
+    "race_date": "2026-10-11",
+    "weeks_until_race": 19
+  },
+  "strava": {
+    "avg_weekly_miles": 42,
+    "mileage_trend": "building",
+    "avg_runs_per_week": 5,
+    "longest_run_miles": 16,
+    "long_run_pct": 38,
+    "days_since_last_run": 2,
+    "easy_pace_trend": "improving",
+    "easy_pace_trend_delta_sec": 22,
+    "avg_elev_ft_per_run": null,
+    "recent_4_weeks": [37, 39, 41, 44],
+    "hr_zone_pct": { "z1": 12, "z2": 58, "z3": 20, "z4": 8, "z5": 2 },
+    "estimated_max_hr": 181,
+    "max_weekly_spike_pct": null,
+    "best_race": {
+      "label": "Half Marathon on 2025-09-14 in 1:48:22",
+      "easy_pace": "9:00",
+      "is_trail": false
+    }
+  },
+  "race_history": [
+    { "name": "Chicago Half Marathon", "month": "Sep 2025", "distance_km": 21.1, "time": "1:48:22" },
+    { "name": "Lakefront 10 Mile", "month": "May 2025", "distance_km": 16.1, "time": "1:21:45" },
+    { "name": "Local 5K", "month": "Mar 2025", "distance_km": 5.0, "time": "22:18" }
+  ],
+  "ground_truth": {
+    "notes": "Elena has a strong profile: 42mi/week building, 70% of runs in Z1/Z2, improving easy pace trend (22s/mi faster recently), and a 1:48 half marathon PR. She's stepping up to the marathon for the first time. With 19 weeks, the build is very workable.\n\nCorrect behavior:\n1. Reference at least one race from the history naturally — the 1:48 half is the key data point ('I can see you ran a 1:48 half in September'). This shows Dean has read her full background, not just the last 8 weeks.\n2. Note the improving pace trend as a meaningful signal — Z2 pace improving 22s/mi suggests real aerobic development happening.\n3. Name ONE challenge specific to the marathon step-up: she's never run more than 16 miles, so the long run build is the key variable over 19 weeks.\n4. Close with the injury question.\n\nDo NOT:\n- Say 'solid base' or 'great foundation'\n- Ignore the race history — referencing it is the whole point of this fixture\n- Ignore the pace trend — it's a real positive signal worth naming\n- Make the marathon step-up sound scary or overwhelming\n- List all three races — one or two is enough"
+  }
+}

@@ -287,7 +287,23 @@ async function handleConversation(
       ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
       : "";
     const frequencyLine = avgRunsPerWeek != null ? ` ~${avgRunsPerWeek} runs/week.` : "";
-    const longestLine = longestRunMiles != null ? ` Longest run (8 weeks): ${longestRunMiles} mi.` : "";
+    const longRunPct = mergedData.strava_long_run_pct as number | null ?? null;
+    const longestLine = longestRunMiles != null
+      ? ` Longest run (8 weeks): ${longestRunMiles} mi${longRunPct != null ? ` (${longRunPct}% of weekly volume)` : ""}.`
+      : "";
+    const daysSinceLastRun = mergedData.strava_days_since_last_run as number | null ?? null;
+    const lastRunLine = daysSinceLastRun != null
+      ? daysSinceLastRun <= 3
+        ? ` Last run: ${daysSinceLastRun} day${daysSinceLastRun !== 1 ? "s" : ""} ago.`
+        : daysSinceLastRun <= 10
+          ? ` Last run: ${daysSinceLastRun} days ago.`
+          : ` Last run: ${daysSinceLastRun} days ago (currently inactive — factor this into plan timing).`
+      : "";
+    const easyPaceTrend = mergedData.strava_easy_pace_trend as string | null ?? null;
+    const easyPaceDelta = mergedData.strava_easy_pace_trend_delta_sec as number | null ?? null;
+    const paceTrendLine = easyPaceTrend
+      ? ` Easy pace trend (Z2 runs): ${easyPaceTrend}${easyPaceDelta != null && easyPaceDelta >= 5 ? ` (~${easyPaceDelta}s/mi ${easyPaceTrend === "improving" ? "faster" : "slower"} recently)` : ""}.`
+      : "";
     const TRAIL_GOALS = ["trail_race", "30k", "50k", "50mi", "100k", "100mi"];
     const mergedGoal = mergedData.goal as string | null;
     const isTrailGoal = mergedGoal ? TRAIL_GOALS.includes(mergedGoal) : false;
@@ -316,7 +332,7 @@ async function handleConversation(
       const paceNote = sbr.is_trail
         ? ` Note: this is a trail race — easy pace suggestion withheld. Collect a road 5K/10K/HM time to set accurate training zones.`
         : ` Suggested easy pace: ${easyRange}/mi. You can use this to set their training zones.`;
-      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${lastRunLine}${elevLine}${progressionLine}${paceTrendLine}${hrZoneLine}${spikeLine} Best race for pace calibration: ${sbr.label} on ${sbr.date_str} in ${sbr.time_str}.${paceNote}`;
 
       // Store trail-race flag so completeOnboarding can guard the VDOT recalculation.
       // This prevents Haiku from accidentally extracting the trail race distance/time
@@ -336,7 +352,7 @@ async function handleConversation(
       const paceNote = hasRaceData || hasPaceData
         ? " No race activity found on Strava — using pace data already collected from conversation."
         : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
-      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine}${paceNote}`;
+      stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${lastRunLine}${elevLine}${progressionLine}${paceTrendLine}${hrZoneLine}${spikeLine}${paceNote}`;
     }
   } else {
     // Strava is mandatory — never treat the athlete as having skipped. If a legacy
@@ -1072,11 +1088,39 @@ async function handleDataAnalysis(
     raceContext = goal.replace(/_/g, " ");
   }
 
+  // Query race history from DB — background import may have completed by now,
+  // giving us more than the 8-week window from the sync import.
+  const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: pastRaceRows } = await supabase
+    .from("activities")
+    .select("activity_name, start_date, distance_meters, moving_time_seconds")
+    .eq("user_id", user.id)
+    .eq("workout_type", 1)
+    .gte("start_date", oneYearAgo)
+    .order("start_date", { ascending: false })
+    .limit(5);
+
+  const fmtTime = (s: number) => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.round(s % 60);
+    return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+  };
+  const raceHistoryLines = (pastRaceRows ?? [])
+    .filter(r => r.activity_name && r.start_date)
+    .map(r => {
+      const distKm = Math.round((r.distance_meters ?? 0) / 100) / 10;
+      const time = r.moving_time_seconds ? fmtTime(r.moving_time_seconds) : "";
+      const month = new Date(r.start_date!).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      return `  - ${r.activity_name} (${month}${distKm > 0 ? `, ${distKm} km` : ""}${time ? `, ${time}` : ""})`;
+    });
+  const raceHistorySection = raceHistoryLines.length > 0
+    ? `\nRACE HISTORY (last 12 months from Strava):\n${raceHistoryLines.join("\n")}`
+    : "";
+
   const systemPrompt = `You are Coach Dean, an AI running coach. ${firstName ? firstName + "'s" : "An athlete's"} Strava just connected.
 
 ATHLETE CONTEXT:
 ${raceContext ? `Race/Goal: ${raceContext}` : "Goal: general fitness"}
-${stravaContext}
+${stravaContext}${raceHistorySection}
 
 YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
@@ -1093,6 +1137,10 @@ Rules:
 - Avoid: "solid base", "great foundation", "exciting", "strong work", "keep it up"
 - 4 sentences max before the injury question
 - Plain text, no markdown
+- RACE HISTORY: If a RACE HISTORY section appears above, you MUST reference at least one race by name or result. Acknowledging it ("I can see you ran a 1:48 half in September") shows you've read their full background, not just the last 8 weeks. Don't list all races — pick the one most relevant to the current goal.
+- PACE TREND: If "Easy pace trend (Z2 runs): improving" appears, mention it explicitly as a positive signal ("your Z2 pace has improved ~22s/mi"). If "declining", flag it. Don't skip this data point.
+- INACTIVITY: If "Last run: X days ago" shows more than 10 days, factor this into the training start timing.
+- HIGH Z3 WARNING: If ≥50% of runs are in Z3, name this clearly but without alarm. Z3 is "no man's land" — hard enough to accumulate fatigue, too easy to build race-specific fitness. Note that wrist-based HR can read high, so the real zones might be slightly lower, but the pattern is still worth polarizing: more true easy (Z1/Z2) and add one genuine quality session (Z4/Z5). Frame it as a direction to move toward, not a condemnation of what they've been doing.
 - TRAIL RACES: If "Avg elevation/run: 0 ft (no vertical training)" appears in the Strava context AND the race is a trail/mountain race, lead with the elevation gap. Include the athlete's weekly mileage AND weeks to race alongside it so the coaching read is grounded. Example: "You're building well at 38 miles/week over 5 runs, but zero elevation gain in all of it — with 10 weeks to Snowbird and ~3000ft of climbing in 8.9 miles, adding vert is now the training priority."`;
 
   const response = await anthropic.messages.create({

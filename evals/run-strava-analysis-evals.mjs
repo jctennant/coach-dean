@@ -80,7 +80,23 @@ function buildStravaContext(strava, goal) {
     ? ` Recent avg: ~${avg_weekly_miles} mi/week${mileage_trend ? ` (${mileage_trend})` : ""}.`
     : "";
   const frequencyLine = avg_runs_per_week != null ? ` ~${avg_runs_per_week} runs/week.` : "";
-  const longestLine = longest_run_miles != null ? ` Longest run (8 weeks): ${longest_run_miles} mi.` : "";
+  const longRunPct = strava.long_run_pct ?? null;
+  const longestLine = longest_run_miles != null
+    ? ` Longest run (8 weeks): ${longest_run_miles} mi${longRunPct != null ? ` (${longRunPct}% of weekly volume)` : ""}.`
+    : "";
+  const daysSince = strava.days_since_last_run ?? null;
+  const lastRunLine = daysSince != null
+    ? daysSince <= 3
+      ? ` Last run: ${daysSince} day${daysSince !== 1 ? "s" : ""} ago.`
+      : daysSince <= 10
+        ? ` Last run: ${daysSince} days ago.`
+        : ` Last run: ${daysSince} days ago (currently inactive — factor this into plan timing).`
+    : "";
+  const easyPaceTrend = strava.easy_pace_trend ?? null;
+  const easyPaceDelta = strava.easy_pace_trend_delta_sec ?? null;
+  const paceTrendLine = easyPaceTrend
+    ? ` Easy pace trend (Z2 runs): ${easyPaceTrend}${easyPaceDelta != null && easyPaceDelta >= 5 ? ` (~${easyPaceDelta}s/mi ${easyPaceTrend === "improving" ? "faster" : "slower"} recently)` : ""}.`
+    : "";
   const isTrailGoal = ["trail_race", "30k", "50k", "50mi", "100k", "100mi"].includes(goal ?? "");
   const elevLine = avg_elev_ft_per_run
     ? ` Avg elevation/run: ${avg_elev_ft_per_run} ft.`
@@ -106,7 +122,7 @@ function buildStravaContext(strava, goal) {
     paceNote = " No races found for VDOT calculation — training zones will be calibrated from HR data.";
   }
 
-  return `STRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${elevLine}${progressionLine}${hrZoneLine}${spikeLine}${paceNote}`;
+  return `STRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${lastRunLine}${elevLine}${progressionLine}${paceTrendLine}${hrZoneLine}${spikeLine}${paceNote}`;
 }
 
 // ─────────────────────────────────────────────
@@ -124,11 +140,18 @@ function buildDataAnalysisPrompt(fixture) {
     raceContext = athlete.goal.replace(/_/g, " ");
   }
 
+  const raceHistory = fixture.race_history ?? [];
+  const raceHistorySection = raceHistory.length > 0
+    ? `\nRACE HISTORY (last 12 months from Strava):\n${raceHistory.map(r =>
+        `  - ${r.name} (${r.month}${r.distance_km ? `, ${r.distance_km} km` : ""}${r.time ? `, ${r.time}` : ""})`
+      ).join("\n")}`
+    : "";
+
   return `You are Coach Dean, an AI running coach. ${firstName ? firstName + "'s" : "An athlete's"} Strava just connected.
 
 ATHLETE CONTEXT:
 ${raceContext ? `Race/Goal: ${raceContext}` : "Goal: general fitness"}
-${stravaContext}
+${stravaContext}${raceHistorySection}
 
 YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
@@ -145,6 +168,10 @@ Rules:
 - Avoid: "solid base", "great foundation", "exciting", "strong work", "keep it up"
 - 4 sentences max before the injury question
 - Plain text, no markdown
+- RACE HISTORY: If a RACE HISTORY section appears, you MUST reference at least one race by name or result in your response. The race history shows their competitive background — acknowledging it ("I can see you ran a 1:48 half in September") earns trust and grounds the coaching in their real fitness. Do NOT ignore it.
+- HIGH Z3 WARNING: If ≥50% of runs are in Z3, name this clearly but without alarm. Z3 is "no man's land" — hard enough to accumulate fatigue, too easy to build race-specific fitness. Note that wrist-based HR can read high, so the real zones might be slightly lower, but the pattern is still worth polarizing: more true easy (Z1/Z2) and add one genuine quality session (Z4/Z5). Frame it as a direction to move toward, not a condemnation of what they've been doing.
+- PACE TREND: If "Easy pace trend (Z2 runs): improving" appears in the context, weave it in as a positive signal. "Your Z2 pace has been improving 22s/mi" tells them their aerobic base is actually developing — don't waste that data point.
+- INACTIVITY: If the last run was >10 days ago, factor this into your coaching read — the plan timing needs adjustment.
 - TRAIL RACES: If "Avg elevation/run: 0 ft (no vertical training)" appears in the Strava context AND the race is a trail/mountain race, lead with the elevation gap. Include the athlete's weekly mileage AND weeks to race alongside it so the coaching read is grounded. Example: "You're building well at 38 miles/week over 5 runs, but zero elevation gain in all of it — with 10 weeks to Snowbird and ~3000ft of climbing in 8.9 miles, adding vert is now the training priority."`;
 }
 

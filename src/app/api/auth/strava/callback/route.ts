@@ -343,6 +343,71 @@ export async function GET(request: Request) {
     updatedOnboardingData.strava_max_weekly_spike_pct = Math.round(maxSpikePct * 100);
   }
 
+  // Long run as % of weekly volume — signals training polarization / balance
+  if (longestRunMiles != null && avgWeeklyMiles != null && avgWeeklyMiles > 0) {
+    updatedOnboardingData.strava_long_run_pct = Math.round((longestRunMiles / avgWeeklyMiles) * 100);
+  }
+
+  // Most recent run date — flag inactivity gaps that affect training plan timing
+  if (runs8w.length > 0) {
+    const mostRecent = runs8w.reduce((a, b) =>
+      new Date(a.start_date!).getTime() > new Date(b.start_date!).getTime() ? a : b
+    );
+    updatedOnboardingData.strava_days_since_last_run = Math.round(
+      (Date.now() - new Date(mostRecent.start_date!).getTime()) / (24 * 60 * 60 * 1000)
+    );
+  }
+
+  // Easy pace trend — compare avg pace of Z2 runs in older 4 weeks vs. newer 4 weeks.
+  // Uses estimated max HR to isolate aerobic-effort runs for a consistent comparison.
+  if (estimatedMaxHR != null) {
+    const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
+    const z2Runs = runs8w.filter(r => {
+      if (!r.average_heartrate || !r.distance_meters || !r.moving_time_seconds) return false;
+      if ((r.distance_meters ?? 0) < 800) return false;
+      const pct = r.average_heartrate / estimatedMaxHR;
+      return pct >= 0.60 && pct < 0.75;
+    });
+    const olderZ2 = z2Runs.filter(r => new Date(r.start_date!) < fourWeeksAgo);
+    const newerZ2 = z2Runs.filter(r => new Date(r.start_date!) >= fourWeeksAgo);
+    const avgPaceSPM = (runs: typeof z2Runs): number | null => {
+      if (!runs.length) return null;
+      return runs.reduce((s, r) =>
+        s + r.moving_time_seconds! / (r.distance_meters! / 1609.34), 0
+      ) / runs.length;
+    };
+    const olderPace = avgPaceSPM(olderZ2);
+    const newerPace = avgPaceSPM(newerZ2);
+    if (olderPace != null && newerPace != null) {
+      const ratio = newerPace / olderPace;
+      const trend = ratio < 0.97 ? "improving" : ratio > 1.03 ? "declining" : "steady";
+      updatedOnboardingData.strava_easy_pace_trend = trend;
+      const deltaSec = Math.round(Math.abs(olderPace - newerPace));
+      if (deltaSec >= 5) updatedOnboardingData.strava_easy_pace_trend_delta_sec = deltaSec;
+    }
+  }
+
+  // Recent races from 8-week window — activity_name + workout_type:1 from Strava
+  const formatRaceTime = (secs: number): string => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = Math.round(secs % 60);
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+      : `${m}:${String(s).padStart(2, "0")}`;
+  };
+  const races8w = runs8w
+    .filter(r => r.workout_type === 1 && (r.distance_meters ?? 0) > 400)
+    .sort((a, b) => new Date(b.start_date!).getTime() - new Date(a.start_date!).getTime())
+    .slice(0, 3)
+    .map(r => ({
+      name: r.activity_name ?? "Race",
+      date: r.start_date?.slice(0, 10) ?? "",
+      distance_km: Math.round((r.distance_meters ?? 0) / 100) / 10,
+      time_str: formatRaceTime(r.moving_time_seconds ?? 0),
+    }));
+  if (races8w.length > 0) updatedOnboardingData.strava_recent_races = races8w;
+
   // Write analytics into onboarding_data. This is a second DB update — analytics depend
   // on importRecentActivities (line ~170), which runs after the first update at line ~136.
   if (avgWeeklyMiles != null) updatedOnboardingData.strava_avg_weekly_miles = avgWeeklyMiles;
