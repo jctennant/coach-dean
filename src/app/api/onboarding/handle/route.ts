@@ -288,7 +288,14 @@ async function handleConversation(
       : "";
     const frequencyLine = avgRunsPerWeek != null ? ` ~${avgRunsPerWeek} runs/week.` : "";
     const longestLine = longestRunMiles != null ? ` Longest run (8 weeks): ${longestRunMiles} mi.` : "";
-    const elevLine = avgElevFtPerRun ? ` Avg elevation/run: ${avgElevFtPerRun} ft.` : "";
+    const TRAIL_GOALS = ["trail_race", "30k", "50k", "50mi", "100k", "100mi"];
+    const mergedGoal = mergedData.goal as string | null;
+    const isTrailGoal = mergedGoal ? TRAIL_GOALS.includes(mergedGoal) : false;
+    const elevLine = avgElevFtPerRun
+      ? ` Avg elevation/run: ${avgElevFtPerRun} ft.`
+      : isTrailGoal
+        ? " Avg elevation/run: 0 ft (no vertical training in recent runs)."
+        : "";
     // Show weekly progression oldest→newest so trend is readable (e.g. "22, 25, 28, 30")
     const progressionLine = recent4Weeks && recent4Weeks.some(m => m > 0)
       ? ` Weekly miles (oldest→newest): ${[...recent4Weeks].reverse().join(", ")}.`
@@ -1074,7 +1081,7 @@ ${stravaContext}
 YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
 Write 3–4 sentences:
-1. One insight that connects their training data to the race timeline. Use the actual numbers. Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
+1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data (e.g. weekly mileage, HR zone %, longest run, weeks until race). Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
 2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
 3. One forward-looking sentence about what the coaching will watch.
 
@@ -1085,7 +1092,8 @@ Rules:
 - Do NOT narrate all the stats — pick 2–3 meaningful facts and make them mean something
 - Avoid: "solid base", "great foundation", "exciting", "strong work", "keep it up"
 - 4 sentences max before the injury question
-- Plain text, no markdown`;
+- Plain text, no markdown
+- TRAIL RACES: If "Avg elevation/run: 0 ft (no vertical training)" appears in the Strava context AND the race is a trail/mountain race, lead with the elevation gap. Include the athlete's weekly mileage AND weeks to race alongside it so the coaching read is grounded. Example: "You're building well at 38 miles/week over 5 runs, but zero elevation gain in all of it — with 10 weeks to Snowbird and ~3000ft of climbing in 8.9 miles, adding vert is now the training priority."`;
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",

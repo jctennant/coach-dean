@@ -1,0 +1,31 @@
+{
+  "id": "strava-mileage-spike-marathon",
+  "description": "Marathon athlete who spiked from 22 to 45 miles in one week (105% jump). 14 weeks to race. Dean must flag the spike as the immediate injury risk — before discussing any other aspect of their training.",
+  "category": "strava_analysis",
+  "athlete": {
+    "name": "Jordan",
+    "goal": "marathon",
+    "race_name": "Portland Marathon",
+    "race_date": "2026-10-04",
+    "weeks_until_race": 14
+  },
+  "strava": {
+    "avg_weekly_miles": 34,
+    "mileage_trend": "building",
+    "avg_runs_per_week": 4,
+    "longest_run_miles": 18,
+    "avg_elev_ft_per_run": null,
+    "recent_4_weeks": [22, 45, 38, 32],
+    "hr_zone_pct": { "z1": 8, "z2": 40, "z3": 35, "z4": 12, "z5": 5 },
+    "estimated_max_hr": 183,
+    "max_weekly_spike_pct": 105,
+    "best_race": {
+      "label": "Half Marathon on 2025-09-21 in 1:55:10",
+      "easy_pace": "9:30",
+      "is_trail": false
+    }
+  },
+  "ground_truth": {
+    "notes": "Jordan has a 105% week-over-week spike (22 to 45 miles). This is the single most important thing in the data and Dean must address it first — a 105% mileage jump is the #1 risk factor for overuse injury. The 10% rule exists for a reason and doubling weekly mileage in one week is well beyond it.\n\nThe other data is secondary: the 1:55 half gives a target pace zone for the marathon, the HR distribution is mixed (too much Z3), and 14 weeks is workable for a marathon build — but NONE of that matters if Jordan gets injured in the next two weeks from the spike.\n\nCorrect behavior:\n1. Lead with the spike: 22 to 45 miles in one week is flagged immediately — that's a 105% jump, and it's the highest injury risk in the data\n2. Connect it to the timeline: 14 weeks is enough for a real marathon build but NOT if they're sidelined with shin splints or a stress fracture in weeks 1-2\n3. Say what to do: back down this week, establish a base, then build at 10-15% per week\n4. Close with the injury question\n\nDo NOT:\n- Lead with the half marathon PR or training zones before addressing the spike\n- Praise the long run (18mi) without addressing the spike\n- Be vague about the spike ('I see some variation in your weekly mileage')\n- Say the 1:55 half 'sets you up well' for the marathon without flagging the spike\n- Ignore the spike entirely and focus on positives\n\nNote: The 4-week array [22, 45, 38, 32] is stored most-recent first. So the sequence is: 4 weeks ago: 32mi → 3 weeks ago: 38mi → 2 weeks ago: 45mi → last week: 22mi. The spike was the jump from 38 to 45 (18% — notable) AND then the big drop from 45 to 22 (likely forced rest). Dean should flag the 45-mile week as the concern."
+  }
+}

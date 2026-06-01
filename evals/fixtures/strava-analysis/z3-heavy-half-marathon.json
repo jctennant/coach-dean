@@ -1,0 +1,31 @@
+{
+  "id": "strava-z3-heavy-half-marathon",
+  "description": "Athlete running 32 miles/week but 60% of it is Z3 — junk miles that fatigue without building aerobic base. 18 weeks to a half marathon. Dean must name the aerobic efficiency problem specifically, not describe the data back.",
+  "category": "strava_analysis",
+  "athlete": {
+    "name": "Sarah",
+    "goal": "half_marathon",
+    "race_name": "Chicago Half Marathon",
+    "race_date": "2026-10-04",
+    "weeks_until_race": 18
+  },
+  "strava": {
+    "avg_weekly_miles": 32,
+    "mileage_trend": "steady",
+    "avg_runs_per_week": 5,
+    "longest_run_miles": 10,
+    "avg_elev_ft_per_run": null,
+    "recent_4_weeks": [31, 33, 30, 32],
+    "hr_zone_pct": { "z1": 5, "z2": 20, "z3": 60, "z4": 10, "z5": 5 },
+    "estimated_max_hr": 187,
+    "max_weekly_spike_pct": null,
+    "best_race": {
+      "label": "Half Marathon on 2025-04-12 in 2:02:15",
+      "easy_pace": "10:15",
+      "is_trail": false
+    }
+  },
+  "ground_truth": {
+    "notes": "Sarah has been running 32mi/week for months but 60% of it is in Z3 — the aerobic efficiency problem. Z3 is too hard to be truly aerobic recovery/base building, but too easy to be genuine quality training. It sits in the gray zone that builds fatigue without the training adaptations of either Z2 base work OR Z4/Z5 quality work.\n\nFor an 18-week half marathon build, this is the central issue. With 18 weeks she has plenty of time to fix it, but Dean needs to name the actual problem:\n\nCorrect behavior:\n1. Use the actual numbers: 60% Z3, 32mi/week, 18 weeks\n2. Name what Z3-dominant training means in practice: fatiguing without building aerobic base — the mileage is there but the physiological adaptation isn't\n3. Say what will change: shifting Z3 miles to true easy (Z1/Z2) plus adding one genuine quality session\n4. Close with the injury question\n\nDo NOT:\n- Say 'solid base', 'great foundation', 'consistent mileage'\n- Just describe the data back ('I can see you've been running 5 days a week at about 32 miles')\n- Be vague about the problem ('we'll want to work on your effort distribution')\n- Suggest the mileage is fine as-is\n- Mention that 18 weeks is plenty of time without connecting it to what will happen in those 18 weeks\n\nBonus credit: mention that the 2:02 half gives a target — the training zones from that PR will be used to set her easy pace."
+  }
+}

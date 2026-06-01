@@ -1,0 +1,27 @@
+{
+  "id": "strava-trail-no-elevation",
+  "description": "Athlete has solid road mileage (38mi/week, good HR distribution) but zero elevation gain per run. Racing a mountain trail race (Cirque Series Snowbird, ~3000ft gain) in 10 weeks. Dean must flag the elevation deficit — not praise the mileage.",
+  "category": "strava_analysis",
+  "athlete": {
+    "name": "Marcus",
+    "goal": "trail_race",
+    "race_name": "Cirque Series Snowbird",
+    "race_date": "2026-08-08",
+    "weeks_until_race": 10
+  },
+  "strava": {
+    "avg_weekly_miles": 38,
+    "mileage_trend": "building",
+    "avg_runs_per_week": 5,
+    "longest_run_miles": 14,
+    "avg_elev_ft_per_run": null,
+    "recent_4_weeks": [33, 36, 39, 42],
+    "hr_zone_pct": { "z1": 10, "z2": 55, "z3": 25, "z4": 8, "z5": 2 },
+    "estimated_max_hr": 179,
+    "max_weekly_spike_pct": 8,
+    "best_race": null
+  },
+  "ground_truth": {
+    "notes": "Marcus has a genuinely good training profile — 38mi/week building, good Z2 base (55%), consistent. BUT he has no elevation data (avg_elev_ft_per_run is null/zero), and Snowbird's course has ~3000ft of gain in 8.9 miles — almost entirely uphill in the first half. This is the central issue: his aerobic base is solid for road running, but he has zero vertical training.\n\nFor a trail race that is fundamentally defined by climbing, the elevation gap is more important than anything else. 10 weeks is enough to add meaningful vert but not enough to ignore it.\n\nCorrect behavior:\n1. Acknowledge the strong aerobic base with specific numbers (38mi/week, building, solid Z2)\n2. Name the elevation problem directly: his training shows no elevation gain, and Snowbird is defined by its climb — ~3000ft in the first 4 miles\n3. Say what will change: adding vert immediately, even hiking counts, stair repeats, weekly gain target\n4. Close with the injury question\n\nDo NOT:\n- Focus primarily on the aerobic positive without addressing the elevation gap\n- Say the good base 'translates well' to trail without mentioning the vert gap\n- Be vague ('we'll want to add some hill work')\n- Suggest 10 weeks isn't enough time (it's tight but workable with focused vert work)\n- Ignore that no best race is available (no pace zones from Strava — this is fine, training zones come from effort-based data)"
+  }
+}
