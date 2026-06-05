@@ -241,7 +241,10 @@ describe("Multi-race onboarding — extraction and data merging", () => {
           }),
           error: null,
         },
-        { data: { dashboard_token: "tok-abc" }, error: null },  // user lookup in completeOnboarding
+        { data: { onboarding_data: {} }, error: null },  // isReady update (line 806) — onboarding_data persist
+        { data: { onboarding_data: {} }, error: null },  // fresh user fetch in completeOnboarding (line 1719)
+        { data: { billing_enabled: false, reverse_trial_enabled: false, dashboard_token: null, phone_number: "+12025551234" }, error: null },  // billing check (line 1820)
+        { data: [{ id: "user-001" }], error: null },  // update guard (onboarding_step → null)
       ],
       conversations: { data: [], error: null },
       activities: { data: [], error: null },

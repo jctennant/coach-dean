@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-04 — Onboarding race condition, wrong YTD milestone, Strava friends text removed
+
+**Type:** Bug Fix (3 issues)
+**Reported by:** Jake (internal observation)
+**User feedback:** "got a repeat here... Should I do any stretching or strengthening for the shin? [Dean responds with the same initial_plan message again]" / "Rebekah got a message today that she hit 200 mi this year but she actually is at something like 350" / "we are not showing the coaching notes right now in strava, so let's remove mention of your friends will see this"
+**Root cause:**
+1. Race condition in onboarding: if user sends a message while `onboarding/handle` is still processing (Claude + web search takes 15-30s), the second message sees `onboarding_step = "onboarding"` and gets routed to `onboarding/handle` again. By then all fields are collected so [READY] fires a second time, triggering `initial_plan` again with the same "go run" message.
+2. YTD milestone used `recentActivities` (last 50 activities, ~12 weeks) to compute year-to-date miles. For year-round runners, this underflows — causing false milestone triggers (e.g. crossing 200mi when athlete is at 350mi total).
+3. Onboarding messages mentioned "your friends will see it too" for Strava coaching notes, but coaching notes are not currently being posted.
+**Fix / Change:**
+1. Added a conditional update guard in `completeOnboarding`: `.eq("onboarding_step", "onboarding")` filter on the users update + early return if 0 rows matched (means another call already completed).
+2. Added a separate YTD activities DB query (all runs since Jan 1) for `post_run` milestone checks — replaces the unreliable `recentActivities` filtering approach.
+3. Removed "your friends will see it too" / Strava coaching note mentions from all onboarding messages (en/fr/es).
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/multi-race-onboarding.test.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-05-31 — Onboarding architecture: dedicated post-Strava stages for data synthesis and injury intake
 
 **Type:** Feature / Refactor

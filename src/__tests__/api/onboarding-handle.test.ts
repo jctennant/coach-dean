@@ -549,10 +549,14 @@ describe("POST /api/onboarding/handle — current_week seeded from external_plan
     const tables: Record<string, { data: unknown; error: unknown } | Array<{ data: unknown; error: unknown }>> = {
       users: [
         { data: userData, error: null },
-        // fresh user fetch inside completeOnboarding
+        // isReady onboarding_data persist (line 806)
         { data: { onboarding_data: userData.onboarding_data }, error: null },
-        // billing check
+        // fresh user fetch inside completeOnboarding (line 1719)
+        { data: { onboarding_data: userData.onboarding_data }, error: null },
+        // billing check (line 1820)
         { data: { billing_enabled: false, reverse_trial_enabled: false, dashboard_token: "tok-abc", phone_number: "+12025551234" }, error: null },
+        // update guard (onboarding_step → null)
+        { data: [{ id: "user-001" }], error: null },
       ],
       conversations: { data: [], error: null },
       activities: { data: [], error: null },

@@ -781,6 +781,19 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     return await handleLighterWeek(userId, dry_run ?? false);
   }
 
+  // YTD activities for post_run milestone check — separate from recentActivities which
+  // only holds the last 50 activities (~12 weeks). Without this, the YTD sum underflows
+  // for year-round runners and incorrectly fires milestone notifications.
+  const ytdStart = new Date(new Date().getFullYear(), 0, 1).toISOString();
+  const ytdActivitiesPromise = (trigger === "post_run")
+    ? supabase
+        .from("activities")
+        .select("distance_meters, start_date, activity_type")
+        .eq("user_id", userId)
+        .gte("start_date", ytdStart)
+        .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
+    : Promise.resolve({ data: null, error: null });
+
   // Fetch user context in parallel
   const [
     userResult,
@@ -791,6 +804,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     raceHistoryResult,
     upcomingRacesResult,
     planTotalWeeksResult,
+    ytdActivitiesResult,
   ] = await Promise.all([
     supabase.from("users").select("*").eq("id", userId).single(),
     supabase
@@ -839,6 +853,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    ytdActivitiesPromise,
   ]);
 
   const user = userResult.data;
@@ -852,6 +867,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const recentActivities = deduplicateActivities(
     (recentActivitiesResult.data as ActivityRow[] | null) || []
   );
+  const ytdActivities = (ytdActivitiesResult.data as Array<{ distance_meters: number | null; start_date: string | null; activity_type: string | null }> | null) || [];
   const raceHistory =
     (raceHistoryResult.data as Array<Record<string, unknown>> | null) || [];
   const upcomingRaces =
@@ -1700,12 +1716,15 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       });
 
     // YTD milestone: did this run cross a round-number threshold this calendar year?
-    const yearStart = new Date(new Date(thisRunStartMs).getFullYear(), 0, 1).getTime();
-    const ytdRunsBefore = recentActivities
+    // Use the dedicated ytdActivities query (all runs since Jan 1) rather than
+    // recentActivities (last 50), which underflows for year-round runners and
+    // causes false milestone triggers (e.g. "200 mi!" when athlete is at 350).
+    const thisRunStartMs2 = thisRunStartMs; // alias to avoid shadowing in filter
+    const ytdRunsBefore = ytdActivities
       .filter(a => RUN_TYPES.has(a.activity_type as string))
       .filter(a => {
         const t = a.start_date ? new Date(a.start_date as string).getTime() : 0;
-        return t >= yearStart && t < thisRunStartMs;
+        return t < thisRunStartMs2;
       });
     const ytdMilesBefore = ytdRunsBefore.reduce((s, a) => s + (a.distance_meters ?? 0) / 1609.34, 0);
     const ytdMilesAfter = ytdMilesBefore + thisRunMiles;

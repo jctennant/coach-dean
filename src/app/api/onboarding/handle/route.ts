@@ -450,7 +450,7 @@ EXCEPTION — injury_recovery or return_to_running goals: If the athlete's goal 
 
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-Keep the pitch simple: "I'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too." Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism. The benefit is the coaching note in their feed.
+Keep the pitch simple: "I'll connect to Strava to read your runs automatically." Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention coaching notes or friends seeing anything.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -674,10 +674,10 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
     const stravaLang = (mergedData.preferred_language as string | undefined) ?? "en";
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
     const stravaNote = stravaLang === "fr"
-      ? `Je me connecterai à Strava et j'ajouterai une courte note de coaching à chaque activité — tes amis Strava la verront aussi.`
+      ? `Je me connecterai à Strava pour lire tes courses automatiquement.`
       : stravaLang === "es"
-      ? `Me conectaré a Strava y agregaré una nota de coaching a cada actividad — tus amigos de Strava también la verán.`
-      : `I'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too.`;
+      ? `Me conectaré a Strava para leer tus carreras automáticamente.`
+      : `I'll connect to Strava to read your runs automatically.`;
     stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${writeUrl}\n\n${stravaNote}`;
   } else {
     responseText = rawText
@@ -794,10 +794,10 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
       const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
       const lang = (mergedData.preferred_language as string | undefined) ?? "en";
       const pitch = lang === "fr"
-        ? `Avant qu'on lance — j'ai vraiment besoin de Strava pour te coacher correctement. Je lirai chaque course automatiquement et j'ajouterai une note de coaching sur chaque activité — tes amis Strava la verront aussi. Connecte ici :\n\n${writeUrl}`
+        ? `Avant qu'on lance — j'ai vraiment besoin de Strava pour te coacher correctement. Je lirai chaque course automatiquement. Connecte ici :\n\n${writeUrl}`
         : lang === "es"
-        ? `Antes de empezar — necesito Strava para entrenarte bien. Leeré cada carrera automáticamente y agregaré una nota de coaching en cada actividad — tus amigos de Strava también la verán. Conéctalo aquí:\n\n${writeUrl}`
-        : `Before we kick off — I need Strava to coach you properly. I'll read every run automatically and add a short coaching note to each activity — your friends will see it too. Takes two minutes:\n\n${writeUrl}`;
+        ? `Antes de empezar — necesito Strava para entrenarte bien. Leeré cada carrera automáticamente. Conéctalo aquí:\n\n${writeUrl}`
+        : `Before we kick off — I need Strava to coach you properly. I'll read every run automatically. Takes two minutes:\n\n${writeUrl}`;
       await sendAndStore(user.id, user.phone_number, pitch, "awaiting_strava");
       return NextResponse.json({ ok: true });
     }
@@ -1339,7 +1339,7 @@ async function handleStrava(
   // If asking about Strava — explain what it is and re-send the link
   const isAskingAboutStrava = /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
   if (isAskingAboutStrava || (/strava/i.test(message) && message.includes("?"))) {
-    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run and add a short coaching note to each activity. Your friends on Strava will see it too.\n\n${writeUrl}`;
+    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run and give you feedback after each one.\n\n${writeUrl}`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
@@ -1853,12 +1853,22 @@ async function completeOnboarding(
     }
   }
 
+  // Guard against the race condition where a second message arrives while this
+  // call is processing. If onboarding_step is already null (a prior [READY] call
+  // completed and fired initial_plan), skip re-firing it.
   const userResult = await supabase
     .from("users")
     .update(userUpdatePayload)
-    .eq("id", user.id);
+    .eq("id", user.id)
+    .eq("onboarding_step", "onboarding")
+    .select("id");
 
   if (userResult.error) console.error("[onboarding] users update failed:", userResult.error);
+
+  if (!userResult.data || userResult.data.length === 0) {
+    console.warn("[onboarding] completeOnboarding: onboarding_step was already null — skipping duplicate initial_plan fire for user", user.id);
+    return;
+  }
 
   // Write races to DB
   if (raceDate && goal) {
