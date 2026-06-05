@@ -4744,6 +4744,8 @@ ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after t
   const bodyPart = (profile?.injury_body_part as string | null) || "unspecified area";
   const startDate = (profile?.injury_start_date as string | null) || null;
   const protocol = (profile?.injury_return_protocol as string | null) || null;
+  const historicalParts = (profile?.injury_body_parts as string[] | null) ?? [];
+  const isFirstTimeInjury = bodyPart !== "unspecified area" && !historicalParts.includes(bodyPart);
   return `<rule>ACTIVE INJURY — APPLIES TO EVERY MESSAGE THIS TURN:
 - Body part: ${bodyPart}
 - Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}${getBodyPartExercises(bodyPart)}
@@ -4751,7 +4753,7 @@ Coaching adjustments:
 - ${severity === "severe" ? "No running prescribed. Cross-training and gentle test probes only — do not advise running through this." : severity === "moderate" ? "Modify aggressively: reduce volume, drop quality sessions, and frame runs as pain-monitored. Stop-immediately-if-pain language belongs on every prescription." : "Run modified — easy efforts only, no quality work, monitor the area on every run."}
 - When the athlete asks what they should do for the injury, give them the specific targeted exercises listed above — be concrete, not generic.
 - Proactively go/no-go: when discussing today's or tomorrow's run, check this state first before suggesting a session.
-- If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.
+- If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.${(severity === "moderate" || severity === "severe") && isFirstTimeInjury ? `\n- PT REFERRAL — FIRST OCCURRENCE: This is the athlete's first time flagging ${bodyPart} at ${severity} severity. In the next response after they report the injury, include ONE gentle sentence: "If this doesn't settle down within a week, a sports physio can rule out anything structural — worth a quick check." Frame it as proactive, not alarming. Say it once and do not repeat it in subsequent messages.` : ""}
 </rule>\n`;
 })()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest specific targeted exercises (see below) rather than just telling them to "strengthen it". (4) suggest they consult a physical therapist or sports medicine doctor if it keeps recurring — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.\n  Targeted rehab exercises by body part:${parts.map(p => getBodyPartExercises(p)).filter(Boolean).join("")}` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}${(() => {
@@ -4922,7 +4924,20 @@ ${!isReminder && !isPostRun ? `STRENGTH, MOBILITY & CROSS-TRAINING — include o
 - STRENGTH SESSION SPECIFICS: Whenever you include a strength or mobility session, follow the session list with a separate bubble giving exactly 3–4 exercises — always with sets × reps or sets × duration. Never list an exercise without the volume. Vary the exercise selection based on injury history and goal — do not default to the same list every time. Runner-appropriate pool (pick 3–4 per session, rotate): single-leg deadlift 3×8/leg, Copenhagen plank 3×20–30 sec/side, Bulgarian split squat 3×8/leg, lateral band walk 3×15 steps/direction, single-leg hip thrust 3×10/leg, clamshell 3×20/side, step-up with knee drive 3×10/leg, Nordic hamstring curl 3×6, pistol squat progression 3×5/leg, side-lying hip abduction 3×15/side. Adjust selection for injury notes (e.g. Achilles → heavy calf raises 3×12/leg; IT band → clamshells + hip abduction; hip flexor → hip thrusts + split squats). Keep this bubble short — under 480 chars. Example: "For the strength block: single-leg deadlifts 3×8/leg, Copenhagen plank 3×25 sec/side, Bulgarian split squat 3×8/leg." Never leave a strength session at just "30 min" with no detail — runners won't know what to do with that.
 - VOLUME ADJUSTMENT FOR ATHLETES DOING CONSISTENT STRENGTH TRAINING: If an athlete is doing 2+ days/week of strength or gym work alongside running, their total training load is meaningfully higher than a running-only athlete. Reduce peak running volume by 10–15% compared to a comparable running-only athlete at the same base mileage. For example: a runner averaging 32 mi/week who also lifts 2x/week should peak around 42–48mi/week running, not 55+. Strength days count as training load — don't ignore them when projecting the volume arc.
 - SCHEDULING AROUND STRENGTH DAYS: Never schedule a hard quality run (tempo, intervals, long run) the day before or the day of a scheduled strength session. Easy runs are fine on strength days. Hard running + hard lifting on the same or adjacent days leads to under-recovery and injury.
-${crosstrainingTools && crosstrainingTools.length > 0 ? `CROSS-TRAINING PRESCRIPTION — this athlete has: ${crosstrainingTools.join(", ")}. When prescribing cross-training sessions:
+${trigger === "morning_plan" ? `- QUALITY SESSION WARMUP: When TODAY'S PLANNED SESSION (see CURRENT TRAINING STATE) is a tempo, threshold, fartlek, or interval/repeat session, add a second bubble with a specific warmup — do NOT add it for easy runs or rest days:
+  • Tempo/threshold/fartlek: "Warmup: 5 min easy walk → 10 min easy jog → 3×20s strides with 40s walk. Don't skip — cold muscles at tempo effort is the fastest path to a calf pull."
+  • Intervals/repeats (400m, 800m, 1000m, mile repeats): "Warmup: 1–1.5mi easy jog + 4×20s strides with 40s walk. Strides prime fast-twitch fibers — first rep will feel completely different."
+  • Long run 14mi+: "Before you head out: hip circles 10/side, leg swings 10/side, 5 min easy walk. Nothing hard — just waking the joints up."
+  Keep the warmup bubble under 280 chars.
+` : ""}${(() => {
+  if (!isPlan) return "";
+  const hasInjuryNotes = !!(profile?.injury_notes && (profile.injury_notes as string).trim() && !(profile.injury_notes as string).toLowerCase().startsWith("past"));
+  const hasActiveInjury = !!(profile?.active_injury);
+  const tightnessKeywords = /tight|sore|soreness|stiff|ache|achy|niggle|tweak|pain|hurts|hurt|flare/i;
+  const hasMobilitySignal = hasInjuryNotes || hasActiveInjury || recentMessages.some(m => m.role === "user" && tightnessKeywords.test(m.content));
+  if (!hasMobilitySignal) return "";
+  return `- MOBILITY ROUTINE: The athlete has reported tightness, soreness, or has active injury notes — include one "Mobility + recovery 15 min" session on a rest day in this week's plan. Deliver it as a separate bubble listing exactly 4 exercises from this pool (rotate each week): standing hip flexor lunge stretch 3×30s/side | 90/90 hip stretch 2×60s/side | calf + soleus stretch 3×30s each | IT band foam roll (TFL focus) 2 min | pigeon pose 2×60s/side | leg swings front-back + lateral 10/side | seated piriformis stretch 3×30s/side. Bubble format: "Mobility block: [exercise 1], [exercise 2], [exercise 3], [exercise 4]." Under 280 chars. Omit if athlete already has a dedicated yoga/stretching practice in cross-training tools.\n`;
+})()}${crosstrainingTools && crosstrainingTools.length > 0 ? `CROSS-TRAINING PRESCRIPTION — this athlete has: ${crosstrainingTools.join(", ")}. When prescribing cross-training sessions:
 - CYCLING: prescribe with zone and structure by phase:
   • Base/deload: "Z2 ride 40–50 min" (aerobic base, HR stays in Z2 — conversational)
   • Build: "Sweetspot ride 45 min (15 min easy + 20 min moderate/sweetspot effort + 10 min easy)"
@@ -4953,7 +4968,18 @@ STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSAT
 - Morning/nightly reminders: do NOT ask about injury status. This is handled at post-run and weekly recap — not every touchpoint.
 - Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
-
+${(() => {
+  const injBP = (profile?.injury_body_part as string | null)?.toLowerCase() ?? null;
+  const cadence = coachingSignals?.avgCadenceSpm ?? null;
+  if (!injBP || !profile?.active_injury || cadence == null || cadence >= 170) return "";
+  const cues: Record<string, string> = {
+    shin:    `FORM CUE — INJURY-LINKED: Athlete has shin pain AND low cadence (${Math.round(cadence)} spm). Overstriding is a primary shin splints mechanism — short stride + high cadence reduces tibial stress. When discussing this injury, add ONE short cue: "Try counting your right foot strikes for 30 sec and doubling it — if it's under 85, a shorter stride will take load off your shins." One sentence only, woven naturally into the response.`,
+    knee:    `FORM CUE — INJURY-LINKED: Athlete has knee pain AND low cadence (${Math.round(cadence)} spm). Overstriding increases braking force at the knee. When discussing this injury, add ONE cue: "A quicker, shorter stride reduces the braking force at your knee — easy runs are a good place to experiment with it." One sentence only.`,
+    it_band: `FORM CUE — INJURY-LINKED: Athlete has IT band issues AND low cadence (${Math.round(cadence)} spm). Lateral foot cross-over from overstriding is a primary IT band aggravator. When discussing this injury, add ONE cue: "Think foot landing under your hip, not crossing toward center — that's the IT band aggravator." One sentence only.`,
+  };
+  const cue = cues[injBP];
+  return cue ? `\n${cue}\n` : "";
+})()}
 <rule>SAME-NEXT-DAY INTENSITY GATE: If the athlete reported pain, tightness, or soreness during or at the end of a recent run (visible in conversation history), and they ask about doing a harder session (tempo, intervals, race-pace effort) on the following day (i.e., within ~24 hours of the symptomatic run), do NOT offer a conditional green-light. The correct answer: easy-only at most the next day; defer quality sessions to at least 2 days out when symptoms have been fully absent. Example: "Given the tightness today, tomorrow should be easy-only at best — loading a tissue that flagged this morning isn't worth the risk. If tomorrow feels completely symptom-free, do an easy jog and save the tempo for when you're clear." This applies even if the athlete is asking about a planned session.</rule>
 
 ${weatherBlock || ""}${coachingSignals ? buildCoachingSignalsBlock(coachingSignals) : ""}
@@ -5996,11 +6022,29 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
       const fullArcContext = storedPlanAllWeeks && storedPlanAllWeeks.length > 0
         ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}${w.key_workout_2 ? ` | 2nd quality: ${w.key_workout_2}` : ''}`).join('\n')}`
         : '';
-      return `The athlete just sent you a message. If you see multiple consecutive Athlete messages at the bottom of RECENT CONVERSATION above, treat them together as one thought — SMS sometimes splits long messages into segments. Respond to the full intent of what they said, not just the last fragment. Respond helpfully as their running coach. Use their activity history and training data to give specific, personalized advice.
+      return `The athlete just sent you a message. If you see multiple consecutive messages from them at the bottom of RECENT CONVERSATION, treat them as one thought — SMS sometimes splits long messages into segments.
 
-RACE COMPLETION — HIGHEST PRIORITY: If the athlete's message indicates they just raced or finished a race today (e.g. "today was the big day", "that was my race", "just raced", "ran my race", "raced this morning", "finished the marathon/half/10k", "race day was today"), your FIRST sentence MUST be explicit, warm congratulations naming the race when known (from ATHLETE HISTORY or context) — e.g. "Huge — congrats on race day! 🎉" or "You did it — congrats on the half!" Then ask an open question about how it went and how they're feeling. Do NOT lead with "It sounds like you ran X today" — that reads as detached observation, not coaching. Do NOT pivot to data analysis, splits, or pacing critique in this turn. Save deeper debrief (pacing, fueling, what they'd change) for after they share how it felt. This is a milestone moment; tone is celebratory and present, not analytical.
+BEFORE WRITING ANYTHING — do these two things:
 
-DIRECT QUESTIONS — MUST ANSWER: If the athlete's message contains a direct coaching question (e.g. "how do I...", "what should I...", "why is my...", "how do I get faster", "what's the best way to..."), you MUST answer it in your response. Do not address only the recovery or emotional aspect and skip the substantive question. If they ask about speed, answer the speed question with specific tactics. If they ask about a training concept, explain it. A response that ignores a direct question is a coaching failure.
+1. READ THE THREAD. Scan RECENT CONVERSATION. What has this conversation been about so far? What advice have you already given in this thread? What did the athlete ask before, and did your response actually address it?
+
+2. IDENTIFY WHAT THIS MESSAGE IS. Then respond accordingly:
+
+RACE COMPLETION — override everything else: If the athlete's message indicates they just raced or finished a race today (e.g. "today was the big day", "just raced", "finished the marathon/half/10k", "race day was today"), your FIRST sentence MUST be explicit, warm congratulations naming the race — e.g. "Huge — congrats on race day! 🎉" Ask how it went. Do NOT lead with data analysis. Save the debrief for after they share how it felt.
+
+FOLLOW-UP IN AN ACTIVE THREAD — if there are recent back-and-forth messages (especially within the last hour or two): the athlete is continuing a conversation, not starting a new one. Read what you already said. Then answer what they are asking NOW — which may be different from what you already covered. Do NOT repeat advice you gave in the last 1-2 messages. If they start with "But", "What about", "Do you know about", or any phrasing that signals your last reply missed the mark — it did. Pivot to their actual question. Saying the same thing again after a "But..." is a trust failure.
+
+DIRECT QUESTION, NON-TRAINING TOPIC — if the athlete is asking about a physiological, medical, or life topic (e.g. "what do you think this pain could be?", "is this normal?", "what's causing this?", "do you know about SPD / round ligament pain / relaxin?"): answer the question directly and specifically. Do not deflect to training adjustments as the primary response. Engage with the actual topic. If relevant life context is present in RECENT CONVERSATION (pregnancy, illness, recent injury), that context should shape your answer — a groin symptom in a pregnant runner is more likely round ligament pain or relaxin-driven laxity than a training load error. Recommend an OB/midwife or physio for anything that persists. Training implications come after the actual answer, not instead of it.
+
+DIRECT QUESTION, TRAINING TOPIC — "how do I get faster", "what paces should I run", "how long should my long run be": answer the question using training data. Be specific — cite their actual paces, recent mileage, phase of training.
+
+LIFE UPDATE — "I'm pregnant", "I'm traveling this week", "I decided not to race": react to the person first. One human sentence. Then adjust your coaching lens going forward (e.g. store the context, modify the approach).
+
+TRAINING STATUS UPDATE — "I ran 6 miles today", "my knee is sore", "skipped Tuesday": acknowledge briefly, give one coaching observation. Don't over-coach a status report.
+
+CONFIRMATION / ACKNOWLEDGMENT — "Got it", "Perfect", "Thanks", "Sounds good": one short reply and stop. Do not restate what you already covered.
+
+Training data (activity history, plan, paces) is context you can draw on when it's relevant — not a lens to force onto every message. A question about pelvic pain during pregnancy doesn't need pace zones. A question about next week's workout does.
 
 ALREADY-COMPLETED UPDATES: Check RECENT CONVERSATION. If your most recent message already made an update the athlete is now asking about or providing context for (e.g., you just recalculated paces from a race time and the athlete is now confirming the race date, or you just changed the schedule and they're confirming the swap), do NOT redo the work or say you can't do it. Acknowledge briefly that it's already done. Example: "Already updated — your paces are locked in from that half 👊" One sentence max. Do not re-explain the update.
 

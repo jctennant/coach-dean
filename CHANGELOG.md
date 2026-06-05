@@ -4,6 +4,30 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-04 — Injury prevention: warmup prescriptions, weekly mobility, form cues, first-time PT referral
+
+**Type:** Feature
+**Reported by:** Internal — injury prevention identified as a major gap
+**User feedback:** N/A
+**Root cause:** System had strong injury *response* (rehab exercises, hold/lighter-week states, return ramps) but no proactive injury *prevention* — no warmup guidance before quality sessions, no standing mobility routine for healthy athletes, and no form coaching linked to active injuries.
+**Fix / Change:**
+- Quality session warmup: when morning_plan trigger fires for a tempo, interval, or long run (14mi+), system prompt now instructs Dean to add a second bubble with a specific warmup routine (session-type appropriate, under 280 chars). Easy and rest days are untouched.
+- Weekly mobility routine: for all athletes on weekly_recap and initial_plan, Dean now includes one "Mobility + recovery 15 min" session on a rest day. Rotates 4 exercises from a curated pool of 7 each week. Omitted only if athlete already has yoga/stretching in cross-training tools.
+- Form cues tied to injury: when an athlete has an active shin/knee/IT band injury AND cadence < 170 spm, a single one-sentence form cue is injected into the injury follow-up block. Three body parts mapped with clinically grounded cues.
+- PT referral for first-time moderate pain: first-occurrence moderate/severe injuries now get one gentle PT referral sentence ("If this doesn't settle down within a week, a sports physio can rule out anything structural"). Doesn't fire for recurring injuries (those already have stronger language).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+## 2026-06-04 — Reworked user_message prompt framing (classification-first approach)
+
+**Type:** Improvement
+**Reported by:** Jake (internal observation, Gwyneth)
+**User feedback:** Gwyneth asked "But what do you think the groin could be, given how far along I am?" and "But do you know about SPD?" — Dean responded with the same generic "take it easy / easy runs / monitor symptoms" advice 3-4 times instead of engaging with the actual questions.
+**Root cause:** Structural problem in the `user_message` system prompt. The opening instruction was "use their activity history and training data to give specific, personalized advice" — this anchored Claude to the training-data lens for every message type, forcing 25+ override rules to compensate for specific failure modes. The model was biased toward coaching outputs even when the athlete was asking a medical question or pushing back on a prior response.
+**Fix / Change:** Replaced the "use training data" default framing with a classification-first structure. Claude is now instructed to (1) read the thread before writing and (2) identify what type of message it is — active follow-up, non-training question, training question, life update, status update, or confirmation — then respond accordingly. Training data is reframed as context available when relevant, not the lens for every response. Non-training questions (physiology, medical, pregnancy-related symptoms) now have an explicit branch that says: answer the question directly and engage with the topic; pregnancy context in RECENT CONVERSATION shapes how symptoms are interpreted. The three bandaid rules added earlier (FOLLOW-UP PUSHBACK, CONVERSATION REPETITION GUARD, PREGNANCY CONTEXT) are removed — their intent is now handled by the top-level classification.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-06-04 — Onboarding race condition, wrong YTD milestone, Strava friends text removed
 
 **Type:** Bug Fix (3 issues)
