@@ -4,6 +4,34 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Switched AI provider back to Anthropic
+
+**Type:** Infra
+**Reported by:** User request
+**User feedback:** "can we switch over to anthropic as API provider now?"
+**Root cause:** Provider had been temporarily on OpenAI since April due to Anthropic tier 1 rate limits. Limits resolved.
+**Fix / Change:** Changed default in `src/lib/anthropic.ts`, all 5 eval runners, and `.env.local` from `"openai"` to `"anthropic"`. Added `AI_PROVIDER=anthropic` to `.env.local`. User will update Vercel env vars. Web search now active natively for `user_message` trigger in `coach/respond` and inline `web_search_20250305` tool used in onboarding Sonnet calls.
+**Files changed:** `src/lib/anthropic.ts`, `.env.local`, `evals/run-evals.mjs`, `evals/run-onboarding-evals.mjs`, `evals/run-simulation-evals.mjs`, `evals/run-extraction-evals.mjs`, `evals/run-strava-analysis-evals.mjs`
+
+---
+
+## 2026-06-07 — Onboarding evals: 9/9 passing, new injury fixtures, prompt fixes
+
+**Type:** Improvement / Eval
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Several onboarding prompt issues found by running evals after the onboarding overhaul: (1) generic praise ("That sounds like a challenging and exciting goal!") on trail race disclosure; (2) goals-stage Dean probing injury details instead of acknowledging and continuing; (3) RTR goals pivoting to Strava before asking one injury question; (4) injury intake eval fixture using goals-stage prompt instead of intake-stage prompt.
+**Fix / Change:**
+- Strengthened "no generic praise" instruction with explicit banned phrases list ("that sounds like a challenging/exciting goal", etc.) — synced between `route.ts` and eval runner.
+- Restructured injury mention instruction in goals stage: STEP 1 check (is this RTR/injury_recovery goal?) routes to injury probe or acknowledge-and-continue. Added explicit "Do NOT mention Strava in this message" for RTR path so model doesn't preview Strava while asking the injury question.
+- Added Strava section exception for RTR goals (injury question first, Strava after).
+- Updated `trail-race-goal-type` ground_truth to accept Strava-first as valid after goal is established.
+- Added injury intake stage detection to eval runner (`buildInjuryIntakeSystemPrompt`): fixtures with `stage: "injury_intake"` now use the intake-stage prompt instead of goals-stage Sonnet.
+- New onboarding fixtures: `injury-active-goals-stage` (active injury mid-goals-stage), `injury-intake-follow-up-quality` (injury intake specific follow-up targeting).
+- New simulation fixture: `sim-active-injury-marathon` (Jordan with active hamstring, tests full injury intake flow including body_part/severity/reported_during collection).
+- Final result: 9/9 onboarding evals passing, avg 10.0/10.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-onboarding-evals.mjs`, `evals/fixtures/onboarding/trail-race-goal-type.json`, new fixtures `injury-active-goals-stage.json`, `injury-intake-follow-up-quality.json`, `evals/fixtures/simulation/sim-active-injury-marathon.json`
+
 ## 2026-06-07 — Onboarding overhaul: injury-aware completion, sleep, off-topic handling, two-follow-up cap
 
 **Type:** Feature / Improvement

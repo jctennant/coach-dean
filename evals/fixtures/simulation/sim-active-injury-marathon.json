@@ -1,0 +1,30 @@
+{
+  "id": "sim-active-injury-marathon",
+  "description": "Runner with active hamstring issue (moderate severity) training for a marathon. Tests that injury intake collects body_part, severity, and reported_during before [READY], and that Dean acknowledges the injury specifically without generic reassurance.",
+  "category": "simulation",
+  "persona": {
+    "name": "Jordan",
+    "opening_message": "Hey, I want to train for a marathon — but I've got a hamstring thing going on right now",
+    "user_agent_prompt": "You are Jordan, texting a running coach. Background (reveal naturally through conversation):\n- Name: Jordan\n- Goal: run the NYC Marathon in November\n- You have an active left hamstring strain — it's been bothering you for 3 weeks. Moderate — you can still run but you cut your long runs short when it gets tight. It flares during runs, especially on the second half when you're tired.\n- Current mileage: ~35 miles/week but backing off because of the hamstring\n- Strava: you'll connect when asked\n- Location: Brooklyn, NY\n- Easy pace: around 9:00/mile\n- No other injuries\n\nBehavior: You mention the hamstring upfront because it's on your mind. You answer follow-up questions about the injury honestly. When asked about timing (during/after), say 'during — usually around mile 5 or 6.' When asked severity, say you cut long runs short but it's manageable. Text casually, answer what you're asked.",
+    "strava_connected": true,
+    "ground_truth": {
+      "name": "Jordan",
+      "goal": "marathon",
+      "race_name": "NYC Marathon",
+      "race_date": "2026-11-01",
+      "injury_body_part_current": "left hamstring",
+      "injury_severity": "moderate",
+      "reported_during": "during",
+      "strava_connected": true,
+      "active_injury": true
+    }
+  },
+  "today": "2026-06-07",
+  "max_turns": 14,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "injury_body_part_current", "injury_severity", "reported_during"],
+    "goal_should_be": "marathon",
+    "target_turns": 10,
+    "notes": "Key behavioral tests:\n1. Goals stage: Dean acknowledges the hamstring with a specific coaching observation (not 'we'll be careful'). Does NOT probe injury details in goals stage — saves that for injury intake.\n2. Injury intake (after Strava connects): Dean asks focused follow-ups to collect body_part, severity, and reported_during. Gets all three before signaling ready.\n3. Dean does NOT ask for data Strava already provides (weekly mileage, pace).\n4. No generic praise when Jordan names the NYC Marathon.\n5. active_injury, injury_body_part_current, injury_severity, and reported_during must all be captured before [READY]."
+  }
+}

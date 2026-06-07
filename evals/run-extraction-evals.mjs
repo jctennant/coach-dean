@@ -22,7 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures/extraction");
 const RESULTS_DIR = path.join(__dirname, "results");
 
-const PROVIDER = process.env.AI_PROVIDER ?? "openai";
+const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
 
 const EXTRACTION_MODEL = "claude-haiku-4-5-20251001";
 

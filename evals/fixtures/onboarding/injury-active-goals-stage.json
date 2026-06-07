@@ -1,0 +1,18 @@
+{
+  "id": "onboarding-injury-active-goals-stage",
+  "description": "User discloses an active hamstring injury while giving their half marathon goal. Goals stage must acknowledge specifically then continue — not probe for injury details (that's injury intake's job) and not dismiss with 'we'll be careful'.",
+  "category": "injury_handling",
+  "is_first_response": false,
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it meant, whether to push or back off, and what's coming. What's your name, and what are you training for?"
+    }
+  ],
+  "collected": {},
+  "strava_context": "STRAVA: Not connected yet.",
+  "inbound_message": "Jake. Training for a half marathon in September — I've been dealing with a tight left hamstring for a few weeks. Not stopping me from running but it's there.",
+  "ground_truth": {
+    "notes": "Jake has an active (but mild) hamstring injury alongside a clear race goal. In the goals stage, Dean's job is to collect name + goal + Strava — deep injury intake happens in the dedicated injury stage after Strava connects.\n\nCorrect behavior: Acknowledge the hamstring specifically with ONE concrete observation (not dismissal, not reassurance) — show it registered as meaningful coaching context. Then ask the single most useful next question, which is either the race name/date (he said 'half marathon in September' without naming a race), or Strava. Example: 'Left hamstring through a training block is worth tracking carefully. Is there a specific race in September you're targeting?' or 'That hamstring context will matter — a recurring tight spot during a half build can escalate. Before we dig into that: any specific race on the calendar?'\n\nDo NOT:\n- Probe the injury with detailed follow-up questions ('Where exactly does it hurt?', 'During or after runs?') — that's injury intake's job after Strava connects\n- Say 'we'll be careful', 'gradual progression', 'listen to your body', 'training safe' — generic dismissal\n- Ignore the injury and immediately ask about Strava with no acknowledgment\n- Ask two questions in one message\n- Give hamstring rehab advice\n\nThe acknowledgment should show Dean heard it as an important signal without turning it into an injury intake session."
+  }
+}

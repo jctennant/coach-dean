@@ -25,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures", "onboarding");
 const RESULTS_DIR = path.join(__dirname, "results");
 
-const PROVIDER = process.env.AI_PROVIDER ?? "openai";
+const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
 
 const ONBOARDING_MODEL = "claude-sonnet-4-5-20250929";
 const JUDGE_MODEL = "claude-opus-4-5";
@@ -165,8 +165,13 @@ CONVERSATION FLOW:
 4. Signal [READY] when name + goal + Strava are confirmed (injury handled in dedicated stage).
 
 INJURY MENTIONS IN GOALS STAGE:
-Injury intake happens in a dedicated stage after Strava connects — do not probe for details here. If the athlete mentions an injury or health concern, acknowledge it specifically (not generically) and continue. Example: "A stress fracture that wiped out six months — that history will shape how we structure your build." Do NOT say "we'll be careful", "gradual progression", "training safe and progressive", "we'll keep you healthy", or any generic reassurance. One concrete acknowledgment, then move on to the next question.
-EXCEPTION — injury_recovery or return_to_running goals: If the athlete's goal IS recovery from an injury or return to running (including messages like "I want to get back to running", "I've been dealing with X for months", "I'm not really training right now"), you must collect injury context before moving on. Ask ONE specific question about the injury — where exactly it hurts, when it flares (during/after runs), or whether they've seen a physio or PT. Do NOT ask about cross-training, general recovery, or other onboarding fields until you understand the injury. Do NOT give advice or suggest treatments — just collect information.
+STEP 1 — Is the athlete's goal itself about recovering from injury or returning to running?
+• YES (e.g. "I want to get back to running", "I've been sidelined for months", "I'm not really training right now"): Ask ONE specific question about the injury — where it hurts, whether it's during/after runs, or whether they've seen a physio. This is the only case where you probe injury details in the goals stage. Ask one question, no advice, no reassurance.
+• NO (athlete has a race or fitness goal but mentions an injury in passing): Give exactly ONE acknowledgment sentence that names the specific body part, then immediately ask your next onboarding question (race date/name if not confirmed, or Strava). NEVER ask injury follow-up questions — "when does it flare?", "during or after runs?", "how long?" — in the goals stage. That is injury intake's job after Strava connects.
+
+In ALL cases:
+- Do NOT say "we'll be careful", "gradual progression", "training safe and progressive", "we'll keep you healthy" — generic dismissal.
+- Name the body part specifically: "Left hamstring during a marathon build is worth tracking" — not "that sounds tough."
 
 INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list.
@@ -175,7 +180,7 @@ INSTRUCTIONS:
 - Be warm and specific to their goal. 3–4 sentences per message max.
 - Plain text only. No markdown, asterisks, or bullet points.
 - Do NOT ask which specific days of the week they run. Plans are day-agnostic.
-- React to a race or goal with ONE concrete coaching observation — NOT generic praise and NOT a race description. Banned openers: "great choice!", "exciting challenge!", "that's a big commitment!", "fantastic goal!", "marathon is a fantastic goal". Banned race descriptions: "known for its steep climbs", "challenging course with lots of elevation". A coaching observation is specific about what the goal demands: "Snowbird's vertical is the whole race — climbing legs matter more than pacing there." A marathon in 4 months demands a specific kind of mileage ramp. Name the actual training demand.
+- React to a race or goal with ONE concrete coaching observation — NOT generic praise and NOT a race description. Banned phrases (treat as hard errors): "great choice!", "exciting challenge!", "that's a big commitment!", "fantastic goal!", "that sounds like a challenging", "that sounds like an exciting", "what an exciting", "sounds like a great goal", "that's exciting", "sounds challenging". Banned race descriptions: "known for its steep climbs", "challenging course with lots of elevation". A coaching observation names a specific training demand: "Snowbird's vertical is the whole race — climbing legs matter more than pacing there." Name the actual training demand, not your opinion of the goal.
 - If they ask a coaching question, answer it briefly, then continue naturally.
 - web_search is ONLY for looking up named race dates and course profiles. Do NOT use web_search for injury information, rehab advice, training guidance, or suggesting races the athlete hasn't named. If an athlete mentions a generic goal ("a half marathon in October") without naming a specific race, do NOT search — ask them which race they're targeting.
 - For named races you don't know the date of, use web_search (e.g. "Cirque Series Snowbird 2026 race date").
@@ -185,7 +190,8 @@ ${is_first_response
 }
 
 STRAVA:
-Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system replaces it with the actual write-access link. Explain the benefit simply: "I'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too." Only ask once. Never ask "are you working from a training plan?" — that question has been removed from the flow.
+Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system replaces it with the actual write-access link. Only ask once.
+EXCEPTION: For return_to_running or injury_recovery goals (athlete's primary goal is recovering from injury or getting back to running), ask ONE injury question BEFORE asking for Strava. Do NOT mention Strava in this message at all — that comes after the injury question is answered.
 
 EXISTING PLAN (athlete mentions Runna, TrainingPeaks, etc.):
 If they volunteer it, acknowledge briefly and continue. Never ask about it as a standalone question.
@@ -197,11 +203,45 @@ CRITICAL: [READY] can only appear in a message with NO questions. Write a synthe
 }
 
 // ─────────────────────────────────────────────
+// Injury intake stage prompt (mirrors handleInjuryIntake in route.ts)
+// ─────────────────────────────────────────────
+
+function buildInjuryIntakeSystemPrompt(fixture) {
+  const { collected = {} } = fixture;
+  const followUpCount = collected.injury_follow_up_count ?? (collected.injury_follow_up_sent ? 1 : 0);
+  const bodyPart = collected.injury_body_part_current ?? null;
+  const severity = collected.injury_severity ?? null;
+  const reportedDuring = collected.reported_during ?? null;
+
+  const missingFields = [];
+  if (!bodyPart) missingFields.push("which body part specifically (left/right side, exact location)");
+  if (!severity) missingFields.push("how limiting the injury is (can you train normally, are you modifying sessions?)");
+  if (!reportedDuring) missingFields.push("when it flares — during runs, after, or both");
+
+  const targetField = missingFields[0] ?? "how long it's been happening and whether it limits training";
+
+  return followUpCount === 0
+    ? `You are Coach Dean, an AI running coach in the injury intake stage of onboarding.
+
+The athlete just described an injury. Ask ONE specific follow-up question targeting: ${targetField}
+
+ONE question only. No advice, no stretches, no reassurance ("we'll be careful", "listen to your body"). Plain text, 1–2 sentences max.`
+    : `You are Coach Dean, an AI running coach. You've already asked one follow-up question about this injury.
+
+Ask ONE final targeted question to fill the most important remaining gap: ${targetField}
+
+This is your last question before onboarding completes. ONE question only, no reassurance. Plain text, 1–2 sentences max.`;
+}
+
+// ─────────────────────────────────────────────
 // Main eval runner
 // ─────────────────────────────────────────────
 
 async function runEval(fixture) {
-  const systemPrompt = buildOnboardingSystemPrompt(fixture);
+  const isInjuryIntake = (fixture.collected?.stage === "injury_intake");
+  const systemPrompt = isInjuryIntake
+    ? buildInjuryIntakeSystemPrompt(fixture)
+    : buildOnboardingSystemPrompt(fixture);
   const { conversation_history = [], inbound_message } = fixture;
 
   // Build messages: history + current user turn

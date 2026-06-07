@@ -1,0 +1,42 @@
+{
+  "id": "onboarding-injury-intake-follow-up-quality",
+  "description": "In the injury intake stage (after Strava connects), user gives a vague injury answer. Dean must ask ONE specific follow-up targeting the most important missing field — body part, severity, or when it flares.",
+  "category": "injury_handling",
+  "is_first_response": false,
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it meant, whether to push or back off, and what's coming. What's your name, and what are you training for?"
+    },
+    {
+      "role": "user",
+      "content": "Maria. I want to run the Chicago Marathon in October."
+    },
+    {
+      "role": "assistant",
+      "content": "Chicago is a fast course — the flat profile rewards consistent pacing, which means your training zones actually matter. Your Strava data will let me calibrate those for you. Connect it here so I can read your runs automatically."
+    },
+    {
+      "role": "user",
+      "content": "(strava connected)"
+    },
+    {
+      "role": "assistant",
+      "content": "Your training data is in — you're at 28 miles/week with 65% of runs in Z3, which is the hard-easy problem that catches most marathoners. With 18 weeks to Chicago, there's time to polarize that: more truly easy and one genuine tempo. Has injury ever been a factor for you, or anything you're managing right now?"
+    }
+  ],
+  "collected": {
+    "name": "Maria",
+    "goal": "marathon",
+    "race_name": "Chicago Marathon",
+    "race_date": "2026-10-11",
+    "strava_connected": true,
+    "strava_avg_weekly_miles": 28,
+    "stage": "injury_intake"
+  },
+  "strava_context": "STRAVA: Connected. Recent avg: ~28 mi/week. ~4 runs/week. Longest run (8 weeks): 16 mi. Last run: 2 days ago. HR zones (% of runs by avg HR): Z1 5%, Z2 30%, Z3 65%, Z4 0%, Z5 0%.",
+  "inbound_message": "Yeah, my knee has been bugging me a bit.",
+  "ground_truth": {
+    "notes": "Maria gave a vague injury disclosure — 'my knee' with no specifics about side/location, severity, or timing. This is the injury intake stage. Dean should ask ONE focused follow-up question targeting the most important missing field.\n\nThe three fields Dean needs: body_part (which knee, which part of the knee), severity/impact on training, reported_during (during runs, after, or both).\n\nCorrect behavior: Ask ONE specific question about the most important unknown. Good options:\n- 'Which knee, and is the pain inside, outside, or behind the kneecap?' (body part)\n- 'Does it hurt during runs, after, or both?' (reported_during)\n- 'Is it affecting your training — are you modifying sessions because of it?' (severity/impact)\n\nDo NOT:\n- Ask multiple questions in one message\n- Give knee advice ('foam roll your IT band', 'try strengthening your glutes') — not Dean's job\n- Dismiss it ('knees are common, we'll monitor') — this is precisely the moment to collect details\n- Ask about a completely different topic (training days, race goal, anything else)\n- Say 'we'll be careful' or 'listen to your body'\n- Give a vague acknowledgment without asking a specific question\n\nThe question must be focused and specific — targeting exactly one of the missing fields."
+  }
+}
