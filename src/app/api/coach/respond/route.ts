@@ -44,6 +44,11 @@ function getBodyPartExercises(bodyPart: string): string {
   return `\n  Targeted exercises for ${bodyPart.replace(/_/g, " ")}: ${exercises.join(" | ")}`;
 }
 
+// UKK Institute hip & core injury prevention protocol (Run RCT, Leppänen et al. 2024).
+// 34% fewer lower-extremity injuries, 52% fewer substantial overuse injuries vs. stretching control.
+// Free PDF with photos and progressive levels — always send the link, never describe the exercises.
+const UKK_PDF_URL = "https://ukkinstituutti.fi/wp-content/uploads/2024/06/TheRunRCTHipAndCoreProgram.pdf";
+
 type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week" | "symptom_checkin";
 
 interface CoachRequest {
@@ -1472,6 +1477,29 @@ Use this data to:
     return `\n\nPRESCRIBED STRENGTH ROUTINE (stored on athlete's dashboard):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nWhen the athlete DIRECTLY ASKS about the strength routine, send the FULL routine in your response — list every exercise with complete specs (sets/reps/cues) and frequency. Do not just tell them to check the dashboard; they need to see the details in SMS. Otherwise (unprompted), reference it briefly when naturally relevant — e.g. after a run that stressed a known injury site, or in a weekly recap. Don't lecture about it unless there's a clear injury signal.`;
   })();
 
+  // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
+  // may be relevant. Tells Claude when and how to surface the UKK PDF without spamming it.
+  const hipCoreProtocolBlock = (() => {
+    if (trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message") return "";
+    const activeInjury = !!(profile?.active_injury);
+    const hasLoadSpike = (() => {
+      const rolling30dMax = ((state as Record<string, unknown> | null)?.rolling_30d_max_running_load as number | undefined) ?? null;
+      const currentLoad = trigger === "post_run" && activityData
+        ? ((activityData as Record<string, unknown>)?.running_impact_load as number | undefined) ?? null
+        : null;
+      return currentLoad !== null && rolling30dMax !== null && currentLoad > rolling30dMax * 1.10;
+    })();
+    const flagged = activeInjury || hasLoadSpike;
+    return `\n\nHIP & CORE INJURY PREVENTION PROTOCOL (UKK Institute, Run RCT — Leppänen et al. 2024):
+The strongest RCT evidence for running injury prevention: hip & core training 2×/week BEFORE runs cut lower-extremity injuries 34% and substantial overuse injuries 52% vs. a stretching control.
+PDF (free, full protocol with photos + 4 progressive levels per exercise): ${UKK_PDF_URL}
+
+${flagged ? "FLAGGED: This athlete has an active injury or a load spike — the protocol is directly relevant right now." : ""}
+Surface this when: (1) athlete asks about strength work, injury prevention, or cross-training; (2) active injury with no specific exercises already prescribed; (3) post-run after a load spike + athlete mentions soreness or fatigue; (4) weekly recap where no recent strength work has been mentioned.
+How: one specific sentence on WHY it applies to THIS athlete (their injury, load spike, or training gap), then send the link. Do NOT describe or list the exercises — the PDF has photos and progressions. Example: "The hip and core protocol cut overuse injuries by 34% in the best trial we have — worth 20 min before your next run: [link]."
+Do NOT surface this every message. Once is enough — reinforce only 4+ weeks later if no strength compliance mentioned.`;
+  })();
+
   const systemPrompt = buildSystemPrompt(
     user,
     profile,
@@ -1494,7 +1522,7 @@ Use this data to:
     lthrData,
     recentActivities,
     activitiesQueryFailed
-  ) + aerobicTrendBlock + strengthRoutineBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + (coachingFocus
+  ) + aerobicTrendBlock + strengthRoutineBlock + hipCoreProtocolBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + (coachingFocus
     ? `\n\nATHLETE COACHING FOCUS (stored from a previous conversation — use this to weight your coaching lens):
 Focus: ${coachingFocus}
 - "aerobic_base_and_zones": Athlete wants to understand and build their aerobic base. HR zone analysis, cardiac drift, and aerobic efficiency trends are welcome.
@@ -5393,6 +5421,7 @@ type ExtractedProfileData = {
   strava_write_enabled?: boolean | null;
   coaching_focus?: string | null;
   coaching_mode_request?: "analyst" | "full_coach" | null;
+  avg_sleep_hours?: number | null;
 };
 
 /**
@@ -5440,8 +5469,9 @@ Extract ONLY explicitly stated NEW information:
 - Explicitly requests to stop Coach Dean from posting notes to Strava activity descriptions (e.g. "don't post to my Strava", "stop writing to my activities", "never do it again" in context of Strava notes, "I don't want you posting on my Strava", "never post on my behalf") → strava_write_enabled: false
 - A stated coaching focus or preference — what aspect of training they want Dean to emphasize (e.g. "I want to focus on HR zones and aerobic base", "I care more about hitting my paces", "I want help with strength and form", "I just want to stay consistent", "I don't care about heart rate, I run by feel", "focus on cadence") → coaching_focus as a brief normalized string: "aerobic_base_and_zones" (HR zone work, aerobic base), "pacing_and_execution" (hitting prescribed paces, race execution), "strength_and_form" (strength work, cadence, running economy), "consistency" (just keep showing up, avoid overthinking), or "no_zones" (athlete prefers effort-based running over HR data). Only set when the athlete explicitly states a preference; not from inference.
 - A stated preference for whether Dean should prescribe workouts/a training plan vs. just react to runs → coaching_mode_request. Set "analyst" when athlete says things like "just check in after my runs", "don't give me a plan", "just track my runs", "no workouts", "I don't need a schedule", "just react to what I do". Set "full_coach" when athlete says things like "yes give me workouts", "keep writing my plan", "I want a schedule". Only set when they are explicitly answering a question about coaching style or clearly stating this preference; not from inference.
+- How many hours of sleep the athlete is getting (e.g. "I've been sleeping about 7 hours", "only getting 5-6 hours lately", "sleep has been great, 8+ hours") → avg_sleep_hours as a number (hours per night, use midpoint for ranges like "5-6" → 5.5). Only extract if explicitly stated; do not infer from "tired" or "fatigued".
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -5663,6 +5693,11 @@ async function persistProfileUpdates(
     if (hasCoachingModeRequest) {
       profileUpdate.coaching_mode = extracted.coaching_mode_request;
       console.log(`[persistProfileUpdates] coaching_mode updated to ${extracted.coaching_mode_request}`);
+    }
+    const hasSleepHours = typeof extracted.avg_sleep_hours === "number" && extracted.avg_sleep_hours > 0;
+    if (hasSleepHours) {
+      profileUpdate.avg_sleep_hours = extracted.avg_sleep_hours;
+      console.log(`[persistProfileUpdates] avg_sleep_hours updated to ${extracted.avg_sleep_hours}`);
     }
 
     // Write manual workout to activities table if reported.
@@ -6670,6 +6705,8 @@ Never write a short quality distance when the athlete will also run warmup/coold
 VOLUME ACCURACY: Any weekly volume total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero. If the sum doesn’t match your stated total, correct the plan before sending. Never show the calculation. If you’re not listing every session, omit the total entirely.
 TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the ${recapIsMetric ? "km" : "miles"} from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: ${recapIsMetric ? "52 km" : "32.5 mi"}". Wrong: adding past-week volume to next week’s total.
 <rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use ‘min’ for duration — NEVER ‘${recapIsMetric ? "km" : "mi"}’. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60${recapIsMetric ? "km" : "mi"}". Writing distance on a cross-training session causes it to be counted as running volume and will inflate your stated total.</rule>
+
+WEEKLY RECOVERY CHECK-IN: At the very end of your second text (after the session list), add one casual check-in line on its own: "How’s sleep and energy been this week? Any strength work in?" — keep it as one short question, not two. These two signals drive injury risk assessment. Do NOT skip this or fold it into another sentence.
 
 COACHING THREADS — REQUIRED MACHINE TAG: At the very end of your response (before [SESSION_LIST]), append a [THREADS: ...] tag with 1–3 short sentences capturing what you'll be watching on this athlete over the coming weeks. These are the through-line stories — patterns, recoveries, progressions — that make Dean feel like a coach who pays attention across runs, not just a stat reporter on a single run. Examples:
 - [THREADS: Cadence climbed from 168 → 174 spm over the last 6 weeks — keep nudging toward 178. Long-run HR drift is high (>10%) when total weekly miles >35; backing off easy effort is the next test. Left achilles flared in week 3, fully calm now — green light on hill work.]

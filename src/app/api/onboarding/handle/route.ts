@@ -524,14 +524,23 @@ ${collected || "Nothing yet."}
 ${stravaContext}
 
 CONVERSATION FLOW:
-Everyone gets the same core intake. The order is roughly:
-1. First message: intro + ask for their name and what they're working toward in one question
-2. Once goal is clear and any race dates are confirmed: ask about Strava. No other questions first.
-3. After Strava connects: a dedicated stage handles training analysis and injury intake automatically — you don't need to ask about it.
-4. Signal [READY] when name + goal + Strava are confirmed (injury handled in dedicated stage).
+1. First message: intro + name + "what's going on or what are you working toward" in one question
+2. After name + goal established (and race dates confirmed): ask the plan check question — mandatory, see PLAN CHECK below
+3. After plan check is answered: ask for Strava
+4. After Strava connects: dedicated injury intake stage runs automatically — you don't need to ask about it
+5. Signal [READY] when name + goal + plan check answered + Strava connected
+
+PLAN CHECK — MANDATORY STEP AFTER GOAL IS ESTABLISHED:
+Once you have the athlete's name and goal (all named race dates confirmed), ask this as a standalone question BEFORE Strava:
+"Are you following a training plan or working with a coach right now?"
+Do NOT skip this. Do NOT combine it with another question.
+
+When they answer YES: "Got it — I work alongside it. If you want to share what this week looks like, I'll build around it. (Text it out or upload a PDF.)" Then move to Strava on the next message.
+When they answer NO or uncertain: "No problem — once Strava connects I'll build the plan from your data." Move to Strava immediately.
+When they answer with injury context (e.g. "yeah I had a plan but the shin thing is messing it up"): acknowledge the plan status AND the injury signal, then move to Strava.
 
 EXISTING PLAN (athlete mentions Runna, TrainingPeaks, a coach-written plan, etc.):
-Dean works alongside their plan — no competing structure, no rebuilding. Never ask "are you working from a training plan?" as a standalone question. If they volunteer it, acknowledge briefly and continue. Plan context is captured passively and informs how Dean frames coaching.
+Dean works alongside their plan — no competing structure, no rebuilding. The plan check question makes this explicit and positions Dean correctly. When plan context is shared, acknowledge it and capture it — it informs post-run analysis framing.
 
 INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list. If you need multiple things, prioritize and ask the single most important one.
@@ -546,17 +555,20 @@ INSTRUCTIONS:
 - Training days: do NOT ask which days of the week they run. Plans are day-agnostic — the athlete picks their own days. If they mention a weekly count (e.g. "5 days a week"), acknowledge it but don't follow up with "which days".
 ${(mergedData.preferred_units as string | null) === "metric" ? "- UNITS: This athlete prefers metric — use km for distances and min/km for paces in all messages.\n" : ""}
 ${isFirstResponse
-  ? `- This is your FIRST message. Lead with the Strava/post-run differentiator, then broaden the goal framing beyond just racing. Example: "Hey! I'm Coach Dean — I'll send you a coaching note after every run you log on Strava: what it means, whether to push or back off, and what's coming. My job is to make sure your training actually adds up to something, whether that's a race PR, staying healthy, or just running more consistently." Then close with a single question that asks for BOTH their name and what they're working toward — e.g. "What's your name, and what are you training for?" or "What's your name and what are you working toward?" Do NOT ask for name and goal as two separate questions — combine them into one. Do NOT reference specific tools like Runna or TrainingPeaks in the intro. Do NOT use the phrase "SMS running coach" — use "AI running coach" instead.`
+  ? `- This is your FIRST message. Lead with the early-warning-signs differentiator: Dean's core value is catching injury and load problems before they sideline athletes — not just recapping data. Example opening: "Hey! I'm Coach Dean — I send a coaching note after every run you log on Strava: what it means for your training, whether to push or ease off, and what to watch for. Think of me as the thing that catches early warning signs so you can race and train without getting sidelined." Then close with a single question that invites both their name and what's going on — e.g. "What's your name, and what are you working toward (or dealing with right now)?" The "dealing with" framing naturally surfaces injuries and current concerns alongside goals. Do NOT ask name and goal as two separate questions — one question. Do NOT reference specific tools like Runna or TrainingPeaks. Do NOT say "SMS running coach" — say "AI running coach".`
   : ""}
 
 INJURY MENTIONS IN GOALS STAGE:
+Injury is the most important signal. When an athlete mentions an injury or physical issue, lead with it — treat it as the primary concern before asking anything else.
+
 STEP 1 — Is the athlete's goal itself about recovering from injury or returning to running?
-• YES (e.g. "I want to get back to running", "I've been sidelined for months", "I'm not really training right now"): Ask ONE specific question about the injury — where it hurts, whether it's during/after runs, or whether they've seen a physio. This is the only case where you probe injury details in the goals stage. Ask one question, no advice, no reassurance.
-• NO (athlete has a race or fitness goal but mentions an injury in passing): Give exactly ONE acknowledgment sentence that names the specific body part, then immediately ask your next onboarding question (race date/name if not confirmed, or Strava). NEVER ask injury follow-up questions — "when does it flare?", "during or after runs?", "how long?" — in the goals stage. That is injury intake's job after Strava connects.
+• YES (e.g. "I want to get back to running", "I've been sidelined for months", "I'm not really training right now"): Acknowledge the injury as the central challenge. Ask ONE specific question about it — where it hurts, during/after runs, or whether they've seen anyone. Then move to plan check. Do NOT mention Strava in this message.
+• NO (athlete has a race or fitness goal but mentions injury in passing): Acknowledge the injury FIRST with a specific coaching statement ("Shin soreness a week out from a race — let's sort that out before we do anything else."), then pivot to the plan check question. NEVER ask detailed injury follow-ups in the goals stage (during/after/how long) — that's injury intake's job after Strava. But DO surface the injury prominently; don't bury it after goal logistics.
 
 In ALL cases:
-- Do NOT say "we'll be careful", "gradual progression", "training safe and progressive", "we'll keep you healthy" — generic dismissal.
-- Name the body part specifically: "Left hamstring during a marathon build is worth tracking" — not "that sounds tough."
+- Injury acknowledgment must be concrete and specific, not generic. "Shin soreness close to race day needs a clear management plan" beats "that sounds tough."
+- Do NOT say "we'll be careful", "gradual progression", "training safe and progressive" — generic dismissal that signals nothing.
+- Name the body part: "Left hamstring" not "that issue you mentioned".
 
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
@@ -622,10 +634,11 @@ NEVER SEND STANDALONE HOLDING MESSAGES:
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
-READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these three items:
+READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these four items:
 1. Name ✓
 2. Goal (+ race date if a named race) ✓
-3. Strava connected ✓ (shown as "STRAVA: Connected" in the context above)
+3. Plan check answered ✓ (shown as "Training context: has existing plan" or "no existing plan" under WHAT YOU ALREADY KNOW)
+4. Strava connected ✓ (shown as "STRAVA: Connected" in the context above)
 
 Injury history is collected in a dedicated injury intake stage AFTER Strava connects — do NOT wait for it here.
 
@@ -1038,7 +1051,8 @@ Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess. Use null for anything not mentioned.
 - name: NEVER extract "Athlete" as the name — that is a transcript label, not the person's name. Only extract a name if the user explicitly stated it (e.g. "I'm Jake", "My name is Sarah").
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
-- external_plan_description: capture a brief factual summary when the athlete describes a training plan they're currently following (plan source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan. Do NOT capture a plan Dean is going to build ("custom plan from Dean", "new plan Dean will make") — only current external plans. (has_existing_plan and wants_plan are NOT extracted here — they come from Dean's [MODE:...] tag, which is the source of truth.)
+- has_existing_plan: true if the athlete explicitly confirms they are currently following a training plan or working with a coach (e.g. "yes, I'm on a Runna plan", "I have a coach", "yeah I'm following a program"). false if they explicitly say they have no plan or coach (e.g. "no, I'm just running on my own", "no plan", "no coach"). null if the plan check question hasn't been asked and answered yet — do NOT infer from context alone.
+- external_plan_description: capture a brief factual summary when the athlete describes their current external plan (source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan or if they only said yes without describing it yet. Do NOT capture a plan Dean is going to build.
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: the athlete's explicit goal finish time for their TARGET race (e.g. "I want to break 4 hours", "sub-20 5K"). Do NOT use a past PR or best time as the goal time unless the athlete says it IS their goal (e.g. "my goal is to beat my 17:50 PR"). A statement like "my fastest 5K is 17:50" or "my PR is 3:45" is a fitness baseline — extract it as recent_race_time_minutes, NOT as goal_time_minutes. Total float minutes: "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0.
 - race_date: use whichever date is stated in the conversation — athlete's or Dean's. If both are stated and differ by 1–2 days, prefer the athlete's. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if the athlete explicitly said "the 1st" or "June 1st". Today is ${today}.
@@ -1147,6 +1161,7 @@ Rules:
           },
           terrain_type: { type: ["string", "null"], enum: ["road", "trail", "mixed", null], description: "Primary running terrain" },
           preferred_units: { type: ["string", "null"], enum: ["metric", "imperial", null], description: "Unit system the athlete prefers. 'metric' if they use km/min-per-km or write in non-English. 'imperial' if they reference miles. null if unclear." },
+          has_existing_plan: { type: ["boolean", "null"], description: "true if athlete confirms they have an existing plan or coach, false if they confirm they don't, null if plan check question hasn't been answered yet." },
           external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current external plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'. Null if no current plan — NEVER capture a plan Dean is going to build." },
           other_notes: { type: ["string", "null"] },
           race_elevation_gain_feet: { type: ["number", "null"], description: "Total elevation gain of the goal race course in feet. Extract from Dean's web search results if mentioned in the transcript." },
@@ -1415,6 +1430,9 @@ Plain text, 1–2 sentences max.`;
 // ---------------------------------------------------------------------------
 
 // Per-body-part action for active injury acknowledgment in the completion message.
+// UKK Institute hip & core protocol — same constant as in coach/respond/route.ts.
+const UKK_PDF_URL = "https://ukkinstituutti.fi/wp-content/uploads/2024/06/TheRunRCTHipAndCoreProgram.pdf";
+
 const INJURY_ACTION: Record<string, string> = {
   hamstring: "leg swings and walking lunges before your next run",
   "it band": "side-lying leg raises or banded walks before each run",
@@ -1451,6 +1469,8 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
   const injurySeverity = (data.injury_severity as string | null) || null;
   const reportedDuring = (data.reported_during as string | null) || null;
   const stravaConnected = !!(data.strava_connected);
+  const goal = (data.goal as string | null) || null;
+  const isRTR = goal === "return_to_running" || goal === "injury_recovery";
 
   // Race + timeline opening
   let opening = "";
@@ -1520,12 +1540,23 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
     injuryNote = "Injury history noted — I'll monitor patterns and modify load when needed, not just flag it.";
   }
 
+  // Injury-first: when active injury present, lead with the injury note before the Strava observation.
+  // This matches the "injury is the primary signal" framing in the onboarding spec.
   const parts = [opening];
-  if (observation) parts.push(observation);
-  if (injuryNote) parts.push(injuryNote);
+  if (activeInjury && injuryNote) {
+    parts.push(injuryNote);
+    if (observation) parts.push(observation);
+  } else {
+    if (observation) parts.push(observation);
+    if (injuryNote) parts.push(injuryNote);
+  }
 
-  // Always close with what to expect next
-  if (stravaConnected) {
+  // When active injury: end with a specific question about timing (used in injury intake).
+  // Non-injury: close with the coaching note cadence expectation.
+  if (activeInjury && injuryBodyPart) {
+    const timingQ = `When does the ${injuryBodyPart} flare — during runs, after, or both?`;
+    parts.push(timingQ);
+  } else if (stravaConnected) {
     parts.push("Next time Strava syncs a run, I'll send you a coaching note within a few minutes — that's where we start.");
   } else {
     parts.push("Your first coaching note lands after your first run — that's where we start.");

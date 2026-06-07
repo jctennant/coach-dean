@@ -4,6 +4,39 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Onboarding: injury-first flow, plan check step, UKK PDF scoped correctly
+
+**Type:** Feature / Improvement
+**Reported by:** Internal (ICP targeting + onboarding review)
+**User feedback:** "I don't necessarily want us to send the PDF link to everyone — we should send it when we feel like strength training is needed and could help!"
+**Root cause:** Onboarding was framed as a fitness app ("what are you working toward?") rather than targeting the ICP of athletes managing or preventing injury. UKK PDF was sent deterministically at completion for all injury users rather than contextually by Claude. Plan check was passive — Dean only acknowledged plans if the athlete volunteered them, rather than explicitly asking.
+**Fix / Change:**
+- **Injury-first framing**: Goals-stage system prompt now positions Dean as "the thing that catches early warning signs so you can race and train without getting sidelined." First message uses "what's going on (or dealing with right now)" framing to surface injury alongside goals.
+- **Plan check — mandatory Step 2**: After goal is established, Dean now explicitly asks "Are you following a training plan or working with a coach right now?" before Strava. This is a required step in the flow, and [READY] now requires plan check answered. Plan check is handled gracefully for yes/no/injury-context answers.
+- **Injury-first synthesis**: `buildDeterministicCompletion` now puts the injury note BEFORE the Strava observation when active injury is present, and ends with a specific timing question ("When does the [body_part] flare — during runs, after, or both?") rather than the Strava cadence close.
+- **UKK PDF removed from deterministic completion**: PDF link no longer fires for all active injury users. Instead, `hipCoreProtocolBlock` in `coach/respond` gives Claude the protocol + conditions for when to surface it naturally (active injury + no exercises prescribed, load spike with soreness, athlete asks about strength).
+- **Haiku extracts `has_existing_plan`**: Removed broken [MODE:...] tag dependency. Haiku now extracts `has_existing_plan` (boolean) directly from the conversation when athlete answers the plan check question.
+- Eval runner synced with all prompt changes.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-onboarding-evals.mjs`
+
+---
+
+## 2026-06-07 — Injury prevention Phase 1: UKK protocol + sleep tracking + weekly check-in
+
+**Type:** Feature
+**Reported by:** Internal (injury prevention research review)
+**User feedback:** N/A
+**Root cause:** Coach Dean had load spike detection and symptom tracking but wasn't surfacing the UKK hip/core protocol (the best RCT evidence for injury prevention) or tracking sleep beyond onboarding intake.
+**Fix / Change:**
+- Added `UKK_PDF_URL` constant (`https://ukkinstituutti.fi/...`) in both `coach/respond` and `onboarding/handle`
+- New `hipCoreProtocolBlock` in `buildSystemPrompt` — injected for `post_run`, `weekly_recap`, `user_message` triggers. Flags when `active_injury` or load spike is present. Tells Claude when/how to surface the link (not to describe exercises — just send the link).
+- `buildDeterministicCompletion` now adds the UKK PDF link as a part for athletes with `active_injury = true` or RTR/injury_recovery goals.
+- Added `avg_sleep_hours` to `ExtractedProfileData` + extraction prompt. Haiku now extracts explicit sleep mentions from user messages and `persistProfileUpdates` saves to `training_profiles.avg_sleep_hours`.
+- Weekly recap prompt now instructs Claude to end the second text with: "How's sleep and energy been this week? Any strength work in?" — closes the loop on the two highest-evidence soft signals.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-06-07 — Switched AI provider back to Anthropic
 
 **Type:** Infra
