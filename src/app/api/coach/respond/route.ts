@@ -170,7 +170,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
       : Promise.resolve({ data: null }),
     supabase.from("races").select("race_date, race_name, priority").eq("user_id", userId).gt("race_date", now.toISOString().slice(0, 10)).in("priority", ["B", "C"]),
     supabase.from("training_state").select("weekly_mileage_target, current_week, weekly_plan_sessions, weekly_long_run_miles, weekly_quality_session").eq("user_id", userId).single(),
-    supabase.from("conversations").select("role, content").eq("user_id", userId).order("created_at", { ascending: false }).limit(20),
+    supabase.from("conversations").select("role, content, message_type").eq("user_id", userId).order("created_at", { ascending: false }).limit(20),
   ]);
 
   let avgWeeklyMileage: number | null = null;
@@ -1906,7 +1906,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     ];
     const scanned: string[] = [];
     let postRunsSeen = 0;
-    for (let i = recentMessages.length - 1; i >= 0 && postRunsSeen < 5; i--) {
+    for (let i = recentMessages.length - 1; i >= 0 && postRunsSeen < 3; i--) {
       const m = recentMessages[i];
       if (m.role !== "assistant") continue;
       if (m.message_type !== "post_run") continue;
@@ -5167,6 +5167,7 @@ type ExtractedProfileData = {
   preferred_language?: string | null;
   strava_write_enabled?: boolean | null;
   coaching_focus?: string | null;
+  coaching_mode_request?: "analyst" | "full_coach" | null;
 };
 
 /**
@@ -5213,8 +5214,9 @@ Extract ONLY explicitly stated NEW information:
 - Explicitly requests Coach Dean to respond in a specific language (e.g. "speak French", "parle en français", "je veux que tu me parles en français", "respond in Spanish", "réponds en français", "Tu parles en français") → preferred_language as ISO 639-1 code ("fr" for French, "es" for Spanish, "de" for German, "pt" for Portuguese, "it" for Italian)
 - Explicitly requests to stop Coach Dean from posting notes to Strava activity descriptions (e.g. "don't post to my Strava", "stop writing to my activities", "never do it again" in context of Strava notes, "I don't want you posting on my Strava", "never post on my behalf") → strava_write_enabled: false
 - A stated coaching focus or preference — what aspect of training they want Dean to emphasize (e.g. "I want to focus on HR zones and aerobic base", "I care more about hitting my paces", "I want help with strength and form", "I just want to stay consistent", "I don't care about heart rate, I run by feel", "focus on cadence") → coaching_focus as a brief normalized string: "aerobic_base_and_zones" (HR zone work, aerobic base), "pacing_and_execution" (hitting prescribed paces, race execution), "strength_and_form" (strength work, cadence, running economy), "consistency" (just keep showing up, avoid overthinking), or "no_zones" (athlete prefers effort-based running over HR data). Only set when the athlete explicitly states a preference; not from inference.
+- A stated preference for whether Dean should prescribe workouts/a training plan vs. just react to runs → coaching_mode_request. Set "analyst" when athlete says things like "just check in after my runs", "don't give me a plan", "just track my runs", "no workouts", "I don't need a schedule", "just react to what I do". Set "full_coach" when athlete says things like "yes give me workouts", "keep writing my plan", "I want a schedule". Only set when they are explicitly answering a question about coaching style or clearly stating this preference; not from inference.
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -5265,7 +5267,8 @@ async function persistProfileUpdates(
     const hasPreferredLanguage = !!(extracted.preferred_language);
     const hasStravaWriteDisable = extracted.strava_write_enabled === false;
     const hasCoachingFocus = !!(extracted.coaching_focus);
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable && !hasCoachingFocus) return;
+    const hasCoachingModeRequest = !!(extracted.coaching_mode_request);
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable && !hasCoachingFocus && !hasCoachingModeRequest) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -5423,6 +5426,10 @@ async function persistProfileUpdates(
     if (hasCoachingFocus) {
       updatedOnboardingData.coaching_focus = extracted.coaching_focus;
       console.log(`[persistProfileUpdates] coaching_focus updated to ${extracted.coaching_focus}`);
+    }
+    if (hasCoachingModeRequest) {
+      profileUpdate.coaching_mode = extracted.coaching_mode_request;
+      console.log(`[persistProfileUpdates] coaching_mode updated to ${extracted.coaching_mode_request}`);
     }
 
     // Write manual workout to activities table if reported.
@@ -6039,6 +6046,8 @@ DIRECT QUESTION, NON-TRAINING TOPIC — if the athlete is asking about a physiol
 DIRECT QUESTION, TRAINING TOPIC — "how do I get faster", "what paces should I run", "how long should my long run be": answer the question using training data. Be specific — cite their actual paces, recent mileage, phase of training.
 
 LIFE UPDATE — "I'm pregnant", "I'm traveling this week", "I decided not to race": react to the person first. One human sentence. Then adjust your coaching lens going forward (e.g. store the context, modify the approach).
+
+COACHING STYLE QUESTION — when the athlete drops their primary goal race (with no replacement) OR announces a major life change like pregnancy, ask them at the end of your response: "Do you want me to keep writing your weekly workouts, or would you rather just check in after each run for now?" Ask this once, the first time you learn of the change — do NOT ask again in follow-up messages if RECENT CONVERSATION shows you already asked. When they answer, their preference will be stored automatically.
 
 TRAINING STATUS UPDATE — "I ran 6 miles today", "my knee is sore", "skipped Tuesday": acknowledge briefly, give one coaching observation. Don't over-coach a status report.
 

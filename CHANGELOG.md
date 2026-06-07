@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Coaching style question on race drop or pregnancy; coaching_mode_request extraction
+
+**Type:** Feature
+**Reported by:** User feedback (Gwyneth via Jake)
+**User feedback:** "Dean didn't actually give me an option to be given workouts from him"
+**Root cause:** When an athlete drops their A-race or announces a major life change (pregnancy), Dean acknowledged it conversationally but kept prescribing structured workouts without asking what the athlete wanted. No extraction path existed for athletes to express "just track my runs" preference. Old onboarding had a coaching mode question; new onboarding removed it.
+**Fix / Change:** Added a `COACHING STYLE QUESTION` rule to the user_message system prompt: when the athlete drops their primary race or announces pregnancy, Dean now asks "Do you want me to keep writing your weekly workouts, or would you rather just check in after each run for now?" Added `coaching_mode_request` to Haiku extraction (picks up "analyst" or "full_coach" responses) and persists the result to `training_profiles.coaching_mode`. Also updated Gwyneth's profile: `injury_notes` now includes pregnancy context (~10 weeks as of June 2026), `coaching_mode` set to `analyst`.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-06-07 — Fixed post-run insight dedup never firing; fixed Gwyneth's stale training state
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Gwyneth)
+**User feedback:** "Dean keeps telling me I need to stay below X heart rate" (repeated on every run including walks and hikes)
+**Root cause:** The `conversations` query at line 173 of `coach/respond/route.ts` only selected `role, content` — missing `message_type`. Both dedup loops (`recentPostRunInsights` and `recentRecapObservations`) checked `m.message_type !== "post_run"` which always evaluated to `undefined !== string = true`, so every message was skipped. Neither dedup mechanism has ever fired. Additionally, Gwyneth's `weekly_mileage_target` was stuck at 3 (should be 18) and `race_date` still pointed to the Snowbird race she dropped May 26. Her `coaching_threads` still read "Continue reducing time in the moderate zone" which kept nudging Dean toward Z3 advice regardless of dedup.
+**Fix / Change:** Added `message_type` to the conversations select. Patched Gwyneth's DB: `weekly_mileage_target` → 18, `race_date` → null, `coaching_threads` → null.
+**Files changed:** `src/app/api/coach/respond/route.ts` (line 173)
+
+---
+
 ## 2026-06-04 — Injury prevention: warmup prescriptions, weekly mobility, form cues, first-time PT referral
 
 **Type:** Feature
