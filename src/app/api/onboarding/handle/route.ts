@@ -1062,6 +1062,7 @@ async function handleDataAnalysis(
   chatId?: string | null
 ): Promise<NextResponse> {
   void chatId;
+  const injuryAlreadyCollected = !!(data.injury_history || data.current_niggles || data.injury_notes);
   const rawName = (data.name as string | null) || user.name || null;
   const firstName = rawName ? rawName.split(" ")[0] : null;
   const raceName = data.race_name as string | null;
@@ -1129,7 +1130,9 @@ Write 3–4 sentences:
 2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
 3. One forward-looking sentence about what the coaching will watch.
 
-Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"
+${injuryAlreadyCollected
+  ? `INJURY ALREADY KNOWN: The athlete already shared injury context during the conversation (see ATHLETE CONTEXT). Do NOT ask "Has injury ever been a factor?" — that was already answered. Instead, close your analysis with one forward-looking sentence about what you'll watch for given their training data and the race timeline.`
+  : `Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"`}
 
 Rules:
 - Do NOT ask for road race times — training zones calibrate from Strava data
@@ -1158,8 +1161,13 @@ Rules:
 
   const finalText = synthesisText || "Your training data is in. Has injury ever been a factor for you, or anything you're managing right now?";
 
-  // Advance to injury intake stage
-  const updatedData = { ...data, stage: "injury_intake" };
+  // Advance to injury intake stage; if injury was already collected, pre-mark follow-up sent
+  // so handleInjuryIntake skips straight to completion on the next message.
+  const updatedData = {
+    ...data,
+    stage: "injury_intake",
+    ...(injuryAlreadyCollected ? { injury_follow_up_sent: true } : {}),
+  };
 
   await supabase.from("conversations").insert({
     user_id: user.id,
@@ -1209,7 +1217,9 @@ async function handleInjuryIntake(
 
   // Detect "no injury" responses
   const noInjury = /\b(no (injury|injuries|issues|pain|niggles|problems)|all good|nothing|clean|healthy|fine|never|n\/a)\b/i.test(message);
-  const shouldComplete = followUpAlreadySent || noInjury;
+  // Also complete if injury was already captured during the goals stage (follow-up pre-marked by handleDataAnalysis)
+  const injuryAlreadyKnown = !!(mergedData.injury_history || mergedData.current_niggles || mergedData.injury_notes);
+  const shouldComplete = followUpAlreadySent || noInjury || injuryAlreadyKnown;
 
   if (shouldComplete) {
     const completionMsg = buildDeterministicCompletion(mergedData);

@@ -44,9 +44,14 @@ export type Database = {
           user_id: string
           weather_data: Json | null
           weather_fetched_at: string | null
+          activity_fatigue_load: number | null
+          grade_modifier_source: string | null
+          running_impact_load: number | null
+          user_confirmed_incline: boolean | null
           workout_type: number | null
         }
         Insert: {
+          activity_fatigue_load?: number | null
           activity_name?: string | null
           activity_type?: string | null
           aerobic_efficiency?: number | null
@@ -62,9 +67,11 @@ export type Database = {
           elevation_gain?: number | null
           gear_id?: string | null
           gear_name?: string | null
+          grade_modifier_source?: string | null
           id?: string
           max_heartrate?: number | null
           moving_time_seconds?: number | null
+          running_impact_load?: number | null
           source?: string
           start_date?: string | null
           start_lat?: number | null
@@ -72,12 +79,14 @@ export type Database = {
           strava_activity_id?: number | null
           suffer_score?: number | null
           summary?: Json | null
+          user_confirmed_incline?: boolean | null
           user_id: string
           weather_data?: Json | null
           weather_fetched_at?: string | null
           workout_type?: number | null
         }
         Update: {
+          activity_fatigue_load?: number | null
           activity_name?: string | null
           activity_type?: string | null
           aerobic_efficiency?: number | null
@@ -93,9 +102,11 @@ export type Database = {
           elevation_gain?: number | null
           gear_id?: string | null
           gear_name?: string | null
+          grade_modifier_source?: string | null
           id?: string
           max_heartrate?: number | null
           moving_time_seconds?: number | null
+          running_impact_load?: number | null
           source?: string
           start_date?: string | null
           start_lat?: number | null
@@ -103,6 +114,7 @@ export type Database = {
           strava_activity_id?: number | null
           suffer_score?: number | null
           summary?: Json | null
+          user_confirmed_incline?: boolean | null
           user_id?: string
           weather_data?: Json | null
           weather_fetched_at?: string | null
@@ -365,10 +377,13 @@ export type Database = {
           manual_prs: Json | null
           max_hr_estimate: number | null
           max_hr_estimate_updated_at: string | null
+          physio_notes: string | null
+          physio_prescribed_restrictions: Json | null
           preferred_units: string
           proactive_cadence: string | null
           race_date: string | null
           skip_dates: string[] | null
+          symptom_history: Json | null
           terrain_type: string | null
           this_week_override_days: string[] | null
           this_week_override_expires: string | null
@@ -416,10 +431,13 @@ export type Database = {
           manual_prs?: Json | null
           max_hr_estimate?: number | null
           max_hr_estimate_updated_at?: string | null
+          physio_notes?: string | null
+          physio_prescribed_restrictions?: Json | null
           preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
+          symptom_history?: Json | null
           terrain_type?: string | null
           this_week_override_days?: string[] | null
           this_week_override_expires?: string | null
@@ -467,10 +485,13 @@ export type Database = {
           manual_prs?: Json | null
           max_hr_estimate?: number | null
           max_hr_estimate_updated_at?: string | null
+          physio_notes?: string | null
+          physio_prescribed_restrictions?: Json | null
           preferred_units?: string
           proactive_cadence?: string | null
           race_date?: string | null
           skip_dates?: string[] | null
+          symptom_history?: Json | null
           terrain_type?: string | null
           this_week_override_days?: string[] | null
           this_week_override_expires?: string | null
@@ -497,9 +518,18 @@ export type Database = {
           injury_hold_since: string | null
           last_activity_date: string | null
           last_activity_summary: Json | null
+          leg_day_flag: boolean | null
+          leg_day_flag_expires_at: string | null
           long_run_target: number | null
+          pending_symptom_checkin: boolean | null
+          physio_referral_sent_at: string | null
+          physio_visit_confirmed: boolean | null
           plan_adjustments: string | null
           pre_injury_mileage_target: number | null
+          race_peak_load_flag: boolean | null
+          return_to_run_gate_date: string | null
+          return_to_run_phase: number | null
+          rolling_30d_max_running_load: number | null
           taper_peak_miles: number | null
           updated_at: string | null
           user_id: string
@@ -517,9 +547,18 @@ export type Database = {
           injury_hold_since?: string | null
           last_activity_date?: string | null
           last_activity_summary?: Json | null
+          leg_day_flag?: boolean | null
+          leg_day_flag_expires_at?: string | null
           long_run_target?: number | null
+          pending_symptom_checkin?: boolean | null
+          physio_referral_sent_at?: string | null
+          physio_visit_confirmed?: boolean | null
           plan_adjustments?: string | null
           pre_injury_mileage_target?: number | null
+          race_peak_load_flag?: boolean | null
+          return_to_run_gate_date?: string | null
+          return_to_run_phase?: number | null
+          rolling_30d_max_running_load?: number | null
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id: string
@@ -537,9 +576,18 @@ export type Database = {
           injury_hold_since?: string | null
           last_activity_date?: string | null
           last_activity_summary?: Json | null
+          leg_day_flag?: boolean | null
+          leg_day_flag_expires_at?: string | null
           long_run_target?: number | null
+          pending_symptom_checkin?: boolean | null
+          physio_referral_sent_at?: string | null
+          physio_visit_confirmed?: boolean | null
           plan_adjustments?: string | null
           pre_injury_mileage_target?: number | null
+          race_peak_load_flag?: boolean | null
+          return_to_run_gate_date?: string | null
+          return_to_run_phase?: number | null
+          rolling_30d_max_running_load?: number | null
           taper_peak_miles?: number | null
           updated_at?: string | null
           user_id?: string

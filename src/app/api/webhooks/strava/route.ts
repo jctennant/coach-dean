@@ -4,6 +4,7 @@ import { getValidAccessToken, getActivity } from "@/lib/strava";
 import { fetchActivityWeatherByCoords } from "@/lib/weather";
 import { estimateLTHRFromRaces } from "@/lib/hr-zones";
 import { estimateMaxHR } from "@/lib/hr-utils";
+import { computeLoadScores, computeRolling30dMaxRunningLoad } from "@/lib/load-score";
 
 /**
  * GET /api/webhooks/strava
@@ -151,6 +152,88 @@ async function processStravaEvent(body: {
         },
         { onConflict: "strava_activity_id" }
       );
+
+      // Compute and store load scores for this activity.
+      // Fetch the athlete's max_hr_estimate and easy_pace for accurate zone assignment.
+      // Also compute rolling_30d_max_running_load and detect load spikes.
+      if (isNew) {
+        try {
+          const { data: profileForLoad } = await supabase
+            .from("training_profiles")
+            .select("max_hr_estimate, current_easy_pace")
+            .eq("user_id", user.id)
+            .single();
+
+          const loadResult = computeLoadScores({
+            activity_type: activity.type,
+            moving_time_seconds: activity.moving_time ?? null,
+            average_heartrate: activity.average_heartrate ?? null,
+            max_hr_estimate: (profileForLoad?.max_hr_estimate as number | null) ?? null,
+            average_pace: (() => {
+              const distMiles = activity.distance / 1609.34;
+              const movingMin = activity.moving_time / 60;
+              if (!distMiles || !movingMin) return null;
+              const secPerMile = Math.round((movingMin / distMiles) * 60);
+              return `${Math.floor(secPerMile / 60)}:${String(secPerMile % 60).padStart(2, "0")}/mi`;
+            })(),
+            easy_pace: (profileForLoad?.current_easy_pace as string | null) ?? null,
+            elevation_gain: activity.total_elevation_gain ?? null,
+            distance_meters: activity.distance ?? null,
+          });
+
+          // Update the just-upserted activity row with load scores.
+          const loadUpdate: Record<string, unknown> = {
+            grade_modifier_source: loadResult.grade_modifier_source,
+          };
+          if (loadResult.running_impact_load !== null) loadUpdate.running_impact_load = loadResult.running_impact_load;
+          if (loadResult.activity_fatigue_load !== null) loadUpdate.activity_fatigue_load = loadResult.activity_fatigue_load;
+          await supabase.from("activities").update(loadUpdate).eq("strava_activity_id", activity.id);
+
+          // Leg-day flag: set with a 36-hour TTL so the response handler can check at query time.
+          if (loadResult.isLegDay) {
+            const expiresAt = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
+            await supabase.from("training_state").update({
+              leg_day_flag: true,
+              leg_day_flag_expires_at: expiresAt,
+            }).eq("user_id", user.id);
+            console.log(`[strava-webhook] leg_day_flag set for user ${user.id}, expires ${expiresAt}`);
+          }
+
+          // Spike detection for running activities: if this session's impact load is ≥10%
+          // above the rolling 30-day max, flag for a proactive symptom check-in.
+          const RUNNING_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+          if (RUNNING_TYPES.has(activity.type) && loadResult.running_impact_load && loadResult.running_impact_load > 0) {
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            const { data: priorActivities } = await supabase
+              .from("activities")
+              .select("running_impact_load, start_date, activity_type")
+              .eq("user_id", user.id)
+              .neq("strava_activity_id", activity.id)
+              .gte("start_date", thirtyDaysAgo)
+              .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+
+            const rolling30dMax = computeRolling30dMaxRunningLoad(
+              (priorActivities ?? []) as Array<{ running_impact_load: number | null; start_date: string; activity_type: string }>
+            );
+
+            const isRace = activity.workout_type === 1;
+            const updatePayload: Record<string, unknown> = {
+              rolling_30d_max_running_load: rolling30dMax ?? loadResult.running_impact_load,
+            };
+            if (rolling30dMax !== null && loadResult.running_impact_load > rolling30dMax * 1.10) {
+              updatePayload.pending_symptom_checkin = true;
+              console.log(`[strava-webhook] load spike detected for user ${user.id}: ${loadResult.running_impact_load} > ${rolling30dMax} × 1.10`);
+            }
+            if (isRace) {
+              updatePayload.race_peak_load_flag = true;
+            }
+            await supabase.from("training_state").update(updatePayload).eq("user_id", user.id);
+          }
+        } catch (loadErr) {
+          // Load scoring is best-effort — never block coaching on a load score failure
+          console.warn("[strava-webhook] load score compute failed (non-fatal):", loadErr);
+        }
+      }
 
       // Fetch and store historical weather for this activity.
       // Done before firing the coaching trigger so the coach prompt can include

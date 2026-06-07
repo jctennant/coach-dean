@@ -18,6 +18,7 @@ import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSig
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
 import type { ActivityWeatherData } from "@/lib/weather";
+import { computeRecentFatigueLoad } from "@/lib/load-score";
 
 export const maxDuration = 120;
 
@@ -43,7 +44,7 @@ function getBodyPartExercises(bodyPart: string): string {
   return `\n  Targeted exercises for ${bodyPart.replace(/_/g, " ")}: ${exercises.join(" | ")}`;
 }
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week" | "symptom_checkin";
 
 interface CoachRequest {
   userId: string;
@@ -74,6 +75,8 @@ interface ActivityRow {
   cardiac_decoupling_pct: number | null;
   workout_type: number | null;
   activity_name: string | null;
+  running_impact_load: number | null;
+  activity_fatigue_load: number | null;
 }
 
 interface CoachingSignals {
@@ -752,6 +755,63 @@ function buildActivityDataGuard(activity: Record<string, unknown> | null): strin
   return `\nSTRAVA FIELD SEMANTICS — read before interpreting the JSON below:\n${annotations.map(a => `- ${a}`).join("\n")}`;
 }
 
+/**
+ * Proactive one-question symptom check-in after a load-spike session.
+ * Fires when pending_symptom_checkin = true in training_state (set by the Strava webhook).
+ * Asks a single targeted question and clears the flag.
+ */
+async function handleSymptomCheckin(userId: string, dryRun: boolean, requestChatId?: string): Promise<NextResponse> {
+  const [userResult, stateResult] = await Promise.all([
+    supabase.from("users").select("phone_number, name, linq_chat_id, messaging_opted_out").eq("id", userId).single(),
+    supabase.from("training_state").select("rolling_30d_max_running_load, pending_symptom_checkin").eq("user_id", userId).single(),
+  ]);
+
+  const user = userResult.data;
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  if (user.messaging_opted_out) return NextResponse.json({ ok: true, skipped: "opted_out" });
+
+  const state = stateResult.data as { rolling_30d_max_running_load: number | null; pending_symptom_checkin: boolean | null } | null;
+  if (!state?.pending_symptom_checkin) {
+    return NextResponse.json({ ok: true, skipped: "no_pending_checkin" });
+  }
+
+  // Fetch the spike-triggering activity (most recent run)
+  const { data: lastActivity } = await supabase
+    .from("activities")
+    .select("distance_meters, moving_time_seconds, activity_type, activity_name, running_impact_load, start_date")
+    .eq("user_id", userId)
+    .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const activityDesc = (() => {
+    if (!lastActivity) return "your last run";
+    const dist = lastActivity.distance_meters ? `${Math.round((lastActivity.distance_meters as number) / 1609.34 * 10) / 10}mi` : "";
+    const name = lastActivity.activity_name ? `"${lastActivity.activity_name}"` : lastActivity.activity_type;
+    return [name, dist].filter(Boolean).join(" — ");
+  })();
+
+  const message = `How are the legs feeling after ${activityDesc}? Anything new showing up — tightness, soreness in a specific spot, anything that wasn't there before?`;
+
+  if (!dryRun) {
+    const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+    if (chatId) await startTyping(chatId);
+    await sendSMS(user.phone_number as string, message);
+    await supabase.from("conversations").insert({
+      user_id: userId,
+      role: "assistant",
+      content: message,
+      message_type: "symptom_checkin",
+    });
+    await supabase.from("training_state").update({
+      pending_symptom_checkin: false,
+    }).eq("user_id", userId);
+  }
+
+  return NextResponse.json({ ok: true, message });
+}
+
 async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const { userId, trigger, activityId, imageActivity, dry_run, silent, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
 
@@ -779,6 +839,10 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   if (trigger === "lighter_week") {
     return await handleLighterWeek(userId, dry_run ?? false);
+  }
+
+  if (trigger === "symptom_checkin") {
+    return await handleSymptomCheckin(userId, dry_run ?? false, requestChatId);
   }
 
   // YTD activities for post_run milestone check — separate from recentActivities which
@@ -827,7 +891,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
     supabase
       .from("activities")
       .select(
-        "activity_type, distance_meters, moving_time_seconds, average_heartrate, max_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct, workout_type, activity_name"
+        "activity_type, distance_meters, moving_time_seconds, average_heartrate, max_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct, workout_type, activity_name, running_impact_load, activity_fatigue_load"
       )
       .eq("user_id", userId)
       .order("start_date", { ascending: false })
@@ -971,6 +1035,19 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const isAnalystMode = (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst';
   const isComplementMode = (profile as Record<string, unknown> | null)?.coaching_mode === 'complement';
   const isPositiveOnlyStyle = (profile?.coaching_style as string | null) === 'positive_only';
+
+  // Leg-day flag: check at response time against leg_day_flag_expires_at rather than
+  // relying on the cron having cleared it. An 8pm leg session followed by a 6am cron
+  // would clear the flag before the 36-hour window expires.
+  const legDayFlagRaw = (state as Record<string, unknown> | null)?.leg_day_flag as boolean | null;
+  const legDayFlagExpiresAt = (state as Record<string, unknown> | null)?.leg_day_flag_expires_at as string | null;
+  const legDayActive = !!(legDayFlagRaw && legDayFlagExpiresAt && new Date(legDayFlagExpiresAt) > new Date());
+
+  // Check if nightly/morning cron should fire a symptom check-in instead of the normal message.
+  const pendingSymptomCheckin = !!((state as Record<string, unknown> | null)?.pending_symptom_checkin);
+  if (pendingSymptomCheckin && (trigger === "nightly_reminder" || trigger === "morning_plan" || trigger === "morning_reminder")) {
+    return await handleSymptomCheckin(userId, dry_run ?? false, requestChatId);
+  }
 
   // Analyst mode = no training plan; skip plan-focused proactive triggers.
   if (isAnalystMode && trigger === "morning_plan") {
@@ -1236,6 +1313,89 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
     periodizationMileage
   );
 
+  // Load context block: surface running impact load vs 30-day max (spike detection) and
+  // recent fatigue load (leg day, cross-training). Included for post_run and user_message.
+  const loadContextBlock = (() => {
+    if (trigger !== "post_run" && trigger !== "user_message" && trigger !== "morning_plan" && trigger !== "morning_reminder") return "";
+    // ?? null coerces undefined → null so the !== null checks below work correctly
+    const rolling30dMax = (((state as Record<string, unknown> | null)?.rolling_30d_max_running_load) as number | undefined) ?? null;
+    const currentLoad = (trigger === "post_run" && activityData
+      ? ((activityData as Record<string, unknown>)?.running_impact_load as number | undefined) ?? null
+      : null);
+    const recentFatigue = computeRecentFatigueLoad(
+      recentActivities as Array<{ activity_fatigue_load: number | null; start_date: string }>,
+      48
+    );
+    const parts: string[] = [];
+    if (currentLoad !== null && rolling30dMax !== null) {
+      const spikePct = Math.round(((currentLoad - rolling30dMax) / rolling30dMax) * 100);
+      const spikeNote = spikePct >= 10
+        ? ` — ${spikePct}% above 30-day high. LOAD SPIKE: this session exceeded the athlete's recent training ceiling. Acknowledge that this was a big effort without being alarmist.`
+        : spikePct <= -20
+        ? ` — well below recent baseline (easy/recovery session)`
+        : "";
+      parts.push(`Session impact load: ${currentLoad.toFixed(1)} units (30-day max: ${rolling30dMax.toFixed(1)}${spikeNote})`);
+    } else if (rolling30dMax !== null) {
+      parts.push(`30-day running impact load max: ${rolling30dMax.toFixed(1)} units`);
+    }
+    if (legDayActive) {
+      parts.push("LEG DAY FLAG: Strength/weights session within the last 36 hours. Expect elevated fatigue and heavier legs. Reduce pace targets by ~10-15 sec/mile and do not prescribe a quality session today.");
+    }
+    if (recentFatigue > 0) {
+      parts.push(`Total fatigue load (all activities, last 48h): ${recentFatigue.toFixed(0)} units`);
+    }
+    if (parts.length === 0) return "";
+    return `\n\nLOAD CONTEXT:\n${parts.map(p => `- ${p}`).join("\n")}`;
+  })();
+
+  // Symptom escalation block: check for recurring body part reports in the last 30 days.
+  // Only built for user_message (where the athlete may be reporting a symptom).
+  const symptomEscalationBlock = (() => {
+    if (trigger !== "user_message") return "";
+    const symptomHistory = (profile?.symptom_history as Array<{
+      date: string;
+      body_part: string;
+      severity: string;
+      reported_during: string;
+      activity_id?: string | null;
+    }> | null) ?? [];
+    if (symptomHistory.length < 2) return "";
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const recent = symptomHistory.filter(e => e.date >= thirtyDaysAgo);
+    if (recent.length < 2) return "";
+    // Count occurrences per body part
+    const counts: Record<string, number> = {};
+    for (const e of recent) {
+      counts[e.body_part] = (counts[e.body_part] ?? 0) + 1;
+    }
+    const recurring = Object.entries(counts).filter(([, n]) => n >= 2).map(([bp]) => bp);
+    if (recurring.length === 0) return "";
+    const tripleThreshold = Object.entries(counts).filter(([, n]) => n >= 3).map(([bp]) => bp);
+    const parts: string[] = [
+      `SYMPTOM RECURRENCE DETECTED — the following body parts have been reported in the last 30 days: ${recurring.join(", ")}.`,
+      `When any of these areas come up in this message or conversation:`,
+      `1. Acknowledge this as a pattern, not a one-off: "You've mentioned your [X] a couple times now — that pattern matters more than a single-session soreness."`,
+      `2. Recommend specific load modification: swap or reduce the next hard session, not just a vague "take it easy."`,
+      `3. Use [LIGHTER_WEEK] if the recurrence is moderate severity or unclear, or [SESSION_SWAP] to swap a specific hard session.`,
+    ];
+    if (tripleThreshold.length > 0) {
+      parts.push(`MANDATORY ESCALATION: ${tripleThreshold.join(", ")} has been flagged 3+ times. You MUST include a clear recommendation to see a sports physio. Say: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run." Then append [INJURY_HOLD] at the end of your response.`);
+    }
+    return `\n\n${parts.join("\n")}`;
+  })();
+
+  // Physio notes block: inject when the athlete has reported what their physio prescribed.
+  // Dean coaches within these constraints rather than generating a competing assessment.
+  const physioNotesBlock = (() => {
+    const physioNotes = (profile?.physio_notes as string | null) ?? null;
+    const restrictions = (profile?.physio_prescribed_restrictions as string[] | null) ?? null;
+    if (!physioNotes) return "";
+    const restrictionLines = restrictions && restrictions.length > 0
+      ? `\nRestrictions: ${restrictions.join(", ")}`
+      : "";
+    return `\n\nPHYSIO PRESCRIPTION ACTIVE: The athlete's physical therapist or sports physician has given specific guidance. Coach within these constraints and explicitly defer to this professional guidance:\n${physioNotes}${restrictionLines}\nDo not prescribe anything that conflicts with these restrictions. If the athlete's goals conflict with the physio's prescription, side with the physio.`;
+  })();
+
   // Aerobic metrics trend block — last 10 runs with efficiency + decoupling.
   // Included for post_run and user_message so Dean can spot improvements or overreaching.
   let aerobicTrendBlock = "";
@@ -1334,7 +1494,7 @@ Use this data to:
     lthrData,
     recentActivities,
     activitiesQueryFailed
-  ) + aerobicTrendBlock + strengthRoutineBlock + (coachingFocus
+  ) + aerobicTrendBlock + strengthRoutineBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + (coachingFocus
     ? `\n\nATHLETE COACHING FOCUS (stored from a previous conversation — use this to weight your coaching lens):
 Focus: ${coachingFocus}
 - "aerobic_base_and_zones": Athlete wants to understand and build their aerobic base. HR zone analysis, cardiac drift, and aerobic efficiency trends are welcome.
@@ -2146,6 +2306,12 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   const wantsPositiveOnly = /\[POSITIVE_ONLY\]/i.test(rawText);
   const wantsStandardCoaching = /\[STANDARD_COACHING\]/i.test(rawText);
+  // SESSION_SWAP: swap a specific session in the current week plan.
+  const sessionSwapMatch = rawText.match(/\[SESSION_SWAP\s+day="([^"]+)"\s+to="([^"]+)"\]/i);
+  const tagSessionSwapDay = sessionSwapMatch ? sessionSwapMatch[1].trim() : null;
+  const tagSessionSwapTo = sessionSwapMatch ? sessionSwapMatch[2].trim() : null;
+  // PHYSIO_REFERRAL: emitted when Dean refers the athlete to a physical therapist.
+  const wantsPhysioReferral = /\[PHYSIO_REFERRAL\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
   const weekOverrideMatch = rawText.match(/\[WEEK_OVERRIDE:\s*([^\]]+)\]/i);
   const tagWeekOverrideDays = weekOverrideMatch
@@ -2175,6 +2341,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .replace(/\[SKIP_DAY:\s*\d{4}-\d{2}-\d{2}\]/gi, "")
       .replace(/\[RACE_COURSE_UPDATE:\s*\{[\s\S]*?\}\]/gi, "")
       .replace(/\[THREADS:\s*[\s\S]*?\]/gi, "")
+      .replace(/\[SESSION_SWAP[^\]]*\]/gi, "")
+      .replace(/\[PHYSIO_REFERRAL\]/gi, "")
       .trim()
   );
   // correctMileageTotal catches math errors where Claude states a weekly total that
@@ -2581,6 +2749,52 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           }
         });
       }
+      // SESSION_SWAP: modify a single session in the current week's plan.
+      if (tagSessionSwapDay && tagSessionSwapTo) {
+        after(async () => {
+          try {
+            const { data: currentState } = await supabase
+              .from("training_state")
+              .select("weekly_plan_sessions")
+              .eq("user_id", userId)
+              .single();
+            const sessions = (currentState?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+            const normalizeDay = (d: string) => d.toLowerCase().trim().replace(/\.$/, "");
+            const DAY_ABBREVS: Record<string, string> = {
+              mon: "monday", tue: "tuesday", wed: "wednesday", thu: "thursday",
+              fri: "friday", sat: "saturday", sun: "sunday",
+            };
+            const targetDay = DAY_ABBREVS[normalizeDay(tagSessionSwapDay).slice(0, 3)] ?? normalizeDay(tagSessionSwapDay);
+            const matchIdx = sessions.findIndex(s => normalizeDay(s.day) === targetDay || normalizeDay(s.day).startsWith(targetDay.slice(0, 3)));
+            if (matchIdx === -1) {
+              console.warn(`[coach/respond] SESSION_SWAP: no session found for day="${tagSessionSwapDay}" (normalized: "${targetDay}") in weekly_plan_sessions`);
+              void trackEvent(userId, "session_swap_failed", { day: tagSessionSwapDay, to: tagSessionSwapTo });
+            } else {
+              sessions[matchIdx] = { ...sessions[matchIdx], label: tagSessionSwapTo };
+              await supabase.from("training_state").update({
+                weekly_plan_sessions: sessions as unknown as import("@/lib/database.types").Json,
+              }).eq("user_id", userId);
+              console.log(`[coach/respond] SESSION_SWAP: swapped ${tagSessionSwapDay} → "${tagSessionSwapTo}"`);
+              void trackEvent(userId, "session_swapped", { day: tagSessionSwapDay, to: tagSessionSwapTo });
+            }
+          } catch (err) {
+            console.error("[coach/respond] SESSION_SWAP failed:", err);
+          }
+        });
+      }
+
+      // PHYSIO_REFERRAL: record when Dean refers the athlete to a professional.
+      if (wantsPhysioReferral) {
+        after(async () => {
+          const { error } = await supabase
+            .from("training_state")
+            .update({ physio_referral_sent_at: new Date().toISOString() })
+            .eq("user_id", userId);
+          if (error) console.error("[coach/respond] physio_referral_sent_at update failed:", error);
+          else void trackEvent(userId, "physio_referral_sent");
+        });
+      }
+
       // Persist coaching style preference changes
       if (wantsPositiveOnly || wantsStandardCoaching) {
         const newStyle = wantsPositiveOnly ? "positive_only" : "standard";
@@ -4964,10 +5178,21 @@ STALE CONTEXT RULE: If the athlete has explicitly changed their training focus o
 
 STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSATION before asking. If the athlete has said it's fine, not bothering them, or no issues in ANY recent message — do NOT ask about it again in this response. One "I'm fine" is enough to stop. Do not ask again until the athlete brings it up themselves. Repeating the same injury question after the athlete has already said they're fine is annoying and erodes trust.
 
+SHARP PAIN DISAMBIGUATION: If the athlete uses the word "sharp" to describe pain (not "sharp turn", "sharp hill", "sharp ascent"), DO NOT immediately escalate to a PT referral. First ask one clarifying question: "When you say sharp — is it a sudden stabbing feeling, or more of an intense ache or tightness?" Only escalate after they confirm it's a stabbing/sudden sensation. False escalations (treating "felt a bit sharp" as a medical emergency) damage trust.
+
+MANDATORY PROFESSIONAL REFERRAL: You MUST include a clear recommendation to see a sports physio or running-focused physician (not optional, not softened) when ANY of these conditions are true:
+1. The athlete explicitly confirms stabbing/sudden sharp pain during a run (after disambiguation above)
+2. The athlete reports pain that changes their gait or causes them to limp
+3. The athlete reports swelling, numbness, or pins-and-needles in a limb
+4. The symptom history shows the same body part flagged 3+ times (handled by SYMPTOM RECURRENCE block above if present)
+Suggested language: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run. Happy to keep coaching around whatever they prescribe." After sending this, append [PHYSIO_REFERRAL] at the end of your response (before [INJURY_HOLD] if also needed).
+
 - Post-run feedback: briefly check in on how the affected area held up — only if it's still an active concern and not already cleared in recent messages. One short sentence is enough.
 - Morning/nightly reminders: do NOT ask about injury status. This is handled at post-run and weekly recap — not every touchpoint.
 - Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
+
+SESSION_SWAP tag: When recommending a specific session modification (not a whole-week reduction), use: [SESSION_SWAP day="Mon" to="40min easy bike"] at the end of your response. This immediately swaps that session in the athlete's plan. Use this instead of [LIGHTER_WEEK] when you're recommending one specific change, not a whole-week pull-back.
 ${(() => {
   const injBP = (profile?.injury_body_part as string | null)?.toLowerCase() ?? null;
   const cadence = coachingSignals?.avgCadenceSpm ?? null;
@@ -5335,9 +5560,17 @@ async function persistProfileUpdates(
       if (!existingParts.includes(extracted.injury_body_part as string)) {
         profileUpdate.injury_body_parts = [...existingParts, extracted.injury_body_part as string];
       }
-      // Auto-activate the injury state for moderate/severe reports so the full
-      // ACTIVE INJURY block fires in the system prompt without requiring a manual trigger.
+      // Append to structured symptom_history for 30-day recurrence detection.
+      // The body_part is already normalized by Haiku's controlled vocabulary constraint.
+      const existingHistory = (profile?.symptom_history as Array<Record<string, unknown>> | null) ?? [];
       const severity = extracted.injury_severity;
+      const newSymptomEntry = {
+        date: new Date().toISOString().slice(0, 10),
+        body_part: extracted.injury_body_part as string,
+        severity: severity ?? "soreness",
+        reported_during: "after", // default; conversation context not available here
+      };
+      profileUpdate.symptom_history = [...existingHistory, newSymptomEntry];
       if ((severity === "moderate" || severity === "severe") && !profile?.active_injury) {
         profileUpdate.active_injury = true;
         profileUpdate.injury_body_part = extracted.injury_body_part;

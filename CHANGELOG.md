@@ -4,6 +4,40 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Load + symptom monitoring system (pivot to injury-prevention coaching)
+
+**Type:** Feature
+**Reported by:** Internal product analysis
+**User feedback:** N/A
+**Root cause:** Competitive analysis and 2-week PMF review showed strongest engagement with injury-aware users. Research: 70-80% of running injuries caused by load spikes; single session ≥10% above prior 30-day max is the primary predictor.
+**Fix / Change:** Full pivot from reactive post-run feedback to proactive load + symptom monitoring:
+- **Two-signal load scoring**: `running_impact_load` (mechanical tissue stress, spike detection) and `activity_fatigue_load` (systemic fatigue, coaching tone). Activity-type-specific multipliers: full impact for runs, 0.65× for hike/elliptical, 0.8× for ride/swim, 0 for pure leg-day (WeightTraining/Workout).
+- **Zone multiplier** (TRIMP-style): HR-primary (Z1-2=1.0, Z3=1.5, Z4=2.0, Z5=3.0), pace-fallback when no HR.
+- **Trail grade modifier**: `1.0 + (grade - 0.08) × 2`, capped at 1.4, applied only to impact load not fatigue.
+- **Treadmill grade inference**: elevation_gain=0 is common; fallback to speed < 1.8 m/s → walking incline → 0.65× modifier.
+- **Spike detection**: session impact load > rolling 30-day max × 1.10 → sets `pending_symptom_checkin = true` in training_state.
+- **`handleSymptomCheckin`**: proactive one-question SMS fired at next nightly/morning cron after a spike. Clears the flag after sending.
+- **Leg-day flag TTL**: `leg_day_flag_expires_at` checked at response time (not relying on cron to clear).
+- **Symptom history**: structured JSONB with canonical body part vocabulary. 30-day recurrence window. Pattern detected ≥2 reports → system prompt escalation.
+- **Sharp disambiguation**: one clarifying question before PT referral escalation.
+- **SESSION_SWAP tag**: `[SESSION_SWAP day="Thu" to="40min easy bike"]` — surgical session modification without full week rebuild.
+- **PHYSIO_REFERRAL tag**: records when Dean refers athlete to a professional; stores `physio_referral_sent_at`.
+- **Physio prescription capture**: `physio_notes + physio_prescribed_restrictions` injected into system prompt so Dean coaches within the physio's constraints.
+- **Backfill script**: `node scripts/backfill-load-scores.mjs` — idempotent, processes users in chronological order, `--dry-run` + `--user-id` flags.
+- **DB migrations**: 017 (load score columns), 018 (symptom_history, pending_sharp_disambiguation, message_type constraint), 019 (physio tracking, return-to-run phases).
+**Files changed:** `src/lib/load-score.ts` (new), `src/app/api/webhooks/strava/route.ts`, `src/app/api/coach/respond/route.ts`, `migrations/017-019_*.sql` (new), `scripts/backfill-load-scores.mjs` (new), `src/lib/database.types.ts`, `src/__tests__/lib/load-score.test.ts` (new)
+
+## 2026-06-07 — Fixed onboarding injury stage asking about injury twice when already discussed
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Jake)
+**User feedback:** "Seems like the onboarding changes we made aren't quite right"
+**Root cause:** The new `handleDataAnalysis` stage (post-Strava) always appended "Has injury ever been a factor for you, or anything you're managing right now?" even when the user had already shared injury context during the goals stage. Then `handleInjuryIntake` sent a Haiku follow-up question regardless of whether `injury_history`/`current_niggles`/`injury_notes` was already populated. Users who mentioned injury during the goals conversation got asked about it 2-3 more times.
+**Fix / Change:** `handleDataAnalysis` now checks `injuryAlreadyCollected` and skips the injury question when data is present, instead closing with a forward-looking coaching line. It also pre-sets `injury_follow_up_sent: true` in `onboarding_data` so `handleInjuryIntake` sees it immediately. `handleInjuryIntake` adds `injuryAlreadyKnown` as a third short-circuit condition alongside `followUpAlreadySent` and `noInjury`, completing onboarding immediately when injury context is already captured.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-06-07 — Coaching style question on race drop or pregnancy; coaching_mode_request extraction
 
 **Type:** Feature
