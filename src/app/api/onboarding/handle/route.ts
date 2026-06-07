@@ -186,6 +186,99 @@ const VALID_GOAL_BUCKETS = new Set([
  *
  * Claude uses [STRAVA_LINK] as a placeholder to request the Strava connect flow.
  */
+
+// ---------------------------------------------------------------------------
+// Off-topic classifier + handler (goals stage only)
+// ---------------------------------------------------------------------------
+
+// Keywords that strongly indicate an on-topic onboarding message.
+// If any match, skip the classifier LLM call entirely.
+const ONBOARDING_KEYWORDS = /\b(race|run|running|marathon|strava|injury|goal|train|training|week|pace|mile|km|5k|10k|half|plan|fatigue|sleep|coach|workout|hurt|pain|knee|achilles|hamstring|shin|hip|calf|plantar|itb|it band|mileage|base|speed|tempo|interval|easy|long run|trail|ultra|fitness|PR|personal record|finish|time goal|taper|build|connect|app|account|skip|yes|no|sure|ok|got it|sounds good|makes sense)\b/i;
+
+async function classifyOffTopic(
+  message: string,
+  stageGoal: string,
+  history: Array<{ role: string; content: string }>
+): Promise<boolean> {
+  // System triggers are always on-topic
+  if (/^\(strava/.test(message)) return false;
+  // No question mark → almost certainly a direct answer, skip LLM
+  if (!/\?/.test(message)) return false;
+  // Contains training/running keywords → on-topic, skip LLM
+  if (ONBOARDING_KEYWORDS.test(message)) return false;
+  // Very short questions are likely direct responses, not tangents
+  if (message.trim().length < 50) return false;
+
+  const lastAssistantMsg = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
+
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 10,
+    system: `Classify whether an athlete's message is advancing onboarding or is a tangent/question unrelated to the current step.
+
+Current step goal: ${stageGoal}
+Coach's last message: "${lastAssistantMsg.slice(0, 200)}"
+
+Reply with exactly one word: ON_TOPIC or OFF_TOPIC.
+
+ON_TOPIC: answers the coach's question, provides training info, names a race, mentions injury, confirms Strava, or is a direct response to what was asked.
+OFF_TOPIC: general questions (gear recommendations, nutrition science, app functionality issues, how running zones work in theory, unrelated complaints).`,
+    messages: [{ role: "user", content: message }],
+  });
+
+  const verdict = response.content
+    .filter(b => b.type === "text")
+    .map(b => (b as { type: "text"; text: string }).text)
+    .join("")
+    .trim()
+    .toUpperCase();
+  return verdict === "OFF_TOPIC";
+}
+
+async function handleOffTopicMessage(
+  user: { id: string; phone_number: string; name: string | null },
+  message: string,
+  data: Record<string, unknown>,
+  stageGoal: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+  chatId?: string | null
+): Promise<NextResponse> {
+  void chatId;
+  const firstName = ((data.name as string | null) ?? user.name ?? "").split(" ")[0] || null;
+  const redirectLine = stageGoal.includes("name") ? "What's your name, and what are you training for?"
+    : stageGoal.includes("goal") ? "What race or goal are you training for?"
+    : stageGoal.includes("Strava") ? "To keep going I need to connect to Strava — the link's just above."
+    : "Ready to lock this in whenever you are.";
+
+  const response = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 150,
+    system: `You are Coach Dean, an AI running coach currently onboarding a new athlete.
+
+The athlete asked a question or went off-topic. Answer it briefly and specifically — no generic coaching advice.
+Then redirect back to where you left off with: "${redirectLine}"
+
+Rules:
+- Answer the question in 1–2 sentences max. Be specific.
+- Do NOT ask a new onboarding question — use the redirect line above verbatim.
+- Plain text, no markdown.${firstName ? `\n- Athlete's name: ${firstName}` : ""}`,
+    messages: [...history, { role: "user", content: message }],
+  });
+
+  const text = response.content
+    .filter(b => b.type === "text")
+    .map(b => (b as { type: "text"; text: string }).text)
+    .join("")
+    .trim() || `${redirectLine}`;
+
+  await supabase.from("conversations").insert([
+    { user_id: user.id, role: "user", content: message, message_type: "user_message" },
+    { user_id: user.id, role: "assistant", content: text, message_type: "onboarding" },
+  ]);
+  if (!dryRunUsers.has(user.id)) await sendSMS(user.phone_number, text);
+  return NextResponse.json({ ok: true });
+}
+
 async function handleConversation(
   user: { id: string; phone_number: string; name: string | null },
   message: string,
@@ -376,6 +469,18 @@ async function handleConversation(
     return handleInjuryIntake(user, message, mergedData, chatId);
   }
   // Falls through to goals stage (collect name + goal + race date + Strava).
+
+  // ── Off-topic classifier ────────────────────────────────────────────────────
+  // Cheap Haiku call to detect tangential questions so the goals-stage Sonnet
+  // prompt can answer them naturally without confusing state advancement.
+  const stageGoal = !mergedData.name ? "collect the athlete's name and what they're training for"
+    : !mergedData.goal ? "confirm the athlete's training goal"
+    : !mergedData.strava_connected ? "get the athlete to connect Strava"
+    : "wrap up and signal ready";
+  const isOffTopic = await classifyOffTopic(message, stageGoal, history);
+  if (isOffTopic) {
+    return handleOffTopicMessage(user, message, mergedData, stageGoal, history, chatId);
+  }
 
   const onbLang = (mergedData.preferred_language as string | undefined) ?? "en";
   const langInstruction = onbLang !== "en"
@@ -888,6 +993,8 @@ function summarizeCollected(data: Record<string, unknown>): string {
   if (data.injury_history) lines.push(`Injury history: ${data.injury_history}`);
   if (data.current_niggles) lines.push(`Current niggles: ${data.current_niggles}`);
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);
+  if (data.reported_during) lines.push(`Injury timing: pain reported ${data.reported_during} runs`);
+  if (data.avg_sleep_hours) lines.push(`Avg sleep: ${data.avg_sleep_hours} hours/night`);
   if (data.strength_habits) lines.push(`Strength/cross-training: ${data.strength_habits}`);
   if (data.ultra_race_history) lines.push(`Ultra background: ${data.ultra_race_history}`);
   if (data.preferred_units) lines.push(`Units preference: ${data.preferred_units}`);
@@ -939,6 +1046,8 @@ Rules:
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
 - injury_history: summarize any historical injuries the athlete has had (past injuries they've recovered from, recurring issues, injury-prone areas). Extract from the athlete's own words only. Null if not mentioned.
 - current_niggles: any current aches, pain, or issues the athlete is managing right now (distinct from past injury history). Null if not mentioned.
+- reported_during: when the injury pain occurs — 'during' if they feel it while running, 'after' if only after finishing, 'both' if during and after. Null if not mentioned.
+- avg_sleep_hours: if the athlete mentions how many hours of sleep they get (e.g. "I sleep about 7 hours", "usually 6-7 hours"), extract as a number. Null if not mentioned.
 - strength_habits: a brief description of the athlete's strength training and cross-training habits — what they do, how often. Examples: "3x/week lifting, no cross-training", "yoga 2x/week, cycling occasionally", "no strength work". Null if not mentioned.
 - cross_training_activities: array of cross-training activities the athlete does (e.g. ['cycling', 'swimming', 'yoga', 'lifting']). Null if not mentioned.
 - wants_speed_work: true if athlete explicitly asks for speed work. Null otherwise.
@@ -999,6 +1108,8 @@ Rules:
           active_injury: { type: ["boolean", "null"], description: "True if the athlete describes a CURRENT injury they're managing right now (e.g. 'my achilles is still bothering me', 'recovering from a stress fracture'). False/null for historical injuries that are resolved." },
           injury_severity: { type: ["string", "null"], enum: ["mild", "moderate", "severe", null], description: "Severity of the current active injury. mild=annoyance, can run modified. moderate=skipping some sessions, modifying others. severe=cannot run at all." },
           injury_body_part_current: { type: ["string", "null"], description: "Body part of the CURRENT active injury (e.g. 'left achilles', 'right knee'). Null for historical injuries." },
+          reported_during: { type: ["string", "null"], enum: ["during", "after", "both", null], description: "When the injury pain occurs relative to running. 'during' = feels it while running, 'after' = feels it after finishing, 'both' = during and after. Null if not mentioned." },
+          avg_sleep_hours: { type: ["number", "null"], description: "Average hours of sleep per night the athlete gets. E.g. '7 hours' → 7.0, '6-7 hours' → 6.5. Null if not mentioned." },
           experience_years: { type: ["number", "null"] },
           other_races: {
             oneOf: [
@@ -1195,7 +1306,9 @@ async function handleInjuryIntake(
   data: Record<string, unknown>,
   chatId?: string | null
 ): Promise<NextResponse> {
-  const followUpAlreadySent = !!(data.injury_follow_up_sent as boolean | null);
+  // Support legacy boolean flag and new numeric counter
+  const followUpCount = (data.injury_follow_up_count as number | null)
+    ?? ((data.injury_follow_up_sent as boolean | null) ? 1 : 0);
 
   // Extract injury details from this message
   const extracted = await extractFields([{ role: "user", content: message }]);
@@ -1217,11 +1330,34 @@ async function handleInjuryIntake(
 
   // Detect "no injury" responses
   const noInjury = /\b(no (injury|injuries|issues|pain|niggles|problems)|all good|nothing|clean|healthy|fine|never|n\/a)\b/i.test(message);
-  // Also complete if injury was already captured during the goals stage (follow-up pre-marked by handleDataAnalysis)
+  // Injury already captured during goals stage (follow-up pre-marked by handleDataAnalysis)
   const injuryAlreadyKnown = !!(mergedData.injury_history || mergedData.current_niggles || mergedData.injury_notes);
-  const shouldComplete = followUpAlreadySent || noInjury || injuryAlreadyKnown;
+  // All three fields needed: body_part, severity, reported_during
+  const hasAllSymptomFields = !!(mergedData.injury_body_part_current && mergedData.injury_severity && mergedData.reported_during);
+  // Hard cap at 2 follow-up questions total
+  const hitFollowUpCap = followUpCount >= 2;
+  const shouldComplete = noInjury || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
 
   if (shouldComplete) {
+    // Sleep question — ask once after injury is resolved, before final completion
+    const sleepAlreadyKnown = !!(mergedData.avg_sleep_hours);
+    const sleepQuestionSent = !!(mergedData.sleep_question_sent);
+    if (!sleepAlreadyKnown && !sleepQuestionSent && !noInjury) {
+      const sleepQuestion = "Last thing — how's sleep been lately? It affects how I interpret your recovery between runs.";
+      const updatedData = { ...mergedData, sleep_question_sent: true };
+      await supabase.from("users")
+        .update({ onboarding_data: updatedData as unknown as Json })
+        .eq("id", user.id);
+      await sendAndStore(user.id, user.phone_number, sleepQuestion, "onboarding");
+      return NextResponse.json({ ok: true });
+    }
+
+    // Extract sleep from this message if the sleep question was pending
+    if (sleepQuestionSent && !sleepAlreadyKnown) {
+      const sleepMatch = message.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i);
+      if (sleepMatch) mergedData.avg_sleep_hours = parseFloat(sleepMatch[1]);
+    }
+
     const completionMsg = buildDeterministicCompletion(mergedData);
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
@@ -1231,16 +1367,26 @@ async function handleInjuryIntake(
     return NextResponse.json({ ok: true });
   }
 
-  // First injury response — generate ONE specific follow-up question via Haiku
+  // Choose follow-up target based on what's missing
+  const missingFields: string[] = [];
+  if (!mergedData.injury_body_part_current) missingFields.push("which body part specifically");
+  if (!mergedData.injury_severity) missingFields.push("how limiting it is");
+  if (!mergedData.reported_during) missingFields.push("when it flares (during or after runs)");
+
+  const followUpSystem = followUpCount === 0
+    ? `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question targeting the most important unknown: ${missingFields[0] ?? "how long it's been happening"}.
+
+ONE question only. No advice, no stretches, no reassurance. Just the question.
+Plain text, 1–2 sentences max.`
+    : `You are Coach Dean. You've asked one follow-up about an injury. Ask ONE final targeted question to fill the most important remaining gap: ${missingFields[0] ?? "how long it's been happening and whether it's limiting training"}.
+
+This is the last question before onboarding completes — make it count. ONE question, no reassurance.
+Plain text, 1–2 sentences max.`;
+
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 120,
-    system: `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question.
-
-Target: how long it's been happening, whether pain is during runs or after, whether it's limiting training.
-
-ONE question only. No advice, no stretches, no reassurance ("we'll be careful", "listen to your body"). Just the question.
-Plain text, 1–2 sentences max.`,
+    system: followUpSystem,
     messages: [{ role: "user", content: message }],
   });
 
@@ -1250,7 +1396,7 @@ Plain text, 1–2 sentences max.`,
     .join("")
     .trim() || "How long has it been bothering you, and do you feel it during runs, after, or both?";
 
-  const updatedData = { ...mergedData, injury_follow_up_sent: true };
+  const updatedData = { ...mergedData, injury_follow_up_count: followUpCount + 1 };
   await supabase.from("users")
     .update({ onboarding_data: updatedData as unknown as Json })
     .eq("id", user.id);
@@ -1261,6 +1407,27 @@ Plain text, 1–2 sentences max.`,
 // ---------------------------------------------------------------------------
 // Deterministic completion message — built from structured data, not LLM
 // ---------------------------------------------------------------------------
+
+// Per-body-part action for active injury acknowledgment in the completion message.
+const INJURY_ACTION: Record<string, string> = {
+  hamstring: "leg swings and walking lunges before your next run",
+  "it band": "side-lying leg raises or banded walks before each run",
+  itb: "side-lying leg raises or banded walks before each run",
+  knee: "glute activation — clamshells or bridges — before your next run",
+  achilles: "calf drops (straight + bent knee) after your next run",
+  calf: "calf drops after your next run",
+  shin: "reduce intensity for the next few days and ice if tender to touch",
+  hip: "hip flexor stretch and single-leg glute work before your next run",
+  plantar: "foot rolling and calf stretches first thing in the morning",
+};
+
+function getInjuryAction(bodyPart: string): string {
+  const lower = bodyPart.toLowerCase();
+  for (const [key, action] of Object.entries(INJURY_ACTION)) {
+    if (lower.includes(key)) return action;
+  }
+  return "an easy warm-up before your next run";
+}
 
 function buildDeterministicCompletion(data: Record<string, unknown>): string {
   const rawName = (data.name as string) || "";
@@ -1273,6 +1440,11 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
   const injuryHistory = data.injury_history as string | null;
   const mileageTrend = data.strava_mileage_trend as string | null;
   const otherRaces = (data.other_races as Array<{ name?: string | null; date?: string | null; priority: string }> | null) ?? [];
+  const activeInjury = data.active_injury === true;
+  const injuryBodyPart = (data.injury_body_part_current as string | null) || null;
+  const injurySeverity = (data.injury_severity as string | null) || null;
+  const reportedDuring = (data.reported_during as string | null) || null;
+  const stravaConnected = !!(data.strava_connected);
 
   // Race + timeline opening
   let opening = "";
@@ -1308,28 +1480,50 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
     observation = `Your base at ${avgMiles} mi/week${trendNote} gives us room to work.`;
   }
 
-  // Injury note — body-part specific
+  // Injury note — specific action when active, pattern monitoring when historical
   let injuryNote = "";
-  if (currentNiggles) {
+  if (activeInjury && injuryBodyPart) {
+    const action = getInjuryAction(injuryBodyPart);
+    const whenStr = reportedDuring === "during" ? "during runs"
+      : reportedDuring === "after" ? "after runs"
+      : reportedDuring === "both" ? "during and after runs"
+      : null;
+    const severityNote = injurySeverity === "severe" ? "Given the severity, "
+      : injurySeverity === "moderate" ? "Given how it's affecting training, "
+      : "";
+    const duringNote = whenStr ? ` You mentioned it flares ${whenStr} — that's the signal I'll track.` : "";
+    injuryNote = `${severityNote}Before your next run, do ${action}. If you mention your ${injuryBodyPart} after a run, I'll modify your load — not just flag it.${duringNote}`;
+  } else if (currentNiggles && !/\b(none|no injury|healthy|fine)\b/i.test(currentNiggles)) {
     const text = currentNiggles.toLowerCase();
-    const bodyPart = text.includes("hamstring") ? "Hamstring"
-      : text.includes("shin") ? "Shin"
-      : text.includes("knee") ? "Knee"
-      : text.includes("achilles") ? "Achilles"
+    const bodyPart = text.includes("hamstring") ? "hamstring"
+      : text.includes("shin") ? "shin"
+      : text.includes("knee") ? "knee"
+      : text.includes("achilles") ? "achilles"
       : text.includes("it band") || text.includes("itb") ? "IT band"
-      : text.includes("hip") ? "Hip"
-      : text.includes("calf") ? "Calf"
-      : text.includes("plantar") ? "Plantar fascia"
-      : "That";
-    injuryNote = `${bodyPart} is on my radar — I'll watch the load and flag anything that looks risky.`;
+      : text.includes("hip") ? "hip"
+      : text.includes("calf") ? "calf"
+      : text.includes("plantar") ? "plantar fascia"
+      : null;
+    if (bodyPart) {
+      const action = getInjuryAction(bodyPart);
+      injuryNote = `The ${bodyPart} — before your next run, do ${action}. If you mention it after a run I'll adjust your load.`;
+    } else {
+      injuryNote = "Injury history noted — I'll monitor patterns and modify load when needed, not just flag it.";
+    }
   } else if (injuryHistory && !/\b(none|no injury|no injuries|healthy|fine)\b/i.test(injuryHistory)) {
-    injuryNote = "Injury history noted — I'll monitor patterns and flag anything worth managing.";
+    injuryNote = "Injury history noted — I'll monitor patterns and modify load when needed, not just flag it.";
   }
 
   const parts = [opening];
   if (observation) parts.push(observation);
   if (injuryNote) parts.push(injuryNote);
-  parts.push("First coaching note lands after your next run — go run.");
+
+  // Always close with what to expect next
+  if (stravaConnected) {
+    parts.push("Next time Strava syncs a run, I'll send you a coaching note within a few minutes — that's where we start.");
+  } else {
+    parts.push("Your first coaching note lands after your first run — that's where we start.");
+  }
 
   return parts.join(" ");
 }
@@ -1703,7 +1897,9 @@ async function completeOnboarding(
       : weeklyMilesRaw <= 10
       ? Math.ceil(weeklyMilesRaw)
       : Math.round(weeklyMilesRaw / 5) * 5 || 15;
-  const currentLongRunMiles = (data.current_long_run_miles as number) ?? null;
+  const currentLongRunMiles = (data.current_long_run_miles as number | null)
+    ?? (data.strava_longest_run_miles as number | null)
+    ?? null;
   const longRunRaw = Math.round(weeklyMileage * 0.3);
   const longRun =
     currentLongRunMiles ?? (isUltra ? Math.max(longRunRaw, 10) : longRunRaw);
@@ -1792,6 +1988,7 @@ async function completeOnboarding(
           hr_zone_method: "lthr",
         } : {}),
         coaching_mode: 'adaptive',
+        ...(((data.avg_sleep_hours as number | null) != null) ? { avg_sleep_hours: data.avg_sleep_hours as number } : {}),
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
@@ -1810,6 +2007,7 @@ async function completeOnboarding(
         weekly_mileage_target: weeklyMileage,
         long_run_target: longRun,
         week_mileage_so_far: 0,
+        ...((goal === "return_to_running" || goal === "injury_recovery") ? { return_to_run_phase: 1 } : {}),
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }
@@ -1823,6 +2021,21 @@ async function completeOnboarding(
   if (stateResult.error) {
     console.error("[onboarding] training_state upsert failed:", stateResult.error);
     return;
+  }
+
+  // Seed symptom_history from onboarding injury data so the monitoring system
+  // has day-1 context without waiting for a post-run check-in.
+  if (data.active_injury === true && data.injury_body_part_current) {
+    const initialSymptom = {
+      date: new Date().toISOString().slice(0, 10),
+      body_part: data.injury_body_part_current as string,
+      severity: (data.injury_severity as string | null) ?? "mild",
+      reported_during: (data.reported_during as string | null) ?? "after",
+      source: "onboarding",
+    };
+    await supabase.from("training_profiles")
+      .update({ symptom_history: [initialSymptom] })
+      .eq("user_id", user.id);
   }
 
   // Check if billing gate is needed

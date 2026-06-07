@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Onboarding overhaul: injury-aware completion, sleep, off-topic handling, two-follow-up cap
+
+**Type:** Feature / Improvement
+**Reported by:** Internal observation (Jake's onboarding experience — hamstring disclosure got "I'll keep an eye on it")
+**User feedback:** "you disclosed a hamstring issue and Dean said 'I'll keep an eye on it.' That's the worst possible response to an injury disclosure at onboarding — it's passive, it's vague, and it signals that the information went nowhere."
+**Root cause:** `buildDeterministicCompletion` had a generic injury note with no body-part-specific action, no commitment to load modification, and no "what happens next" moment. `handleInjuryIntake` capped at one follow-up regardless of how much was captured. `symptom_history` was never seeded at onboarding. `return_to_run_phase` was never set for RTR/injury_recovery goals. No off-topic handling in the goals stage.
+**Fix / Change:**
+- `buildDeterministicCompletion` — conditional branch when `active_injury = true`: acknowledges the specific body part by name, gives one concrete pre-run action (body-part lookup table), and commits to load modification not just flagging. Historical injury also upgraded from "on my radar" to "modify load when needed, not just flag it." All paths now close with a "what happens next" sentence ("Next time Strava syncs a run, I'll send you a coaching note within a few minutes").
+- `handleInjuryIntake` — increased follow-up cap from 1 to 2. After first follow-up, Haiku checks if body_part + severity + reported_during are all known; only fires a second follow-up if fields are still missing. Target varies by follow-up number (first = most important missing field, second = final gap).
+- Sleep question — added at the end of injury intake before completion: "Last thing — how's sleep been lately? It affects how I interpret your recovery between runs." Extracted from response and stored as `avg_sleep_hours` in `training_profiles`.
+- `completeOnboarding` — seeds `symptom_history` JSONB with an initial entry when `active_injury = true`, so the recurrence monitoring system has context from day 1 rather than waiting for a post-run check-in.
+- `completeOnboarding` — sets `return_to_run_phase = 1` in `training_state` for `return_to_running` and `injury_recovery` goals.
+- `completeOnboarding` — long run baseline now falls back to `strava_longest_run_miles` from Strava history, so users don't need to be asked for data Strava already has.
+- `extractFields` — added `reported_during` (during/after/both), `avg_sleep_hours` fields.
+- Off-topic classifier — rule-based early returns + optional Haiku LLM call for messages that are long, contain `?`, and lack training keywords. Off-topic messages get a natural answer + redirect to the current stage goal without advancing onboarding state.
+- Migration `050_avg_sleep_hours.sql` — adds `avg_sleep_hours numeric` to `training_profiles`.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `supabase/migrations/050_avg_sleep_hours.sql`, `src/lib/database.types.ts`
+
 ## 2026-06-07 — Load + symptom monitoring system (pivot to injury-prevention coaching)
 
 **Type:** Feature

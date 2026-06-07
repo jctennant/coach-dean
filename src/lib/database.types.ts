@@ -377,6 +377,7 @@ export type Database = {
           manual_prs: Json | null
           max_hr_estimate: number | null
           max_hr_estimate_updated_at: string | null
+          avg_sleep_hours: number | null
           physio_notes: string | null
           physio_prescribed_restrictions: Json | null
           preferred_units: string
@@ -426,6 +427,7 @@ export type Database = {
           lthr_confidence?: string | null
           lthr_estimate?: number | null
           lthr_history?: Json | null
+          avg_sleep_hours?: number | null
           lthr_last_updated?: string | null
           lthr_source?: string | null
           manual_prs?: Json | null
@@ -480,6 +482,7 @@ export type Database = {
           lthr_confidence?: string | null
           lthr_estimate?: number | null
           lthr_history?: Json | null
+          avg_sleep_hours?: number | null
           lthr_last_updated?: string | null
           lthr_source?: string | null
           manual_prs?: Json | null
