@@ -28,7 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
 const RESULTS_DIR = path.join(__dirname, "results");
 
-const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
+const PROVIDER = process.env.AI_PROVIDER ?? "openai";
 
 // Mirrors the production shim in src/lib/anthropic.ts: when running on OpenAI,
 // map Claude IDs to OpenAI models so eval-mode and prod use the same models.

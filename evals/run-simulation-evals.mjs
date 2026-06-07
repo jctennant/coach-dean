@@ -25,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures", "simulation");
 const RESULTS_DIR = path.join(__dirname, "results");
 
-const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
+const PROVIDER = process.env.AI_PROVIDER ?? "openai";
 
 const DEAN_MODEL = "claude-sonnet-4-5-20250929";
 const AGENT_MODEL = "claude-haiku-4-5-20251001";

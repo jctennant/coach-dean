@@ -236,7 +236,7 @@ function buildOpenAIClient(): Anthropic {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-const provider = process.env.AI_PROVIDER ?? "anthropic";
+const provider = process.env.AI_PROVIDER ?? "openai";
 
 export const anthropic: Anthropic =
   provider === "anthropic" ? buildAnthropicClient() : buildOpenAIClient();
