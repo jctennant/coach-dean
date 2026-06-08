@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Eliminate jargon (ACWR, units) and align all triggers on injury prevention mission
+
+**Type:** Improvement
+**Reported by:** Jake (internal)
+**User feedback:** "we probably need to clearly define 'units' and the way we are going about training load / running load here! same with something like ACWR, most people don't know what that is. Also, can you take a look now at onboarding, coach respond, and sunday recap and make sure all of them properly align on focusing on injury prevention and recovery (getting faster without getting injured)"
+**Root cause:** (1) The LOAD CONTEXT block used "units" and "impact load" as athlete-facing terms — meaningless to athletes. (2) The prompt used "ACWR" as a term Dean could say to athletes, including in example phrases like "ACWR at 1.38." (3) Coaching philosophy ("get faster without getting injured") was stated in onboarding but not in the main coach/respond prompt. (4) Weekly recap LONGITUDINAL SIGNALS used load only as a mileage-volume signal, not tied to injury prevention.
+**Fix / Change:** (1) Added PLAIN LANGUAGE jargon rules at the top of buildSystemPrompt: never say "ACWR", "X units", "impact load score", or "cardiac decoupling" to athletes — translate each into plain English with specific example wordings. (2) Added CORE COACHING MISSION paragraph to buildSystemPrompt aligning coach/respond with onboarding's "get faster without getting injured" philosophy. (3) Fixed all ACWR example phrases in 5 CORE METRICS, OVERRIDES, CITE THE NUMBER, and weekly recap — replaced with plain-English equivalents. (4) Added load-as-injury-prevention framing to weekly recap LONGITUDINAL SIGNALS: when athlete has injury notes, load is always the first signal. (5) LOAD CONTEXT block header now explicitly instructs Dean it's internal-only data, never to repeat raw numbers to athletes.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-06-07 — Shift post-run coaching lens from HR to load scores and injury prevention
 
 **Type:** Improvement
