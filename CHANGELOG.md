@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Plan-aware synthesis message at end of onboarding
+
+**Type:** Feature / Improvement
+**Reported by:** Jake (internal testing — SWAP plan + shin soreness scenario)
+**User feedback:** "Dean gave generic taper advice instead of referencing the specific Tuesday workout in my SWAP plan"
+**Root cause:** `buildDeterministicCompletion` was fully deterministic text — it had no access to `plan_sessions_all_weeks` and couldn't name specific upcoming workouts or frame a decision point.
+**Fix / Change:** Replaced synchronous `buildDeterministicCompletion` call with async `buildSynthesisMessage`. When `plan_sessions_all_weeks` is present AND there is an active injury, makes a Sonnet call with a tight prompt: names the specific next quality session (by day + label) as the decision point, states that session is where we'll know whether to push or pull back, and ends with a mandatory diagnostic question ("Does the [body_part] hurt only while running, or also walking around?"). Falls back to deterministic logic for non-injured users or users without an uploaded plan.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-06-07 — Onboarding: injury-first flow, plan check step, UKK PDF scoped correctly
 
 **Type:** Feature / Improvement

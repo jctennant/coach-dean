@@ -7,6 +7,8 @@ import { calculateVDOTPaces, easyPaceRange, formatRaceDistance } from "@/lib/pac
 import { getCheckoutPageUrl } from "@/lib/stripe";
 import type { Json } from "@/lib/database.types";
 import { parseTimezoneFromLocation } from "@/lib/timezone";
+import type { UploadedPlanWeek } from "@/lib/training-plan";
+import { computeWeekSessions } from "@/lib/training-plan";
 
 export const maxDuration = 60;
 
@@ -1379,7 +1381,8 @@ async function handleInjuryIntake(
       if (sleepMatch) mergedData.avg_sleep_hours = parseFloat(sleepMatch[1]);
     }
 
-    const completionMsg = buildDeterministicCompletion(mergedData);
+    const timezone = (mergedData.timezone as string | null) ?? "America/New_York";
+    const completionMsg = await buildSynthesisMessage(mergedData, timezone);
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
@@ -1423,6 +1426,85 @@ Plain text, 1–2 sentences max.`;
     .eq("id", user.id);
   await sendAndStore(user.id, user.phone_number, followUpText, "onboarding");
   return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Plan-aware synthesis message — Sonnet call when plan + active injury present
+// ---------------------------------------------------------------------------
+
+async function buildSynthesisMessage(data: Record<string, unknown>, timezone: string): Promise<string> {
+  const rawName = (data.name as string) || "";
+  const firstName = rawName.split(" ")[0] || "Hey";
+  const activeInjury = data.active_injury === true;
+  const injuryBodyPart = (data.injury_body_part_current as string | null) || null;
+  const allWeeks = (data.plan_sessions_all_weeks as UploadedPlanWeek[] | null) ?? [];
+  const raceDate = data.race_date as string | null;
+
+  if (activeInjury && injuryBodyPart && allWeeks.length > 0) {
+    const totalWeeks = allWeeks.length;
+    let currentPlanWeek = 1;
+    if (raceDate) {
+      const daysUntilRace = Math.ceil(
+        (new Date(raceDate + "T12:00:00Z").getTime() - Date.now()) / (24 * 60 * 60 * 1000)
+      );
+      currentPlanWeek = Math.max(1, Math.min(totalWeeks, totalWeeks - Math.ceil(daysUntilRace / 7) + 1));
+    }
+
+    const weeklySessions = computeWeekSessions(allWeeks, currentPlanWeek, timezone);
+
+    // Filter to remaining sessions from today onwards
+    const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date());
+    const [, todayM, todayD] = todayStr.split("-").map(Number);
+    const remainingSessions = weeklySessions.filter(s => {
+      const [sm, sd] = s.date.split("/").map(Number);
+      return sm * 31 + sd >= todayM * 31 + todayD;
+    });
+
+    if (remainingSessions.length > 0) {
+      const sessionList = remainingSessions.map(s => `- ${s.day} (${s.date}): ${s.label}`).join("\n");
+      const injurySeverity = (data.injury_severity as string | null) || "mild";
+      const raceName = (data.race_name as string | null) || "your race";
+      const avgMiles = data.strava_avg_weekly_miles as number | null;
+
+      const synthesisPrompt = `You are Coach Dean, a running coach. An athlete just completed onboarding. Write their completion message.
+
+ATHLETE:
+- Name: ${firstName}
+- Injury: ${injuryBodyPart} (${injurySeverity})
+- Race: ${raceName}${raceDate ? ` on ${raceDate}` : ""}
+- Weekly mileage: ${avgMiles ? `${avgMiles} mi/week` : "unknown"}
+
+REMAINING PLAN SESSIONS THIS WEEK:
+${sessionList}
+
+Write a completion message (under 160 words) following these rules exactly:
+1. First sentence: name + race context (timeline or "locked in")
+2. Name the next quality session (intervals, tempo, workout) as THE DECISION POINT — use its exact label and day. If no quality session this week, use the next long run. Be specific.
+3. One sentence: that session is where you'll know whether to push or pull back on the ${injuryBodyPart}
+4. One sentence: frame your injury-monitoring approach — you'll act on the signal before it compounds
+5. FINAL SENTENCE (mandatory, exact format): "Does the ${injuryBodyPart} hurt only while running, or also walking around?"
+
+Prohibited: generic taper advice, "listen to your body", reassurance padding, motivational filler.
+Plain text only, no bullet points or formatting.`;
+
+      const response = await anthropic.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 280,
+        messages: [{ role: "user", content: synthesisPrompt }],
+      });
+
+      const text = response.content
+        .filter(b => b.type === "text")
+        .map(b => (b as { type: "text"; text: string }).text)
+        .join("")
+        .trim();
+
+      if (text) return text;
+    }
+  }
+
+  // Fall back to deterministic logic when no plan data or no active injury
+  return buildDeterministicCompletion(data);
 }
 
 // ---------------------------------------------------------------------------
