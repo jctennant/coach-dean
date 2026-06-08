@@ -1279,14 +1279,14 @@ Write 3–4 sentences:
 3. One forward-looking sentence about what the coaching relationship will specifically monitor — make the athlete feel watched, not just coached.
 
 Do NOT lead with or headline HR zone analysis. If the Z3 pattern is relevant (extra fatigue → slower recovery), you may mention it briefly as one supporting observation, but it must not be the opening or the main point.
-Close with exactly ONE question about what they're doing for the injury — use the specific body part from the INJURY FLAGGED line: "Are you doing anything for the [body part] right now — physio, rest, any specific treatment?" One question, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
+Close with TWO questions combined naturally into one sentence — ask what they're doing for the injury AND how sleep has been. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment — and how's sleep been lately?" One sentence, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
 Write 3–4 sentences:
 1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data (e.g. weekly mileage, HR zone %, longest run, weeks until race). Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
 2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
 3. One forward-looking sentence about what the coaching will watch.
 
-Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"`}
+Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now — and how's sleep been lately? Both affect how I set up the plan."`}
 
 Rules:
 - Do NOT ask for road race times — training zones calibrate from Strava data
@@ -1382,27 +1382,8 @@ async function handleInjuryIntake(
   const shouldComplete = noInjury || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
 
   if (shouldComplete) {
-    // Sleep question — ask once after injury is resolved, before final completion
-    const sleepAlreadyKnown = !!(mergedData.avg_sleep_hours);
-    const sleepQuestionSent = !!(mergedData.sleep_question_sent);
-    if (!sleepAlreadyKnown && !sleepQuestionSent && !noInjury) {
-      const sleepQuestion = "Last thing — how's sleep been lately? It affects how I interpret your recovery between runs.";
-      const updatedData = { ...mergedData, sleep_question_sent: true };
-      await supabase.from("users")
-        .update({ onboarding_data: updatedData as unknown as Json })
-        .eq("id", user.id);
-      await sendAndStore(user.id, user.phone_number, sleepQuestion, "onboarding");
-      return NextResponse.json({ ok: true });
-    }
-
-    // Extract sleep from this message if the sleep question was pending
-    if (sleepQuestionSent && !sleepAlreadyKnown) {
-      const sleepMatch = message.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i);
-      if (sleepMatch) mergedData.avg_sleep_hours = parseFloat(sleepMatch[1]);
-    }
-
     const timezone = (mergedData.timezone as string | null) ?? "America/New_York";
-    const completionMsg = await buildSynthesisMessage(mergedData, timezone);
+    const completionMsg = await buildSynthesisMessage(mergedData, timezone, message);
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
@@ -1458,7 +1439,7 @@ Plain text, 1–2 sentences max.`;
 // Plan-aware synthesis message — Sonnet call when plan + active injury present
 // ---------------------------------------------------------------------------
 
-async function buildSynthesisMessage(data: Record<string, unknown>, timezone: string): Promise<string> {
+async function buildSynthesisMessage(data: Record<string, unknown>, timezone: string, lastUserMessage?: string): Promise<string> {
   const rawName = (data.name as string) || "";
   const firstName = rawName.split(" ")[0] || "Hey";
   const activeInjury = data.active_injury === true;
@@ -1497,30 +1478,38 @@ async function buildSynthesisMessage(data: Record<string, unknown>, timezone: st
       const raceName = (data.race_name as string | null) || "your race";
       const avgMiles = data.strava_avg_weekly_miles as number | null;
 
+      const lastMsgContext = lastUserMessage
+        ? `\nATHLETE'S LAST MESSAGE: "${lastUserMessage}"`
+        : "";
+
       const synthesisPrompt = `You are Coach Dean, a running coach. An athlete just completed onboarding. Write their completion message.
 
 ATHLETE:
 - Name: ${firstName}
-- Injury: ${injuryBodyPart} (${injurySeverity})
+- Active injury: ${injuryBodyPart} (${injurySeverity})
 - Race: ${raceName}${raceDate ? ` on ${raceDate}` : ""}
-- Weekly mileage: ${avgMiles ? `${avgMiles} mi/week` : "unknown"}
+- Weekly mileage: ${avgMiles ? `~${avgMiles} mi/week` : "unknown"}
+${lastMsgContext}
 
 REMAINING PLAN SESSIONS THIS WEEK:
 ${sessionList}
 
-Write a completion message (under 160 words) following these rules exactly:
-1. First sentence: name + race context (timeline or "locked in")
-2. Name the next quality session (intervals, tempo, workout) as THE DECISION POINT — use its exact label and day. If no quality session this week, use the next long run. Be specific.
-3. One sentence: that session is where you'll know whether to push or pull back on the ${injuryBodyPart}
-4. One sentence: frame your injury-monitoring approach — you'll act on the signal before it compounds
-5. FINAL SENTENCE (mandatory, exact format): "Does the ${injuryBodyPart} hurt only while running, or also walking around?"
+WRITE A COMPLETION MESSAGE UNDER 130 WORDS:
 
-Prohibited: generic taper advice, "listen to your body", reassurance padding, motivational filler.
-Plain text only, no bullet points or formatting.`;
+1. Give 3 specific ${injuryBodyPart} management suggestions ordered by impact. Format them inline as "(1) ... (2) ... (3) ...". Each must be specific and actionable — not "listen to your body". Shins: prioritize load reduction, icing after aggravating runs, using the next key session as the decision point. Use the body part and race timeline to make them concrete.
+
+2. Identify the next quality session from PLAN SESSIONS (intervals, tempo, workout, or long run if no quality). Use its EXACT label and day from the plan. State: if the ${injuryBodyPart} is improving by the day before, do it (possibly shortened). If same or worse, swap for easy miles and protect for race day.
+
+3. One sentence: the fitness is there — don't add stress to the ${injuryBodyPart} between now and race day.
+
+4. Final sentence (exactly): "How's it feeling today compared to yesterday?"
+
+Rules: NO generic advice. NO recapping what the athlete told you. NO motivational filler. If the athlete's last message asked a direct question, lead with the answer before anything else.
+Plain text only, no markdown, no bullet points.`;
 
       const response = await anthropic.messages.create({
         model: "claude-sonnet-4-6",
-        max_tokens: 280,
+        max_tokens: 320,
         messages: [{ role: "user", content: synthesisPrompt }],
       });
 

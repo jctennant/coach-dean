@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Onboarding: plan-aware synthesis, sleep question sequencing, injury message focus
+
+**Type:** Improvement
+**Reported by:** Jake (internal product review)
+**User feedback:** "(1) The final message is doing too much and delivering too little — it recaps instead of answering the athlete's question. (2) Dean never actually used the SWAP plan — the plan upload is currently decorative. (3) The sleep question is sequenced wrong and feels like a form — dropped as its own standalone message after Jake asked for suggestions."
+**Root cause:**
+1. `buildSynthesisMessage` Sonnet prompt told Claude to recap race/Strava context rather than lead with specific injury management actions, making it feel like a status report.
+2. Plan sessions were injected into the prompt context but the prompt didn't explicitly instruct Claude to name specific sessions by label and day — so the plan was present but invisible in the output.
+3. Sleep question was sent as a blocking standalone message in `handleInjuryIntake` after injury fields were complete, delaying the answer to any question the athlete had asked.
+**Fix / Change:**
+- Redesigned `buildSynthesisMessage` Sonnet prompt: now leads with 3 ranked, specific injury management actions (numbered inline), then names the exact upcoming plan session from `sessionList` as the decision point using its verbatim label, then closes with "How's it feeling today compared to yesterday?" rather than a diagnostic question. If the athlete's last message asked a question, Claude is instructed to lead with the answer.
+- Added `lastUserMessage` param to `buildSynthesisMessage` so the synthesis can respond to what the athlete actually asked.
+- Folded sleep question into `handleDataAnalysis` (Strava synthesis stage) — combined with the injury/health question as one natural sentence. Removed standalone sleep question block from `handleInjuryIntake` entirely.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
 ## 2026-06-07 — RTR protocol, multi-session swap, gait triage question
 
 **Type:** Feature
