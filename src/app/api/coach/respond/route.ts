@@ -1318,8 +1318,8 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
     periodizationMileage
   );
 
-  // Load context block: surface running impact load vs 30-day max (spike detection) and
-  // recent fatigue load (leg day, cross-training). Included for post_run and user_message.
+  // Load context block: session impact load vs recent baseline (trend coaching), spike detection,
+  // and recent fatigue (leg day, cross-training). Included for post_run and user_message.
   const loadContextBlock = (() => {
     if (trigger !== "post_run" && trigger !== "user_message" && trigger !== "morning_plan" && trigger !== "morning_reminder") return "";
     // ?? null coerces undefined → null so the !== null checks below work correctly
@@ -1331,17 +1331,54 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
       recentActivities as Array<{ activity_fatigue_load: number | null; start_date: string }>,
       48
     );
+
+    const RUNNING_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+    // Last 5 running sessions (excluding the current activity) with load data
+    const currentActivityStartDate = activityData?.start_date ?? null;
+    const recentRunLoads = (recentActivities as Array<{ activity_type: string; running_impact_load: number | null; start_date: string }>)
+      .filter(a => RUNNING_TYPES.has(a.activity_type) && a.running_impact_load != null && a.start_date !== currentActivityStartDate)
+      .slice(0, 5)
+      .map(a => a.running_impact_load as number);
+    const recentAvgLoad = recentRunLoads.length >= 2
+      ? recentRunLoads.reduce((s, v) => s + v, 0) / recentRunLoads.length
+      : null;
+
     const parts: string[] = [];
-    if (currentLoad !== null && rolling30dMax !== null) {
-      const spikePct = Math.round(((currentLoad - rolling30dMax) / rolling30dMax) * 100);
-      const spikeNote = spikePct >= 10
-        ? ` — ${spikePct}% above 30-day high. LOAD SPIKE: this session exceeded the athlete's recent training ceiling. Acknowledge that this was a big effort without being alarmist.`
-        : spikePct <= -20
-        ? ` — well below recent baseline (easy/recovery session)`
-        : "";
-      parts.push(`Session impact load: ${currentLoad.toFixed(1)} units (30-day max: ${rolling30dMax.toFixed(1)}${spikeNote})`);
+    if (currentLoad !== null) {
+      if (rolling30dMax !== null) {
+        const spikePct = Math.round(((currentLoad - rolling30dMax) / rolling30dMax) * 100);
+        const spikeNote = spikePct >= 10
+          ? ` — ${spikePct}% above 30-day high. LOAD SPIKE: this session exceeded the athlete's recent training ceiling. Acknowledge that this was a big effort without being alarmist.`
+          : spikePct <= -20
+          ? ` — well below recent baseline (easy/recovery session)`
+          : "";
+        if (recentAvgLoad !== null) {
+          const vsAvgPct = Math.round(((currentLoad - recentAvgLoad) / recentAvgLoad) * 100);
+          const vsAvgNote = vsAvgPct >= 15
+            ? ` (${vsAvgPct}% harder than your recent run average of ${recentAvgLoad.toFixed(0)} units)`
+            : vsAvgPct <= -15
+            ? ` (${Math.abs(vsAvgPct)}% easier than your recent run average of ${recentAvgLoad.toFixed(0)} units — solid recovery effort)`
+            : ` (in line with your recent run average of ${recentAvgLoad.toFixed(0)} units)`;
+          parts.push(`Session impact load: ${currentLoad.toFixed(1)} units${vsAvgNote}${spikeNote}`);
+        } else {
+          parts.push(`Session impact load: ${currentLoad.toFixed(1)} units (30-day max: ${rolling30dMax.toFixed(1)}${spikeNote})`);
+        }
+      } else if (recentAvgLoad !== null) {
+        const vsAvgPct = Math.round(((currentLoad - recentAvgLoad) / recentAvgLoad) * 100);
+        const vsAvgNote = vsAvgPct >= 15
+          ? ` — ${vsAvgPct}% harder than recent average (${recentAvgLoad.toFixed(0)} units)`
+          : vsAvgPct <= -15
+          ? ` — ${Math.abs(vsAvgPct)}% easier than recent average (${recentAvgLoad.toFixed(0)} units)`
+          : ` — in line with recent average (${recentAvgLoad.toFixed(0)} units)`;
+        parts.push(`Session impact load: ${currentLoad.toFixed(1)} units${vsAvgNote}`);
+      } else {
+        parts.push(`Session impact load: ${currentLoad.toFixed(1)} units`);
+      }
     } else if (rolling30dMax !== null) {
       parts.push(`30-day running impact load max: ${rolling30dMax.toFixed(1)} units`);
+    }
+    if (recentRunLoads.length >= 3) {
+      parts.push(`Recent session loads (last ${recentRunLoads.length} runs): ${recentRunLoads.map(l => l.toFixed(0)).join(", ")} units`);
     }
     if (legDayActive) {
       parts.push("LEG DAY FLAG: Strength/weights session within the last 36 hours. Expect elevated fatigue and heavier legs. Reduce pace targets by ~10-15 sec/mile and do not prescribe a quality session today.");
@@ -6190,10 +6227,18 @@ ${[...new Set(recentPostRunInsights)].map(s => `- ${s}`).join("\n")}
 Pick a DIFFERENT lens from the menu below. If the only available lens for this run was already used recently, surface a non-obvious finding (YTD milestone, route comparison, week-over-week pace-at-HR change, first-time-this-month effort) instead of repeating. The athlete should never feel like they're getting the same coaching note twice.\n\n`
   : ""}5 CORE METRICS — pick the most relevant for this run (don't use the same lens two runs in a row):
 
-1. TRAINING LOAD — check first; overrides other metrics if flagging
-   When to surface: ACWR >1.3 or weekly mileage >10% above 4-week avg. Cite the exact ratio and name the implication plainly: "ACWR at 1.38 — that's a 38% load spike. The next 2 easy days matter more than the next workout."
+1. TRAINING LOAD & INJURY PREVENTION — the default lens for easy runs; check first on every post-run
+   Load is how running injuries happen: tissue breaks down when the mechanical stress of sessions outpaces the athlete's current adaptation ceiling. Load coaching is injury prevention.
+   a) Session load vs recent baseline (from LOAD CONTEXT block): USE THIS as the primary lens on easy runs — it's more actionable than HR zones and directly tied to injury risk.
+      - When session load is 15%+ above recent average: name the gap. "Today's load came in at 52 units — about 37% harder than your recent easy run average of 38. That extra stress adds up; the next easy day matters."
+      - When session load is in range: confirm it. "Load was 41 units — right in line with your recent easy runs. That's the consistency that builds durability."
+      - When session load is 15%+ below recent average: call it a win. "38 units — a proper recovery effort, which is exactly what the body needs to absorb last week's work."
+      Translate the number: don't just say the units. Always explain what the load level means for recovery and adaptation. One sentence.
+   b) Load spike alert: ACWR >1.3 or weekly mileage >10% above 4-week avg → MUST address load. Cite exact ratio: "ACWR at 1.38 — that's a 38% spike. The next 2 easy days matter more than the next workout."
+   c) Injury prevention tie-in: when injury_notes exist, connect session load directly to the injury site. "Load was 52 units — that's the tissue stress your shin is absorbing. As long as it's staying in the 38–45 range, you're in the managed zone." Frame it as tissue budget, not alarm.
 
-2. HEART RATE — an important lens for easy runs, when data is reliable. Treat HR zone and cardiac drift as one lens; pick the most useful for this run.
+2. HEART RATE — use for quality sessions and long runs; NOT the default for easy runs
+   Use this lens when: (a) quality session where zone compliance is part of the prescription; (b) cardiac drift >10% on a long or tempo run flagging meaningful aerobic stress; (c) athlete directly asks about zones or aerobic effort. Do NOT default to HR zones for every easy run — load and pacing are more actionable and less repetitive.
    WRIST HR NOTE: Strava doesn't tell us if HR came from a wrist sensor or chest strap. Most athletes use wrist optical sensors, which are adequate for zone awareness but can produce artifacts (contact loss, motion interference). If DATA AVAILABILITY GUARD above flagged HR artifact risk, skip zone labels and use pace-based context instead (see PACING ALTERNATIVE below). If the athlete mentions using a chest strap, HR data is more reliable and you can be more precise.
    PACING ALTERNATIVE (use when wrist HR artifact risk was flagged, or when you'd otherwise repeat a Z3 correction): If the athlete's recent easy runs are visible in RECENT WORKOUTS, reference their typical easy-run pace instead of HR zone. Example: "This came in at 9:10/mi — your recent easy runs have averaged 9:30-9:50/mi, so a bit on the brisker side. How did it feel?" This is more actionable than wrist HR zones and doesn't require a chest strap.
    a) HR zone (use bpm ceiling from HEART RATE ZONES block, never raw percentages):

@@ -537,7 +537,7 @@ Once you have the athlete's name and goal (all named race dates confirmed), ask 
 "Are you following a training plan or working with a coach right now?"
 Do NOT skip this. Do NOT combine it with another question.
 
-When they answer YES: "Got it — I work alongside it. If you want to share what this week looks like, I'll build around it. (Text it out or upload a PDF.)" Then move to Strava on the next message.
+When they answer YES: Ask what week of the plan they're on — that's the ONE question for this message. Example: "Got it — I work alongside it. What week are you on?" After they answer, offer to share that week's sessions (text it out or upload a PDF) and move to Strava on the next message.
 When they answer NO or uncertain: "No problem — once Strava connects I'll build the plan from your data." Move to Strava immediately.
 When they answer with injury context (e.g. "yeah I had a plan but the shin thing is messing it up"): acknowledge the plan status AND the injury signal, then move to Strava.
 
@@ -999,6 +999,7 @@ function summarizeCollected(data: Record<string, unknown>): string {
     lines.push(`Training plan uploaded${name} — content available in context. Do NOT ask the athlete to send it again.`);
   }
   if (data.external_plan_description) lines.push(`Current plan: ${data.external_plan_description}`);
+  if (data.plan_current_week) lines.push(`Currently on plan week: ${data.plan_current_week}`);
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
   if (data.easy_pace) {
     const range = easyPaceRange(data.easy_pace as string);
@@ -1055,6 +1056,7 @@ Rules:
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
 - has_existing_plan: true if the athlete explicitly confirms they are currently following a training plan or working with a coach (e.g. "yes, I'm on a Runna plan", "I have a coach", "yeah I'm following a program"). false if they explicitly say they have no plan or coach (e.g. "no, I'm just running on my own", "no plan", "no coach"). null if the plan check question hasn't been asked and answered yet — do NOT infer from context alone.
 - external_plan_description: capture a brief factual summary when the athlete describes their current external plan (source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan or if they only said yes without describing it yet. Do NOT capture a plan Dean is going to build.
+- plan_current_week: the week number the athlete is currently on in their training plan (e.g. "I'm on week 8", "week 6 of my plan" → 8 or 6). Extract as a number. Null if not mentioned.
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"].
 - goal_time_minutes: the athlete's explicit goal finish time for their TARGET race (e.g. "I want to break 4 hours", "sub-20 5K"). Do NOT use a past PR or best time as the goal time unless the athlete says it IS their goal (e.g. "my goal is to beat my 17:50 PR"). A statement like "my fastest 5K is 17:50" or "my PR is 3:45" is a fitness baseline — extract it as recent_race_time_minutes, NOT as goal_time_minutes. Total float minutes: "1:30" → 90.0, "17:40" → 17.67, "2:25:00" → 145.0.
 - race_date: use whichever date is stated in the conversation — athlete's or Dean's. If both are stated and differ by 1–2 days, prefer the athlete's. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if the athlete explicitly said "the 1st" or "June 1st". Today is ${today}.
@@ -1165,6 +1167,7 @@ Rules:
           preferred_units: { type: ["string", "null"], enum: ["metric", "imperial", null], description: "Unit system the athlete prefers. 'metric' if they use km/min-per-km or write in non-English. 'imperial' if they reference miles. null if unclear." },
           has_existing_plan: { type: ["boolean", "null"], description: "true if athlete confirms they have an existing plan or coach, false if they confirm they don't, null if plan check question hasn't been answered yet." },
           external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current external plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'. Null if no current plan — NEVER capture a plan Dean is going to build." },
+          plan_current_week: { type: ["number", "null"], description: "The week number the athlete is currently on in their training plan (e.g. 'I'm on week 8' → 8). Null if not mentioned." },
           other_notes: { type: ["string", "null"] },
           race_elevation_gain_feet: { type: ["number", "null"], description: "Total elevation gain of the goal race course in feet. Extract from Dean's web search results if mentioned in the transcript." },
           race_elevation_loss_feet: { type: ["number", "null"], description: "Total elevation loss (descent) of the goal race course in feet." },
@@ -1442,12 +1445,17 @@ async function buildSynthesisMessage(data: Record<string, unknown>, timezone: st
 
   if (activeInjury && injuryBodyPart && allWeeks.length > 0) {
     const totalWeeks = allWeeks.length;
-    let currentPlanWeek = 1;
-    if (raceDate) {
+    const storedWeek = data.plan_current_week as number | null;
+    let currentPlanWeek: number;
+    if (storedWeek && storedWeek >= 1 && storedWeek <= totalWeeks) {
+      currentPlanWeek = storedWeek;
+    } else if (raceDate) {
       const daysUntilRace = Math.ceil(
         (new Date(raceDate + "T12:00:00Z").getTime() - Date.now()) / (24 * 60 * 60 * 1000)
       );
       currentPlanWeek = Math.max(1, Math.min(totalWeeks, totalWeeks - Math.ceil(daysUntilRace / 7) + 1));
+    } else {
+      currentPlanWeek = 1;
     }
 
     const weeklySessions = computeWeekSessions(allWeeks, currentPlanWeek, timezone);

@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Shift post-run coaching lens from HR to load scores and injury prevention
+
+**Type:** Improvement
+**Reported by:** Jake (internal)
+**User feedback:** "coach respond and post run are still mostly focused on HR a lot - Gwyneth keeps getting messages about that and maybe we need to shift towards the load scores we now have and injury prevention"
+**Root cause:** The "5 CORE METRICS" prompt listed HR as "an important lens for easy runs" — making it the default fallback for any run where ACWR wasn't spiking. Load scores were only surfaced as a spike alert (ACWR >1.3), not as a regular coaching lens. Athletes with injury history were getting HR zone analysis instead of load-tied injury prevention framing.
+**Fix / Change:** (1) Promoted TRAINING LOAD to the default easy-run lens with explicit per-session load vs. recent baseline comparison ("52 units — 37% harder than your recent easy run average of 38 units") including injury prevention tie-in when injury notes exist. (2) Demoted HR to "use for quality sessions and long runs; NOT the default for easy runs." (3) Expanded loadContextBlock to compute last 5 session impact loads, calculate recent average, and inject the delta comparison into the prompt so Dean has concrete numbers to cite. Fixed current-activity exclusion to use start_date (strava_activity_id not in select).
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-06-07 — Ask athlete what week of plan they're on; use that for synthesis
+
+**Type:** Improvement
+**Reported by:** Jake (internal)
+**User feedback:** "we can also ask what week the user is on, that's probably better!"
+**Root cause:** `buildSynthesisMessage` computed the current plan week from race date math, which is wrong if the athlete started late, repeated a week, or is off-schedule.
+**Fix / Change:** When athlete answers YES to the plan check question, Dean now asks "What week are you on?" as the follow-up. Haiku extracts `plan_current_week: number` from the conversation. `buildSynthesisMessage` uses the stored week number as the primary source (falls back to race-date computation if not set). Also surfaced in `summarizeCollected` so Dean doesn't re-ask.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-06-07 — Plan-aware synthesis message at end of onboarding
 
 **Type:** Feature / Improvement
