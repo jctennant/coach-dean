@@ -4,6 +4,23 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — RTR protocol, multi-session swap, gait triage question
+
+**Type:** Feature
+**Reported by:** Jake (internal product review)
+**User feedback:** N/A
+**Root cause:** Three gaps identified in injury recovery product: (1) INJURY_CLEAR jumped straight to full plan without a graduated return; (2) SESSION_SWAP could only modify one session per response; (3) Triage never explicitly asked whether a symptom was affecting the athlete's gait.
+**Fix / Change:**
+- **Return-to-run protocol (2-phase)**: `handleInjuryClear` now starts RTR phase 1 (walk/run intervals, 3×/week, 20–25 min) instead of immediately rebuilding the full plan. Sends two phase 1 protocol SMS bubbles with the body part named. Phase 2 (easy running, ~55% mileage cap) is reached via `[RTR_ADVANCE]` tag after two consecutive pain-free sessions. Phase 2 graduation re-fires `injury_clear` → plan rebuild with standard ramp. `return_to_run_phase` column now actually increments (1 → 2 → null with plan rebuild).
+- **RTR block in system prompt**: `morning_plan`, `post_run`, `user_message` all receive a `⚠️ RETURN-TO-RUN PHASE N ACTIVE` block when the phase is set. Phase 1 rules: walk/run only, no continuous runs, gate question after each session. Phase 2 rules: easy only, mileage cap, gate question.
+- **RTR_ADVANCE tag**: When Dean signals `[RTR_ADVANCE]`, the after() handler increments the phase or fires `injury_clear` for graduation. Tag is stripped before SMS send.
+- **handleSymptomCheckin RTR-aware**: Fetches `return_to_run_phase` and `injury_body_part`; uses gate question ("How did the [body_part] feel — any pain during or after, or all clear?") in RTR mode; keeps generic gait-inclusive question otherwise.
+- **Multi-session SESSION_SWAP**: Changed from single `.match()` to `.matchAll()` — Claude can now emit multiple `[SESSION_SWAP day="X" to="Y"]` tags in one response to surgically modify 2+ sessions. After() handler loops all matches before writing one DB update. System prompt updated to show multi-tag example.
+- **Gait question in triage**: Added `GAIT QUESTION — TRIAGE` rule between `SHARP PAIN DISAMBIGUATION` and `MANDATORY PROFESSIONAL REFERRAL`. Dean now explicitly asks "Does this change how you're walking or running — like favouring one side, any limping?" when a new symptom is first reported. Athlete confirming gait impact → mandatory referral trigger.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-06-07 — Injury intake captures management context and synthesis describes how coaching works
 
 **Type:** Feature / Improvement

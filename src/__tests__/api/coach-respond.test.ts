@@ -711,14 +711,55 @@ describe("coach/respond — injury_clear trigger", () => {
     afterQueue.splice(0);
   });
 
-  it("clears injury_hold_since and pre_injury_mileage_target, then fires generateAndSaveFullPlan", async () => {
-    const holdDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); // ~10 days ago — clearly in the 2-week ramp bucket (≥2w, <3w)
+  it("starts RTR phase 1 (walk/run protocol) when called directly with no existing RTR phase", async () => {
+    const holdDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const stateChain = makeChain({
-      data: { injury_hold_since: holdDate, pre_injury_mileage_target: 30, weekly_mileage_target: 0 },
+      data: { injury_hold_since: holdDate, pre_injury_mileage_target: 30, weekly_mileage_target: 0, return_to_run_phase: null },
       error: null,
     });
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
-      if (table === "users") return makeChain({ data: { phone_number: "+12025550001", strava_athlete_id: null, onboarding_data: {} }, error: null });
+      if (table === "users") return makeChain({ data: { phone_number: "+12025550001", strava_athlete_id: null, onboarding_data: {}, linq_chat_id: null }, error: null });
+      if (table === "training_profiles") return makeChain({ data: { goal: "half_marathon", race_date: null, injury_body_part: "shin" }, error: null });
+      if (table === "training_state") return stateChain;
+      if (table === "races") return makeChain({ data: [], error: null });
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "injury_clear" });
+    const result = await POST(req);
+    await flush();
+
+    // Should set return_to_run_phase = 1 and clear injury_hold_since, but keep pre_injury_mileage_target
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const phaseUpdate = updateCalls.find(
+      ([payload]: [Record<string, unknown>]) => payload?.return_to_run_phase === 1
+    );
+    expect(phaseUpdate).toBeDefined();
+    expect(phaseUpdate![0].injury_hold_since).toBeNull();
+    expect(phaseUpdate![0].pre_injury_mileage_target).toBeUndefined(); // kept, not cleared
+
+    // Should send two SMS bubbles (phase 1 protocol)
+    const { sendSMS } = await import("@/lib/linq");
+    expect(sendSMS).toHaveBeenCalledTimes(2);
+    const firstCall = (sendSMS as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    expect(firstCall).toContain("walk/run intervals");
+
+    // Should NOT generate a full plan yet
+    const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
+    expect(generateAndSaveFullPlan).not.toHaveBeenCalled();
+
+    // Non-dry-run always returns { ok: true } immediately; work runs in after()
+    expect((result as { data: unknown }).data).toMatchObject({ ok: true });
+  });
+
+  it("graduates to full plan rebuild when called with return_to_run_phase = 2", async () => {
+    const holdDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const stateChain = makeChain({
+      data: { injury_hold_since: holdDate, pre_injury_mileage_target: 30, weekly_mileage_target: 0, return_to_run_phase: 2 },
+      error: null,
+    });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: { phone_number: "+12025550001", strava_athlete_id: null, onboarding_data: {}, linq_chat_id: null }, error: null });
       if (table === "training_profiles") return makeChain({ data: { goal: "half_marathon", race_date: null }, error: null });
       if (table === "training_state") return stateChain;
       if (table === "races") return makeChain({ data: [], error: null });
@@ -729,10 +770,10 @@ describe("coach/respond — injury_clear trigger", () => {
     const result = await POST(req);
     await flush();
 
-    // Should clear the hold
+    // Should clear hold, pre_injury_mileage_target, and return_to_run_phase
     const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
     const clearUpdate = updateCalls.find(
-      ([payload]: [Record<string, unknown>]) => payload?.injury_hold_since === null
+      ([payload]: [Record<string, unknown>]) => payload?.injury_hold_since === null && payload?.return_to_run_phase === null
     );
     expect(clearUpdate).toBeDefined();
     expect(clearUpdate![0].pre_injury_mileage_target).toBeNull();
@@ -741,8 +782,7 @@ describe("coach/respond — injury_clear trigger", () => {
     const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
     expect(generateAndSaveFullPlan).toHaveBeenCalled();
     const callArgs = (generateAndSaveFullPlan as ReturnType<typeof vi.fn>).mock.calls[0];
-    // prescribedWeek1Miles should be 60% of 30 = 18mi
-    expect(callArgs[3]).toBeCloseTo(18, 0); // avgWeeklyMileage arg (null → returnBase used via prescribedWeek1Miles)
+    expect(callArgs[3]).toBeCloseTo(18, 0); // 60% of 30 = 18mi
     const opts = callArgs[4] as Record<string, unknown>;
     expect(opts.prescribedWeek1Miles).toBeCloseTo(18, 0);
     expect(opts.resetToWeek1).toBe(false);

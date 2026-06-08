@@ -455,9 +455,9 @@ async function handleInjuryHold(userId: string, dryRun: boolean): Promise<NextRe
  */
 async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextResponse> {
   const [userResult, profileResult, stateResult] = await Promise.all([
-    supabase.from("users").select("phone_number, strava_athlete_id, onboarding_data, dashboard_token").eq("id", userId).single(),
+    supabase.from("users").select("phone_number, strava_athlete_id, onboarding_data, dashboard_token, linq_chat_id").eq("id", userId).single(),
     supabase.from("training_profiles").select("*").eq("user_id", userId).single(),
-    supabase.from("training_state").select("injury_hold_since, pre_injury_mileage_target, weekly_mileage_target").eq("user_id", userId).single(),
+    supabase.from("training_state").select("injury_hold_since, pre_injury_mileage_target, weekly_mileage_target, return_to_run_phase").eq("user_id", userId).single(),
   ]);
 
   const user = userResult.data as Record<string, unknown> | null;
@@ -467,10 +467,48 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
   }
 
   const phoneNumber = user.phone_number as string;
-  const stateRow = stateResult.data as { injury_hold_since: string | null; pre_injury_mileage_target: number | null; weekly_mileage_target: number | null } | null;
+  const stateRow = stateResult.data as { injury_hold_since: string | null; pre_injury_mileage_target: number | null; weekly_mileage_target: number | null; return_to_run_phase: number | null } | null;
   const holdSince = stateRow?.injury_hold_since ?? null;
   const preInjuryTarget = stateRow?.pre_injury_mileage_target ?? stateRow?.weekly_mileage_target ?? null;
+  const currentRtrPhase = stateRow?.return_to_run_phase ?? null;
 
+  // If called after RTR phase 2 graduation (via RTR_ADVANCE), rebuild the full plan.
+  // If called directly via [INJURY_CLEAR] tag (athlete bypassing RTR), start RTR phase 1.
+  const isGraduation = currentRtrPhase !== null && currentRtrPhase >= 2;
+  console.log(`[handleInjuryClear] userId=${userId} — currentRtrPhase=${currentRtrPhase}, isGraduation=${isGraduation}`);
+
+  if (!isGraduation) {
+    // Direct INJURY_CLEAR or coming from phase 0 → enter RTR phase 1 (walk/run protocol).
+    const bodyPart = (profile.injury_body_part as string | null) ?? "injury area";
+    const bubble1 = `Good news — here's how we bring you back safely. This week: walk/run intervals, 3 sessions. Run 2 min, walk 1 min, repeat 6×. About 20–25 min each, easy effort only. No watching pace — just time on feet.`;
+    const bubble2 = `After each session, let me know how the ${bodyPart} felt — whether you noticed anything during or after. I'll check in when your run comes through.`;
+
+    if (!dryRun) {
+      await supabase.from("training_state").update({
+        injury_hold_since: null,
+        return_to_run_phase: 1,
+        weekly_mileage_target: 0,
+        weekly_plan_sessions: null,
+        // Keep pre_injury_mileage_target for phase graduation later
+      }).eq("user_id", userId);
+
+      const chatId = (user.linq_chat_id as string | null) ?? null;
+      if (chatId) await startTyping(chatId);
+      await sendSMS(phoneNumber, bubble1);
+      await new Promise(r => setTimeout(r, 1500));
+      await sendSMS(phoneNumber, bubble2);
+      await supabase.from("conversations").insert([
+        { user_id: userId, role: "assistant", content: bubble1, message_type: "coach_response" },
+        { user_id: userId, role: "assistant", content: bubble2, message_type: "coach_response" },
+      ]);
+      void trackEvent(userId, "rtr_phase_started", { phase: 1, body_part: bodyPart });
+    }
+
+    console.log(`[handleInjuryClear] userId=${userId} — RTR phase 1 started, body_part=${bodyPart}`);
+    return NextResponse.json({ ok: true, rtr_phase: 1, body_part: bodyPart });
+  }
+
+  // Graduation path: phase 2 → full plan rebuild.
   // Compute return-to-running base from weeks injured and pre-injury mileage.
   let returnBase: number | undefined;
   let weeksInjured = 1;
@@ -483,11 +521,12 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
     console.log(`[handleInjuryClear] userId=${userId} — ${weeksInjured}w injured, return base=${returnBase} (${Math.round(rampFactor * 100)}% of ${preInjuryTarget})`);
   }
 
-  // Clear the hold immediately so next trigger doesn't see stale state.
+  // Clear the hold and RTR phase so next trigger doesn't see stale state.
   if (!dryRun) {
     await supabase.from("training_state").update({
       injury_hold_since: null,
       pre_injury_mileage_target: null,
+      return_to_run_phase: null,
     }).eq("user_id", userId);
   }
 
@@ -766,19 +805,23 @@ function buildActivityDataGuard(activity: Record<string, unknown> | null): strin
  * Asks a single targeted question and clears the flag.
  */
 async function handleSymptomCheckin(userId: string, dryRun: boolean, requestChatId?: string): Promise<NextResponse> {
-  const [userResult, stateResult] = await Promise.all([
+  const [userResult, stateResult, profileResult] = await Promise.all([
     supabase.from("users").select("phone_number, name, linq_chat_id, messaging_opted_out").eq("id", userId).single(),
-    supabase.from("training_state").select("rolling_30d_max_running_load, pending_symptom_checkin").eq("user_id", userId).single(),
+    supabase.from("training_state").select("rolling_30d_max_running_load, pending_symptom_checkin, return_to_run_phase").eq("user_id", userId).single(),
+    supabase.from("training_profiles").select("injury_body_part").eq("user_id", userId).single(),
   ]);
 
   const user = userResult.data;
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
   if (user.messaging_opted_out) return NextResponse.json({ ok: true, skipped: "opted_out" });
 
-  const state = stateResult.data as { rolling_30d_max_running_load: number | null; pending_symptom_checkin: boolean | null } | null;
+  const state = stateResult.data as { rolling_30d_max_running_load: number | null; pending_symptom_checkin: boolean | null; return_to_run_phase: number | null } | null;
   if (!state?.pending_symptom_checkin) {
     return NextResponse.json({ ok: true, skipped: "no_pending_checkin" });
   }
+
+  const rtrPhase = state.return_to_run_phase ?? null;
+  const bodyPart = (profileResult.data?.injury_body_part as string | null) ?? "injury area";
 
   // Fetch the spike-triggering activity (most recent run)
   const { data: lastActivity } = await supabase
@@ -797,7 +840,10 @@ async function handleSymptomCheckin(userId: string, dryRun: boolean, requestChat
     return [name, dist].filter(Boolean).join(" — ");
   })();
 
-  const message = `How are the legs feeling after ${activityDesc}? Anything new showing up — tightness, soreness in a specific spot, anything that wasn't there before?`;
+  // RTR gate question vs. general symptom check-in
+  const message = rtrPhase
+    ? `How did the ${bodyPart} feel — any pain during or after the run, or all clear?`
+    : `How are the legs feeling after ${activityDesc}? Anything new showing up — tightness, soreness in a specific spot? And if anything is bothering you, does it change how you're walking or running?`;
 
   if (!dryRun) {
     const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
@@ -2371,10 +2417,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   const wantsPositiveOnly = /\[POSITIVE_ONLY\]/i.test(rawText);
   const wantsStandardCoaching = /\[STANDARD_COACHING\]/i.test(rawText);
-  // SESSION_SWAP: swap a specific session in the current week plan.
-  const sessionSwapMatch = rawText.match(/\[SESSION_SWAP\s+day="([^"]+)"\s+to="([^"]+)"\]/i);
-  const tagSessionSwapDay = sessionSwapMatch ? sessionSwapMatch[1].trim() : null;
-  const tagSessionSwapTo = sessionSwapMatch ? sessionSwapMatch[2].trim() : null;
+  // RTR_ADVANCE: advance the return-to-run phase when athlete clears the gate.
+  const wantsRtrAdvance = /\[RTR_ADVANCE\]/i.test(rawText);
+  // SESSION_SWAP: swap one or more sessions in the current week plan.
+  const sessionSwapMatches = [...rawText.matchAll(/\[SESSION_SWAP\s+day="([^"]+)"\s+to="([^"]+)"\]/gi)];
+  const tagSessionSwaps = sessionSwapMatches.map(m => ({ day: m[1].trim(), to: m[2].trim() }));
+  // Backward-compat aliases used by the after() condition check below
+  const tagSessionSwapDay = tagSessionSwaps[0]?.day ?? null;
+  const tagSessionSwapTo = tagSessionSwaps[0]?.to ?? null;
   // PHYSIO_REFERRAL: emitted when Dean refers the athlete to a physical therapist.
   const wantsPhysioReferral = /\[PHYSIO_REFERRAL\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
@@ -2408,6 +2458,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .replace(/\[THREADS:\s*[\s\S]*?\]/gi, "")
       .replace(/\[SESSION_SWAP[^\]]*\]/gi, "")
       .replace(/\[PHYSIO_REFERRAL\]/gi, "")
+      .replace(/\[RTR_ADVANCE\]/gi, "")
       .trim()
   );
   // correctMileageTotal catches math errors where Claude states a weekly total that
@@ -2814,8 +2865,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           }
         });
       }
-      // SESSION_SWAP: modify a single session in the current week's plan.
-      if (tagSessionSwapDay && tagSessionSwapTo) {
+      // SESSION_SWAP: modify one or more sessions in the current week's plan.
+      if (tagSessionSwaps.length > 0) {
         after(async () => {
           try {
             const { data: currentState } = await supabase
@@ -2829,21 +2880,62 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
               mon: "monday", tue: "tuesday", wed: "wednesday", thu: "thursday",
               fri: "friday", sat: "saturday", sun: "sunday",
             };
-            const targetDay = DAY_ABBREVS[normalizeDay(tagSessionSwapDay).slice(0, 3)] ?? normalizeDay(tagSessionSwapDay);
-            const matchIdx = sessions.findIndex(s => normalizeDay(s.day) === targetDay || normalizeDay(s.day).startsWith(targetDay.slice(0, 3)));
-            if (matchIdx === -1) {
-              console.warn(`[coach/respond] SESSION_SWAP: no session found for day="${tagSessionSwapDay}" (normalized: "${targetDay}") in weekly_plan_sessions`);
-              void trackEvent(userId, "session_swap_failed", { day: tagSessionSwapDay, to: tagSessionSwapTo });
-            } else {
-              sessions[matchIdx] = { ...sessions[matchIdx], label: tagSessionSwapTo };
+            let changed = false;
+            for (const swap of tagSessionSwaps) {
+              const targetDay = DAY_ABBREVS[normalizeDay(swap.day).slice(0, 3)] ?? normalizeDay(swap.day);
+              const matchIdx = sessions.findIndex(s => normalizeDay(s.day) === targetDay || normalizeDay(s.day).startsWith(targetDay.slice(0, 3)));
+              if (matchIdx === -1) {
+                console.warn(`[coach/respond] SESSION_SWAP: no session found for day="${swap.day}" (normalized: "${targetDay}") in weekly_plan_sessions`);
+                void trackEvent(userId, "session_swap_failed", { day: swap.day, to: swap.to });
+              } else {
+                sessions[matchIdx] = { ...sessions[matchIdx], label: swap.to };
+                changed = true;
+                console.log(`[coach/respond] SESSION_SWAP: swapped ${swap.day} → "${swap.to}"`);
+                void trackEvent(userId, "session_swapped", { day: swap.day, to: swap.to });
+              }
+            }
+            if (changed) {
               await supabase.from("training_state").update({
                 weekly_plan_sessions: sessions as unknown as import("@/lib/database.types").Json,
               }).eq("user_id", userId);
-              console.log(`[coach/respond] SESSION_SWAP: swapped ${tagSessionSwapDay} → "${tagSessionSwapTo}"`);
-              void trackEvent(userId, "session_swapped", { day: tagSessionSwapDay, to: tagSessionSwapTo });
             }
           } catch (err) {
             console.error("[coach/respond] SESSION_SWAP failed:", err);
+          }
+        });
+      }
+
+      // RTR_ADVANCE: advance the return-to-run phase when athlete clears the gate.
+      if (wantsRtrAdvance) {
+        after(async () => {
+          try {
+            const { data: currentState } = await supabase
+              .from("training_state")
+              .select("return_to_run_phase, pre_injury_mileage_target, weekly_mileage_target")
+              .eq("user_id", userId)
+              .single();
+            const currentPhase = (currentState as Record<string, unknown> | null)?.return_to_run_phase as number | null;
+            if (!currentPhase) return; // already cleared or not set
+
+            if (currentPhase >= 2) {
+              // Phase 2 cleared → graduate to full plan rebuild.
+              await supabase.from("training_state").update({ return_to_run_phase: null }).eq("user_id", userId);
+              const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+              await fetch(`${appUrl}/api/coach/respond`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId, trigger: "injury_clear" }),
+              });
+              void trackEvent(userId, "rtr_phase_graduated", { from_phase: currentPhase, to: "full_plan" });
+            } else {
+              // Advance to next phase (1 → 2).
+              const nextPhase = currentPhase + 1;
+              await supabase.from("training_state").update({ return_to_run_phase: nextPhase }).eq("user_id", userId);
+              void trackEvent(userId, "rtr_phase_advanced", { from_phase: currentPhase, to_phase: nextPhase });
+              console.log(`[coach/respond] RTR_ADVANCE: userId=${userId} phase ${currentPhase} → ${nextPhase}`);
+            }
+          } catch (err) {
+            console.error("[coach/respond] RTR_ADVANCE failed:", err);
           }
         });
       }
@@ -5094,7 +5186,20 @@ ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): 
 <rule>LABEL/PACE CONSISTENCY: A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than easy. Never write "Tempo X mi @ [easy pace range]" — fix the label or fix the pace.</rule>
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
-${state?.injury_hold_since ? `⚠️ INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}${sessionRows}${remainingPlanLine}`;
+${state?.injury_hold_since ? `⚠️ INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}${(() => {
+  const rtrPhase = (state as Record<string, unknown> | null)?.return_to_run_phase as number | null;
+  if (!rtrPhase) return "";
+  const bodyPart = (profile?.injury_body_part as string | null) ?? "injury area";
+  if (rtrPhase === 1) {
+    return `\n⚠️ RETURN-TO-RUN PHASE 1 ACTIVE: Athlete is returning from injury (${bodyPart}). Walk/run protocol in effect. Rules:\n- Prescribe ONLY walk/run intervals: "Run 2 min, walk 1 min, repeat 6×" (~20–25 min). No continuous easy runs yet.\n- Max 3 sessions this week. Zero quality sessions, zero tempo, zero long run.\n- After each completed session, ask ONE gate question: "How did the ${bodyPart} feel — any pain during or after, or all clear?"\n- If the athlete reports 2 consecutive pain-free sessions: append [RTR_ADVANCE] at the end of your response to advance to phase 2.\n- If they report ANY pain during a session: do NOT advance. Assess severity — if significant, use [INJURY_HOLD] to pause.`;
+  }
+  if (rtrPhase === 2) {
+    const preMiles = (state as Record<string, unknown> | null)?.pre_injury_mileage_target as number | null;
+    const cap = preMiles ? Math.round(preMiles * 0.55) : null;
+    return `\n⚠️ RETURN-TO-RUN PHASE 2 ACTIVE: Athlete is in graduated return to running (${bodyPart}). Rules:\n- Easy running only. No tempo, no intervals, no race-pace effort.\n${cap ? `- Mileage cap this week: ~${cap} miles. Do NOT prescribe sessions that would exceed this total.\n` : ""}- After each run, ask the gate question: "How's the ${bodyPart} feeling — anything during or after the run?"\n- If the athlete completes the week pain-free: append [RTR_ADVANCE] at the end of your response to graduate to a full plan.\n- If they report pain: reassess with [LIGHTER_WEEK] or [INJURY_HOLD] depending on severity.`;
+  }
+  return "";
+})()}${sessionRows}${remainingPlanLine}`;
 })()}
 
 
@@ -5253,6 +5358,8 @@ STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSAT
 
 SHARP PAIN DISAMBIGUATION: If the athlete uses the word "sharp" to describe pain (not "sharp turn", "sharp hill", "sharp ascent"), DO NOT immediately escalate to a PT referral. First ask one clarifying question: "When you say sharp — is it a sudden stabbing feeling, or more of an intense ache or tightness?" Only escalate after they confirm it's a stabbing/sudden sensation. False escalations (treating "felt a bit sharp" as a medical emergency) damage trust.
 
+GAIT QUESTION — TRIAGE: When the athlete first reports a new symptom (pain, tightness, or soreness in a specific body part), and the conversation doesn't already show gait information, include ONE targeted question alongside your triage: "Does this change how you're walking or running — like favouring one side, any limping?" This is a key differentiator: gait-altering pain = higher urgency (may warrant [INJURY_HOLD] even without sharp pain). If the athlete confirms gait impact in their response, treat it as a mandatory referral trigger (same as sharp pain — see MANDATORY PROFESSIONAL REFERRAL below).
+
 MANDATORY PROFESSIONAL REFERRAL: You MUST include a clear recommendation to see a sports physio or running-focused physician (not optional, not softened) when ANY of these conditions are true:
 1. The athlete explicitly confirms stabbing/sudden sharp pain during a run (after disambiguation above)
 2. The athlete reports pain that changes their gait or causes them to limp
@@ -5265,7 +5372,7 @@ Suggested language: "What you're describing is past the point where I should be 
 - Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
 
-SESSION_SWAP tag: When recommending a specific session modification (not a whole-week reduction), use: [SESSION_SWAP day="Mon" to="40min easy bike"] at the end of your response. This immediately swaps that session in the athlete's plan. Use this instead of [LIGHTER_WEEK] when you're recommending one specific change, not a whole-week pull-back.
+SESSION_SWAP tag: When recommending specific session modifications (not a whole-week reduction), use: [SESSION_SWAP day="Mon" to="40min easy bike"] at the end of your response. You can include multiple SESSION_SWAP tags to modify several sessions at once — e.g. [SESSION_SWAP day="Thu" to="40min easy bike"][SESSION_SWAP day="Sun" to="10mi easy"]. This immediately swaps those sessions in the athlete's plan. Use this instead of [LIGHTER_WEEK] when you're making targeted changes to 1–2 specific sessions, not reducing the whole week.
 ${(() => {
   const injBP = (profile?.injury_body_part as string | null)?.toLowerCase() ?? null;
   const cadence = coachingSignals?.avgCadenceSpm ?? null;
