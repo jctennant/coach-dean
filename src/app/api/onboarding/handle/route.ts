@@ -1015,6 +1015,7 @@ function summarizeCollected(data: Record<string, unknown>): string {
   if (data.injury_history) lines.push(`Injury history: ${data.injury_history}`);
   if (data.current_niggles) lines.push(`Current niggles: ${data.current_niggles}`);
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);
+  if (data.injury_management) lines.push(`What they're doing for it: ${data.injury_management}`);
   if (data.reported_during) lines.push(`Injury timing: pain reported ${data.reported_during} runs`);
   if (data.avg_sleep_hours) lines.push(`Avg sleep: ${data.avg_sleep_hours} hours/night`);
   if (data.strength_habits) lines.push(`Strength/cross-training: ${data.strength_habits}`);
@@ -1070,6 +1071,7 @@ Rules:
 - ultra_race_history: summarize any ultra/trail background mentioned, even if none.
 - injury_history: summarize any historical injuries the athlete has had (past injuries they've recovered from, recurring issues, injury-prone areas). Extract from the athlete's own words only. Null if not mentioned.
 - current_niggles: any current aches, pain, or issues the athlete is managing right now (distinct from past injury history). Null if not mentioned.
+- injury_management: what the athlete is doing to manage a current injury — physical therapy, rest, icing, stretching protocol, seeing a doctor or physio, etc. Extract from the athlete's own words. Null if not mentioned or no current injury.
 - reported_during: when the injury pain occurs — 'during' if they feel it while running, 'after' if only after finishing, 'both' if during and after. Null if not mentioned.
 - avg_sleep_hours: if the athlete mentions how many hours of sleep they get (e.g. "I sleep about 7 hours", "usually 6-7 hours"), extract as a number. Null if not mentioned.
 - strength_habits: a brief description of the athlete's strength training and cross-training habits — what they do, how often. Examples: "3x/week lifting, no cross-training", "yoga 2x/week, cycling occasionally", "no strength work". Null if not mentioned.
@@ -1107,6 +1109,7 @@ Rules:
           ultra_race_history: { type: ["string", "null"] },
           injury_history: { type: ["string", "null"], description: "Historical injuries the athlete has had in the past — not current issues. E.g. 'IT band issues in 2023, stress fracture 2022'." },
           current_niggles: { type: ["string", "null"], description: "Current aches or pain the athlete is managing right now." },
+          injury_management: { type: ["string", "null"], description: "What the athlete is doing to manage a current injury — PT, rest, ice, stretching, seeing a physio, etc. Only from athlete's own words." },
           strength_habits: { type: ["string", "null"], description: "Description of strength training and cross-training habits, including frequency. E.g. '2x/week lifting, no cross-training'." },
           cross_training_activities: {
             oneOf: [
@@ -1254,33 +1257,47 @@ async function handleDataAnalysis(
     ? `\nRACE HISTORY (last 12 months from Strava):\n${raceHistoryLines.join("\n")}`
     : "";
 
+  const injuryContext = [
+    data.current_niggles as string | null,
+    data.injury_notes as string | null,
+    data.injury_history as string | null,
+  ].filter(Boolean).join("; ") || null;
+
   const systemPrompt = `You are Coach Dean, an AI running coach. ${firstName ? firstName + "'s" : "An athlete's"} Strava just connected.
 
 ATHLETE CONTEXT:
 ${raceContext ? `Race/Goal: ${raceContext}` : "Goal: general fitness"}
 ${stravaContext}${raceHistorySection}
+${injuryAlreadyCollected && injuryContext ? `\nINJURY FLAGGED BEFORE STRAVA: ${injuryContext}` : ""}
 
-YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
+${injuryAlreadyCollected ? `YOUR JOB — INJURY IS THE PRIMARY LENS:
+The athlete already flagged an injury before connecting Strava. That injury is the primary coaching concern. Do NOT lead with HR zone distribution or aerobic efficiency. Use load/volume signals (weekly mileage, trend, weeks to race) as the data backbone, and connect everything back to the injury and race timeline.
+
+Write 3–4 sentences:
+1. Lead with the injury + what the training volume says about risk given the race timeline. Use at least 2 specific numbers (e.g. weekly mileage, weeks to race, mileage trend). E.g. "You're at 38 miles/week heading into Dipsea in 6 weeks — with the shin in play, the question right now is managing load so the tissue can settle before the race, not adding more."
+2. One specific signal you'll watch: name it clearly (load spike, pace drop, mileage jump). Connect it to the injury. Don't be generic.
+3. One forward-looking sentence about what the coaching relationship will specifically monitor — make the athlete feel watched, not just coached.
+
+Do NOT lead with or headline HR zone analysis. If the Z3 pattern is relevant (extra fatigue → slower recovery), you may mention it briefly as one supporting observation, but it must not be the opening or the main point.
+Close with exactly ONE question about what they're doing for the injury — use the specific body part from the INJURY FLAGGED line: "Are you doing anything for the [body part] right now — physio, rest, any specific treatment?" One question, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
 Write 3–4 sentences:
 1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data (e.g. weekly mileage, HR zone %, longest run, weeks until race). Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
 2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
 3. One forward-looking sentence about what the coaching will watch.
 
-${injuryAlreadyCollected
-  ? `INJURY ALREADY KNOWN: The athlete already shared injury context during the conversation (see ATHLETE CONTEXT). Do NOT ask "Has injury ever been a factor?" — that was already answered. Instead, close your analysis with one forward-looking sentence about what you'll watch for given their training data and the race timeline.`
-  : `Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"`}
+Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"`}
 
 Rules:
 - Do NOT ask for road race times — training zones calibrate from Strava data
 - Do NOT narrate all the stats — pick 2–3 meaningful facts and make them mean something
 - Avoid: "solid base", "great foundation", "exciting", "strong work", "keep it up"
-- 4 sentences max before the injury question
+- 4 sentences max${injuryAlreadyCollected ? "" : " before the injury question"}
 - Plain text, no markdown
 - RACE HISTORY: If a RACE HISTORY section appears above, you MUST reference at least one race by name or result. Acknowledging it ("I can see you ran a 1:48 half in September") shows you've read their full background, not just the last 8 weeks. Don't list all races — pick the one most relevant to the current goal.
 - PACE TREND: If "Easy pace trend (Z2 runs): improving" appears, mention it explicitly as a positive signal ("your Z2 pace has improved ~22s/mi"). If "declining", flag it. Don't skip this data point.
 - INACTIVITY: If "Last run: X days ago" shows more than 10 days, factor this into the training start timing.
-- HIGH Z3 WARNING: If ≥50% of runs are in Z3, name this clearly but without alarm. Z3 is "no man's land" — hard enough to accumulate fatigue, too easy to build race-specific fitness. Note that wrist-based HR can read high, so the real zones might be slightly lower, but the pattern is still worth polarizing: more true easy (Z1/Z2) and add one genuine quality session (Z4/Z5). Frame it as a direction to move toward, not a condemnation of what they've been doing.
+${injuryAlreadyCollected ? `- HR ZONES: Do not lead with or headline HR zone analysis when injury is already known. If ≥50% of runs are in Z3 and the pattern is relevant to injury recovery (more fatigue → slower healing), you may mention it as a supporting detail only — never the headline.` : `- HIGH Z3 WARNING: If ≥50% of runs are in Z3, name this clearly but without alarm. Z3 is "no man's land" — hard enough to accumulate fatigue, too easy to build race-specific fitness. Note that wrist-based HR can read high, so the real zones might be slightly lower, but the pattern is still worth polarizing: more true easy (Z1/Z2) and add one genuine quality session (Z4/Z5). Frame it as a direction to move toward, not a condemnation of what they've been doing.`}
 - TRAIL RACES: If "Avg elevation/run: 0 ft (no vertical training)" appears in the Strava context AND the race is a trail/mountain race, lead with the elevation gap. Include the athlete's weekly mileage AND weeks to race alongside it so the coaching read is grounded. Example: "You're building well at 38 miles/week over 5 runs, but zero elevation gain in all of it — with 10 weeks to Snowbird and ~3000ft of climbing in 8.9 miles, adding vert is now the training priority."`;
 
   const response = await anthropic.messages.create({
@@ -1397,15 +1414,21 @@ async function handleInjuryIntake(
   // Choose follow-up target based on what's missing
   const missingFields: string[] = [];
   if (!mergedData.injury_body_part_current) missingFields.push("which body part specifically");
-  if (!mergedData.injury_severity) missingFields.push("how limiting it is");
-  if (!mergedData.reported_during) missingFields.push("when it flares (during or after runs)");
+  if (!mergedData.injury_management && !mergedData.reported_during) {
+    missingFields.push("what they're doing for it (physio, rest, ice, etc.) and when the pain flares — ask both in one question");
+  } else if (!mergedData.injury_management) {
+    missingFields.push("what they're doing for it right now — any treatment, physio, rest");
+  } else if (!mergedData.reported_during) {
+    missingFields.push("when it flares (during runs, after, or both)");
+  }
+  if (!mergedData.injury_severity) missingFields.push("how limiting it is right now — can they run modified, or not at all");
 
   const followUpSystem = followUpCount === 0
-    ? `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question targeting the most important unknown: ${missingFields[0] ?? "how long it's been happening"}.
+    ? `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question targeting the most important unknown: ${missingFields[0] ?? "how long it's been happening and whether they're doing anything for it"}.
 
 ONE question only. No advice, no stretches, no reassurance. Just the question.
 Plain text, 1–2 sentences max.`
-    : `You are Coach Dean. You've asked one follow-up about an injury. Ask ONE final targeted question to fill the most important remaining gap: ${missingFields[0] ?? "how long it's been happening and whether it's limiting training"}.
+    : `You are Coach Dean. You've asked one follow-up about an injury. Ask ONE final targeted question to fill the most important remaining gap: ${missingFields[0] ?? "whether they're doing anything for it and how limiting it is"}.
 
 This is the last question before onboarding completes — make it count. ONE question, no reassurance.
 Plain text, 1–2 sentences max.`;
@@ -1558,6 +1581,7 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
   const injuryBodyPart = (data.injury_body_part_current as string | null) || null;
   const injurySeverity = (data.injury_severity as string | null) || null;
   const reportedDuring = (data.reported_during as string | null) || null;
+  const injuryManagement = (data.injury_management as string | null) || null;
   const stravaConnected = !!(data.strava_connected);
   const goal = (data.goal as string | null) || null;
   const isRTR = goal === "return_to_running" || goal === "injury_recovery";
@@ -1608,7 +1632,19 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
       : injurySeverity === "moderate" ? "Given how it's affecting training, "
       : "";
     const duringNote = whenStr ? ` You mentioned it flares ${whenStr} — that's the signal I'll track.` : "";
-    injuryNote = `${severityNote}Before your next run, do ${action}. If you mention your ${injuryBodyPart} after a run, I'll modify your load — not just flag it.${duringNote}`;
+
+    // Management-aware injury action
+    let mgmtActionPart: string;
+    if (injuryManagement && /physio|pt\b|physical therapy|therapist|sports medicine|doctor|clinic/i.test(injuryManagement)) {
+      mgmtActionPart = `Working alongside your physio on the ${injuryBodyPart}. If load from runs is pushing against the recovery timeline I'll flag it before it compounds.`;
+    } else if (injuryManagement && /rest|taking.*off|not running|stopped/i.test(injuryManagement)) {
+      mgmtActionPart = `Good call giving it some rest. When you're back running, I'll pace the ramp and flag any load spikes early.`;
+    } else if (injuryManagement) {
+      mgmtActionPart = `${injuryManagement} for the ${injuryBodyPart} — good. Before your next run, also ${action}.`;
+    } else {
+      mgmtActionPart = `${severityNote}Before your next run, do ${action}.`;
+    }
+    injuryNote = `${mgmtActionPart} If you mention the ${injuryBodyPart} after a run, I'll adjust your load — not just flag it.${duringNote}`;
   } else if (currentNiggles && !/\b(none|no injury|healthy|fine)\b/i.test(currentNiggles)) {
     const text = currentNiggles.toLowerCase();
     const bodyPart = text.includes("hamstring") ? "hamstring"
@@ -1641,15 +1677,13 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
     if (injuryNote) parts.push(injuryNote);
   }
 
-  // When active injury: end with a specific question about timing (used in injury intake).
-  // Non-injury: close with the coaching note cadence expectation.
+  // Close with how coaching works — specific to injury situation.
   if (activeInjury && injuryBodyPart) {
-    const timingQ = `When does the ${injuryBodyPart} flare — during runs, after, or both?`;
-    parts.push(timingQ);
+    parts.push(`After your next run, I'll send a note — what the session means for the ${injuryBodyPart}, and whether to adjust the next day based on what I see.`);
   } else if (stravaConnected) {
-    parts.push("Next time Strava syncs a run, I'll send you a coaching note within a few minutes — that's where we start.");
+    parts.push("After your next run, I'll send a coaching note — what it means for the week ahead and what to watch for. That's where we start.");
   } else {
-    parts.push("Your first coaching note lands after your first run — that's where we start.");
+    parts.push("Your first coaching note lands after your first run — what it means for the week ahead and what to watch for.");
   }
 
   return parts.join(" ");

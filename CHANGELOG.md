@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-07 — Injury intake captures management context and synthesis describes how coaching works
+
+**Type:** Feature / Improvement
+**Reported by:** Jake (internal)
+**User feedback:** "should we ask something like 'are you doing anything for that injury right now?' want to make sure that onboarding fully captures the relevant context and can provide some good recommendations for the upcoming week and then describes how to work together"
+**Root cause:** Injury intake only probed for body_part, severity, and when-it-flares — never asked what the athlete is already doing for it (PT, rest, ice, etc.). Synthesis message closed generically ("coaching note lands after your first run") without describing what that note would address for injury cases.
+**Fix / Change:** (1) Added `injury_management` as a captured field in `extractFields` — extracted when athlete says what they're doing for an injury. (2) `handleDataAnalysis` now closes with a direct management question when injury was pre-flagged: "Are you doing anything for the [body part] right now — physio, rest, any specific treatment?" (3) `handleInjuryIntake` probe sequence now prioritizes management + timing combined ("what are you doing for it and when does it flare") over severity. (4) `buildDeterministicCompletion` uses management context to write a nuanced injury note (PT → "working alongside your physio"; rest → "good call giving it rest; I'll pace the ramp"; other treatment → acknowledge + add body-part action). (5) Closing sentence for injury cases now describes what coaching will specifically address: "After your next run, I'll send a note — what the session means for the [body part], and whether to adjust the next day."
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
+## 2026-06-07 — Strava analysis leads with injury context when injury is already flagged
+
+**Type:** Bug Fix
+**Reported by:** Jake (testing)
+**User feedback:** "I flagged my shin issue before my race upcoming and it kind of just said 'I'll keep an eye on it' and decided to focus on my HR instead from strava...should the strava connection analysis focus on the core goal / issue being brought up?"
+**Root cause:** `handleDataAnalysis` had a single prompt structure for all users. When `injuryAlreadyCollected` was true, the prompt only modified the closing line ("close with a forward-looking sentence") but kept the same main body: "lead with 2-3 Strava numbers (e.g. weekly mileage, HR zone %)". The HIGH Z3 WARNING rule fired regardless, pushing Dean to lead with "57% of your runs are in Zone 3" even though the athlete had just flagged a shin issue.
+**Fix / Change:** Restructured `handleDataAnalysis` system prompt to branch on `injuryAlreadyCollected`. When injury is known: (1) Lead with injury + volume/load signals as the primary lens — not HR zones; (2) Name a specific load signal to watch and connect it to the injury; (3) HR zone analysis demoted to a supporting observation only if relevant to recovery; (4) No closing injury question. The injury context (from `current_niggles`, `injury_notes`, `injury_history`) is now explicitly surfaced in the prompt as "INJURY FLAGGED BEFORE STRAVA: [text]" so Dean has the specific detail, not just a boolean.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-06-07 — Eliminate jargon (ACWR, units) and align all triggers on injury prevention mission
 
 **Type:** Improvement
