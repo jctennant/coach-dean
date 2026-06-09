@@ -1,0 +1,42 @@
+{
+  "id": "injury-plantar-first-marathon-build",
+  "description": "Plantar fasciitis — building back from near-zero mileage for first marathon 20 weeks out. Dean must respect the conservative ramp, give PF-specific protocol, and frame the timeline realistically.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-05-18",
+  "user": {
+    "name": "Kenji",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Chicago Marathon",
+    "goal_race_date": "2026-10-11",
+    "current_week": 2,
+    "current_phase": "base",
+    "vdot": 42,
+    "easy_pace": "10:15/mi",
+    "tempo_pace": "8:05/mi",
+    "interval_pace": "7:15/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 15,
+    "miles_logged_this_week": 6.0,
+    "runs_this_week": 2,
+    "injury_notes": "Plantar fasciitis — right foot. Had it severely for 4 months (Jan–Apr), completely off running. Now cleared to run, building back slowly. First marathon — no injury history before this.",
+    "injury_body_part": "plantar",
+    "injury_severity": "mild",
+    "active_injury": true,
+    "injury_history": "Severe plantar fasciitis right foot Jan-Apr 2026 — 4 months off running. Cleared to run May 2026.",
+    "recent_activities": [
+      { "date": "2026-05-17", "type": "Easy Run", "distance_miles": 3.0, "pace": "10:20/mi", "average_heartrate": 145 },
+      { "date": "2026-05-14", "type": "Easy Run", "distance_miles": 3.0, "pace": "10:25/mi", "average_heartrate": 143 },
+      { "date": "2026-05-10", "type": "Easy Run", "distance_miles": 2.5, "pace": "10:30/mi", "average_heartrate": 141 },
+      { "date": "2026-05-07", "type": "Easy Run", "distance_miles": 2.5, "pace": "10:35/mi", "average_heartrate": 140 }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "The foot is feeling good after yesterday's 3 miler — maybe a 1/10 stiffness in the morning but nothing during the run. I'm feeling optimistic. Do I actually have enough time to train for Chicago?",
+  "ground_truth": {
+    "notes": "SCORING NOTE: Accept '20 weeks', '21 weeks', or 'about 20 weeks' — the race is approximately 20-21 weeks away, and the specific count is NOT a scoring criterion. Do not reduce the score for timeline precision. The 'base phase' label is also not required. Evaluate ONLY on: (1) direct yes/no timeline answer — 'yes, 20 weeks is enough IF the foot stays healthy, but the ramp must be conservative'; don't accept 'it depends' or 'we'll see'; (2) at least 2 specific named PF exercises from: frozen water bottle rolling under arch, calf stretches before getting out of bed, towel toe curls, short-foot arch activation — naming them verbatim is required, 'do your PF exercises' without names fails; (3) the 3/10 morning stiffness pullback signal — 'if stiffness rises above 3/10 on any morning, pull back that day'. Score 7+ if all 3 criteria are met even partially. A response without named exercises scores below 5."
+  }
+}

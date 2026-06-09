@@ -1,0 +1,58 @@
+{
+  "id": "injury-runners-knee-high-pain",
+  "description": "Patellofemoral pain (runner's knee) at high severity — can't run without pain. Dean must fire [INJURY_HOLD], give specific VMO/glute strengthening exercises, and NOT suggest pushing through it.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-04-22",
+  "user": {
+    "name": "Marcus",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Portland Marathon",
+    "goal_race_date": "2026-10-04",
+    "current_week": 8,
+    "current_phase": "build",
+    "vdot": 48,
+    "easy_pace": "9:05/mi",
+    "tempo_pace": "7:10/mi",
+    "interval_pace": "6:25/mi",
+    "training_days": ["tuesday", "thursday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 45,
+    "miles_logged_this_week": 18.0,
+    "runs_this_week": 3,
+    "injury_notes": "Right knee — runner's knee/patellofemoral pain, started 3 weeks ago, getting worse.",
+    "injury_body_part": "knee",
+    "injury_severity": "severe",
+    "active_injury": true,
+    "recent_activities": [
+      { "date": "2026-04-22", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:22/mi", "average_heartrate": 151 },
+      { "date": "2026-04-20", "type": "Tempo Run", "distance_miles": 7.0, "pace": "7:15/mi", "average_heartrate": 174 },
+      { "date": "2026-04-17", "type": "Long Run", "distance_miles": 16.0, "pace": "9:30/mi", "average_heartrate": 155 }
+    ],
+    "recent_conversation": [
+      {
+        "role": "user",
+        "date": "2026-04-17",
+        "content": "16 miles done but the knee was really bothering me the last 4 miles."
+      },
+      {
+        "role": "assistant",
+        "date": "2026-04-17",
+        "content": "That knee signal at mile 12 on a 16-miler is worth paying attention to — pain that shows up late and compounds is different from typical fatigue. How is it feeling now, a few hours out?"
+      },
+      {
+        "role": "user",
+        "date": "2026-04-18",
+        "content": "Still sore this morning. Hurts going down stairs."
+      }
+    ]
+  },
+  "inbound_sms": "Tried to run today and had to stop at mile 2. The knee pain is really bad, like 7/10. It hurts going downstairs, hurts during the run, and it's been getting worse for 3 weeks. I'm really scared about Portland.",
+  "ground_truth": {
+    "must_contain_tag": "[INJURY_HOLD]",
+    "forbidden_tags": ["[LIGHTER_WEEK]", "[INJURY_CLEAR]"],
+    "notes": "7/10 pain, three weeks of worsening patellofemoral symptoms, had to stop mid-run — this is a clear [INJURY_HOLD] trigger. Dean MUST: (1) fire [INJURY_HOLD]; (2) tell Marcus to stop running immediately — this is not a 'run through it' situation; (3) name at least 2 of the following specific exercises for patellofemoral pain: VMO quad sets, terminal knee extensions (TKEs), step-downs, straight-leg raises — with sets/reps; (4) strongly recommend seeing a physio or sports medicine doctor, framed as 'the fastest path back to Portland' or similar; (5) address the race anxiety: 24 weeks until Portland is enough time to treat this properly — this is a critical detail because Marcus explicitly said he's scared about Portland. Do NOT catastrophize or say 'no running forever'. Do NOT prescribe any running session this week. Core pass criteria (score 7+): [INJURY_HOLD] present + stop running message + at least 2 named exercises with sets/reps + physio recommendation. Portland context is a bonus for 9-10. A response without [INJURY_HOLD] scores 0. A response with [INJURY_HOLD] but no named exercises scores below 6."
+  }
+}

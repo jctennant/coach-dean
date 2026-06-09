@@ -1,0 +1,41 @@
+{
+  "id": "injury-stress-fracture-history-ultra",
+  "description": "Runner with tibial stress fracture history (18 months ago), now training for first 50-miler 16 weeks out, reports bone soreness after a 22-mile week. Dean must take this very seriously, not dismiss it.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-05-26",
+  "user": {
+    "name": "Amara",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "50mi",
+    "goal_race": "Wasatch Front 100",
+    "goal_race_date": "2026-09-11",
+    "current_week": 7,
+    "current_phase": "build",
+    "vdot": 49,
+    "easy_pace": "8:55/mi",
+    "tempo_pace": "7:02/mi",
+    "interval_pace": "6:18/mi",
+    "training_days": ["monday", "tuesday", "thursday", "friday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 55,
+    "miles_logged_this_week": 22.0,
+    "runs_this_week": 5,
+    "injury_notes": "History: right tibial stress fracture November 2024 — required 12 weeks off running. Fully healed per imaging Feb 2025. No bone issues since.",
+    "injury_history": "Right tibial stress fracture November 2024 — 12 weeks off running. Cleared by imaging February 2025.",
+    "injury_body_parts": ["shin"],
+    "recent_activities": [
+      { "date": "2026-05-25", "type": "Long Run", "distance_miles": 8.0, "pace": "9:15/mi", "average_heartrate": 154 },
+      { "date": "2026-05-24", "type": "Easy Run", "distance_miles": 6.0, "pace": "9:00/mi", "average_heartrate": 148 },
+      { "date": "2026-05-22", "type": "Trail Run", "distance_miles": 4.0, "pace": "11:30/mi", "average_heartrate": 160 },
+      { "date": "2026-05-20", "type": "Easy Run", "distance_miles": 4.0, "pace": "8:58/mi", "average_heartrate": 146 }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "My right shin is kind of achy today — feels different from muscle soreness, more like a deep bone ache. It came on after yesterday's long run. Probably nothing but given my history I figured I should mention it.",
+  "ground_truth": {
+    "must_contain_tag": "[INJURY_HOLD]",
+    "notes": "CRITICAL: Amara has a tibial stress fracture history on the SAME leg (right tibia), and is now reporting 'deep bone ache' on the same side after a run. Dean MUST: (1) fire [INJURY_HOLD] — this is the primary pass/fail criterion; (2) explicitly name the concern — stress fracture recurrence on a healed tibia is serious; (3) tell Amara to stop running immediately until evaluated — not 'monitor it' but full stop; (4) strongly recommend seeing a sports physio or sports medicine doctor NOW — framed as urgent, not optional. Core passing criteria (score 7+): [INJURY_HOLD] present + stop running + immediate physio/doctor referral + naming the stress fracture concern explicitly. Bonus for score 9-10: mentioning that MRI is the gold standard (X-ray has high false-negative rate for early stress fractures), or describing the hop test as a simple field screen. A response that says 'monitor it' or 'take a few easy days' scores 0. A response without [INJURY_HOLD] scores 0. The physio referral and explicit naming of stress fracture risk are required for a passing score."
+  }
+}

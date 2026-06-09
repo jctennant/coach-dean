@@ -1,0 +1,54 @@
+{
+  "id": "injury-hamstring-50miler-long-run",
+  "description": "Runner with hamstring history training for first 50-miler asks if they should do a 26-mile training run this weekend. Active hamstring tightness flagged earlier in the week. Dean must give a specific recommendation — not dodge.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-06-04",
+  "user": {
+    "name": "Tobias",
+    "timezone": "America/Los_Angeles",
+    "strava_connected": true,
+    "goal": "50mi",
+    "goal_race": "TNF Endurance Challenge 50 Mile",
+    "goal_race_date": "2026-12-06",
+    "current_week": 12,
+    "current_phase": "build",
+    "vdot": 52,
+    "easy_pace": "8:30/mi",
+    "tempo_pace": "6:42/mi",
+    "interval_pace": "5:55/mi",
+    "training_days": ["monday", "tuesday", "thursday", "friday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 60,
+    "miles_logged_this_week": 28.0,
+    "runs_this_week": 4,
+    "injury_notes": "History: left hamstring grade 2 strain, July 2024 — required 8 weeks off. Currently reporting tightness in the same left hamstring, rated 2/10, noticed on Tuesday's tempo. Active monitoring.",
+    "injury_body_part": "hamstring",
+    "injury_severity": "mild",
+    "active_injury": true,
+    "injury_body_parts": ["hamstring"],
+    "injury_history": "Left hamstring grade 2 strain July 2024 — 8 weeks off running. Fully recovered. Now reporting mild tightness same side.",
+    "recent_activities": [
+      { "date": "2026-06-03", "type": "Easy Run", "distance_miles": 7.0, "pace": "8:45/mi", "average_heartrate": 144 },
+      { "date": "2026-06-02", "type": "Easy Run", "distance_miles": 6.0, "pace": "8:38/mi", "average_heartrate": 141 },
+      { "date": "2026-05-31", "type": "Tempo Run", "distance_miles": 9.0, "pace": "6:47/mi", "average_heartrate": 172 },
+      { "date": "2026-05-29", "type": "Long Run", "distance_miles": 22.0, "pace": "9:20/mi", "average_heartrate": 158 }
+    ],
+    "recent_conversation": [
+      {
+        "role": "user",
+        "date": "2026-06-01",
+        "content": "Felt a little tightness in my left hamstring during the tempo yesterday. Like a 2/10. Probably just tired."
+      },
+      {
+        "role": "assistant",
+        "date": "2026-06-01",
+        "content": "Left hamstring tightness at 2/10 on tempo day — same side as your grade 2 strain from last year. That's worth tracking carefully. The 'probably just tired' read might be right, but given the history, let's treat this as a real signal until it proves otherwise. How does it feel this morning?"
+      }
+    ]
+  },
+  "inbound_sms": "Hamstring is still a 2/10 today, maybe a tiny bit better. I have a 26 mile training run planned for Saturday. Should I do it?",
+  "ground_truth": {
+    "notes": "Tobias is asking a direct decision question: should he do his 26-mile training run with 2/10 hamstring tightness and a grade 2 strain history on the same side. Dean MUST give a direct recommendation — not 'it depends' or 'listen to your body'. Core passing criteria (score 7+): (1) clear recommendation NOT to do the full 26-miler, with a reason tied to the hamstring history — any specific alternative is acceptable: shortening to 10-16 miles, pushing to next week, swapping for easy miles — ALL of these are correct answers and must NOT be penalized; (2) name WHY the history matters — grade 2 scar tissue + current tightness = elevated re-strain risk at high mileage; (3) prescribe AT LEAST 2 specific named hamstring exercises from the list provided — 'Nordic curls', 'single-leg RDLs', etc. with sets/reps. The exercises and the specific recommendation are both required to pass. A response of 'yes go for it' scores 0. A response that says 'be careful' without a specific recommendation scores below 4. A response with a recommendation but no named exercises scores below 6. IMPORTANT: Shortening the run (e.g., to 10-16 miles) IS a correct and safe recommendation — do NOT penalize it. [LIGHTER_WEEK] is an acceptable internal tag (stripped before SMS delivery in production) — do not penalize its presence."
+  }
+}

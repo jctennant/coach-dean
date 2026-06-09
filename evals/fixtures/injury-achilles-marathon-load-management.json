@@ -1,0 +1,56 @@
+{
+  "id": "injury-achilles-marathon-load-management",
+  "description": "Achilles tendinopathy — moderate, still running but asking about this week's tempo session. Dean must prescribe eccentric calf work and give a clear decision rule for the tempo.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-05-11",
+  "user": {
+    "name": "Sofia",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "marathon",
+    "goal_race": "Philadelphia Marathon",
+    "goal_race_date": "2026-11-22",
+    "current_week": 6,
+    "current_phase": "build",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "7:33/mi",
+    "interval_pace": "6:45/mi",
+    "training_days": ["monday", "wednesday", "friday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 38,
+    "miles_logged_this_week": 12.0,
+    "runs_this_week": 2,
+    "injury_notes": "Left achilles — mild-to-moderate tendinopathy. Stiff for first 10 min of each run, settles. Some soreness the morning after harder sessions. Managing for 6 weeks.",
+    "injury_body_part": "achilles",
+    "injury_severity": "moderate",
+    "active_injury": true,
+    "weekly_plan": {
+      "quality_session": "Tempo 6mi (1mi WU + 4mi @ 7:33/mi + 1mi CD)"
+    },
+    "recent_activities": [
+      { "date": "2026-05-11", "type": "Easy Run", "distance_miles": 6.5, "pace": "9:28/mi", "average_heartrate": 143 },
+      { "date": "2026-05-09", "type": "Tempo Run", "distance_miles": 6.0, "pace": "7:35/mi", "average_heartrate": 170 },
+      { "date": "2026-05-07", "type": "Easy Run", "distance_miles": 5.5, "pace": "9:32/mi", "average_heartrate": 140 },
+      { "date": "2026-05-05", "type": "Long Run", "distance_miles": 13.0, "pace": "9:45/mi", "average_heartrate": 151 }
+    ],
+    "recent_conversation": [
+      {
+        "role": "assistant",
+        "date": "2026-05-09",
+        "content": "Tempo held at 7:35/mi — essentially on target. Left achilles check: how did it feel during and after?"
+      },
+      {
+        "role": "user",
+        "date": "2026-05-09",
+        "content": "Felt okay during — maybe a 2/10 tightness in the warm-up. Some soreness this morning."
+      }
+    ]
+  },
+  "inbound_sms": "Easy run today felt fine — the achilles was stiff for the first mile as usual but then it settled. I have a tempo on Wednesday. Should I do it or back off?",
+  "ground_truth": {
+    "forbidden_tags": ["[INJURY_HOLD]"],
+    "notes": "Sofia is asking a direct decision question about Wednesday's tempo. This is NOT a hold situation — the achilles is managing at mild-to-moderate, warming up and settling. Core passing criteria (score 7+): (1) give a clear decision rule for the tempo — e.g., 'check morning stiffness Wednesday. If it's no worse than usual (≤2/10), do the tempo shortened to 3mi of work instead of 4. If stiffness is above 3/10, swap for an easy run and push tempo to Friday'; (2) prescribe eccentric heel drops — named specifically: 'eccentric heel drops off a step, straight knee 3×15 + bent knee 3×15, after each run'; (3) NOT fire [INJURY_HOLD]. A response that just says 'be careful' or 'listen to your body' without a specific tempo decision rule scores below 5. A response that names calf stretches but not the eccentric protocol (lowering slowly off a step) scores below 6."
+  }
+}

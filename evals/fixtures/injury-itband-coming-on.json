@@ -1,0 +1,42 @@
+{
+  "id": "injury-itband-coming-on",
+  "description": "IT band soreness coming on after a long run — Dean must not prescribe intensity, should flag the spike risk, give IT band-specific prehab, and NOT fire [INJURY_HOLD].",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-05-03",
+  "user": {
+    "name": "Priya",
+    "timezone": "America/Chicago",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Chicago Half Marathon",
+    "goal_race_date": "2026-07-19",
+    "current_week": 5,
+    "current_phase": "build",
+    "vdot": 43,
+    "easy_pace": "10:00/mi",
+    "tempo_pace": "7:55/mi",
+    "interval_pace": "7:05/mi",
+    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 30,
+    "miles_logged_this_week": 22.0,
+    "runs_this_week": 4,
+    "injury_notes": "IT band tightness — outer knee soreness reported after long runs",
+    "injury_body_part": "it_band",
+    "injury_severity": "mild",
+    "active_injury": true,
+    "recent_activities": [
+      { "date": "2026-05-03", "type": "Long Run", "distance_miles": 11.0, "pace": "10:05/mi", "average_heartrate": 148 },
+      { "date": "2026-05-01", "type": "Easy Run", "distance_miles": 6.0, "pace": "10:12/mi", "average_heartrate": 141 },
+      { "date": "2026-04-28", "type": "Tempo Run", "distance_miles": 5.5, "pace": "7:58/mi", "average_heartrate": 168 },
+      { "date": "2026-04-26", "type": "Long Run", "distance_miles": 9.0, "pace": "10:08/mi", "average_heartrate": 146 }
+    ],
+    "recent_conversation": []
+  },
+  "inbound_sms": "That 11 miler felt pretty solid but my outer knee is a bit sore now — started around mile 8. Feels like it might be IT band? Happened to me once before a couple years ago.",
+  "ground_truth": {
+    "forbidden_tags": ["[INJURY_HOLD]"],
+    "notes": "IT band soreness coming on after the long run jumped from 9→11 miles (22% increase in a single session). All 4 training days for the week are already done (runs_this_week=4, today is Sunday) — Dean MUST explicitly acknowledge the week is complete and that there are no more runs until Monday. Dean should: (1) confirm the IT band read — outer knee tightness starting late in a long run is the classic overuse pattern; (2) give 2-3 IT band-specific prehab actions named explicitly from: hip abductor clamshells 3×15, lateral band walks, foam rolling TFL/outer glute (NOT the IT band directly), hip flexor stretch in lunge position — at least 2 of these named specifically; (3) recommend ice/rest before the next run — 'ice tonight' (not 'ice after your next run' since the week is done), and the next run depends on how it feels; (4) NOT prescribe any additional activity this week (week is complete). [INJURY_HOLD] would be an overreaction — the athlete can still run easy next week if it settles. [LIGHTER_WEEK] is acceptable. Response should NOT contain generic advice. Core pass criteria (score 7+): week-complete acknowledgment + at least 2 named IT band exercises + 'ice tonight' or equivalent immediate care recommendation."
+  }
+}
