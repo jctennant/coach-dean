@@ -370,10 +370,10 @@ async function handleInboundMessage(
   const messageBody = body || "[Image received]";
 
   // Content-based dedup: if the exact same text body arrived from this user within
-  // the last 30 seconds, it's a duplicate send (e.g. user double-tapped, Linq retry
+  // the last 60 seconds, it's a duplicate send (e.g. user double-tapped, Linq retry
   // with a different message ID). Skip processing to avoid double responses.
   if (body) {
-    const contentCutoff = new Date(Date.now() - 30_000).toISOString();
+    const contentCutoff = new Date(Date.now() - 60_000).toISOString();
     const { data: recentSame } = await supabase
       .from("conversations")
       .select("id")

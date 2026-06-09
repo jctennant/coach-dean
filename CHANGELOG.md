@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-08 — Injury coaching improvements: pain threshold, groin exercises, pregnancy context, dedup window
+
+**Type:** Improvement
+**Reported by:** Jake (conversation review — Gwyneth)
+**User feedback:** Gwyneth reported pain going from 1/10 → 3-4/10 during runs and asked what level of pain was OK. Dean gave a binary "don't run" answer three times instead of a specific threshold. Exercises suggested (heel raises, calf stretches) were from her old shin injury, not her current groin strain. Pregnancy context wasn't shaping cross-training advice or exercise recommendations.
+**Root cause:** (1) No explicit pain threshold in the ACTIVE INJURY prompt — Dean defaulted to binary "stop running" rather than the clinical 0–2/10 rule. (2) "groin" was missing from BODY_PART_EXERCISES — getBodyPartExercises returned an empty string, so Dean had no specific exercises and fell back to stored dashboard exercises from the prior shin injury. (3) Pregnancy context existed only in conversation history, not injected into the ACTIVE INJURY block where it could shape advice. (4) Content-dedup window in linq webhook was 30s — a duplicate delivery 35s later could slip through.
+**Fix / Change:** (1) Added `groin` to BODY_PART_EXERCISES with four pregnancy-safe adductor/hip exercises. (2) Added explicit PAIN THRESHOLD RULE to the ACTIVE INJURY block (0–2/10 acceptable, 3/10 = stop, worsening during run = stop signal) — Dean now gives the athlete the actual scale, not a binary answer. (3) Added PREGNANCY CHECK to the ACTIVE INJURY block: checks injury_notes/physio_notes/coaching_threads for "pregnant" keyword; if stored, confirms; if not, instructs Claude to scan RECENT CONVERSATION and apply pregnancy-specific rules (aqua jogging cross-training, tighter 0–1/10 threshold, pregnancy-safe exercises only, correct referral chain, relaxin context, fitness anxiety reassurance). (4) Updated extraction prompt to capture "pregnancy-related" in injury_notes when athlete mentions pregnancy alongside an injury. (5) Extended content-dedup window from 30s to 60s. (6) Manually updated Gwyneth's injury_notes to "groin strain, pregnancy-related, started last week" so pregnancy context is immediately active.
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/webhooks/linq/route.ts
+
 ## 2026-06-07 — Onboarding: plan-aware synthesis, sleep question sequencing, injury message focus
 
 **Type:** Improvement
