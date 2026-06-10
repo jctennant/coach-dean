@@ -1943,6 +1943,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         weekAerobicMinutesSoFar: computeWeekCrossTrainingAerobicMinutes(recentActivitiesForCT, userTimezone, lthrForCT, weekRefDate),
         weekRunMileageSoFar: weekMileageSoFar,
         useMetric: isMetricUser,
+        injuryNotes: injuryNotes ?? null,
       })
     : null;
   const crossTrainWeeklySummary = trigger === "weekly_recap"

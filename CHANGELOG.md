@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-09 — Cross-training messages now inherit injury context + no praise openers
+
+**Type:** Improvement
+**Reported by:** Internal conversation review
+**User feedback:** N/A
+**Root cause:** `buildCrossTrainingContext` never received `injury_notes` and had no instruction to connect the session to the athlete's active injury. Its "no generic openers" rule was also too weak — the model still opened with "Great job!" on bike/swim/rowing sessions.
+**Fix / Change:** Added `injuryNotes` param to `buildCrossTrainingContext`. When an active injury exists, injects a mandatory rule to explain how the cross-training session protects the injury site and end with a brief check-in. Also hardened the opener prohibition to match the running post-run rule ("NEVER open with praise"). `injuryNotes` is now passed from the call site in `route.ts`.
+**Files changed:** `src/lib/cross-training.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-06-08 — Injury coaching improvements: pain threshold, groin exercises, pregnancy context, dedup window
 
 **Type:** Improvement

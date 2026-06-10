@@ -129,10 +129,11 @@ export function buildCrossTrainingContext(params: {
   weekAerobicMinutesSoFar: number;
   weekRunMileageSoFar: number;
   useMetric: boolean;
+  injuryNotes: string | null;
 }): string {
   const { activityType, activityName, movingTimeSeconds, averageHeartrate, averageWatts,
     workoutType, lthrEstimate, crosstrainingTools, phase, weekAerobicMinutesSoFar,
-    weekRunMileageSoFar, useMetric } = params;
+    weekRunMileageSoFar, useMetric, injuryNotes } = params;
 
   const { effort, rationale } = classifyCrossTrainingEffort({
     activityType, movingTimeSeconds, averageHeartrate, averageWatts,
@@ -145,6 +146,11 @@ export function buildCrossTrainingContext(params: {
     ? `${(weekRunMileageSoFar * 1.60934).toFixed(1)} km`
     : `${weekRunMileageSoFar.toFixed(1)} mi`;
 
+  const hasActiveInjury = !!injuryNotes && !injuryNotes.toLowerCase().startsWith("past");
+  const injuryRule = hasActiveInjury
+    ? `- INJURY CONTEXT — MANDATORY: Athlete has an active injury/concern: "${injuryNotes}". Connect this cross-training session to the injury — explain how it protects the injury site or maintains fitness while it heals. Do NOT skip this. Example: "This keeps you aerobic without loading the [body part]" or "Avoids the impact your [body part] needs to stay away from right now." End with a brief check-in on how the injury is feeling.`
+    : null;
+
   const lines = [
     `CROSS-TRAINING ACTIVITY: ${activityType}${activityName ? ` ("${activityName}")` : ""}`,
     `Duration: ${durationStr} | Effort: ${effort} (${rationale})`,
@@ -154,12 +160,13 @@ export function buildCrossTrainingContext(params: {
     `Phase: ${(phase ?? "base").toLowerCase()} — ${phaseGuidance(phase, effort)}`,
     ``,
     `RESPONSE GUIDELINES:`,
-    `- 2–4 sentences. No generic openers. Don't treat this like a run debrief.`,
+    `- 2–4 sentences. NEVER open with praise ("Great job", "Great work", "Impressive", "Nice", or any similar opener). Start with the specific observation about the session.`,
     `- Reference something specific from the session (effort level, duration, what it does for their fitness).`,
     `- Do NOT cite the week's running mileage total in this response.`,
     effort === "hard"
       ? `- This was a quality effort — acknowledge the training stimulus it provided, not just "great job cross-training".`
       : `- Easy cross-training = active recovery. Reinforce the positive: staying aerobic without impact.`,
+    injuryRule,
     crosstrainingTools && crosstrainingTools.length > 0
       ? `- Athlete has these tools: ${crosstrainingTools.join(", ")} — if relevant, you can briefly suggest what to pair with this mid-week.`
       : null,
