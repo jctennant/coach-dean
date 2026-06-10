@@ -39,6 +39,87 @@ const BODY_PART_EXERCISES: Record<string, string[]> = {
   groin:        ["Side-lying hip adduction 3×15 each side (inner thigh, low compression — pregnancy-safe)", "Seated adductor isometric squeeze with pillow/ball between knees 3×15, 10-sec holds (pregnancy-safe)", "Gentle seated butterfly stretch 3×30s — gravity only, no forcing (pregnancy-safe)", "Clamshells with band 3×15 (hip and pelvic stability — pregnancy-safe)"],
 };
 
+// Injury-specific cross-training alternatives — activities that maintain fitness without
+// stressing the injured area. Used to give athletes something concrete to do instead of
+// just telling them to rest.
+const CROSS_TRAINING_ALTERNATIVES: Record<string, string[]> = {
+  shin:      [
+    "Pool running (deep-water belt) — gold standard; mimics running mechanics with zero bone impact",
+    "Uphill treadmill walking or easy jogging — incline reduces ground reaction force on the tibia vs. flat running; start with a walk, progress to an easy jog if pain-free, stop if any shin discomfort",
+    "Cycling or stationary bike — zero tibial loading, full aerobic stimulus",
+    "Elliptical — low-impact if pain-free; stop immediately if shin discomfort starts",
+    "Avoid rowing — plantar flexion under load stresses the anterior tibialis",
+  ],
+  knee:      [
+    "Swimming (any stroke) — zero knee impact, full aerobic workout",
+    "Pool running with deep-water belt — running-specific conditioning, no knee load",
+    "Easy cycling at low resistance — check that it's pain-free through full pedal stroke before pushing effort",
+    "Uphill treadmill walking at low incline — generally knee-friendly but test cautiously; avoid steep grades if quad or patellar pain flares",
+  ],
+  it_band:   [
+    "Swimming — no lateral stress on the IT band at all",
+    "Uphill treadmill walking — uphill is far safer than downhill for IT band; keeps aerobic work going without the lateral knee stress of flat road running",
+    "Cycling (steady seated, avoid climbing out of the saddle) — minimal IT band engagement when seated",
+    "Elliptical — only use if lateral knee is completely pain-free on the machine",
+  ],
+  hamstring: [
+    "Cycling — avoids the eccentric hamstring loading that running creates; keep effort easy",
+    "Swimming — safe for all hamstring issues, full aerobic stimulus",
+    "Elliptical at low incline — check for any pulling sensation and back off if present",
+  ],
+  calf:      [
+    "Pool running or swimming — no plantar flexion load from ground contact",
+    "Cycling with clip shoes (minimizes calf push-off); flat pedals stress the calf more — avoid those",
+    "Avoid uphill treadmill and rowing — both increase calf/Achilles load; test elliptical cautiously",
+  ],
+  foot:      [
+    "Cycling — foot is mostly passive through the pedal stroke, zero ground contact",
+    "Swimming — completely non-weight-bearing",
+    "Pool running with float belt — maintains running conditioning with no foot strike",
+  ],
+  hip:       [
+    "Swimming or aqua jogging — supported range of motion, no impact",
+    "Uphill treadmill walking — hip flexor and glute engagement without impact; easy on the joint",
+    "Cycling — hip-friendly in most cases; avoid if hip flexor tightness flares on the bike",
+    "Elliptical — generally safe; stop if hip pain during",
+  ],
+  glute:     [
+    "Swimming or pool running — low glute loading, full aerobic base maintenance",
+    "Easy cycling (low resistance) — minimal glute activation at easy effort",
+    "Uphill treadmill walking — activates glutes in a controlled way; can double as light rehab stimulus",
+    "Elliptical at low incline",
+  ],
+  piriformis:[
+    "Swimming (freestyle) — minimal piriformis activation in the flutter kick",
+    "Easy cycling — avoids the hip external rotation that aggravates piriformis",
+    "Elliptical at low resistance, flat setting",
+  ],
+  back:      [
+    "Swimming — freestyle and backstroke decompress the spine; avoid breaststroke if it causes discomfort",
+    "Easy walking or light cycling — keeps movement without spinal loading",
+    "Avoid rowing — spinal flexion under load is the worst thing for most back injuries",
+    "Avoid uphill treadmill at steep incline — forward lean can load the lumbar spine",
+  ],
+  groin:     [
+    "Swimming with flutter kick (freestyle) — minimal adductor stress",
+    "Cycling (seated, steady effort) — avoids the adductor loading from ground reaction force",
+    "Pool running with deep-water belt — eliminates the lateral leg push-off that loads the groin",
+    "Uphill treadmill walking — generally low adductor stress; test at easy pace and low grade first",
+  ],
+  ankle:     [
+    "Pool running — zero ankle load, perfect running substitute",
+    "Swimming — non-weight-bearing",
+    "Cycling with clip shoes (reduces dorsiflexion stress vs. flat pedals)",
+    "Avoid uphill treadmill — increased dorsiflexion range at higher grades can stress the ankle",
+  ],
+};
+
+function getCrossTrainingAlternatives(bodyPart: string): string {
+  const options = CROSS_TRAINING_ALTERNATIVES[bodyPart.toLowerCase()];
+  if (!options) return "";
+  return `\n  Safe cross-training for ${bodyPart.replace(/_/g, " ")} (use these when the athlete asks what to do instead of running):\n${options.map(o => `    • ${o}`).join("\n")}`;
+}
+
 function getBodyPartExercises(bodyPart: string): string {
   const exercises = BODY_PART_EXERCISES[bodyPart.toLowerCase()];
   if (!exercises) return "";
@@ -5136,11 +5217,12 @@ ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after t
     : `\n- PREGNANCY CHECK: Scan RECENT CONVERSATION for any mention of pregnancy before responding. If the athlete is pregnant, apply all pregnancy-specific rules below even if not in stored profile.`;
   return `<rule>ACTIVE INJURY — APPLIES TO EVERY MESSAGE THIS TURN:
 - Body part: ${bodyPart}
-- Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}${getBodyPartExercises(bodyPart)}
+- Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}${getBodyPartExercises(bodyPart)}${getCrossTrainingAlternatives(bodyPart)}
 Coaching adjustments:
 - ${severity === "severe" ? "No running prescribed. Cross-training and gentle test probes only — do not advise running through this." : severity === "moderate" ? "Modify aggressively: reduce volume, drop quality sessions, and frame runs as pain-monitored." : "Run modified — easy efforts only, no quality work, monitor the area on every run."}
 - PAIN THRESHOLD RULE — use this exact scale when the athlete asks what level of pain is OK: 0–2/10 = acceptable, continue with monitoring; 3/10 = stop that run; pain that worsens during a run (e.g. starts at 1/10, climbs to 3–4/10) = stop signal, even if it feels better the next day. Give the athlete this number explicitly rather than a binary "don't run" — they're asking because they want to make real decisions.
 - When the athlete asks what they should do for the injury, give them the specific targeted exercises listed above — be concrete, not generic.
+- CROSS-TRAINING INSTEAD OF REST: When the athlete reports feeling off, mentions soreness or pain, or asks what to do instead of running — NEVER just say "take a few days off" or "rest up". Always offer 2-3 specific active alternatives from the safe cross-training list above. Check their available cross-training tools first (see "Cross-training available" in ATHLETE HISTORY) and prioritize what they already have access to. If no tools are listed, pool running, cycling, and elliptical are universally available at most gyms. Frame it as: here's how you stay fit while this heals — not as a consolation prize.
 - Proactively go/no-go: when discussing today's or tomorrow's run, check this state first before suggesting a session.
 - If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.${(severity === "moderate" || severity === "severe") && isFirstTimeInjury ? `\n- PT REFERRAL — FIRST OCCURRENCE: This is the athlete's first time flagging ${bodyPart} at ${severity} severity. In the next response after they report the injury, include ONE gentle sentence: "If this doesn't settle down within a week, a sports physio can rule out anything structural — worth a quick check." Frame it as proactive, not alarming. Say it once and do not repeat it in subsequent messages.` : ""}${pregnancyBlock}
 - PREGNANCY-SPECIFIC RULES (apply if pregnant): (1) Primary cross-training recommendation is swimming or aqua jogging — near-perfect running substitute, safe all trimesters; stationary bike also good. (2) Tighten the pain threshold: stay at 0–1/10 max while pregnant, any worsening = rest that day. (3) All prescribed exercises must be pregnancy-safe: no lying flat on back after ~16 weeks, avoid heavy core compression. The groin exercises above are pregnancy-safe. (4) Referral order: OB/midwife first for any new musculoskeletal symptom, then a women's health physio (pelvic floor specialist) — not just "a physio who specializes in pregnancy." (5) Relaxin-related laxity: groin/pelvic girdle pain in pregnancy is often round ligament pain or pubic symphysis dysfunction — acknowledge this context, don't default to framing it as a training-load error. (6) If the athlete worries about losing fitness during pregnancy: reassure them directly — aerobic fitness is well-maintained through low-impact cross-training, and aqua jogging preserves running-specific conditioning. The goal during pregnancy is "maintain, not gain."
@@ -6541,13 +6623,13 @@ FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (no
 
 INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
 
-When signaling [INJURY_HOLD], your response MUST include a brief cross-training week outline — 3–4 sessions using ONLY the athlete's available tools (check "cross-training tools" in their profile; if none listed, suggest walking and easy elliptical as universally accessible options). Format as a compact daily suggestion: "Mon/Wed/Fri — easy 30min bike or elliptical; Thu — optional swim if available. No high-impact activity — focus on blood flow and recovery." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week."
+When signaling [INJURY_HOLD], your response MUST include a brief cross-training week outline — 3–4 sessions using the injury-appropriate options from the ACTIVE INJURY block above (if active), otherwise use the athlete's available tools from their profile, otherwise default to easy walking and elliptical. Format as a compact daily suggestion: "Mon/Wed/Fri — 30min [specific safe option]; Thu — optional [second option]. No high-impact activity." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week." The goal is to give them the best activities for THEIR specific injury — not a generic rest prescription.
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
 
 COACHING STYLE PREFERENCES: When an athlete asks for more positive/affirming feedback — e.g. "just tell me good job", "stop telling me to run easier", "I don't need the corrections, just what went well", "less criticism" — acknowledge it warmly and append [POSITIVE_ONLY] at the end of your response. This updates their preference permanently. Example response: "Got it — I'll keep the feedback focused on what's going well. Your data and observations will still be there, just without the effort corrections." If they're already in positive-only mode and want the full analysis back — e.g. "go back to normal", "give me the full feedback" — append [STANDARD_COACHING] instead.
 
-LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and offer cross-training (easy bike, elliptical, swim) as an option for any days they'd otherwise skip. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
+LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and for any days they'd otherwise skip, give 2-3 specific cross-training alternatives using the injury-safe options from the ACTIVE INJURY block if one is active — or if no active injury, use their available tools from the profile (bike, pool, elliptical). Never just say "rest" or "take it easy" — always give them something concrete and active they can do instead. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
 
 MANUALLY-REPORTED ACTIVITY: If earlier in RECENT CONVERSATION you told the athlete you could NOT see a specific activity in Strava, and they then provided the details manually (distance, pace, time, etc.) in a follow-up message — those numbers are athlete-reported, NOT Strava-confirmed. Do NOT say "that matches what I saw from the sync" or any phrasing that implies Strava confirmed the data. Acknowledge it as manually noted: e.g. "Got it — I've noted that manually. If it eventually syncs from Strava, I'll reconcile it then." Falsely attributing athlete-provided data to a Strava sync that never happened damages trust.
 

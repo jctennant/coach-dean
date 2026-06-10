@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-09 — Injury-specific cross-training alternatives menu
+
+**Type:** Improvement
+**Reported by:** Jake (product review)
+**User feedback:** "I really want Dean to not just tell people 'take a week off or take a few days off.' Instead he should be giving them ideas of ways to stay active via cross-training that won't harm them, or ways to strengthen and recover from the injury so they come back more quickly."
+**Root cause:** Dean had body-part-specific rehab exercises but no map of which cross-training activities are safe vs. risky per injury type. LIGHTER_WEEK and INJURY_HOLD rules gave generic suggestions ("easy bike, elliptical, swim") with no injury-awareness. No instruction to proactively offer a cross-training menu instead of rest.
+**Fix / Change:** Added `CROSS_TRAINING_ALTERNATIVES` map (12 body parts) and `getCrossTrainingAlternatives()` injected into the ACTIVE INJURY prompt block alongside existing exercises. Added a hard rule: never say "take a few days off" — always offer 2-3 specific active alternatives appropriate for the injury, prioritizing the athlete's available tools. Updated LIGHTER_WEEK and INJURY_HOLD rules to use injury-specific alternatives rather than a generic list.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-06-09 — Cross-training messages now inherit injury context + no praise openers
 
 **Type:** Improvement
