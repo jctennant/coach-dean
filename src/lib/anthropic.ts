@@ -202,8 +202,18 @@ function buildOpenAIClient(): Anthropic {
     const nonSearchTools = tools.filter((t) => (t.type as string) !== "web_search_20250305");
     const openAIModel = hasWebSearch ? SEARCH_MODEL : (MODEL_MAP[params.model] ?? "gpt-4o");
 
+    // `system` may be a plain string (most calls) or an Anthropic system-block array
+    // (the cached-prefix form: [{type:"text",text,cache_control}, {type:"text",text}]).
+    // OpenAI has no equivalent of Anthropic's explicit cache_control — it caches long
+    // prompt prefixes automatically — so flatten the blocks into one string and drop the
+    // cache_control markers. The static-first ordering still benefits OpenAI auto-caching.
+    const rawSystem = params.system as unknown;
+    const systemText = Array.isArray(rawSystem)
+      ? (rawSystem as Array<{ text?: string }>).map((b) => b?.text ?? "").join("\n\n")
+      : (rawSystem as string | undefined);
+
     const openAIMessages = await convertMessages(
-      params.system as string | undefined,
+      systemText,
       params.messages as Array<{ role: string; content: string | unknown[] }>
     );
 
@@ -236,7 +246,7 @@ function buildOpenAIClient(): Anthropic {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-const provider = process.env.AI_PROVIDER ?? "openai";
+const provider = process.env.AI_PROVIDER ?? "anthropic";
 
 export const anthropic: Anthropic =
   provider === "anthropic" ? buildAnthropicClient() : buildOpenAIClient();

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------- module mocks (must be before imports) ----------
 vi.mock("@/lib/supabase", () => ({
@@ -113,6 +113,19 @@ function mockToolResponse(toolName: string, input: Record<string, unknown>) {
 }
 
 // ---------- Tests ----------
+
+// These tests encode the OpenAI onboarding path (notably the gpt-4o-search-preview
+// pre-search call for race dates — see isOpenAI in onboarding/handle/route.ts), so their
+// mocked LLM call sequences assume that path. Production now defaults to Anthropic (native
+// web search, no pre-search), but the OpenAI path still ships for AI_PROVIDER=openai — pin
+// the suite to it so the call-sequence assertions stay valid. (The Anthropic onboarding
+// path is exercised by the simulation/onboarding evals.)
+const ORIGINAL_AI_PROVIDER = process.env.AI_PROVIDER;
+beforeEach(() => { process.env.AI_PROVIDER = "openai"; });
+afterEach(() => {
+  if (ORIGINAL_AI_PROVIDER === undefined) delete process.env.AI_PROVIDER;
+  else process.env.AI_PROVIDER = ORIGINAL_AI_PROVIDER;
+});
 
 describe("POST /api/onboarding/handle — unknown/null step", () => {
   beforeEach(() => vi.clearAllMocks());

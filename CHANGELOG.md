@@ -4,6 +4,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-10 — Rehab data behind a tool + switch back to Anthropic provider
+
+**Type:** Improvement / Infra
+**Reported by:** Jake (architecture review)
+**User feedback:** "If you ever do a broader prompt refactor, moving reference data (exercises, pacing tables, cross-training options) behind tools would be the right direction." + "let's do the anthropic one and switch everything back to anthropic now."
+**Root cause:** The full `BODY_PART_EXERCISES` and `CROSS_TRAINING_ALTERNATIVES` maps were injected inline into every injured athlete's system prompt (via the ACTIVE INJURY and RECURRING INJURY blocks), adding mass on every message regardless of whether exercises were actually discussed. As the injury-prevention focus grows, this data would keep bloating the prompt.
+**Fix / Change:**
+- Added a `get_rehab_protocol` client tool. Dean calls it on demand (active injury, recurring body part, or a newly-surfaced symptom on post_run/user_message) to fetch targeted exercises + injury-safe cross-training (filtered/prioritized by the athlete's available equipment, with pregnancy-safe notes and the pain-threshold scale). The exercise/cross-training data no longer lives in the prompt — `buildRehabProtocol()` builds it as code. Removed the now-dead `getBodyPartExercises`/`getCrossTrainingAlternatives` inline-injection helpers (kept the underlying maps, now used by the tool).
+- Implemented a tool-use loop around the main coach call: when Dean calls `get_rehab_protocol` (stop_reason `tool_use`), the result is fed back and he finishes the message. Capped at 3 rounds. web_search (a server tool) is unaffected — it resolves within a single response.
+- **Switched the default AI provider back to Anthropic.** The tool round-trip requires native tool support that the temporary OpenAI shim lacked. Flipped the code defaults from `?? "openai"` to `?? "anthropic"` in `lib/anthropic.ts` (provider selection), `coach/respond/route.ts` (web-search gate), `onboarding/handle/route.ts` (pre-search gate), and the eval harnesses. `.env.local` was already `anthropic`.
+- **Shim hardening (also fixes lever-1 safety):** the OpenAI shim's `convertMessages` only accepted a string `system`. After the caching change `system` is sometimes an array (`[{static,cache_control},{dynamic}]`); the shim now flattens the array to a string and drops `cache_control` (OpenAI auto-caches prefixes; it has no `cache_control`). Prevents a 400 on the OpenAI path if the provider is ever flipped back.
+- Tests: pinned `onboarding-handle.test.ts` to `AI_PROVIDER=openai` (its mocked call sequences encode the OpenAI pre-search path, which still ships); added rehab-tool round-trip tests to `coach-respond.test.ts`. 456/456 passing.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/anthropic.ts`, `src/app/api/onboarding/handle/route.ts`, `evals/run-*.mjs`, `src/__tests__/api/coach-respond.test.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+## 2026-06-10 — OUTPUT CONTRACT: end-of-prompt quality gate for coach replies
+
+**Type:** Improvement
+**Reported by:** Jake (coaching quality review)
+**User feedback:** "If anything improves the responses of Coach Dean to be more like an actual coach — with specific insights and recommendations, no generic 'nice job' or 'keep things truly easy'."
+**Root cause:** The "lead with the observation, no generic praise, no sign-offs" guidance already existed but was buried ~250 lines deep in the system prompt, where model attention is weakest. Responses still drifted into filler openers and uninterpreted numbers (the `response_quality` evals specifically catch post-run opener praise and numbers cited without interpretation).
+**Fix / Change:** Added a concise OUTPUT CONTRACT appended as the LAST element of the system prompt (after all dynamic blocks, closest to generation = highest attention), gated to `post_run` and `user_message` triggers. It hard-requires: (1) open with the specific data insight + what it MEANS, never a greeting/praise; (2) exactly one concrete, individualized takeaway, never generic filler; (3) injury & load as the priority lens — surface a specific load-management/recovery read proactively when LOAD CONTEXT shows a spike/recovery signal or the athlete mentioned soreness (directly supports the injury-prevention focus); (4) no filler praise/recaps/sign-offs; (5) escape valve — answer narrow questions precisely and stop. Mirrored the same block at the end of the eval harness's `buildEvalSystemPrompt` (gated identically) to keep eval parity.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+
 ## 2026-06-10 — Prompt caching for the coach engine (cached static framework)
 
 **Type:** Improvement / Infra

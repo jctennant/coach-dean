@@ -667,7 +667,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   ).some((r) => r?.name && (!r.date || isFirstOfMonth(r.date)));
   const needsRaceDateLookup =
     !mergedData.race_date || isFirstOfMonth(mergedData.race_date) || otherRacesNeedingDate;
-  const isOpenAI = (process.env.AI_PROVIDER ?? "openai") === "openai";
+  const isOpenAI = (process.env.AI_PROVIDER ?? "anthropic") === "openai";
 
   // On OpenAI, gpt-4o-search-preview has a 6000 TPM hard limit — far too small for
   // the full onboarding system prompt + conversation history. Instead, run a minimal

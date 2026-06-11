@@ -28,7 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
 const RESULTS_DIR = path.join(__dirname, "results");
 
-const PROVIDER = process.env.AI_PROVIDER ?? "openai";
+const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
 
 // Mirrors the production shim in src/lib/anthropic.ts: when running on OpenAI,
 // map Claude IDs to OpenAI models so eval-mode and prod use the same models.
@@ -687,7 +687,14 @@ INJURY HOLD: When an athlete cannot or should not run — append [INJURY_HOLD] a
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. Only use after a confirmed injury hold.
 
-LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25%. In your response: acknowledge the setback, suggest shorter easy runs (drop quality sessions), and offer cross-training (easy bike, elliptical, swim) for any days they'd otherwise skip. Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead).`;
+LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25%. In your response: acknowledge the setback, suggest shorter easy runs (drop quality sessions), and offer cross-training (easy bike, elliptical, swim) for any days they'd otherwise skip. Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead).${(trigger === "post_run" || trigger === "user_message") ? `
+
+OUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
+1. OPEN WITH THE INSIGHT, NOT A GREETING OR PRAISE. When you're reading a run or how their training is going, the first sentence states the specific thing THIS athlete's data shows and what it MEANS — never "Nice work", "Great job", "Saw your run come through". A number alone is not an insight; pair it with an interpretation. Bad: "Solid run, 8:58/mi!" Good: "8:58/mi at 153 bpm — that's 38s/mi quicker than the same effort last month, so the base work is paying off."
+2. ONE CONCRETE, INDIVIDUALIZED TAKEAWAY — a specific next session, adjustment, watch-point, or test tied to where THIS athlete is right now. Never generic filler that would fit any runner ("keep it easy", "stay consistent", "listen to your body", "nice base-building"). If you wrote a sentence that's true for everyone, replace it with one that's true for them.
+3. INJURY & LOAD ARE THE PRIORITY LENS. If LOAD CONTEXT shows a spike or a recovery signal, or the athlete mentioned any tightness/soreness/pain (now or recently), lead with or weave in the specific load-management or recovery read — even unprompted. That proactive injury-prevention insight is the highest-value thing you can give them. Translate load numbers into plain English; never cite raw "units".
+4. NO FILLER. Cut generic praise, recaps of what you just said, and sign-offs ("Keep it up", "You've got this", "Let me know if..."). End on the coaching point, not after it.
+5. If the athlete asked a narrow question, answer it precisely and stop — don't pad to hit these. Specificity beats completeness.` : ""}`;
 }
 
 function getWeekMonday(dateStr) {

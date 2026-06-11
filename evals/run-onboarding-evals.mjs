@@ -25,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures", "onboarding");
 const RESULTS_DIR = path.join(__dirname, "results");
 
-const PROVIDER = process.env.AI_PROVIDER ?? "openai";
+const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
 
 const ONBOARDING_MODEL = "claude-sonnet-4-5-20250929";
 const JUDGE_MODEL = "claude-opus-4-5";

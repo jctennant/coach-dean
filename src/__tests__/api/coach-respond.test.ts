@@ -1053,3 +1053,66 @@ describe("coach/respond — skipped non-run session detection on post_run", () =
     expect(userMsg).not.toContain("PLAN DEVIATION — NON-RUN DAY");
   });
 });
+
+describe("coach/respond — rehab protocol tool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("executes get_rehab_protocol and feeds the result back before replying", async () => {
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    // First call: Dean requests the rehab protocol (stop_reason tool_use).
+    // Second call: the final coaching text after the tool result is fed back.
+    create
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "tu-1", name: "get_rehab_protocol", input: { body_part: "it_band", available_tools: ["pool"] } }],
+      })
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "For the IT band: clamshells and lateral band walks. Pool running keeps fitness with zero IT band stress." }],
+      });
+
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ active_injury: true, injury_body_part: "it_band", injury_severity: "moderate", injury_body_parts: ["it_band"] }),
+      state: baseState(),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    // Round-trip: tool request + final response = two model calls
+    expect(create.mock.calls.length).toBe(2);
+
+    // The rehab tool was offered on the first call
+    const firstTools = (create.mock.calls[0][0] as { tools?: Array<{ name?: string }> }).tools ?? [];
+    expect(firstTools.some((t) => t.name === "get_rehab_protocol")).toBe(true);
+
+    // The second call fed back a tool_result carrying the code-built protocol
+    const secondMsgs = (create.mock.calls[1][0] as { messages: Array<{ role: string; content: unknown }> }).messages;
+    const toolResult = secondMsgs
+      .flatMap((m) => (Array.isArray(m.content) ? (m.content as Array<Record<string, unknown>>) : []))
+      .find((b) => b?.type === "tool_result");
+    expect(toolResult).toBeDefined();
+    const trText = String((toolResult as Record<string, unknown>).content);
+    expect(trText.toLowerCase()).toContain("clamshells");          // from BODY_PART_EXERCISES.it_band
+    expect(trText.toLowerCase()).toContain("injury-safe cross-training"); // cross-training section present
+    expect(trText.toLowerCase()).toContain("swimming");            // from CROSS_TRAINING_ALTERNATIVES.it_band
+
+    // The athlete receives the final text, not Dean's tool-call turn
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("IT band");
+  });
+
+  it("does not offer the rehab tool on a nightly reminder with no injury", async () => {
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create.mockResolvedValue({ content: [{ type: "text", text: "Don't forget tonight's easy run." }] });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    await POST(mockRequest({ userId: "user-001", trigger: "nightly_reminder" }));
+    await flush();
+    const lastCall = create.mock.calls[create.mock.calls.length - 1];
+    const tools = (lastCall?.[0] as { tools?: Array<{ name?: string }> })?.tools ?? [];
+    expect(tools.some((t) => t.name === "get_rehab_protocol")).toBe(false);
+  });
+});

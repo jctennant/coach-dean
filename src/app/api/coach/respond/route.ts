@@ -4,6 +4,7 @@ import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { buildHRZoneContext, deriveZones, type LTHRConfidence } from "@/lib/hr-zones";
 import { anthropic } from "@/lib/anthropic";
+import type Anthropic from "@anthropic-ai/sdk";
 import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock, fetchActivityWeather } from "@/lib/weather";
@@ -114,16 +115,85 @@ const CROSS_TRAINING_ALTERNATIVES: Record<string, string[]> = {
   ],
 };
 
-function getCrossTrainingAlternatives(bodyPart: string): string {
-  const options = CROSS_TRAINING_ALTERNATIVES[bodyPart.toLowerCase()];
-  if (!options) return "";
-  return `\n  Safe cross-training for ${bodyPart.replace(/_/g, " ")} (use these when the athlete asks what to do instead of running):\n${options.map(o => `    • ${o}`).join("\n")}`;
-}
+// ─── Rehab protocol tool ──────────────────────────────────────────────────────
+// Instead of injecting the full exercise + cross-training maps into every injured
+// athlete's system prompt, Dean calls this tool on demand when an injury/soreness is
+// actually in play. Keeps the prompt lean and the lookup logic (filtering by available
+// equipment, pregnancy-safe notes) as real code. Requires a tool round-trip — supported
+// natively by the Anthropic SDK (the default provider).
+const KNOWN_REHAB_PARTS = Object.keys(BODY_PART_EXERCISES);
 
-function getBodyPartExercises(bodyPart: string): string {
-  const exercises = BODY_PART_EXERCISES[bodyPart.toLowerCase()];
-  if (!exercises) return "";
-  return `\n  Targeted exercises for ${bodyPart.replace(/_/g, " ")}: ${exercises.join(" | ")}`;
+const REHAB_TOOL = {
+  name: "get_rehab_protocol" as const,
+  description:
+    "Look up targeted rehab/strengthening exercises and injury-safe cross-training options for a body part. " +
+    "Call this whenever you need to give an athlete concrete exercises or cross-training alternatives for an injury, " +
+    "soreness, tightness, or recurring issue — never invent rehab exercises from memory. Returns a compact protocol " +
+    "(exercises with sets×reps, safe cross-training, pain-threshold scale) for you to translate into the athlete's reply. " +
+    `Known body parts: ${KNOWN_REHAB_PARTS.join(", ")}. If the area isn't listed, still call with the closest match.`,
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      body_part: {
+        type: "string",
+        description: `The injured/sore area, e.g. ${KNOWN_REHAB_PARTS.slice(0, 6).join(", ")}.`,
+      },
+      available_tools: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "The athlete's available cross-training equipment from 'Cross-training available' in the prompt " +
+          "(e.g. ['bike','pool','elliptical']). Optional — used to prioritize options they can actually do.",
+      },
+      pregnant: {
+        type: "boolean",
+        description: "Whether the athlete is pregnant — returns pregnancy-safe guidance. Optional.",
+      },
+    },
+    required: ["body_part"],
+  },
+};
+
+/** Execute the get_rehab_protocol tool — returns the tool_result string for Claude. */
+function buildRehabProtocol(input: Record<string, unknown>): string {
+  const rawPart = String(input.body_part ?? "").trim();
+  const bodyPart = rawPart.toLowerCase().replace(/\s+/g, "_");
+  const available = Array.isArray(input.available_tools)
+    ? (input.available_tools as unknown[]).map((t) => String(t).toLowerCase())
+    : [];
+  const pregnant = input.pregnant === true;
+
+  const exercises = BODY_PART_EXERCISES[bodyPart];
+  const crossTrain = CROSS_TRAINING_ALTERNATIVES[bodyPart];
+
+  if (!exercises && !crossTrain) {
+    return `No specific protocol on file for "${rawPart}". Give general injury-safe guidance: keep load off the area, prefer pain-free cross-training (pool running, cycling, swimming), and recommend a sports physio if it persists or changes the athlete's gait. Pain scale: 0-2/10 ok with monitoring, 3/10 = stop.`;
+  }
+
+  const lines: string[] = [`REHAB PROTOCOL — ${bodyPart.replace(/_/g, " ")} (translate into the athlete's reply; pick 3-4 exercises, keep it concise):`];
+  if (exercises) {
+    lines.push(`Targeted exercises (each already has sets×reps): ${exercises.join(" | ")}`);
+  }
+  if (crossTrain) {
+    let opts = crossTrain;
+    if (available.length) {
+      const matched = crossTrain.filter((o) => available.some((t) => o.toLowerCase().includes(t)));
+      const rest = crossTrain.filter((o) => !matched.includes(o));
+      opts = [...matched, ...rest];
+    }
+    lines.push(
+      `Injury-safe cross-training${available.length ? ` (athlete has ${available.join(", ")} — listed first)` : ""}: ${opts.map((o) => `• ${o}`).join("  ")}`
+    );
+  }
+  if (pregnant) {
+    lines.push(
+      `PREGNANCY-SAFE: prioritize swimming/aqua jogging; cap pain at 0-1/10 and rest on any worsening; the groin exercises here are pregnancy-safe; refer OB/midwife first, then a women's-health physio for new symptoms.`
+    );
+  }
+  lines.push(
+    `PAIN THRESHOLD: 0-2/10 ok with monitoring; 3/10 = stop that run; pain that climbs during a run = stop signal even if it eases the next day. Give the athlete this scale if they ask what's OK.`
+  );
+  return lines.join("\n");
 }
 
 // UKK Institute hip & core injury prevention protocol (Run RCT, Leppänen et al. 2024).
@@ -1297,7 +1367,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
 
   // gpt-4o-search-preview has a 6k TPM hard limit — the full coaching system prompt (~16k tokens)
   // always exceeds it. Only enable web search on Anthropic, which has no such constraint.
-  const shouldUseWebSearch = trigger === "user_message" && (process.env.AI_PROVIDER ?? "openai") === "anthropic";
+  const shouldUseWebSearch = trigger === "user_message" && (process.env.AI_PROVIDER ?? "anthropic") === "anthropic";
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
   const dashboardToken = user.dashboard_token as string | null;
@@ -1693,6 +1763,19 @@ Do NOT surface this every message. Once is enough — reinforce only 4+ weeks la
   // block so it's reused across every athlete and trigger. All per-athlete data and the
   // appended dynamic blocks below go in the uncached tail.
   const systemStatic = builtPrompt.static;
+  // OUTPUT CONTRACT — appended LAST so it's the final thing the model reads before generating
+  // (closest-to-generation = highest attention). Concentrates the non-negotiables that make a
+  // reply read like a real coach: data-driven opener, one concrete individualized takeaway,
+  // injury/load as the priority lens, no filler. Only for run-review triggers — plans and
+  // reminders have their own structure rules.
+  const outputContract = (trigger === "post_run" || trigger === "user_message")
+    ? `\n\nOUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
+1. OPEN WITH THE INSIGHT, NOT A GREETING OR PRAISE. When you're reading a run or how their training is going, the first sentence states the specific thing THIS athlete's data shows and what it MEANS — never "Nice work", "Great job", "Saw your run come through". A number alone is not an insight; pair it with an interpretation. Bad: "Solid run, 8:58/mi!" Good: "8:58/mi at 153 bpm — that's 38s/mi quicker than the same effort last month, so the base work is paying off."
+2. ONE CONCRETE, INDIVIDUALIZED TAKEAWAY — a specific next session, adjustment, watch-point, or test tied to where THIS athlete is right now. Never generic filler that would fit any runner ("keep it easy", "stay consistent", "listen to your body", "nice base-building"). If you wrote a sentence that's true for everyone, replace it with one that's true for them.
+3. INJURY & LOAD ARE THE PRIORITY LENS. If LOAD CONTEXT shows a spike or a recovery signal, or the athlete mentioned any tightness/soreness/pain (now or recently), lead with or weave in the specific load-management or recovery read — even unprompted. That proactive injury-prevention insight is the highest-value thing you can give them. Translate load numbers into plain English; never cite raw "units".
+4. NO FILLER. Cut generic praise, recaps of what you just said, and sign-offs ("Keep it up", "You've got this", "Let me know if..."). End on the coaching point, not after it.
+5. If the athlete asked a narrow question, answer it precisely and stop — don't pad to hit these. Specificity beats completeness.`
+    : "";
   const systemDynamic = builtPrompt.dynamic + aerobicTrendBlock + strengthRoutineBlock + hipCoreProtocolBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + (coachingFocus
     ? `\n\nATHLETE COACHING FOCUS (stored from a previous conversation — use this to weight your coaching lens):
 Focus: ${coachingFocus}
@@ -1704,7 +1787,7 @@ Focus: ${coachingFocus}
 Apply this to bias which metric lens you pick and what advice you give proactively. When in doubt, respect what the athlete said they want.`
     : "") + (uploadedPlanContext
     ? `\n\nATHLETE'S UPLOADED TRAINING PLAN (for reference — use this when they ask about their plan, upcoming workouts, or weekly structure; do NOT reproduce it in full; answer specific questions from it directly):\n${uploadedPlanContext}`
-    : "");
+    : "") + outputContract;
 
   // For weekly_recap and user_message, fetch the stored training plan.
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
@@ -2445,20 +2528,56 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     await supabase.from("users").update({ onboarding_step: null }).eq("id", userId);
   }
 
-  const response = await anthropic.messages.create({
+  // Offer the rehab-protocol tool when an injury is in play (stored active injury, recurring
+  // body parts) or on run-review triggers where a new symptom might surface. The exercise +
+  // cross-training data is no longer injected inline — Dean fetches it via the tool only when
+  // needed. Requires a tool round-trip (handled by the loop below) — native on Anthropic.
+  const hasInjuryContext = !!(profile?.active_injury) ||
+    (((profile?.injury_body_parts as string[] | null)?.length) ?? 0) > 0;
+  const offerRehabTool = hasInjuryContext || trigger === "post_run" || trigger === "user_message";
+
+  const coachTools: Anthropic.Messages.ToolUnion[] = [];
+  if (shouldUseWebSearch) coachTools.push({ type: "web_search_20250305", name: "web_search" });
+  if (offerRehabTool) coachTools.push(REHAB_TOOL);
+
+  // Plans can be longer (full week schedule); SMS triggers cap at 512 (SMS max ~640 chars ≈ 150 tokens).
+  // user_message gets 1000 to handle full plan arc requests.
+  const coachMaxTokens = (trigger === "initial_plan" || trigger === "weekly_recap") ? 1000 : trigger === "user_message" ? 1000 : 512;
+  const coachSystem = [
+    { type: "text" as const, text: systemStatic, cache_control: { type: "ephemeral" as const } },
+    { type: "text" as const, text: systemDynamic },
+  ];
+  const convo: Anthropic.Messages.MessageParam[] = [{ role: "user", content: userMessage }];
+  const callCoach = () => anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
-    // Plans can be longer (full week schedule); SMS triggers cap at 512 (SMS max ~640 chars ≈ 150 tokens)
-    // user_message gets 1000 to handle full plan arc requests
-    max_tokens: (trigger === "initial_plan" || trigger === "weekly_recap") ? 1000 : trigger === "user_message" ? 1000 : 512,
-    system: [
-      { type: "text", text: systemStatic, cache_control: { type: "ephemeral" } },
-      { type: "text", text: systemDynamic },
-    ],
-    messages: [{ role: "user", content: userMessage }],
-    ...(shouldUseWebSearch
-      ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" }] }
-      : {}),
+    max_tokens: coachMaxTokens,
+    system: coachSystem,
+    messages: convo,
+    ...(coachTools.length ? { tools: coachTools } : {}),
   });
+
+  // Tool-use loop: when Dean calls get_rehab_protocol (a client tool), run it, feed the
+  // result back, and let him finish the coaching message. web_search is a server tool that
+  // resolves within a single response, so it never sets stop_reason "tool_use" here.
+  let response = await callCoach();
+  let rehabRounds = 0;
+  while (response.stop_reason === "tool_use" && rehabRounds < 3) {
+    const rehabCalls = response.content.filter(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use" && b.name === "get_rehab_protocol"
+    );
+    if (rehabCalls.length === 0) break; // some other/unknown tool — don't spin
+    convo.push({ role: "assistant", content: response.content });
+    convo.push({
+      role: "user",
+      content: rehabCalls.map((tu) => ({
+        type: "tool_result" as const,
+        tool_use_id: tu.id,
+        content: buildRehabProtocol(tu.input as Record<string, unknown>),
+      })),
+    });
+    rehabRounds++;
+    response = await callCoach();
+  }
 
   // Stop the typing refresh loop — generation is done, message is about to send.
   keepTypingAlive = false;
@@ -5323,17 +5442,18 @@ ${secondaryGoal ? `- Secondary goal: ${secondaryGoal} (build toward this after t
     : `\n- PREGNANCY CHECK: Scan RECENT CONVERSATION for any mention of pregnancy before responding. If the athlete is pregnant, apply all pregnancy-specific rules below even if not in stored profile.`;
   return `<rule>ACTIVE INJURY — APPLIES TO EVERY MESSAGE THIS TURN:
 - Body part: ${bodyPart}
-- Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}${getBodyPartExercises(bodyPart)}${getCrossTrainingAlternatives(bodyPart)}
+- Severity: ${severity}${startDate ? `\n- Started: ${startDate}` : ""}${protocol ? `\n- Return-to-running protocol: ${protocol}` : ""}
+- REHAB DATA — before giving any exercises or cross-training for this injury, CALL the get_rehab_protocol tool (body_part: "${bodyPart}", and pass available_tools from "Cross-training available" below). Use what it returns; never invent rehab exercises from memory.
 Coaching adjustments:
 - ${severity === "severe" ? "No running prescribed. Cross-training and gentle test probes only — do not advise running through this." : severity === "moderate" ? "Modify aggressively: reduce volume, drop quality sessions, and frame runs as pain-monitored." : "Run modified — easy efforts only, no quality work, monitor the area on every run."}
 - PAIN THRESHOLD RULE — use this exact scale when the athlete asks what level of pain is OK: 0–2/10 = acceptable, continue with monitoring; 3/10 = stop that run; pain that worsens during a run (e.g. starts at 1/10, climbs to 3–4/10) = stop signal, even if it feels better the next day. Give the athlete this number explicitly rather than a binary "don't run" — they're asking because they want to make real decisions.
-- When the athlete asks what they should do for the injury, give them the specific targeted exercises listed above — be concrete, not generic.
-- CROSS-TRAINING INSTEAD OF REST: When the athlete reports feeling off, mentions soreness or pain, or asks what to do instead of running — NEVER just say "take a few days off" or "rest up". Always offer 2-3 specific active alternatives from the safe cross-training list above. Check their available cross-training tools first (see "Cross-training available" in ATHLETE HISTORY) and prioritize what they already have access to. If no tools are listed, pool running, cycling, and elliptical are universally available at most gyms. Frame it as: here's how you stay fit while this heals — not as a consolation prize.
+- When the athlete asks what they should do for the injury, call get_rehab_protocol and give them 3-4 specific targeted exercises from it — be concrete, not generic.
+- CROSS-TRAINING INSTEAD OF REST: When the athlete reports feeling off, mentions soreness or pain, or asks what to do instead of running — NEVER just say "take a few days off" or "rest up". Call get_rehab_protocol and offer 2-3 specific injury-safe alternatives it returns. Pass their available cross-training tools (see "Cross-training available" in ATHLETE HISTORY) so the options are prioritized to what they have. If no tools are listed, pool running, cycling, and elliptical are universally available at most gyms. Frame it as: here's how you stay fit while this heals — not as a consolation prize.
 - Proactively go/no-go: when discussing today's or tomorrow's run, check this state first before suggesting a session.
 - If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.${(severity === "moderate" || severity === "severe") && isFirstTimeInjury ? `\n- PT REFERRAL — FIRST OCCURRENCE: This is the athlete's first time flagging ${bodyPart} at ${severity} severity. In the next response after they report the injury, include ONE gentle sentence: "If this doesn't settle down within a week, a sports physio can rule out anything structural — worth a quick check." Frame it as proactive, not alarming. Say it once and do not repeat it in subsequent messages.` : ""}${pregnancyBlock}
-- PREGNANCY-SPECIFIC RULES (apply if pregnant): (1) Primary cross-training recommendation is swimming or aqua jogging — near-perfect running substitute, safe all trimesters; stationary bike also good. (2) Tighten the pain threshold: stay at 0–1/10 max while pregnant, any worsening = rest that day. (3) All prescribed exercises must be pregnancy-safe: no lying flat on back after ~16 weeks, avoid heavy core compression. The groin exercises above are pregnancy-safe. (4) Referral order: OB/midwife first for any new musculoskeletal symptom, then a women's health physio (pelvic floor specialist) — not just "a physio who specializes in pregnancy." (5) Relaxin-related laxity: groin/pelvic girdle pain in pregnancy is often round ligament pain or pubic symphysis dysfunction — acknowledge this context, don't default to framing it as a training-load error. (6) If the athlete worries about losing fitness during pregnancy: reassure them directly — aerobic fitness is well-maintained through low-impact cross-training, and aqua jogging preserves running-specific conditioning. The goal during pregnancy is "maintain, not gain."
+- PREGNANCY-SPECIFIC RULES (apply if pregnant): (1) Primary cross-training recommendation is swimming or aqua jogging — near-perfect running substitute, safe all trimesters; stationary bike also good. (2) Tighten the pain threshold: stay at 0–1/10 max while pregnant, any worsening = rest that day. (3) All prescribed exercises must be pregnancy-safe: no lying flat on back after ~16 weeks, avoid heavy core compression. The groin exercises from get_rehab_protocol are pregnancy-safe (pass pregnant: true). (4) Referral order: OB/midwife first for any new musculoskeletal symptom, then a women's health physio (pelvic floor specialist) — not just "a physio who specializes in pregnancy." (5) Relaxin-related laxity: groin/pelvic girdle pain in pregnancy is often round ligament pain or pubic symphysis dysfunction — acknowledge this context, don't default to framing it as a training-load error. (6) If the athlete worries about losing fitness during pregnancy: reassure them directly — aerobic fitness is well-maintained through low-impact cross-training, and aqua jogging preserves running-specific conditioning. The goal during pregnancy is "maintain, not gain."
 </rule>\n`;
-})()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) suggest specific targeted exercises (see below) rather than just telling them to "strengthen it". (4) suggest they consult a physical therapist or sports medicine doctor if it keeps recurring — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.\n  Targeted rehab exercises by body part:${parts.map(p => getBodyPartExercises(p)).filter(Boolean).join("")}` : ""; })()}
+})()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) call get_rehab_protocol for that body part and give specific targeted exercises rather than just telling them to "strengthen it". (4) suggest they consult a physical therapist or sports medicine doctor if it keeps recurring — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.` : ""; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}${(() => {
   const threads = (profile?.coaching_threads as string | null) || null;
   if (!threads || !threads.trim()) return "";
