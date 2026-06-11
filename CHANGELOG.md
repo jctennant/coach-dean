@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-10 — Prompt caching for the coach engine (cached static framework)
+
+**Type:** Improvement / Infra
+**Reported by:** Jake (efficiency review)
+**User feedback:** "Please do your best to reduce the size of the coach respond / post run prompts so that they run more efficiently (consider tool use, caching, other options)."
+**Root cause:** The ~15–20k-token coach system prompt was rebuilt and sent in full on every coach call (post_run, every inbound SMS, every reminder) with no prompt caching. The largest, byte-identical, athlete-independent instructional content (identity, core mission, the 11 principles, communication style, tone, formatting, and all the WHEN-AN-ATHLETE behavior rules) was interleaved with per-athlete data and — critically — the most dynamic block (`factsBlock`) sat at the very top, so no stable cacheable prefix existed.
+**Fix / Change:** Restructured `buildSystemPrompt` to return `{ static, dynamic }`. The athlete-independent coaching framework is relocated to a single front block (the identity/mission/principles region + the COMMUNICATION STYLE → ATHLETE-CONFIRMED region, byte-for-byte preserved), and all per-athlete data (facts, goal/race, fitness tier, training state, activity, conversation) plus the appended dynamic blocks form the uncached tail. The coach call now sends `system` as a two-block array with `cache_control: { type: "ephemeral" }` on the static prefix. Because the prefix is identical across the whole user base (keyed only by units pref + trigger class), it caches across athletes — cached input is ~10% the cost and lower-latency. Expected ~50–70% input-token reduction on coach calls plus lower TTFB. Bonus: live athlete data + RECENT CONVERSATION now sit at the end of the prompt (closest to generation), which improves recall of those exact facts. A few MEMORY-rule directional words ("above"→"below"/"table below") were adjusted since those rules now precede the athlete-data sections. Relocation was done programmatically and verified by a line-multiset diff (rendered prompt text unchanged except the intended edits). Test helpers updated to normalize the new array `system` shape.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`, `src/__tests__/api/coach-respond-metric.test.ts`
+
 ## 2026-06-09 — Injury-specific cross-training alternatives menu
 
 **Type:** Improvement

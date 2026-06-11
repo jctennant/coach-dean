@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mockRequest } from "../helpers/supabase-mock";
 
+// ---------- system-prompt normalization ----------
+// The coach call sends `system` as a cached-prefix array ([{text: static}, {text: dynamic}])
+// for the main path, but some lighter paths still pass a plain string. This flattens either
+// shape into the full prompt text so assertions can search the whole thing.
+function systemText(system: unknown): string {
+  if (typeof system === "string") return system;
+  if (Array.isArray(system)) {
+    return system
+      .map((b) => (b && typeof b === "object" && "text" in b ? String((b as { text: unknown }).text) : ""))
+      .join("\n");
+  }
+  return "";
+}
+
 // ---------- Capture after() callbacks so tests can await background work ----------
 const afterQueue: Array<() => Promise<void>> = [];
 async function flush() {
@@ -243,7 +257,7 @@ describe("coach/respond — B/C race context in system prompt", () => {
 
   function captureSystemPrompt(): string {
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    return (calls[0]?.[0]?.system as string) ?? "";
+    return systemText(calls[0]?.[0]?.system);
   }
 
   it("injects B race mini-taper note when B race is ≤14 days away", async () => {
@@ -573,10 +587,10 @@ describe("coach/respond — initial_plan beginner tier (stale Strava history)", 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
     const sonnetCall = calls.find((c: unknown[]) => {
       const args = c[0] as Record<string, unknown>;
-      return typeof args.system === "string" && (args.system as string).length > 200;
+      return systemText(args.system).length > 200;
     });
     expect(sonnetCall).toBeDefined();
-    const systemPrompt = (sonnetCall![0] as Record<string, unknown>).system as string;
+    const systemPrompt = systemText((sonnetCall![0] as Record<string, unknown>).system);
 
     expect(systemPrompt).toContain("stale history");
     expect(systemPrompt).not.toContain("MODERATE VOLUME");
@@ -610,10 +624,10 @@ describe("coach/respond — initial_plan beginner tier (stale Strava history)", 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
     const sonnetCall = calls.find((c: unknown[]) => {
       const args = c[0] as Record<string, unknown>;
-      return typeof args.system === "string" && (args.system as string).length > 200;
+      return systemText(args.system).length > 200;
     });
     expect(sonnetCall).toBeDefined();
-    const systemPrompt = (sonnetCall![0] as Record<string, unknown>).system as string;
+    const systemPrompt = systemText((sonnetCall![0] as Record<string, unknown>).system);
 
     expect(systemPrompt).toContain("stale history");
     expect(systemPrompt).not.toContain("MODERATE VOLUME");
@@ -885,7 +899,7 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    const systemPrompt = calls[0][0].system as string;
+    const systemPrompt = systemText(calls[0][0].system);
     const userMsg = calls[0][0].messages[0].content as string;
 
     // Guard must be present — reminders never prescribe a specific today's workout

@@ -134,7 +134,14 @@ function baseState(overrides: Record<string, unknown> = {}): Record<string, unkn
 
 function captureSystemPrompt(): string {
   const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-  return (calls[0]?.[0]?.system as string) ?? "";
+  const system = calls[0]?.[0]?.system;
+  // Main coach path sends `system` as a cached-prefix array ([{text: static}, {text: dynamic}]);
+  // flatten to the full prompt text. Lighter paths may still pass a plain string.
+  if (typeof system === "string") return system;
+  if (Array.isArray(system)) {
+    return system.map((b) => (b && typeof b === "object" && "text" in b ? String(b.text) : "")).join("\n");
+  }
+  return "";
 }
 
 function captureUserMessage(): string {
