@@ -1620,7 +1620,7 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
     const severityNote = injurySeverity === "severe" ? "Given the severity, "
       : injurySeverity === "moderate" ? "Given how it's affecting training, "
       : "";
-    const duringNote = whenStr ? ` You mentioned it flares ${whenStr} — that's the signal I'll track.` : "";
+    const duringNote = whenStr ? ` Pain ${whenStr} is the watch-point for whether a session stays or gets swapped.` : "";
 
     // Management-aware injury action
     let mgmtActionPart: string;
@@ -1633,7 +1633,7 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
     } else {
       mgmtActionPart = `${severityNote}Before your next run, do ${action}.`;
     }
-    injuryNote = `${mgmtActionPart} If you mention the ${injuryBodyPart} after a run, I'll adjust your load — not just flag it.${duringNote}`;
+    injuryNote = `${mgmtActionPart}${duringNote}`;
   } else if (currentNiggles && !/\b(none|no injury|healthy|fine)\b/i.test(currentNiggles)) {
     const text = currentNiggles.toLowerCase();
     const bodyPart = text.includes("hamstring") ? "hamstring"
@@ -1647,12 +1647,12 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
       : null;
     if (bodyPart) {
       const action = getInjuryAction(bodyPart);
-      injuryNote = `The ${bodyPart} — before your next run, do ${action}. If you mention it after a run I'll adjust your load.`;
+      injuryNote = `The ${bodyPart} — before your next run, do ${action}.`;
     } else {
-      injuryNote = "Injury history noted — I'll monitor patterns and modify load when needed, not just flag it.";
+      injuryNote = "Injury history noted — it factors into how I set your volume and easy/hard balance.";
     }
   } else if (injuryHistory && !/\b(none|no injury|no injuries|healthy|fine)\b/i.test(injuryHistory)) {
-    injuryNote = "Injury history noted — I'll monitor patterns and modify load when needed, not just flag it.";
+    injuryNote = "Injury history noted — it factors into how I set your volume and easy/hard balance.";
   }
 
   // Injury-first: when active injury present, lead with the injury note before the Strava observation.
@@ -1668,7 +1668,7 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
 
   // Close with how coaching works — specific to injury situation.
   if (activeInjury && injuryBodyPart) {
-    parts.push(`After your next run, I'll send a note — what the session means for the ${injuryBodyPart}, and whether to adjust the next day based on what I see.`);
+    parts.push(`First run on it stays easy — then tell me how the ${injuryBodyPart} felt during and after, and that decides the next session.`);
   } else if (stravaConnected) {
     parts.push("After your next run, I'll send a coaching note — what it means for the week ahead and what to watch for. That's where we start.");
   } else {

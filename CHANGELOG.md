@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-10 — Dean recited "I'll track your shin" instead of acting on it
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "Doesn't seem like Dean is doing a good job of tracking my shin - he's just saying he will haha" — followed by two replies where Dean recited the same shin-management summary (incl. "If you mention the left shin after a run, I'll adjust your load — not just flag it. … that's the signal I'll track.") instead of (a) giving concrete rehab when asked "anything else I should do for it?" and (b) listing the week's sessions when asked "What does my plan say for the rest of the week."
+**Root cause:** The onboarding completion message (`buildDeterministicCompletion`) planted first-person meta-promises in conversation history — "I'll adjust your load — not just flag it", "that's the signal I'll track", "After your next run, I'll send a note … whether to adjust." Jake's shin *was* stored as structured `active_injury` state (the ACTIVE INJURY rule block was firing), but once those promise phrases were in the transcript, Sonnet latched onto them and recited the management summary in place of answering the actual question or using `get_rehab_protocol`. The promises read as empty to the user precisely because nothing concrete backed them.
+**Fix / Change:** (1) `coach/respond` ACTIVE INJURY block — added a rule: don't recite the management plan or promise to track; every message touching the injury must add NEW concrete value (answer the question, give rehab via `get_rehab_protocol`, or make a named go/no-go with a named adjustment). If asked about the week/plan, give the actual sessions, not the injury summary. (2) `onboarding/handle` `buildDeterministicCompletion` — stripped the self-referential "I'll adjust your load / not just flag it / that's the signal I'll track / I'll send a note and decide whether to adjust" phrasing at the source; replaced with concrete watch-point and first-run-easy-then-report framing.
+**Files changed:** src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts
+
 ## 2026-06-10 — Centralized delayed-retry on AI rate limits (429)
 
 **Type:** Infra
