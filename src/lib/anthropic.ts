@@ -11,6 +11,68 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 
+// ─── Rate-limit retry ─────────────────────────────────────────────────────────
+// On the Anthropic free / tier-1 plan a token-per-minute spike returns HTTP 429.
+// We disable each SDK's own retries (maxRetries: 0) and centralize retry here so the
+// behavior — honoring the server's retry-after, exponential backoff, total-wait budget,
+// and logging — is identical across both providers and every call site (coach response,
+// Haiku extraction, plan parsing, etc.).
+const RETRYABLE_STATUS = new Set([408, 409, 429, 500, 502, 503, 504, 529]);
+
+/** Pull a delay (ms) from the error's retry-after / retry-after-ms headers, if present. */
+export function parseRetryAfterMs(err: unknown): number | null {
+  const headers = (err as { headers?: unknown })?.headers;
+  if (!headers) return null;
+  const get = (key: string): string | null => {
+    const h = headers as { get?: (k: string) => string | null } & Record<string, unknown>;
+    if (typeof h.get === "function") return h.get(key);
+    const v = h[key];
+    return typeof v === "string" ? v : null;
+  };
+  const ms = get("retry-after-ms");
+  if (ms && !Number.isNaN(Number(ms))) return Number(ms);
+  const ra = get("retry-after");
+  if (ra) {
+    const secs = Number(ra);
+    if (!Number.isNaN(secs)) return secs * 1000;
+    const at = Date.parse(ra); // HTTP-date form
+    if (!Number.isNaN(at)) return Math.max(0, at - Date.now());
+  }
+  return null;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Retry an AI call on rate-limit / transient errors with delayed backoff. */
+export async function withRetry<T>(fn: () => Promise<T>, label = "anthropic"): Promise<T> {
+  const maxAttempts = Math.max(1, Number(process.env.AI_MAX_RETRIES ?? 5));
+  const maxTotalWaitMs = Number(process.env.AI_MAX_RETRY_WAIT_MS ?? 60_000);
+  const baseMs = 1_000;
+  let waited = 0;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = (err as { status?: number; statusCode?: number })?.status
+        ?? (err as { statusCode?: number })?.statusCode;
+      const isLast = attempt >= maxAttempts - 1;
+      if (status === undefined || !RETRYABLE_STATUS.has(status) || isLast) throw err;
+
+      const headerMs = parseRetryAfterMs(err);
+      const backoff = Math.min(baseMs * 2 ** attempt, 30_000);
+      const jitter = Math.floor(Math.random() * 500);
+      const delay = (headerMs ?? backoff) + jitter;
+
+      // Don't start a wait that would blow the total budget — fail fast instead.
+      if (waited + delay > maxTotalWaitMs) throw err;
+      waited += delay;
+      console.warn(`[${label}] HTTP ${status} — retry ${attempt + 1}/${maxAttempts - 1} after ${delay}ms (rate limit / transient)`);
+      await sleep(delay);
+    }
+  }
+}
+
 // ─── Anthropic (native) ───────────────────────────────────────────────────────
 
 function buildAnthropicClient(): Anthropic {
@@ -21,18 +83,17 @@ function buildAnthropicClient(): Anthropic {
   function getClient(): Anthropic {
     if (_client) return _client;
     if (!process.env.ANTHROPIC_API_KEY) throw new Error("Missing ANTHROPIC_API_KEY");
-    _client = new AnthropicSDK({ apiKey: process.env.ANTHROPIC_API_KEY }) as Anthropic;
+    // maxRetries: 0 — retries are centralized in withRetry (see above).
+    _client = new AnthropicSDK({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0 }) as Anthropic;
     return _client;
   }
 
-  return new Proxy({} as Anthropic, {
-    get(_, prop) {
-      const client = getClient();
-      const value = client[prop as keyof Anthropic];
-      if (typeof value === "function") return value.bind(client);
-      return value;
-    },
-  });
+  // Only messages.create is used across the codebase (non-streaming). Narrow the surface
+  // so every call goes through withRetry. Client is still built lazily on first call.
+  const create = (params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> =>
+    withRetry(() => getClient().messages.create(params) as Promise<Anthropic.Message>, "anthropic");
+
+  return { messages: { create } } as unknown as Anthropic;
 }
 
 // ─── OpenAI shim ─────────────────────────────────────────────────────────────
@@ -62,7 +123,8 @@ function buildOpenAIClient(): Anthropic {
   function getClient() {
     if (_client) return _client;
     if (!process.env.OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
-    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    // maxRetries: 0 — retries are centralized in withRetry (see top of file).
+    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0 });
     return _client;
   }
 
@@ -240,8 +302,14 @@ function buildOpenAIClient(): Anthropic {
     return convertResponse(response);
   }
 
-  // Cast to Anthropic so all call sites see proper types
-  return { messages: { create: messagesCreate } } as unknown as Anthropic;
+  // Cast to Anthropic so all call sites see proper types.
+  // Wrap in withRetry so OpenAI 429s get the same delayed-retry treatment.
+  return {
+    messages: {
+      create: (params: Anthropic.MessageCreateParamsNonStreaming) =>
+        withRetry(() => messagesCreate(params), "openai"),
+    },
+  } as unknown as Anthropic;
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────

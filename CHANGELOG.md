@@ -4,6 +4,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-10 — Centralized delayed-retry on AI rate limits (429)
+
+**Type:** Infra
+**Reported by:** Jake
+**User feedback:** "not yet fixed off the free tier - can we setup a delayed retry in case we hit the rate limit?"
+**Root cause:** With the provider back on Anthropic and the account still on the free / tier-1 plan, a tokens-per-minute spike returns HTTP 429. Each SDK's built-in retry (default 2) wasn't enough/consistent, and the OpenAI shim path had its own separate behavior.
+**Fix / Change:** Added a centralized `withRetry` wrapper in `lib/anthropic.ts` applied to `messages.create` for **both** providers, and disabled each SDK's own retries (`maxRetries: 0`) so retry behavior lives in one place. On a retryable status (408/409/429/5xx/529) it waits and retries, honoring the server's `retry-after` / `retry-after-ms` header when present, otherwise exponential backoff (1s→2s→4s…, capped 30s) with jitter. Bounded by `AI_MAX_RETRIES` (default 5) and a total-wait budget `AI_MAX_RETRY_WAIT_MS` (default 60s) — it won't start a wait that would blow the budget. Every call site benefits (coach response, Haiku extraction, plan parsing). Added `anthropic-retry.test.ts` (8 cases).
+**Operational note:** The retry waits inside the serverless function (including `after()` background work). On a TPM limit, `retry-after` can be up to ~60s — ensure the Vercel function `maxDuration` is high enough to cover the wait, or lower `AI_MAX_RETRY_WAIT_MS`. Raising the Anthropic tier remains the real fix.
+**Files changed:** `src/lib/anthropic.ts`, `src/__tests__/lib/anthropic-retry.test.ts`
+
 ## 2026-06-10 — Rehab data behind a tool + switch back to Anthropic provider
 
 **Type:** Improvement / Infra
