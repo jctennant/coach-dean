@@ -182,10 +182,10 @@ export default function Home() {
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
             <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              An expert running coach in your pocket.
+              An expert running coach designed to keep you healthy.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              Connect Strava and get a coach who reads every run, explains what your data actually means, and adapts when life gets in the way. All over text.
+              Most runners don&apos;t quit. They get hurt. Coach Dean monitors your load, flags warning signs before they become injuries, and adapts your training when something flares up. All over text.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -209,9 +209,9 @@ export default function Home() {
 
           <div className="grid gap-4 md:grid-cols-3 md:gap-6">
             {[
-              { step: "01", label: "Connect Strava", sub: "One tap — Coach Dean reads your full history and knows your fitness baseline from day one." },
-              { step: "02", label: "Dean reads every run and texts you what it means", sub: "Coaching note within minutes. Ask anything — heavy lift day, sore knee, weird HR — and your plan adjusts." },
-              { step: "03", label: "Train with confidence, not guesswork", sub: "Know when to push, when to back off, and why it's working." },
+              { step: "01", label: "Connect Strava", sub: "One tap. Coach Dean reads your full history and builds your load and injury risk profile from day one." },
+              { step: "02", label: "Dean watches every run for warning signs", sub: "Coaching note within minutes. Load spikes, grey-zone effort, form cues. Dean flags what matters before it becomes a problem. Mention a sore knee or missed run and your plan adjusts." },
+              { step: "03", label: "Train through the whole season", sub: "Not in cycles of training hard, getting hurt, and starting over. Stay consistent, stay healthy, and actually reach your goal." },
             ].map(({ step, label, sub }) => (
               <div key={step} className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
                 <span
@@ -235,18 +235,23 @@ export default function Home() {
         <div className="mx-auto max-w-5xl">
           <div className="mb-12 text-center">
             <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
-              A coach who reads your data and adapts to your life.
+              Prevention. Adaptation. Recovery.
             </h2>
             <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
-              Not &ldquo;great run!&rdquo; notifications. Actual analysis from your Strava data — and a real conversation when life gets in the way.
+              Whether you&apos;re trying to stay healthy, managing something that flared up, or rebuilding after time off. Coach Dean handles all three.
             </p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {["IT band syndrome", "shin splints", "plantar fasciitis", "stress reactions", "hip flexor pain", "achilles tendinopathy", "runner's knee", "hamstring strains"].map((injury) => (
+                <span key={injury} className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-500">{injury}</span>
+              ))}
+            </div>
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
             {/* Insight 1 — Injury sounding board (shin splints) */}
             <InsightCard
               context="After today's run"
-              tag="Injury sounding board"
+              tag="Injury prevention"
               tagColor="#dc2626"
               messages={[
                 { from: "user", text: "Left shin has been a bit sore the last two runs — not sharp, just there." },
@@ -254,24 +259,24 @@ export default function Home() {
               ]}
             />
 
-            {/* Insight 2 — Training calibration */}
+            {/* Insight 2 — Return to run */}
             <InsightCard
-              context="After Wednesday's 5.8mi run · 9:12/mi · 148ft gain"
-              tag="Training calibration"
-              tagColor="#9333ea"
+              context="After 2 weeks off with IT band pain"
+              tag="Return to run"
+              tagColor="#f97316"
               messages={[
-                { from: "dean", text: "Nice work getting this one in. That said, your last four runs have all landed at moderate effort — 148bpm average today puts you right in the grey zone again. No real easy days, no real hard day. That pattern builds fatigue without building much fitness. Try a genuinely easy 40 min tomorrow and Thursday's workout will land a lot better." },
+                { from: "user", text: "Knee felt fine on my test run yesterday. Safe to get back to normal?" },
+                { from: "dean", text: "Good sign, but one pain-free run doesn't mean the tissue is ready for full load. Three easy 20-minute runs this week, flat routes only, no tempo. If all three feel clean, we step back up next week. I'll check in after each one and have your IT band strengthening routine ready to go." },
               ]}
             />
 
-            {/* Insight 3 — Data interpretation */}
+            {/* Insight 3 — Training calibration */}
             <InsightCard
-              context="Reading your Garmin"
-              tag="What does this mean?"
-              tagColor="#16a34a"
+              context="After Wednesday's 5.8mi run · 9:12/mi · 148ft gain"
+              tag="Load monitoring"
+              tagColor="#9333ea"
               messages={[
-                { from: "user", text: "Easy run today felt fine but my HR averaged 162 and cadence was 168. Is that cadence too low?" },
-                { from: "dean", text: "168 is on the lower end but not a problem on its own — taller runners naturally sit closer to 165–170. The bigger signal is the 162 HR on what felt like an easy effort — that's drifting into moderate territory, which is the grey-zone trap. Slow the next two easy days by 30–45 sec/mi and you'll see HR drop into the low 150s where the aerobic adaptation actually happens." },
+                { from: "dean", text: "Your last four runs have all landed at moderate effort. 148bpm today puts you right in the grey zone again. No real easy days, no real hard day. That pattern builds fatigue without building fitness, and it's a common injury setup. Try a genuinely easy 40 min tomorrow and Thursday's workout will land a lot better." },
               ]}
             />
 
@@ -282,7 +287,7 @@ export default function Home() {
               tagColor="#0891b2"
               messages={[
                 { from: "user", text: "Just did a heavy leg day — squats and deadlifts. Should I still run my 6 tonight?" },
-                { from: "dean", text: "Skip the 6 tonight — running heavy after that lift is how achilles and hamstring stuff sneaks in. Move tonight to a 30-min easy spin or full rest, and we'll shift the 6 to Wednesday and bump Thursday's tempo to Friday so the legs get a real recovery window. Plan still works." },
+                { from: "dean", text: "Skip the 6 tonight. Running heavy after that lift is how achilles and hamstring stuff sneaks in. Move tonight to a 30-min easy spin or full rest, shift the 6 to Wednesday, and bump Thursday's tempo to Friday so the legs get a real recovery window. Plan still works." },
               ]}
             />
           </div>
@@ -307,10 +312,11 @@ export default function Home() {
                 <p className="font-serif text-lg font-normal text-gray-700">Apps alone</p>
               </div>
               <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Plan tells you what to do — nothing explains why</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Plan tells you what to do. Nothing explains why.</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> &ldquo;Workout Complete&rdquo; is the only feedback you get</li>
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Load builds blind — no one flags what&apos;s coming</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Load patterns go unnoticed until you&apos;re already sidelined</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> Injury questions go to Google</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> No one rebuilds your plan when you miss two weeks</li>
               </ul>
             </div>
 
@@ -321,15 +327,15 @@ export default function Home() {
                 <p className="font-serif text-lg font-normal">Coach Dean</p>
               </div>
               <ul className="text-sm leading-relaxed text-gray-300 flex-1 space-y-2">
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags load spikes and grey-zone patterns before they become injuries</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Prescribes rehab exercises and cross-training so you stay fit while you heal</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Rebuilds your plan around injuries, illness, or missed weeks</li>
+                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan you already have</li>
                 <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Explains what your HR, pace, and cadence actually mean</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Adapts when you lift, get sick, or skip three days</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Daily go/no-go sounding board for niggles and injuries</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Flags load patterns before they interrupt training</li>
-                <li className="flex gap-2"><span className="text-green-400 mt-0.5">✓</span> Works alongside Runna, TrainingPeaks, or any plan</li>
               </ul>
               <div>
-                <p className="text-sm font-medium text-gray-300">Free to start, then $10 / month</p>
-                <p className="text-xs text-gray-500 mt-0.5">Cancel anytime — no friction</p>
+                <p className="text-sm font-medium text-gray-300">Free to start, then $15 / month</p>
+                <p className="text-xs text-gray-500 mt-0.5">Cancel anytime, no friction</p>
               </div>
             </div>
 
@@ -340,7 +346,7 @@ export default function Home() {
                 <p className="font-serif text-lg font-normal text-gray-700">The gold standard</p>
               </div>
               <ul className="text-sm leading-relaxed text-muted-foreground flex-1 space-y-2">
-                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Weekly adaptation — requires a call to change anything</li>
+                <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Weekly adaptation; requires a call to change anything</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Detailed feedback, but often delayed</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">~</span> Scheduled calls &amp; email only</li>
                 <li className="flex gap-2"><span className="text-gray-300 mt-0.5">✗</span> High friction: schedules, logins, check-ins</li>
@@ -364,6 +370,18 @@ export default function Home() {
           <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:gap-x-8 md:gap-y-8">
             {[
               {
+                title: "Load and injury risk",
+                icon: (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <line x1="3" y1="20" x2="21" y2="20" />
+                    <rect x="4" y="15" width="2.5" height="5" />
+                    <rect x="8" y="12" width="2.5" height="8" />
+                    <rect x="12" y="8" width="2.5" height="12" />
+                    <rect x="16" y="5" width="2.5" height="15" fill="currentColor" />
+                  </svg>
+                ),
+              },
+              {
                 title: "Aerobic efficiency",
                 icon: (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -384,14 +402,14 @@ export default function Home() {
                 ),
               },
               {
-                title: "Load and injury risk",
+                title: "Cadence and form",
                 icon: (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <line x1="3" y1="20" x2="21" y2="20" />
-                    <rect x="4" y="15" width="2.5" height="5" />
-                    <rect x="8" y="12" width="2.5" height="8" />
-                    <rect x="12" y="8" width="2.5" height="12" />
-                    <rect x="16" y="5" width="2.5" height="15" fill="currentColor" />
+                    <circle cx="12" cy="5" r="2" />
+                    <path d="M12 7 L10 12 L7 14" />
+                    <path d="M12 7 L14 12 L17 14" />
+                    <path d="M10 12 L9 18" />
+                    <path d="M14 12 L15 18" />
                   </svg>
                 ),
               },
@@ -400,17 +418,6 @@ export default function Home() {
                 icon: (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M12 3 L13.9 8.6 L19.8 8.6 L15 12.1 L16.9 17.7 L12 14.2 L7.1 17.7 L9 12.1 L4.2 8.6 L10.1 8.6 Z" />
-                  </svg>
-                ),
-              },
-              {
-                title: "Weather and conditions",
-                icon: (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M7 18a4 4 0 1 1 1-7.87 5 5 0 0 1 9.78 1.43A3.5 3.5 0 0 1 17 18 Z" />
-                    <line x1="12" y1="3" x2="12" y2="5" />
-                    <line x1="4.5" y1="6.5" x2="5.9" y2="7.9" />
-                    <line x1="19.5" y1="6.5" x2="18.1" y2="7.9" />
                   </svg>
                 ),
               },
@@ -549,7 +556,7 @@ export default function Home() {
               },
               {
                 q: "How much does Coach Dean cost?",
-                a: "It's free for the first 7 days. Cancel with no penalties. After that, $10/mo on an annual plan or $20/mo month-to-month.",
+                a: "It's free for the first 7 days. Cancel with no penalties. After that, $15/mo.",
               },
               {
                 q: "What training philosophy does Coach Dean follow?",
@@ -597,10 +604,10 @@ export default function Home() {
       {/* Final CTA */}
       <section className="flex flex-col items-center gap-6 border-t px-6 py-16 text-center md:py-24">
         <h2 className="max-w-xl font-serif text-2xl font-normal md:text-3xl">
-          Ready to run smarter?
+          Stop losing weeks to injury.
         </h2>
         <p className="max-w-md text-muted-foreground leading-relaxed">
-          Your first 7 days are free. Cancel any time — no friction, no forms. Just text Coach Dean and go.
+          Your first 7 days are free. Tell Coach Dean where you&apos;re at: staying healthy, managing something that flared up, or rebuilding after time off. He&apos;ll take it from there.
         </p>
         <Suspense>
           <SignupForm smsPhone={smsPhone} centered />
