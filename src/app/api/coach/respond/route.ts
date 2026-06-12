@@ -2891,7 +2891,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // media failure must never break the coaching flow.
   if (wantsStrengthPoster && strengthPosterRoutineKey) {
     try {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+      // Linq requires a public HTTPS URL and re-hosts the image. NEXT_PUBLIC_APP_URL is
+      // http://localhost in dev — never send that; fall back to the prod origin so a
+      // misconfigured/dev env can't silently ship a broken (or rejected) poster URL.
+      const envUrl = process.env.NEXT_PUBLIC_APP_URL;
+      const appUrl = envUrl?.startsWith("https://") ? envUrl : "https://coachdean.ai";
       const posterUrl = `${appUrl}/strength-posters/${strengthPosterRoutineKey}.png`;
       const activeChatId = chatId ?? learnedChatId;
       if (activeChatId) await startTyping(activeChatId);
