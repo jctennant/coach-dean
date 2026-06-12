@@ -4,6 +4,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-11 — Wired strength-routine poster images into the coach flow
+
+**Type:** Feature
+**Reported by:** Continuation of personalized-strength-routines work
+**User feedback:** "I put all of the posters in /public/strength-posters — let's go for it!"
+**Root cause:** N/A — final step of the strength feature: athletes get the routine as text, but the "show them how" half (illustrated posters) needed wiring now that the images exist and the Linq media schema is confirmed.
+**Fix / Change:** Added a `[STRENGTH_POSTER]` signal token (mirrors `[REBUILD_PLAN]` etc.): when Dean lists the full strength routine, he appends the token; the system strips it before send and follows the text bubbles with the matching illustrated poster via `sendMediaSMS`. The poster URL is built absolute (`NEXT_PUBLIC_APP_URL/strength-posters/<routine_key>.png`) since Linq fetches and re-hosts it. The token instruction is only injected when a poster-backed routine is actually on file, so Dean never promises an image that doesn't exist. Send is best-effort (try/catch) so a media failure never breaks coaching, logs a `[Sent strength routine poster: <key>]` conversation row (`coach_response` type — no new message_type/migration needed), and fires a `strength_poster_sent` event. dry_run responses now surface `strength_poster: <key|null>` for testing. Verified all 13 posters in `/public/strength-posters` are valid PNGs matching the routine keys.
+**Files changed:** src/app/api/coach/respond/route.ts, src/lib/linq.ts (sendMediaSMS, prior entry)
+
+---
+
+## 2026-06-11 — Confirmed Linq outbound media schema + sendMediaSMS primitive
+
+**Type:** Feature
+**Reported by:** Strength-poster follow-up
+**User feedback:** N/A (continuation of the personalized-strength-routines work — needed to know whether the SMS channel can send images before building the poster send path)
+**Root cause:** The product only ever sent text parts via Linq; the outbound media schema was unconfirmed, blocking the strength-routine poster feature.
+**Fix / Change:** Probed the live Linq API (`scripts/test-linq-media.mjs`) and confirmed the outbound media shape on the first candidate: a `{ type: "media", url, mime_type }` part alongside the text part returns HTTP 201 over iMessage. Notable: Linq downloads the URL and re-hosts the image on its own CDN, so the media URL only needs to be publicly reachable at send time. Added a validated `sendMediaSMS(to, body, mediaUrl, mimeType)` primitive to `linq.ts` (factored the chatId extraction into a shared `extractChatId` helper reused by `sendSMS`). NOT yet wired into the coach flow — that waits on the poster images existing (sending a 404 URL fails the attachment).
+**Files changed:** src/lib/linq.ts, scripts/test-linq-media.mjs (new)
+
+---
+
 ## 2026-06-11 — Personalized strength routines: library, generator, and fixing the phantom routine path
 
 **Type:** Feature

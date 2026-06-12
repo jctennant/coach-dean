@@ -59,10 +59,18 @@ export async function sendSMS(
   // Log the full response so we can confirm the correct field name against real payloads.
   console.log("[linq] sendSMS response:", JSON.stringify(json));
 
-  // Try common field name patterns. Linq sends `to` as an array so the response
-  // may be an array or nested under data[]. Try both top-level and array shapes.
+  const chatId = extractChatId(json);
+  console.log("[linq] sendSMS chatId resolved:", chatId);
+
+  return { chatId };
+}
+
+/** Pull the chatId out of a Linq /chats response across its known shapes. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractChatId(json: any): string | null {
+  // Linq sends `to` as an array so the response may be an array or nested under data[].
   const first = Array.isArray(json) ? json[0] : (json?.data?.[0] ?? json?.chats?.[0] ?? null);
-  const chatId: string | null =
+  return (
     json?.chat_id ??
     json?.chatId ??
     json?.chat?.id ??
@@ -71,10 +79,46 @@ export async function sendSMS(
     first?.chat?.id ??
     first?.id ??
     json?.id ??
-    null;
+    null
+  );
+}
 
-  console.log("[linq] sendSMS chatId resolved:", chatId);
+/**
+ * Send an SMS/iMessage with an image (or other media) attachment via Linq.
+ *
+ * Schema confirmed against the live API (2026-06-11): a `{ type: "media", url, mime_type }`
+ * part alongside the optional text part. Linq downloads the URL and re-hosts it on its own
+ * CDN, so `mediaUrl` must be publicly reachable at send time (a 404 fails the attachment).
+ *
+ * Used to send strength-routine poster images. Returns the chatId like sendSMS.
+ */
+export async function sendMediaSMS(
+  to: string,
+  body: string,
+  mediaUrl: string,
+  mimeType = "image/png"
+): Promise<{ chatId: string | null }> {
+  const { apiKey, from } = getConfig();
 
+  const parts: Array<Record<string, string>> = [];
+  if (body) parts.push({ type: "text", value: body });
+  parts.push({ type: "media", url: mediaUrl, mime_type: mimeType });
+
+  const response = await fetch(LINQ_CHATS_URL, {
+    method: "POST",
+    headers: authHeaders(apiKey),
+    body: JSON.stringify({ from, to: [to], message: { parts } }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("[linq] sendMediaSMS error:", response.status, errorText);
+    throw new Error(`Linq API error: ${response.status}`);
+  }
+
+  const json = await response.json();
+  const chatId = extractChatId(json);
+  console.log("[linq] sendMediaSMS chatId resolved:", chatId);
   return { chatId };
 }
 

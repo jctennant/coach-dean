@@ -42,3 +42,6 @@ next-env.d.ts
 
 # eval results (timestamped run outputs — not committed)
 /evals/results/
+
+# Local backup of pre-compression strength posters (28MB) — not deployed
+assets/strength-posters-original/

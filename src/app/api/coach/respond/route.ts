@@ -5,7 +5,7 @@ import { estimateMaxHR } from "@/lib/hr-utils";
 import { buildHRZoneContext, deriveZones, type LTHRConfidence } from "@/lib/hr-zones";
 import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
-import { sendSMS, startTyping, typingDurationMs } from "@/lib/linq";
+import { sendSMS, sendMediaSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock, fetchActivityWeather } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
@@ -1703,12 +1703,16 @@ Use this data to:
   // This lets Dean say "keep up the heel drops" after a calf-heavy run without re-inventing exercises.
   // If no routine is stored yet but the athlete has an injury signal, generate one on the fly
   // (deterministic — no LLM) and persist it, so the read-path is live for existing users too.
+  // Captured from the strength block below so the send path can attach the matching
+  // poster image when Dean emits [STRENGTH_POSTER].
+  let strengthPosterRoutineKey: string | null = null;
   const strengthRoutineBlock = await (async () => {
     if (trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message") return "";
     const insights = (profile?.dashboard_insights as Record<string, unknown> | null) ?? null;
     let sr = (insights?.strength_recovery as {
       exercises?: Array<{ name: string; specs: string; reason?: string }>;
       frequency?: string;
+      routine_key?: string;
     } | null) ?? null;
 
     if (!sr?.exercises?.length) {
@@ -1731,8 +1735,12 @@ Use this data to:
     }
 
     if (!sr?.exercises?.length) return `\n\nNO STRENGTH ROUTINE STORED: No personalized routine is on file (no injury history was captured for this athlete). Do NOT imply a stored personalized routine exists. If the athlete asks about strength work, recommend the hip & core base protocol (see the HIP & CORE INJURY PREVENTION PROTOCOL block) — that's the strongest general evidence and benefits everyone.`;
+    strengthPosterRoutineKey = sr.routine_key ?? null;
     const lines = sr.exercises.map(ex => `- ${ex.name}: ${ex.specs}${ex.reason ? ` (${ex.reason})` : ""}`).join("\n");
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nWhen the athlete DIRECTLY ASKS about the strength routine, send the FULL routine in your response — list every exercise with complete specs (sets/reps/cues) and frequency. They need to see the details in the text. Otherwise (unprompted), reference it briefly when naturally relevant — e.g. after a run that stressed a known injury site, or in a weekly recap. Don't lecture about it unless there's a clear injury signal.`;
+    const posterNote = strengthPosterRoutineKey
+      ? `\nWHEN you list the FULL routine (above), append the token [STRENGTH_POSTER] at the very end of your message — the system strips it and texts the athlete an illustrated poster of this exact routine they can save or print. Only include the token when you actually list the routine; never otherwise.`
+      : "";
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nWhen the athlete DIRECTLY ASKS about the strength routine, send the FULL routine in your response — list every exercise with complete specs (sets/reps/cues) and frequency. They need to see the details in the text. Otherwise (unprompted), reference it briefly when naturally relevant — e.g. after a run that stressed a known injury site, or in a weekly recap. Don't lecture about it unless there's a clear injury signal.${posterNote}`;
   })();
 
   // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
@@ -2666,6 +2674,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const tagSessionSwapTo = tagSessionSwaps[0]?.to ?? null;
   // PHYSIO_REFERRAL: emitted when Dean refers the athlete to a physical therapist.
   const wantsPhysioReferral = /\[PHYSIO_REFERRAL\]/i.test(rawText);
+  // STRENGTH_POSTER: emitted when Dean lists the full strength routine — triggers a
+  // follow-up media message with the illustrated poster for that routine.
+  const wantsStrengthPoster = /\[STRENGTH_POSTER\]/i.test(rawText);
   // Structured action tags — parsed here, stripped before SMS send
   const weekOverrideMatch = rawText.match(/\[WEEK_OVERRIDE:\s*([^\]]+)\]/i);
   const tagWeekOverrideDays = weekOverrideMatch
@@ -2698,6 +2709,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .replace(/\[SESSION_SWAP[^\]]*\]/gi, "")
       .replace(/\[PHYSIO_REFERRAL\]/gi, "")
       .replace(/\[RTR_ADVANCE\]/gi, "")
+      .replace(/\[STRENGTH_POSTER\]/gi, "")
       .trim()
   );
   // correctMileageTotal catches math errors where Claude states a weekly total that
@@ -2766,7 +2778,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // Day-level session postprocessing removed — coach no longer assigns sessions to specific days.
   const coachMessage = stripBoilerplateSignoffs(volumeChecked);
 
-  if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
+  if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage, strength_poster: (wantsStrengthPoster && strengthPosterRoutineKey) ? strengthPosterRoutineKey : null });
 
   // Strava activity annotation — runs here (before [NO_REPLY] check) so it fires even when
   // Claude decides nothing new needs to be said (e.g. manual re-trigger of an already-analysed run).
@@ -2871,6 +2883,31 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       .from("users")
       .update({ linq_chat_id: learnedChatId })
       .eq("id", userId);
+  }
+
+  // Strength routine poster: Dean emitted [STRENGTH_POSTER] after listing the full routine,
+  // so follow the text with the illustrated poster image for that routine. Linq fetches the
+  // URL and re-hosts it, so it must be a publicly reachable absolute URL. Best-effort — a
+  // media failure must never break the coaching flow.
+  if (wantsStrengthPoster && strengthPosterRoutineKey) {
+    try {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+      const posterUrl = `${appUrl}/strength-posters/${strengthPosterRoutineKey}.png`;
+      const activeChatId = chatId ?? learnedChatId;
+      if (activeChatId) await startTyping(activeChatId);
+      await new Promise((r) => setTimeout(r, 1200));
+      await sendMediaSMS(user.phone_number, "", posterUrl, "image/png");
+      await supabase.from("conversations").insert({
+        user_id: userId,
+        role: "assistant",
+        content: `[Sent strength routine poster: ${strengthPosterRoutineKey}]`,
+        message_type: "coach_response",
+        strava_activity_id: activityId || null,
+      });
+      void trackEvent(userId, "strength_poster_sent", { routine_key: strengthPosterRoutineKey, trigger });
+    } catch (posterErr) {
+      console.error(`[coach/respond] strength poster send failed userId=${userId} routine=${strengthPosterRoutineKey}:`, posterErr);
+    }
   }
 
   void trackEvent(userId, "coaching_response_sent", { trigger, onboarding: false });
