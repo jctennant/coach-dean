@@ -3599,9 +3599,13 @@ function stripReasoningPreamble(text: string): string {
       /^The athlete is (asking|looking|trying|requesting|wondering)/im,
       /^I should (keep|answer|respond|address|be|make)/im,
       /^Key considerations:/im,
-      /^This is a (training|general|coaching|question|philosophy)/im,
-      /^(Let me|I'll|I need to) (think|answer|address|keep|make|write)/im,
+      /^This is a (training|general|coaching|question|philosophy|follow-up)/im,
+      /^(Let me|I'll|I need to) (think|answer|address|keep|make|write|read|check|look|scan)/im,
       /^Based on (the|this|their|what the athlete)/im,
+      /^(FOLLOW-UP IN AN ACTIVE THREAD|DIRECT QUESTION|RACE COMPLETION|LIFE UPDATE|TRAINING STATUS|CONFIRMATION)/,
+      /^Checking (THIS WEEK|the (thread|plan|conversation|history))/im,
+      /^What to do:/im,
+      /^Looking at (RECENT CONVERSATION|the thread|their|this)/im,
     ];
     if (reasoningMarkers.some(p => p.test(preamble.trim()))) {
       return text.slice(sepIdx + 5).trim(); // 5 = "\n---\n".length
@@ -3616,7 +3620,12 @@ function stripReasoningPreamble(text: string): string {
     /^The athlete is (asking|looking|trying|requesting|wondering)/i,
     /^I should (keep|answer|respond|address|be|make)/i,
     /^Key considerations:/i,
-    /^This is a (training|general|coaching|question|philosophy)/i,
+    /^This is a (training|general|coaching|question|philosophy|follow-up)/i,
+    /^I need to (read|check|look|scan|understand|think|assess)/i,
+    /^(FOLLOW-UP IN AN ACTIVE THREAD|DIRECT QUESTION|RACE COMPLETION|LIFE UPDATE|TRAINING STATUS|CONFIRMATION)/,
+    /^Checking (THIS WEEK|the (thread|plan|conversation|history))/i,
+    /^What to do:/i,
+    /^Looking at (RECENT CONVERSATION|the thread|their|this)/i,
   ];
   const paragraphs = text.split(/\n{2,}/);
   let firstCoachingPara = 0;
@@ -6686,11 +6695,9 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
         : '';
       return `The athlete just sent you a message. If you see multiple consecutive messages from them at the bottom of RECENT CONVERSATION, treat them as one thought — SMS sometimes splits long messages into segments.
 
-BEFORE WRITING ANYTHING — do these two things:
+Before writing your response, silently check: what has this conversation been about? Have you already given relevant advice? Is this a follow-up to your last message? Use that to shape your reply — but do NOT output this reasoning. The first thing you write is the coaching message itself.
 
-1. READ THE THREAD. Scan RECENT CONVERSATION. What has this conversation been about so far? What advice have you already given in this thread? What did the athlete ask before, and did your response actually address it?
-
-2. IDENTIFY WHAT THIS MESSAGE IS. Then respond accordingly:
+Respond based on what type of message this is:
 
 RACE COMPLETION — override everything else: If the athlete's message indicates they just raced or finished a race today (e.g. "today was the big day", "just raced", "finished the marathon/half/10k", "race day was today"), your FIRST sentence MUST be explicit, warm congratulations naming the race — e.g. "Huge — congrats on race day! 🎉" Ask how it went. Do NOT lead with data analysis. Save the debrief for after they share how it felt.
 

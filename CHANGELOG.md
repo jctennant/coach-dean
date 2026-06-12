@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-11 — Internal reasoning leaking into SMS messages
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (conversation log review)
+**User feedback:** N/A
+**Root cause:** The `user_message` system prompt contained a "BEFORE WRITING ANYTHING — do these two things:" block with numbered steps (READ THE THREAD, IDENTIFY WHAT THIS MESSAGE IS). Claude occasionally treated this as a scratchpad template and echoed the step labels verbatim in output (e.g. "This is a FOLLOW-UP IN AN ACTIVE THREAD...", "I need to read the thread first...", "What to do:..."). The `stripReasoningPreamble` safety net didn't catch these specific patterns.
+**Fix / Change:** (1) Rewrote the prompt preamble to remove the numbered-steps structure — replaced with a single instruction to check the thread silently before writing. (2) Added missing patterns to `stripReasoningPreamble`/`reasoningMarkers` for the leaked phrases: "I need to read/check...", "FOLLOW-UP IN AN ACTIVE THREAD", "What to do:", "Checking THIS WEEK'S PLAN:", "Looking at RECENT CONVERSATION...".
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-06-10 — Dean recited "I'll track your shin" instead of acting on it
 
 **Type:** Bug Fix
