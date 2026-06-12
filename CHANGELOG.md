@@ -4,6 +4,50 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-11 — Evidence-based injury-prevention section (research credibility + AEO)
+
+**Type:** Feature
+**Reported by:** Internal / growth
+**User feedback:** "These are some of the top reasons runners get injured supported by research — we can incorporate a section about the research on running injuries / RCTs too? … I want to basically say we cover the top 5 things that keep runners healthy / help you stay on track."
+**Root cause:** The page asserted injury-prevention positioning but offered no external evidence backing it, and wasn't capturing high-intent "what causes running injuries" search/answer-engine traffic. Each of the five research-backed levers maps to a capability the product genuinely has, but that connection was never made explicit.
+**Fix / Change:**
+- Added a "Backed by the research — the five things that actually keep runners healthy" section between "How it works" and the example conversations. Five cards, each pairing a sourced research stat with the matching Coach Dean capability: (1) single-session load spikes (+128% risk, Garmin-RUNSAFE 5,205 runners), (2) prior injury history (2–6× risk), (3) hip & core strength (−34% injuries, Run RCT / Leppänen BJSM 2024), (4) sleep (1.7× risk), (5) structured/graduated plans (Linton et al. 2025 scoping review, 106 studies). Closes with the interaction-effect point (the levers aren't independent — Coach Dean holds the full context).
+- Verified each claim against the code before writing it: load/milestone monitoring from Strava, injury history captured in onboarding (and weighted conservatively), strength work + weekly "any strength work in?" check, weekly sleep/energy check-in (`avg_sleep_hours` extracted/stored in onboarding/handle and coach/respond), and structured periodized VDOT plans.
+- Added a "What are the most common causes of running injuries?" entry to both the visible FAQ and the FAQPage JSON-LD to capture that query for SEO/AEO.
+**Files changed:** src/app/page.tsx
+
+---
+
+## 2026-06-11 — Hero declutter + more natural mockup conversation
+
+**Type:** Improvement
+**Reported by:** Internal review
+**User feedback:** "top landing page section feels too crowded - can we cut copy by like 50% and adjust the animation so the copy actually makes sense in this context and doesn't look like it was written by AI?"
+**Root cause:** The hero had accumulated three stacked copy blocks (H1 + a three-clause subhead + a "Tell Coach Dean where you're at" micro-prompt list), which crowded the column next to the phone mockup. The subhead used the AI-tell triad structure ("monitors X, flags Y, adapts Z. All over text."). The mockup conversation opened with a "Great run today!" praise-bomb and a 💪 emoji, reading generated rather than like a real coach thread, and didn't sit naturally alongside the hero message.
+**Fix / Change:**
+- **Hero** (`page.tsx`): cut copy ~55%. Shortened H1 to "An expert running coach who keeps you healthy.", replaced the triad subhead with one human line ("…reads every run you do and texts you back like a coach who's actually paying attention — catching the small stuff before it sidelines you."), and removed the micro-prompt list from the hero (that messaging already lives in the final CTA).
+- **Mockup** (`imessage-mockup.tsx`): rewrote the 5-message thread so Dean opens proactively (he saw the run + flagged elevated HR), listens to the knee report, adjusts tomorrow's session, and ties back to the goal race (CIM). Dropped the praise-bomb opener and the emoji so it reads like a real coaching conversation.
+**Files changed:** src/app/page.tsx, src/components/imessage-mockup.tsx
+
+---
+
+## 2026-06-11 — Landing page ICP sharpening + SEO/AEO improvements
+
+**Type:** Improvement
+**Reported by:** Internal review / growth feedback
+**User feedback:** "The page is in solid shape — the hero headline is already pointing the right direction. But there are meaningful gaps for the ICP (serious recreational runners with a race goal managing an active/recent injury). SEO/AEO needs work — not getting many hits. A runner googling their injury searches 'IT band not getting better,' 'return to running after stress fracture,' not 'AI running coach.'"
+**Root cause:** (1) Page metadata was generic ("An AI-powered running coach that connects to Strava and coaches you via SMS") with no injury/recovery search language, no keywords, no structured data — invisible to the injury-specific searches the ICP actually runs, and uneligible for FAQ rich results / AI answer-engine citation. (2) The hero's strongest conversion copy (the three "where you're at" micro-prompts) was buried in the footer. (3) The social-proof marquee diluted the ICP signal with mass-market beginner terms ("Couch to 5K", "Mile time trial", "5K PR"). (4) Strength/mobility work — a core part of the product and a major ICP hook (the thing their PT keeps telling them to do) — was nearly invisible.
+**Fix / Change:**
+- **SEO metadata** (`layout.tsx`): rewrote title → "Coach Dean — AI Running Coach for Injury-Free Race Training", injury-specific description, added `keywords` (injury prevention, return to running after injury, shin splints, IT band, stress fracture recovery, etc.), canonical URL, robots index/follow, and a Twitter summary_large_image card.
+- **AEO structured data** (`page.tsx`): added `SoftwareApplication` + `FAQPage` JSON-LD (`@graph`) so the existing FAQ content is eligible for Google rich results and citable by AI answer engines. Includes new Q&As for "Can Coach Dean help me return to running after an injury?" and "Does Coach Dean include strength training?".
+- **Hero** (`page.tsx`): sharpened H1 to "...keep you healthy — all the way to race day." and pulled the three micro-prompts (staying healthy through a high-mileage block / managing something nagging / coming back after time off) up from the footer into the hero under the CTA.
+- **Marquee** (`race-marquee.tsx`): replaced beginner/mass-market terms with serious + comeback signals (Sub-3 marathon, Comeback after IT band syndrome, Rebuilding after shin splints, Healthy through marathon block).
+- **Strength visibility** (`page.tsx`): added two insight cards — a "Strength & mobility" accountability prompt and a "Plan rebuild" after missed time card — both grounded in real product behavior (strength block + silent plan rebuild).
+- **Technical SEO** (`sitemap.ts`, `robots.ts`): added a sitemap and robots.txt (previously neither existed) — sitemap lists the indexable marketing pages; robots allows crawling while disallowing `/api/`, `/dashboard`, `/checkout`, `/cancel`.
+**Files changed:** src/app/layout.tsx, src/app/page.tsx, src/components/race-marquee.tsx, src/app/sitemap.ts (new), src/app/robots.ts (new)
+
+---
+
 ## 2026-06-11 — Internal reasoning leaking into SMS messages
 
 **Type:** Bug Fix

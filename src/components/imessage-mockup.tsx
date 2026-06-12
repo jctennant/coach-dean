@@ -6,27 +6,27 @@ const MESSAGES = [
   {
     id: 0,
     from: "dean" as const,
-    text: "Great run today! 5.2 mi in 42:18 — that's an 8:08/mi pace, right in your easy zone.",
+    text: "Saw your 6 this morning. HR ran a little high for an easy day — everything feel alright?",
   },
   {
     id: 1,
     from: "user" as const,
-    text: "My left knee was tight around mile 3.",
+    text: "Left knee was a bit tight around mile 3.",
   },
   {
     id: 2,
     from: "dean" as const,
-    text: "This looks like carryover from Tuesday's tempo — you pushed pace about 12% above easy. Roll your IT band for 5 min tonight. If it's still there tomorrow we'll swap the long run for a bike day and keep your week on track.",
+    text: "Let's not push it then. Roll it tonight and I'll move tomorrow's run to an easy bike so it settles. Probably just carryover from Tuesday's tempo.",
   },
   {
     id: 3,
     from: "user" as const,
-    text: "Will do. What's on the schedule tomorrow?",
+    text: "Sounds good. Still on for the long run Saturday?",
   },
   {
     id: 4,
     from: "dean" as const,
-    text: "Rest day — you've earned it. Wednesday is 4x800m at 7:15 pace. We're building toward that half marathon PR. 💪",
+    text: "Yep — 12 easy. If the knee's quiet by Thursday we're right where we need to be for CIM.",
   },
 ];
 

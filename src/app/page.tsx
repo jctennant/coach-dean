@@ -166,6 +166,125 @@ function InsightCard({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Structured data (SEO / AEO)                                         */
+/*  FAQPage + SoftwareApplication JSON-LD so search engines and AI       */
+/*  answer engines can surface Coach Dean for injury/training queries.   */
+/* ------------------------------------------------------------------ */
+
+const FAQ_JSONLD = [
+  {
+    q: "Can Coach Dean actually prevent running injuries?",
+    a: "Coach Dean catches the patterns that precede most running injuries — load spikes, declining aerobic efficiency, and grey-zone effort distribution — and flags them early so you can act conservatively. He's not a physio and can't diagnose, but he's the early warning system most runners are missing. When something flares up, he prescribes rehab exercises for common injuries like IT band syndrome, shin splints, plantar fasciitis, and hip flexor tightness, and swaps affected sessions for cross-training so your fitness doesn't evaporate while you recover.",
+  },
+  {
+    q: "Can Coach Dean help me return to running after an injury?",
+    a: "Yes. Coach Dean is built for runners coming back from injury or time off. He rebuilds your plan around a gradual return to load, prescribes the strengthening work your PT keeps recommending, and checks in after each run to make sure tissue is ready before you step volume back up.",
+  },
+  {
+    q: "What are the most common causes of running injuries?",
+    a: "Research consistently points to five factors: sudden spikes in running load (a long run well beyond what you've recently done), a previous injury in the last 12 months (the single strongest predictor), weak hips and core, chronically short sleep, and unstructured, ad-hoc training. Coach Dean is built around all five — he flags load spikes from Strava in real time, weighs your injury history, builds hip and core strength into your week, checks your sleep and recovery, and keeps your plan gradual and structured. The edge is holding all of it at once.",
+  },
+  {
+    q: "I already use Runna or TrainingPeaks. Do I need Coach Dean?",
+    a: "Yes — this is our most common use case. Runna or TrainingPeaks gives you the plan; Coach Dean gives you the intelligence layer on top of it: a coaching note after every run, load monitoring, and a direct line for training questions over text. Text him a PDF of your plan and he'll ingest it and reference it directly when giving feedback.",
+  },
+  {
+    q: "What type of races can Coach Dean help me prepare for?",
+    a: "Coach Dean can build training plans for 5Ks all the way up to ultramarathons, including half marathons, full marathons, and trail races. Not sure what distance is right for you? Tell Coach Dean where you're at and he'll help you figure it out.",
+  },
+  {
+    q: "Do I need Strava or a GPS watch?",
+    a: "No — all you need is a phone number. But connecting Strava unlocks the best version of Coach Dean: he pulls your full activity history to build a real picture of your fitness before your first plan is written, and sends coaching feedback within minutes of every run finishing. Without Strava, he asks for a recent race time or your comfortable conversational pace and calculates your training zones from there.",
+  },
+  {
+    q: "Does Coach Dean include strength training?",
+    a: "Yes. Coach Dean weaves targeted strength and mobility work into your week — hip, glute, and calf work that protects your knees, IT band, and achilles — and holds you accountable to it instead of leaving it as something you know you should do. When you're injured, the strengthening routine is built directly into your return-to-running progression.",
+  },
+  {
+    q: "What happens if I miss a workout or need to take a week off?",
+    a: "Just tell Coach Dean — text him like you'd text a coach. Whether you missed a run, got sick, or needed a mental break, he adjusts your upcoming week and rebuilds the ramp so you ease back in instead of cramming the missed miles, keeping you on track toward your goal race.",
+  },
+  {
+    q: "How much does Coach Dean cost?",
+    a: "It's free for the first 7 days, then $15/month. Cancel anytime with no penalties.",
+  },
+  {
+    q: "What training philosophy does Coach Dean follow?",
+    a: "Polarized 80/20 training, Lydiard-style aerobic base building, and Jack Daniels VDOT pacing, with targeted strength and mobility work woven in. The specifics are always adapted to your fitness, schedule, and goal race.",
+  },
+];
+
+const STRUCTURED_DATA = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      name: "Coach Dean",
+      applicationCategory: "HealthApplication",
+      operatingSystem: "iOS, Android, Web",
+      url: "https://coachdean.ai",
+      description:
+        "An AI running coach that connects to Strava and coaches you over text — flagging injury risk early, prescribing rehab and strength work, and rebuilding your plan around injuries or missed time so you reach race day healthy.",
+      offers: {
+        "@type": "Offer",
+        price: "15.00",
+        priceCurrency: "USD",
+        description: "Free for the first 7 days, then $15/month. Cancel anytime.",
+      },
+    },
+    {
+      "@type": "FAQPage",
+      mainEntity: FAQ_JSONLD.map(({ q, a }) => ({
+        "@type": "Question",
+        name: q,
+        acceptedAnswer: { "@type": "Answer", text: a },
+      })),
+    },
+  ],
+};
+
+/* ------------------------------------------------------------------ */
+/*  Evidence-based injury-prevention levers                            */
+/*  Each maps a research finding to a real Coach Dean capability.       */
+/* ------------------------------------------------------------------ */
+
+const LEVERS = [
+  {
+    num: "01",
+    value: "+128%",
+    label: "injury risk from one overlong run",
+    lever: "Sudden load spikes",
+    finding:
+      "In the Garmin-RUNSAFE study of 5,205 runners, a single run more than 100% longer than your longest in the past 30 days doubled injury risk. Even a 10–30% jump raised it 64%.",
+    coachDean:
+      "reads every run from Strava and flags a load spike the moment it happens — before you stack another hard day on top of it.",
+    source: "Garmin-RUNSAFE study · 5,205 runners",
+  },
+  {
+    num: "02",
+    value: "2–6×",
+    label: "higher risk after a recent injury",
+    lever: "A recent injury",
+    finding:
+      "A running injury in the last 12 months is the single strongest predictor of the next one. Nearly half of new injuries strike within two weeks of an earlier problem — often from rushing back too soon.",
+    coachDean:
+      "asks about your injury history before writing a single workout, and stays more conservative with your load because of it.",
+    source: "Epidemiological reviews of running-related injury",
+  },
+  {
+    num: "03",
+    value: "−34%",
+    label: "fewer injuries with hip & core work",
+    lever: "Hip & core strength",
+    finding:
+      "In a 2024 randomized controlled trial, a guided hip-and-core routine cut lower-body injuries 34% and substantial overuse injuries 52% versus stretching — but only when someone kept runners accountable to it.",
+    coachDean:
+      "builds hip, glute, and core work into your week and checks that you're actually doing it — the accountability the research says is the whole point.",
+    source: "Run RCT · Leppänen et al., BJSM 2024",
+  },
+];
+
+/* ------------------------------------------------------------------ */
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -174,6 +293,10 @@ export default function Home() {
   const smsUrl = `sms:${smsPhone}?body=Hi Coach Dean!`;
   return (
     <div className="flex min-h-screen flex-col" style={{ minHeight: "100vh" }}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+      />
       <Navbar smsUrl={smsUrl} />
 
       {/* Hero */}
@@ -182,10 +305,10 @@ export default function Home() {
           {/* Text + form */}
           <div className="flex flex-1 flex-col items-center gap-6 text-center md:items-start md:text-left" style={{ maxWidth: 480 }}>
             <h1 className="font-serif text-4xl font-normal leading-tight tracking-tight md:text-5xl lg:text-5xl">
-              An expert running coach designed to keep you healthy.
+              An expert running coach who keeps you healthy.
             </h1>
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
-              Most runners don&apos;t quit. They get hurt. Coach Dean monitors your load, flags warning signs before they become injuries, and adapts your training when something flares up. All over text.
+              Coach Dean reads every run you do and texts you back like a coach who&apos;s actually paying attention — catching the small stuff before it sidelines you.
             </p>
             <Suspense>
               <SignupForm smsPhone={smsPhone} />
@@ -227,6 +350,49 @@ export default function Home() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Research — the five evidence-based injury-prevention levers */}
+      <section className="border-t px-6 py-16 md:py-24">
+        <div className="mx-auto max-w-4xl">
+          <div className="mb-12 text-center">
+            <p className="mb-3 text-sm uppercase tracking-widest text-muted-foreground">Backed by the research</p>
+            <h2 className="mb-4 font-serif text-2xl font-normal md:text-3xl">
+              The three things that actually keep runners healthy.
+            </h2>
+            <p className="mx-auto max-w-xl leading-relaxed text-muted-foreground">
+              Most running injuries trace back to the same handful of factors. Coach Dean is built around the three with the strongest evidence behind them.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            {LEVERS.map(({ num, value, label, lever, finding, coachDean, source }) => (
+              <div key={num} className="rounded-2xl border border-gray-200 bg-white p-6 md:p-7">
+                <div className="flex flex-col gap-5 md:flex-row md:gap-8">
+                  {/* Stat */}
+                  <div className="flex shrink-0 items-baseline gap-3 md:w-44 md:flex-col md:items-start md:gap-1">
+                    <span className="font-mono text-xs text-gray-300">{num}</span>
+                    <span className="font-serif text-4xl leading-none text-[#1a5c35]">{value}</span>
+                    <span className="text-xs leading-snug text-muted-foreground">{label}</span>
+                  </div>
+                  {/* Body */}
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900">{lever}</p>
+                    <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{finding}</p>
+                    <p className="mt-3 text-sm leading-relaxed text-gray-800">
+                      <span className="font-medium text-[#1a5c35]">Coach Dean</span> {coachDean}
+                    </p>
+                    <p className="mt-3 text-xs text-gray-400">{source}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="mx-auto mt-10 max-w-2xl text-center text-sm leading-relaxed text-muted-foreground">
+            None of these work in isolation. A runner three weeks off an injury who spikes their long run on Saturday is in a completely different place than someone fresh and healthy doing the exact same run. Coach Dean holds all of it at once — that&apos;s the edge.
+          </p>
         </div>
       </section>
 
@@ -288,6 +454,28 @@ export default function Home() {
               messages={[
                 { from: "user", text: "Just did a heavy leg day — squats and deadlifts. Should I still run my 6 tonight?" },
                 { from: "dean", text: "Skip the 6 tonight. Running heavy after that lift is how achilles and hamstring stuff sneaks in. Move tonight to a 30-min easy spin or full rest, shift the 6 to Wednesday, and bump Thursday's tempo to Friday so the legs get a real recovery window. Plan still works." },
+              ]}
+            />
+
+            {/* Insight 5 — Strength accountability */}
+            <InsightCard
+              context="Tuesday · intervals Thursday"
+              tag="Strength & mobility"
+              tagColor="#1a5c35"
+              messages={[
+                { from: "dean", text: "You've got intervals Thursday, so today's your window for the strength work that actually protects your knees. 15 min: single-leg squats, hip bridges, calf raises, and the side planks for your IT band. I'll keep this in your week every Tuesday so it doesn't slip — it's the stuff that keeps you running." },
+                { from: "user", text: "Honestly the part I always skip. Thanks for the nudge." },
+              ]}
+            />
+
+            {/* Insight 6 — Plan rebuild after missed time */}
+            <InsightCard
+              context="After 9 days off · head cold"
+              tag="Plan rebuild"
+              tagColor="#2563eb"
+              messages={[
+                { from: "user", text: "Finally feeling better. I lost a week and a half — am I behind?" },
+                { from: "dean", text: "Not behind, just adjusting. I've rebuilt the next two weeks so you ease back in instead of jumping to where the old plan had you. Easy 3 tomorrow, then we rebuild volume gradually. Your race date still works — I recalculated the ramp. No need to cram the missed miles." },
               ]}
             />
           </div>
@@ -514,6 +702,15 @@ export default function Home() {
                   <>
                     <p>Coach Dean is genuinely good at catching the patterns that precede most running injuries: load spikes, declining aerobic efficiency, and grey-zone effort distribution. He flags them early so you can act conservatively. He&apos;s not a physio and can&apos;t diagnose anything, but he&apos;s the early warning system most runners are missing.</p>
                     <p className="mt-3">When something does flare up, Coach Dean will prescribe specific rehab exercises for common running injuries (IT band, shin splints, plantar fasciitis, hip flexor tightness) and swap affected sessions for cross-training alternatives like pool running, cycling, or the elliptical so your fitness doesn&apos;t evaporate while you recover. The goal is to stay in training, not just to rest and hope.</p>
+                  </>
+                ),
+              },
+              {
+                q: "What are the most common causes of running injuries?",
+                a: (
+                  <>
+                    <p>The research keeps landing on the same handful of factors: a sudden spike in running load (a long run well beyond what you&apos;ve recently done), a previous injury in the last 12 months, weak hips and core, chronically short sleep, and unstructured, ad-hoc training.</p>
+                    <p className="mt-3">Coach Dean is built around all five. He watches your load on Strava and flags spikes in real time, weighs your injury history when setting your plan, builds hip and core strength work into your week, checks in on your sleep and recovery, and keeps your training gradual and structured. The edge is holding all of it at once: the same big Saturday long run is a very different risk if you&apos;re also under-slept and three weeks off an injury.</p>
                   </>
                 ),
               },

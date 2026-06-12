@@ -1768,12 +1768,17 @@ Do NOT surface this every message. Once is enough — reinforce only 4+ weeks la
   // reply read like a real coach: data-driven opener, one concrete individualized takeaway,
   // injury/load as the priority lens, no filler. Only for run-review triggers — plans and
   // reminders have their own structure rules.
+  const proactiveOutputContract = !["post_run", "user_message"].includes(trigger)
+    ? `\n\nOUTPUT CONTRACT — read this last, check before sending:
+NO SIGN-OFFS. Never end with "Let me know if you have questions", "Feel free to reach out", "Don't hesitate to ask", "You've got this!", or any variation. The message ends on the coaching point. If the athlete wants to follow up, they will.
+NO GENERIC OPENERS. Never start with "Great week!", "Nice work!", "Awesome session!" or any praise that isn't tied to a specific data observation.`
+    : "";
   const outputContract = (trigger === "post_run" || trigger === "user_message")
     ? `\n\nOUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
-1. OPEN WITH THE INSIGHT, NOT A GREETING OR PRAISE. When you're reading a run or how their training is going, the first sentence states the specific thing THIS athlete's data shows and what it MEANS — never "Nice work", "Great job", "Saw your run come through". A number alone is not an insight; pair it with an interpretation. Bad: "Solid run, 8:58/mi!" Good: "8:58/mi at 153 bpm — that's 38s/mi quicker than the same effort last month, so the base work is paying off."
-2. ONE CONCRETE, INDIVIDUALIZED TAKEAWAY — a specific next session, adjustment, watch-point, or test tied to where THIS athlete is right now. Never generic filler that would fit any runner ("keep it easy", "stay consistent", "listen to your body", "nice base-building"). If you wrote a sentence that's true for everyone, replace it with one that's true for them.
-3. INJURY & LOAD ARE THE PRIORITY LENS. If LOAD CONTEXT shows a spike or a recovery signal, or the athlete mentioned any tightness/soreness/pain (now or recently), lead with or weave in the specific load-management or recovery read — even unprompted. That proactive injury-prevention insight is the highest-value thing you can give them. Translate load numbers into plain English; never cite raw "units".
-4. NO FILLER. Cut generic praise, recaps of what you just said, and sign-offs ("Keep it up", "You've got this", "Let me know if..."). End on the coaching point, not after it.
+1. NO SIGN-OFFS OR FILLER. The LAST sentence is the coaching point — never "Let me know if you have questions", "Feel free to reach out", "You've got this!", "Keep it up", "Keep the momentum going." Cut anything that would appear in a form letter. This is the most important rule.
+2. OPEN WITH THE INSIGHT, NOT A GREETING OR PRAISE. When you're reading a run or how their training is going, the first sentence states the specific thing THIS athlete's data shows and what it MEANS — never "Nice work", "Great job", "Saw your run come through". A number alone is not an insight; pair it with an interpretation. Bad: "Solid run, 8:58/mi!" Good: "8:58/mi at 153 bpm — that's 38s/mi quicker than the same effort last month, so the base work is paying off."
+3. ONE CONCRETE, INDIVIDUALIZED TAKEAWAY — a specific next session, adjustment, watch-point, or test tied to where THIS athlete is right now. Never generic filler that would fit any runner ("keep it easy", "stay consistent", "listen to your body", "nice base-building"). If you wrote a sentence that's true for everyone, replace it with one that's true for them.
+4. INJURY & LOAD ARE THE PRIORITY LENS. If LOAD CONTEXT shows a spike or a recovery signal, or the athlete mentioned any tightness/soreness/pain (now or recently), lead with or weave in the specific load-management or recovery read — even unprompted. That proactive injury-prevention insight is the highest-value thing you can give them. Translate load numbers into plain English; never cite raw "units".
 5. If the athlete asked a narrow question, answer it precisely and stop — don't pad to hit these. Specificity beats completeness.`
     : "";
   const systemDynamic = builtPrompt.dynamic + aerobicTrendBlock + strengthRoutineBlock + hipCoreProtocolBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + (coachingFocus
@@ -1787,7 +1792,7 @@ Focus: ${coachingFocus}
 Apply this to bias which metric lens you pick and what advice you give proactively. When in doubt, respect what the athlete said they want.`
     : "") + (uploadedPlanContext
     ? `\n\nATHLETE'S UPLOADED TRAINING PLAN (for reference — use this when they ask about their plan, upcoming workouts, or weekly structure; do NOT reproduce it in full; answer specific questions from it directly):\n${uploadedPlanContext}`
-    : "") + outputContract;
+    : "") + outputContract + proactiveOutputContract;
 
   // For weekly_recap and user_message, fetch the stored training plan.
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
@@ -2736,7 +2741,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   );
 
   // Day-level session postprocessing removed — coach no longer assigns sessions to specific days.
-  const coachMessage = volumeChecked;
+  const coachMessage = stripBoilerplateSignoffs(volumeChecked);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -3487,19 +3492,26 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
 
   // Patterns that state a weekly total — replace the number if wrong
   // Handles: "10 miles total", "Total: 10mi", "stays at 10 miles", "~10mi total", etc.
+  // (?<!-|to ) guards against matching the upper bound of ranges like "20-25 miles" or "20 to 25 miles".
   const totalPatterns: RegExp[] = [
-    /(Total:\s*~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?[ \t]*(?:total|this week|for the week))/gi,
-    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(stays?\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(staying\s+at\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(?<!-)(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(Total:\s*~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?[ \t]*(?:total|this week|for the week))/gi,
+    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(stays?\s+at\s+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(staying\s+at\s+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
   ];
 
   let corrected = message;
   for (const pattern of totalPatterns) {
-    corrected = corrected.replace(pattern, (full, pre, num, post) => {
+    corrected = corrected.replace(pattern, (full, pre, num, post, offset, str) => {
       const stated = parseFloat(num);
+      // Don't correct the upper bound of a word range like "20 to 25 miles this week".
+      // The negative lookbehind catches "to " (3 chars) but not longer phrases like "up to ".
+      // Belt-and-suspenders: also check the 8 chars before the matched number in the string.
+      const numStart = offset + pre.length;
+      const before = str.slice(Math.max(0, numStart - 8), numStart);
+      if (/\bto\s+$/.test(before)) return full;
       // Already correct — stated matches the full week total
       if (Math.abs(stated - correctTotal) <= 0.4) return full;
       // Stated matches already-completed miles — Claude is correctly reporting current
@@ -3640,6 +3652,29 @@ function stripReasoningPreamble(text: string): string {
   }
 
   return text;
+}
+
+/**
+ * Strip chatbot sign-off sentences that occasionally appear at the end of responses
+ * despite prompt instructions. These never add value and undermine the coaching voice.
+ * Only strips sentence-final occurrences so mid-sentence paraphrases aren't affected.
+ */
+function stripBoilerplateSignoffs(text: string): string {
+  const signoffPatterns = [
+    // "Let me know if..." / "Feel free to let me know..." / "Don't hesitate to..."
+    /[.!]?\s*(?:(?:Feel free to |Don't hesitate to )?[Ll]et me know if (?:you have|there(?:'s| is)|you need|you want)[^.!?]*[.!?]?)/g,
+    // "Feel free to reach out / ask / text..."
+    /[.!]?\s*Feel free to (?:reach out|ask|text me|message)[^.!?]*[.!?]?/gi,
+    // "If you have any (other) questions..."
+    /[.!]?\s*If you (?:have|need|want) (?:any (?:other |more )?)?questions?[^.!?]*[.!?]?/gi,
+    // "Reply (?:anytime|if)..." style
+    /[.!]?\s*Reply (?:anytime|if you)[^.!?]*[.!?]?/gi,
+  ];
+  let cleaned = text;
+  for (const pattern of signoffPatterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+  return cleaned.trim();
 }
 
 function splitIntoMessages(text: string): string[] {
@@ -6594,7 +6629,7 @@ Pick a DIFFERENT lens from the menu below. If the only available lens for this r
    PACING ALTERNATIVE (use when wrist HR artifact risk was flagged, or when you'd otherwise repeat a Z3 correction): If the athlete's recent easy runs are visible in RECENT WORKOUTS, reference their typical easy-run pace instead of HR zone. Example: "This came in at 9:10/mi — your recent easy runs have averaged 9:30-9:50/mi, so a bit on the brisker side. How did it feel?" This is more actionable than wrist HR zones and doesn't require a chest strap.
    a) HR zone (use bpm ceiling from HEART RATE ZONES block, never raw percentages):
       - Z1/Z2 (easy, aerobic base): Affirm AND explain what it builds — never just name the zone. "HR held at 138 — that's your aerobic base zone, where your body is building the engine for everything else. This is exactly what easy miles are for." Vary the angle across consecutive runs; don't give the same Z2 affirmation every time.
-      - Z3 (gray zone, moderate): Use this lens sparingly. ONLY flag Z3 when: (a) wrist HR artifact risk was NOT flagged, AND (b) "Z3 gray zone / run easier advice" does NOT appear in RECENT INSIGHTS. When you do flag it, frame as an observation + question, not a prescription — "HR ran a bit above easy effort today (around [bpm]). Was that intentional, or just how it felt?" If the athlete responds that they prefer running at that intensity, respect it — never repeat the slow-down advice after they've acknowledged it. Do NOT say "most athletes drift into this" — it's condescending. Skip this lens if you're at risk of harping.
+      ${recentPostRunInsights.includes("Z3 gray zone / run easier advice") ? `- Z3 (gray zone, moderate): SKIP — you already flagged this recently. Use the PACING ALTERNATIVE above (reference their typical easy-run pace) or pick a different lens entirely.` : `- Z3 (gray zone, moderate): Use this lens at most once per week per athlete. Frame as an observation + question, not a prescription — "HR ran a bit above easy effort today (around [bpm]). Was that intentional, or just how it felt?" If the athlete responds that they prefer running at that intensity, respect it — never repeat the slow-down advice. Do NOT say "most athletes drift into this." Skip if wrist HR artifact risk was flagged above.`}
       - Z4/Z5 (threshold/near-max): Appropriate for quality sessions — affirm if prescribed, flag if it was supposed to be easy.
    b) Cardiac drift (cardiac_decoupling_pct in activity JSON):
       Always cite the exact % AND translate it to plain English — never state the number without its meaning. Skip entirely if not in activity JSON. If HR artifact risk was flagged in DATA AVAILABILITY GUARD, add a brief caveat — "drift numbers can be affected by wrist sensor artifacts, so treat this as directional."
@@ -6635,16 +6670,19 @@ EXECUTION CHECK: When a plan is stored and this run matches a quality session in
 
 COACHING FORWARD — fold the forward-looking thought into the insight sentence. "4.2% drift — aerobic system held all 8mi, which is the base you need for the long run next week." One sentence, two jobs.
 
-CLOSING QUESTION — optional, not required:
+CLOSING QUESTION — skip by default. Only add if you actually need the answer to coach better.
+
+${recentPostRunInsights.length >= 2 || recentPostRunQuestions.length >= 2
+  ? `You've already given similar observations and asked questions recently. Default is NO question this message — end on the coaching insight.`
+  : `A question is fine if the run genuinely raises something worth knowing: unusual effort, upcoming key session, injury to monitor. If nothing is unresolved, skip it.`}
+
 ${recentPostRunQuestions.length > 0
-  ? `RECENT QUESTIONS ASKED (last ${recentPostRunQuestions.length} post-run messages):
-${[...new Set(recentPostRunQuestions)].map(q => `- ${q}`).join("\n")}
-Do NOT ask the same type of question again. Either pick a clearly different angle below — OR skip the question entirely. Skipping is often the right call after several consecutive runs.`
-  : "A closing question is appropriate here since you haven't asked one recently."}
+  ? `ALREADY ASKED recently (don't repeat these types):\n${[...new Set(recentPostRunQuestions)].map(q => `- ${q}`).join("\n")}`
+  : ""}
 
-When a question IS warranted: pick the ONE most specific angle for this run — injury history, pace execution, upcoming key session, or load management. NOT generic ("how are you feeling?", "how'd it feel?"). Examples of specific questions: "Any tightness in the quads after that tempo effort?" / "Was that effort sustainable given the heat?" / "Ready for the long run later this week?" / "Did that feel controlled in the final miles?"
+When a question IS warranted: one specific angle — injury history, pace execution, upcoming key session, load management. NOT generic ("how are you feeling?", "how'd it feel?"). Examples: "Any tightness in the quads after that tempo effort?" / "Was that effort sustainable given the heat?" / "Ready for the long run later this week?"
 
-Skip the closing question when: the injury_reminder block already ends with a question; you've asked a similar question in the last 2–3 post-run messages; the run data is self-explanatory and there's nothing meaningful to ask; or asking would feel formulaic given the conversation context.
+Always skip when: the injury_reminder block already ends with a question; this is a cross-training or rest-substitute session; the run data is self-explanatory; or you have nothing specific to learn.
 
 MILEAGE OVERAGE — when noting that the athlete has exceeded or is tracking above their weekly target, always name the specific target (e.g. "you're at 38mi against a 32mi target" not "you've exceeded your planned mileage"). Vague overage comments without a number are unhelpful.
 
@@ -7100,7 +7138,7 @@ VOLUME ACCURACY: Any weekly volume total you state must equal the sum of running
 TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the ${recapIsMetric ? "km" : "miles"} from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: ${recapIsMetric ? "52 km" : "32.5 mi"}". Wrong: adding past-week volume to next week’s total.
 <rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use ‘min’ for duration — NEVER ‘${recapIsMetric ? "km" : "mi"}’. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60${recapIsMetric ? "km" : "mi"}". Writing distance on a cross-training session causes it to be counted as running volume and will inflate your stated total.</rule>
 
-WEEKLY RECOVERY CHECK-IN: At the very end of your second text (after the session list), add one casual check-in line on its own: "How’s sleep and energy been this week? Any strength work in?" — keep it as one short question, not two. These two signals drive injury risk assessment. Do NOT skip this or fold it into another sentence.
+WEEKLY RECOVERY CHECK-IN: If sleep, energy, or strength work hasn’t come up naturally in this week’s conversation, close with a brief check-in — "How’s sleep and energy been? Any strength work this week?" — at the very end of your second text. Skip it if the athlete already mentioned any of these in recent messages, or if the recap is already addressing an injury or other open question. Don’t ask every week if they consistently don’t respond to it.
 
 COACHING THREADS — REQUIRED MACHINE TAG: At the very end of your response (before [SESSION_LIST]), append a [THREADS: ...] tag with 1–3 short sentences capturing what you'll be watching on this athlete over the coming weeks. These are the through-line stories — patterns, recoveries, progressions — that make Dean feel like a coach who pays attention across runs, not just a stat reporter on a single run. Examples:
 - [THREADS: Cadence climbed from 168 → 174 spm over the last 6 weeks — keep nudging toward 178. Long-run HR drift is high (>10%) when total weekly miles >35; backing off easy effort is the next test. Left achilles flared in week 3, fully calm now — green light on hill work.]
