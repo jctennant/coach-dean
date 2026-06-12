@@ -4,6 +4,43 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-11 — Personalized strength routines: library, generator, and fixing the phantom routine path
+
+**Type:** Feature
+**Reported by:** Product audit (the 3 injury-prevention levers)
+**User feedback:** "For these three most common reasons people get injured … audit the actual product. The hip and core strengthening: we actually ideally could show them how to do the various exercises, and if someone has a history of a specific injury, we can proactively give them a weekly routine to prevent further injury."
+**Root cause:** The coach prompt read a stored strength routine from `training_profiles.dashboard_insights.strength_recovery`, but **nothing in the codebase ever wrote that field** — so the read-path always fell through to a `NO STRENGTH ROUTINE STORED` branch that instructed Dean to say *"I'll add recommendations to your dashboard based on your injury history."* That dashboard no longer exists and the routine was never generated — a live empty promise. Separately, the exercise library was a flat `Record<string,string[]>` of free strings with no stable IDs, so there was no way to attach demo media.
+**Fix / Change:**
+- New `src/lib/strength-library.ts`: normalized the exercise library into 42 stable-ID `Exercise` objects (name/specs/cue) and 13 `Routine`s (12 injury-site routines + a universal `hip_core` base from the Run RCT). Each routine `key` doubles as the poster filename stem.
+- `composeStrengthRoutine()` — deterministic (no LLM) generator: maps an athlete's injury body part / history text to the best-matching routine, falls back to `hip_core` when there's injury history but no recognizable site, returns null when there's no injury signal at all. Output shape is backwards-compatible with the existing coach reader (`{name, specs, reason}`) plus `routine_key` / `poster_url` / `note`.
+- Wired generation at **onboarding finalization** (new users get a routine from day one, stored in `dashboard_insights.strength_recovery`) and **lazily in coach/respond** (existing users get one generated + persisted on their next post_run/weekly_recap/user_message — covers the back catalog with no migration, and kills the empty promise everywhere). Reworded the prompt block to drop all "dashboard" references.
+- `scripts/strength-catalog.mjs` + `npm run strength:catalog` → writes `docs/strength-routines.md`, the canonical list of routines + exercises to produce poster images for (one poster per routine key). Note: `poster_url` resolves to `/strength-posters/<key>.png` (override via `NEXT_PUBLIC_STRENGTH_POSTER_BASE`); images don't exist yet and Dean does not yet *send* them — that's the follow-up once the Linq outbound-media field is confirmed.
+- 25 unit tests for catalog integrity, injury→routine mapping, and generation.
+**Files changed:** src/lib/strength-library.ts (new), src/app/api/coach/respond/route.ts, src/app/api/onboarding/handle/route.ts, scripts/strength-catalog.mjs (new), docs/strength-routines.md (new), package.json, src/__tests__/lib/strength-library.test.ts (new)
+
+---
+
+## 2026-06-11 — Structural prompt improvements: gray zone repetition, boilerplate sign-offs, variable interpolation bug
+
+**Type:** Improvement + Bug Fix
+**Reported by:** Internal observation (7-day conversation audit)
+**User feedback:** N/A
+**Root cause / findings:**
+- Gray zone advice repeated to same users 4-5x in one week despite existing dedup instructions — instruction-based suppression isn't reliable
+- "Let me know if you have any other questions" appearing 32+ times per week — output contract only fired on post_run/user_message, not weekly_recap/morning_plan
+- Weekly recap boilerplate question ("How's sleep and energy?") hardcoded as mandatory ("Do NOT skip this") — fired on every recap regardless of context
+- Post-run closing question default framed as "appropriate since you haven't asked recently" — encouraged a question every time
+- Variable interpolation bug in correctMileageTotal: no guard for word ranges like "20 to 25 miles" — upper bound matched "X miles this week" pattern and got replaced with week total, producing "12 to 36.7 miles this week"
+**Fix / Change:**
+- Gray zone: data-layer suppression — when recently flagged, Z3 bullet replaced with "SKIP — use pacing alternative" so option doesn't exist in the prompt
+- Sign-offs: added stripBoilerplateSignoffs() post-processing; extended output contract to all triggers via proactiveOutputContract block; moved "NO SIGN-OFFS" to rule 1 in output contract
+- Weekly recap question: removed mandatory "Do NOT skip this" — now conditional
+- Post-run question: default changed to "skip unless you actually need the answer"; explicitly skips when recent insights ≥ 2 or recent questions ≥ 2
+- Variable interpolation: added `(?<!-|to )` lookbehind plus callback check for "\bto\s+" context before each matched number
+**Files changed:** src/app/api/coach/respond/route.ts
+
+---
+
 ## 2026-06-11 — Evidence-based injury-prevention section (research credibility + AEO)
 
 **Type:** Feature

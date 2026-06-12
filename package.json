@@ -16,7 +16,8 @@
     "eval:onboarding": "node evals/run-onboarding-evals.mjs",
     "eval:simulation": "node evals/run-simulation-evals.mjs",
     "eval:extraction": "node evals/run-extraction-evals.mjs",
-    "eval:strava": "node evals/run-strava-analysis-evals.mjs"
+    "eval:strava": "node evals/run-strava-analysis-evals.mjs",
+    "strength:catalog": "node scripts/strength-catalog.mjs > docs/strength-routines.md && echo 'Wrote docs/strength-routines.md'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

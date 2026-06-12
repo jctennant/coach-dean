@@ -9,6 +9,7 @@ import type { Json } from "@/lib/database.types";
 import { parseTimezoneFromLocation } from "@/lib/timezone";
 import type { UploadedPlanWeek } from "@/lib/training-plan";
 import { computeWeekSessions } from "@/lib/training-plan";
+import { composeStrengthRoutine } from "@/lib/strength-library";
 
 export const maxDuration = 60;
 
@@ -2066,6 +2067,15 @@ async function completeOnboarding(
     || [injuryHistoryText, currentNiggles].filter(Boolean).join(" | ")
     || null;
 
+  // Generate a personalized prehab/strength routine from the athlete's injury history so
+  // it's ready from day one (deterministic — no LLM call). Stored under
+  // dashboard_insights.strength_recovery; surfaced over SMS by coach/respond. Null when
+  // there's no injury signal at all.
+  const strengthRoutine = composeStrengthRoutine({
+    bodyParts: [data.injury_body_part_current as string | null],
+    injuryText: combinedInjuryNotes,
+  });
+
   // Carry LTHR estimate from Strava connect into the profile if available.
   // Re-fetch onboarding_data fresh from the DB to avoid a race condition: the Strava
   // callback writes strava_lthr_estimate asynchronously, but any handleConversation
@@ -2139,6 +2149,7 @@ async function completeOnboarding(
         } : {}),
         coaching_mode: 'adaptive',
         ...(((data.avg_sleep_hours as number | null) != null) ? { avg_sleep_hours: data.avg_sleep_hours as number } : {}),
+        ...(strengthRoutine ? { dashboard_insights: { strength_recovery: strengthRoutine } as unknown as Json } : {}),
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }

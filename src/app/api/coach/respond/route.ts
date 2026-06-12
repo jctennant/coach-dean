@@ -18,6 +18,7 @@ import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
+import { composeStrengthRoutine } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 
@@ -1700,16 +1701,38 @@ Use this data to:
 
   // Inject prescribed strength routine into prompt for triggers where Dean may reference it.
   // This lets Dean say "keep up the heel drops" after a calf-heavy run without re-inventing exercises.
-  const strengthRoutineBlock = (() => {
+  // If no routine is stored yet but the athlete has an injury signal, generate one on the fly
+  // (deterministic — no LLM) and persist it, so the read-path is live for existing users too.
+  const strengthRoutineBlock = await (async () => {
     if (trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message") return "";
-    const insights = profile?.dashboard_insights as Record<string, unknown> | null;
-    const sr = insights?.strength_recovery as {
+    const insights = (profile?.dashboard_insights as Record<string, unknown> | null) ?? null;
+    let sr = (insights?.strength_recovery as {
       exercises?: Array<{ name: string; specs: string; reason?: string }>;
       frequency?: string;
-    } | null;
-    if (!sr?.exercises?.length) return `\n\nNO STRENGTH ROUTINE STORED: No strength routine has been prescribed for this athlete yet. Do NOT reference "the prescribed strength routine" or imply one exists — it would be a hallucination. If the athlete asks about strength work or a routine, say you'll add recommendations to their dashboard based on their injury history.`;
+    } | null) ?? null;
+
+    if (!sr?.exercises?.length) {
+      const composed = composeStrengthRoutine({
+        bodyParts: [
+          profile?.injury_body_part as string | null,
+          ...(((profile?.injury_body_parts as string[] | null) ?? [])),
+        ],
+        injuryText: (profile?.injury_notes as string | null) ?? null,
+      });
+      if (composed) {
+        sr = composed;
+        // Persist the generated routine (merge into dashboard_insights). Fire-and-forget —
+        // this request renders from the in-memory copy regardless.
+        void supabase
+          .from("training_profiles")
+          .update({ dashboard_insights: { ...(insights ?? {}), strength_recovery: composed } as unknown as Json })
+          .eq("user_id", userId);
+      }
+    }
+
+    if (!sr?.exercises?.length) return `\n\nNO STRENGTH ROUTINE STORED: No personalized routine is on file (no injury history was captured for this athlete). Do NOT imply a stored personalized routine exists. If the athlete asks about strength work, recommend the hip & core base protocol (see the HIP & CORE INJURY PREVENTION PROTOCOL block) — that's the strongest general evidence and benefits everyone.`;
     const lines = sr.exercises.map(ex => `- ${ex.name}: ${ex.specs}${ex.reason ? ` (${ex.reason})` : ""}`).join("\n");
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (stored on athlete's dashboard):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nWhen the athlete DIRECTLY ASKS about the strength routine, send the FULL routine in your response — list every exercise with complete specs (sets/reps/cues) and frequency. Do not just tell them to check the dashboard; they need to see the details in SMS. Otherwise (unprompted), reference it briefly when naturally relevant — e.g. after a run that stressed a known injury site, or in a weekly recap. Don't lecture about it unless there's a clear injury signal.`;
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nWhen the athlete DIRECTLY ASKS about the strength routine, send the FULL routine in your response — list every exercise with complete specs (sets/reps/cues) and frequency. They need to see the details in the text. Otherwise (unprompted), reference it briefly when naturally relevant — e.g. after a run that stressed a known injury site, or in a weekly recap. Don't lecture about it unless there's a clear injury signal.`;
   })();
 
   // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
