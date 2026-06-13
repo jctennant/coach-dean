@@ -2432,9 +2432,29 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
-    userMessage = userMessage + "\n\n" + longitudinalBlock;
+    // Suppress zone 3 / gray zone lines from the block when:
+    // (a) athlete is on injury hold — irrelevant while they can't run, or
+    // (b) gray zone was already flagged in recent post-run messages — avoid nagging.
+    const injuryHoldActive = !!((state?.injury_hold_since as string | null));
+    const grayZoneRecentlyFlagged = recentPostRunInsights.includes("Z3 gray zone / run easier advice");
+    const suppressGrayZone = injuryHoldActive || grayZoneRecentlyFlagged;
+    const effectiveLongitudinalBlock = suppressGrayZone
+      ? longitudinalBlock
+          .split("\n")
+          .filter(line => !/gray.?zone|intensity distribution|zone.?3 trap|moderate effort.*polariz/i.test(line))
+          .join("\n")
+      : longitudinalBlock;
+
+    userMessage = userMessage + "\n\n" + effectiveLongitudinalBlock;
+
     if (longitudinalSignals?.requiredMentions.length) {
-      userMessage += `\n⚠️ REQUIRED ACKNOWLEDGMENT: The following signals from LONGITUDINAL TRAINING ANALYSIS are high-priority — you MUST address them in your response. Do not skip or omit: ${longitudinalSignals.requiredMentions.join("; ")}.`;
+      const filteredMentions = longitudinalSignals.requiredMentions.filter(m => {
+        if (suppressGrayZone && /zone.?3|gray.?zone|intensity trap|moderate effort/i.test(m)) return false;
+        return true;
+      });
+      if (filteredMentions.length) {
+        userMessage += `\n⚠️ REQUIRED ACKNOWLEDGMENT: The following signals from LONGITUDINAL TRAINING ANALYSIS are high-priority — you MUST address them in your response. Do not skip or omit: ${filteredMentions.join("; ")}.`;
+      }
     }
   }
 
