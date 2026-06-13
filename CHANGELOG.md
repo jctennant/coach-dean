@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-13 — Switched AI provider back to OpenAI (Anthropic rate limits) + fixed hallucinated race date
+
+**Type:** Infra / Bug Fix
+**Reported by:** Jake
+**User feedback:** "For some reason, didn't get a message after my strava run today - also this message from Dean was wrong - Race is in two days (today is Friday night): … 'Race is in 5 days — bike tomorrow.'" — and later, with logs: "ah I got another rate limit failure - think I need to move back over to openai for now! … 429 … rate limit of 10,000 input tokens per minute (model: claude-sonnet-4-5-20250929)"
+**Root cause:**
+1. **Missing post-run message** — the Anthropic org is on a low tier (10,000 input tokens/min, 5 req/min). The coach system prompt is large, so `post_run` (and other) generations intermittently hit a `429 rate_limit_error`. The failure happens inside `processCoachRequest` which runs in `after()`; the error is caught and sent to Sentry/PostHog but no SMS is ever sent, so it looks like a silent miss. (A prod `dry_run` succeeded because it happened to land under the per-minute ceiling — which initially masked the cause as a post-generation send bug. Strava read/write, billing gate, and dedup were all ruled out.)
+2. **Wrong race countdown** — the athlete's stored `race_date` was `2026-06-18` (a Thursday) for the Dipsea Race, but Dipsea 2026 is **Sunday, June 14** (confirmed via web search). Onboarding's web-search step stored the wrong date, so Dean computed "5 days out" instead of 2.
+**Fix / Change:**
+- Set `AI_PROVIDER=openai` (the `anthropic.ts` shim routes all calls through OpenAI). Changed locally in `.env.local`; Jake set the same env var in Vercel prod. No code change — the shim's default stays `anthropic`; the env var is the "for now" lever. Verified end-to-end: a fresh local dev server on the OpenAI provider successfully generated + sent the previously-missing `post_run` message and annotated the Strava activity.
+- Corrected the data for the affected athlete: `training_profiles.race_date` and the `races` row updated `2026-06-18 → 2026-06-14`.
+- Re-sent the missing post-run SMS (athlete confirmed receipt).
+**Note / follow-up:** Long-term fix is an Anthropic rate-limit/tier increase (the 429 links to console limits). Also worth hardening: a `429` during a proactive trigger should surface more loudly (or `withRetry` should honor the `retry-after` within the 120s `maxDuration` budget) rather than vanishing.
+**Files changed:** .env.local (AI_PROVIDER), production data fix (training_profiles, races) — no application code changed.
+
 ## 2026-06-11 — Wired strength-routine poster images into the coach flow
 
 **Type:** Feature
