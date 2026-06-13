@@ -2366,9 +2366,28 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return findings;
   })();
 
-  // Anti-repetition signal for post-run: scan the last ~5 assistant post_run messages
-  // and detect which insight lenses Dean already used recently. Tell Claude which lenses
-  // to avoid this turn so feedback feels fresh, not formulaic.
+  // Anti-repetition signal for post-run: scan recent assistant messages and detect
+  // which insight lenses Dean already used recently. Tell Claude which to avoid so
+  // feedback feels fresh, not formulaic.
+  //
+  // Gray zone gets a much larger suppression window (10 coaching messages across all
+  // types) — it has the fastest diminishing returns of any lens and users find it
+  // annoying when repeated. All other lenses use a 3-post_run window.
+  const grayZoneRx = /gray zone|zone[- ]?3\b|\bZ3\b|above easy effort|keep HR below|run easier|slow(?:er)? on easy|pull.*HR down|aim.*easier|next easy run.*HR|next easy.*easier|ease off|ease back|moderate effort.*trap|intensity trap/i;
+  const grayZoneMentionedRecently = (() => {
+    if (trigger !== "post_run" && trigger !== "weekly_recap") return false;
+    const COACHING_TYPES = new Set(["post_run", "coach_response", "weekly_recap", "morning_plan"]);
+    let seen = 0;
+    for (let i = recentMessages.length - 1; i >= 0 && seen < 10; i--) {
+      const m = recentMessages[i];
+      if (m.role !== "assistant") continue;
+      if (!COACHING_TYPES.has((m as Record<string, unknown>).message_type as string)) continue;
+      seen++;
+      if (grayZoneRx.test((m.content as string) || "")) return true;
+    }
+    return false;
+  })();
+
   const recentPostRunInsights = (() => {
     if (trigger !== "post_run") return [] as string[];
     const lensPatterns: Array<{ name: string; rx: RegExp }> = [
@@ -2376,7 +2395,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       { name: "cardiac decoupling/drift", rx: /decoupling|cardiac drift|HR (?:climbed|drifted)|heart rate (?:climbed|drifted)/i },
       { name: "aerobic efficiency (pace-at-HR)", rx: /aerobic efficiency|m\/beat|pace[- ]at[- ]?HR|pace at heart rate|pace per beat/i },
       { name: "HR zone affirmation / easy effort", rx: /Zone\s?[12]\b|\bZ[12]\b|aerobic stimulus|stayed aerobic|easy effort|truly easy|aerobic base|conversational effort|aerobic system held/i },
-      { name: "Z3 gray zone / run easier advice", rx: /gray zone|zone[- ]?3\b|\bZ3\b|above easy effort|keep HR below|run easier|slow(?:er)? on easy|pull.*HR down|aim.*easier|next easy run.*HR|next easy.*easier|ease off|ease back/i },
+      { name: "Z3 gray zone / run easier advice", rx: grayZoneRx },
       { name: "pacing/negative split/fade", rx: /negative split|positive split|\bfade(?:d)?\b|even splits|pacing discipline|pacing was/i },
       { name: "GAP / grade-adjusted", rx: /grade[- ]adjusted|\bGAP\b/i },
       { name: "vert / elevation load", rx: /\bvert\b|elevation gain|vert per mile|climbing legs/i },
@@ -2384,6 +2403,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       { name: "load context / volume", rx: /weekly mileage|load (?:spike|jumped)|volume (?:up|down)|tracking (?:above|below)/i },
     ];
     const scanned: string[] = [];
+    // Gray zone: already covered by grayZoneMentionedRecently with a 10-message window.
+    // Pre-seed it so the prompt suppression triggers correctly without double-scanning.
+    if (grayZoneMentionedRecently) scanned.push("Z3 gray zone / run easier advice");
     let postRunsSeen = 0;
     for (let i = recentMessages.length - 1; i >= 0 && postRunsSeen < 3; i--) {
       const m = recentMessages[i];
@@ -2392,6 +2414,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       postRunsSeen++;
       const content = (m.content as string) || "";
       for (const { name, rx } of lensPatterns) {
+        if (name === "Z3 gray zone / run easier advice") continue; // handled above
         if (rx.test(content)) scanned.push(name);
       }
     }
@@ -2434,10 +2457,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   if (longitudinalBlock) {
     // Suppress zone 3 / gray zone lines from the block when:
     // (a) athlete is on injury hold — irrelevant while they can't run, or
-    // (b) gray zone was already flagged in recent post-run messages — avoid nagging.
+    // (b) gray zone was mentioned in any of the last 10 coaching messages.
     const injuryHoldActive = !!((state?.injury_hold_since as string | null));
-    const grayZoneRecentlyFlagged = recentPostRunInsights.includes("Z3 gray zone / run easier advice");
-    const suppressGrayZone = injuryHoldActive || grayZoneRecentlyFlagged;
+    const suppressGrayZone = injuryHoldActive || grayZoneMentionedRecently;
     const effectiveLongitudinalBlock = suppressGrayZone
       ? longitudinalBlock
           .split("\n")
