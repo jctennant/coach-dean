@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-18 — Fixed GPT-4o silently returning [NO_REPLY] for strength routine requests
+
+**Type:** Bug Fix
+**Reported by:** Jake (user self-report)
+**User feedback:** "Coach respond seems to be broken - dean isn't responding to me" — repeated "Can you send me general shin and hip / core strength routine?" with no reply
+**Root cause:** The [NO_REPLY] instruction is injected for all `user_message` triggers (via `isRunReview`). GPT-4o was misapplying it — the conversation history contained an unrelated post_run response appearing after the user's first strength routine request (from a concurrent Strava webhook), making the repeated question look like a concluded conversation. GPT-4o returned `[NO_REPLY]` in ~2.4 seconds, indicating it applied the rule without fully reading the message content.
+**Fix / Change:** Added CRITICAL EXCEPTIONS line to the [NO_REPLY] instruction explicitly listing patterns that always require a reply: question marks, "can you / send me / what / how / why" openers, and any kind of request. This prevents GPT-4o from silently suppressing legitimate questions.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-06-13 — Switched AI provider back to OpenAI (Anthropic rate limits) + fixed hallucinated race date
 
 **Type:** Infra / Bug Fix
