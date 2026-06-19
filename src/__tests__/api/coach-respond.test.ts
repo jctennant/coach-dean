@@ -459,6 +459,37 @@ describe("coach/respond — reasoning preamble stripping", () => {
     expect(sentText).not.toContain("RESPONSE:");
     expect(sentText).toContain("I'm seeing a mismatch");
   });
+
+  it("strips reasoning sentences glued to the real message in the final paragraph", async () => {
+    // Lori's leak: leading reasoning paragraphs PLUS a final paragraph that glued
+    // trailing reasoning ("Both key sessions are done. The athlete has completed…")
+    // directly onto the actual coaching message ("Got it — the lap button catch…").
+    // Paragraph-level stripping removes the leading paragraphs but never touches the
+    // final one, so the sentence-level pass must remove the glued reasoning prefix.
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text:
+        "I need to read the thread first to understand the context. Looking at RECENT CONVERSATION, the athlete has been receiving post-run coaching messages.\n\n" +
+        "This is a FOLLOW-UP IN AN ACTIVE THREAD — they're answering my question about Lap 8.\n\n" +
+        "What to do: Acknowledge their explanation briefly. Checking THIS WEEK'S sessions.\n\n" +
+        "Both key sessions are done. The athlete has completed their week's core work in one session. Got it — the lap button catch explains it. You knocked out the speed work, which was the main event this week."
+      }],
+    });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    // The real coaching message survives
+    expect(sentText).toContain("Got it — the lap button catch explains it");
+    expect(sentText).toContain("You knocked out the speed work");
+    // No reasoning leaks through — including the glued final-paragraph prefix
+    expect(sentText).not.toContain("the athlete");
+    expect(sentText).not.toContain("RECENT CONVERSATION");
+    expect(sentText).not.toContain("FOLLOW-UP IN AN ACTIVE THREAD");
+    expect(sentText).not.toContain("What to do:");
+    expect(sentText).not.toContain("Both key sessions are done");
+  });
 });
 
 describe("coach/respond — web search block filtering", () => {

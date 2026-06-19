@@ -4,6 +4,39 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-18 — Removed Strava activity annotation feature
+
+**Type:** Refactor
+**Reported by:** Internal — buggy behavior observed
+**User feedback:** N/A
+**Root cause:** Annotation feature had bugs and was writing incorrect data to Strava activity descriptions.
+**Fix / Change:** Removed `annotateStravaActivity` and all supporting code (`detectWorkoutKind`, `computeZoneTime`, `computeZone12Pct`, `computeEfficiencyTrend`, `generateAnnotationFallback`, `AnnotationContext` interface). Removed annotation call from the post_run dedup guard path. Exported test helpers (`selectActivityEmoji`, `processSplitsForMetrics`, `computeAerobicEfficiency`, `computeCardiacDecoupling`, `buildSplitAnalysis`, `formatBestGapLine`) retained. Removed unused `getActivity`, `updateActivityDescription`, `fetchActivityWeather` imports.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-06-18 — Fixed [NO_REPLY] suppressing user_message responses
+
+**Type:** Bug Fix
+**Reported by:** Jake (user self-report)
+**User feedback:** "Coach respond seems to be broken - dean isn't responding to me"
+**Root cause:** [NO_REPLY] instruction was injected for all `user_message` triggers. GPT-4o misapplied it for a repeated strength routine question, returning [NO_REPLY] in ~2.4 seconds. Structural fix: [NO_REPLY] now only applies to `post_run` and `workout_image` triggers where silent non-reply after a closing ack is appropriate. For `user_message`, Dean always replies.
+**Fix / Change:** Changed `isRunReview` to `isPostRun` in the [NO_REPLY] injection condition, removing `user_message` from the path entirely.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-06-18 — Fixed internal reasoning leaking into SMS in the final paragraph
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (Lori's conversation, weekly review)
+**User feedback:** N/A — caught reviewing conversations. Lori received a 4-bubble reply that opened with "I need to read the thread first to understand the context. Looking at RECENT CONVERSATION, the athlete has been receiving post-run coaching messages…" and "This is a FOLLOW-UP IN AN ACTIVE THREAD…", "What to do:…", before the actual coaching message.
+**Root cause:** `stripReasoningPreamble` strips leading reasoning *paragraphs* but (a) deliberately never strips the final paragraph, and (b) can't handle reasoning that shares a paragraph with the real message. Claude's output ended with a paragraph that glued trailing reasoning ("Both key sessions are done. The athlete has completed their week's core work in one session.") directly onto the real message ("Got it — the lap button catch explains it. You knocked out the speed work…"), so the reasoning prefix survived and was sent.
+**Fix / Change:** Added a sentence-level pass (Pattern 4) that runs after the paragraph pass. It finds the first sentence that clearly addresses the athlete (second person, or a greeting/acknowledgment) and, if any sentence before it reads like reasoning, drops everything up to it. Third-person references to "the athlete" and echoed prompt section names ("RECENT CONVERSATION", "What to do:", "FOLLOW-UP IN AN ACTIVE THREAD") are reliable reasoning tells since a coach always addresses the runner as "you". Guarded to never strip everything. Added a regression test reproducing Lori's exact leak.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-06-18 — Fixed GPT-4o silently returning [NO_REPLY] for strength routine requests
 
 **Type:** Bug Fix

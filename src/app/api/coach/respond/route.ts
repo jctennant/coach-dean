@@ -7,12 +7,12 @@ import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { sendSMS, sendMediaSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
-import { fetchWeekWeather, buildWeatherBlock, fetchActivityWeather } from "@/lib/weather";
+import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions } from "@/lib/plan-validation";
-import { getValidAccessToken, getActivity, updateActivityDescription } from "@/lib/strava";
+import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
@@ -1265,7 +1265,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone, weekRefDate);
 
   // Dedup guard — if we've already sent a post_run SMS for this activity, skip Claude.
-  // Still run the Strava annotation so re-triggers can retry a failed annotation.
   if (trigger === "post_run" && activityId) {
     const { data: existingPostRun } = await supabase
       .from("conversations")
@@ -1276,34 +1275,6 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
       .limit(1);
     if (existingPostRun && existingPostRun.length > 0) {
       console.log(`[coach/respond] post_run already sent for activity ${activityId} — skipping Claude`);
-      const isRunActivity = ["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(activityData?.activity_type as string);
-      if ((user.strava_write_enabled as boolean) && isRunActivity) {
-        const storedSummary = activityData?.summary as Record<string, unknown> | null;
-        const storedSplits = Array.isArray(storedSummary?.splits)
-          ? (storedSummary.splits as Array<Record<string, unknown>>)
-          : [];
-        const onbData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
-        const annotationLocation = onbData.strava_city && onbData.strava_state
-          ? { city: onbData.strava_city as string, state: onbData.strava_state as string, timezone: (user.timezone as string) || "America/New_York" }
-          : undefined;
-        const dupTz = (user.timezone as string) || "America/New_York";
-        const dupTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: dupTz }).format(new Date());
-        const dupSessions = (state?.weekly_plan_sessions as Array<{ date: string; label: string }> | null) ?? [];
-        const dupTodaySession = dupSessions.find(s => s.date === dupTodayStr);
-        await annotateStravaActivity(userId, activityId, {
-          activityData,
-          weekMileageSoFar,
-          weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
-          currentWeek: (state?.current_week as number | null) ?? null,
-          upcomingRaces: upcomingRaces,
-          preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
-          splits: storedSplits,
-          isAnalystMode: (profile as Record<string, unknown> | null)?.coaching_mode === 'analyst',
-          lthrEstimate: (profile?.lthr_estimate as number | null) ?? null,
-          maxHrEstimate: (profile?.max_hr_estimate as number | null) ?? null,
-          plannedSessionLabel: dupTodaySession?.label ?? null,
-        }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
-      }
       return NextResponse.json({ ok: true, skipped: "duplicate_post_run" });
     }
   }
@@ -2822,34 +2793,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage, strength_poster: (wantsStrengthPoster && strengthPosterRoutineKey) ? strengthPosterRoutineKey : null });
 
-  // Strava activity annotation — runs here (before [NO_REPLY] check) so it fires even when
-  // Claude decides nothing new needs to be said (e.g. manual re-trigger of an already-analysed run).
-  // Annotation is independent of SMS; it runs as long as we have write access and an activity.
-  // Only annotate run-type activities — bikes, hikes, swims, etc. are excluded.
-  const isRunActivityForAnnotation = ["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(activityData?.activity_type as string);
-  if (trigger === "post_run" && activityId && (user.strava_write_enabled as boolean) && isRunActivityForAnnotation) {
-    const storedSummary = activityData?.summary as Record<string, unknown> | null;
-    const storedSplits = Array.isArray(storedSummary?.splits)
-      ? (storedSummary.splits as Array<Record<string, unknown>>)
-      : [];
-    const annotationLocation = stravaCity && stravaState
-      ? { city: stravaCity, state: stravaState, timezone: userTimezone }
-      : undefined;
-    await annotateStravaActivity(userId, activityId, {
-      activityData,
-      weekMileageSoFar,
-      weekTarget: (state?.weekly_mileage_target as number | null) ?? null,
-      currentWeek: (state?.current_week as number | null) ?? null,
-      upcomingRaces: upcomingRaces,
-      preferredUnits: ((profile?.preferred_units as string) === "metric") ? "metric" : "imperial",
-      splits: storedSplits,
-      isAnalystMode: false,
-      lthrEstimate: (profile?.lthr_estimate as number | null) ?? null,
-      maxHrEstimate: (profile?.max_hr_estimate as number | null) ?? null,
-      plannedSessionLabel: null,
-    }, annotationLocation).catch((err) => console.error("[strava-annotation] failed:", err));
-  }
-
   // Claude signals "nothing to send" with [NO_REPLY] — skip all SMS and DB writes.
   // Also skip if the response is empty (can happen if web search returns no final text block,
   // or Claude times out mid-generation) — sending an empty body causes Linq to deliver a ".".
@@ -3753,11 +3696,53 @@ function stripReasoningPreamble(text: string): string {
   ) {
     firstCoachingPara++;
   }
-  if (firstCoachingPara > 0) {
-    return paragraphs.slice(firstCoachingPara).join("\n\n").trim();
+  let remaining =
+    firstCoachingPara > 0
+      ? paragraphs.slice(firstCoachingPara).join("\n\n").trim()
+      : text;
+
+  // Pattern 4: leading reasoning SENTENCES that share a paragraph with the real
+  // coaching message. Paragraph-level stripping can't catch these, and it never
+  // touches the final paragraph — so a final paragraph like
+  // "Both key sessions are done. The athlete has completed their week's core work
+  //  in one session. Got it — the lap button catch explains it. You knocked out…"
+  // leaks the reasoning prefix. Here we find the first sentence that clearly
+  // addresses the athlete (second person, or a greeting/acknowledgment) and, if
+  // any sentence before it reads like reasoning, drop everything up to it.
+  // A coach speaks to the athlete as "you" and never refers to "the athlete" in
+  // the third person, so that phrasing is a reliable reasoning tell.
+  const looksLikeReasoning = (s: string): boolean => {
+    const t = s.trim();
+    return (
+      /^⚠️/.test(t) ||
+      /\bthe athlete\b/i.test(t) ||
+      /\bRECENT CONVERSATION\b/.test(t) ||
+      /\bTHIS WEEK'S\b/.test(t) ||
+      /^(What to do|Key considerations?|My (response|reply|approach|plan)|Approach|Response|Analysis)\s*:/i.test(t) ||
+      /^(FOLLOW-UP IN AN ACTIVE THREAD|DIRECT QUESTION|RACE COMPLETION|LIFE UPDATE|TRAINING STATUS|CONFIRMATION)\b/.test(t) ||
+      /^(Let me|I'll|I will|I need to|I should|I'm going to|I am going to)\b.*\b(think|read|check|look|scan|assess|understand|address|keep|make|consider|acknowledge|move|pivot|note|review|figure)/i.test(t) ||
+      /^(Looking at|Checking|Scanning|Reviewing|Based on)\b/i.test(t) ||
+      /^This is (a |an )?(training|general|coaching|question|philosophy|follow-up|direct|confirmation|life)\b/i.test(t)
+    );
+  };
+  const isCoachingSentence = (s: string): boolean => {
+    const t = s.trim();
+    if (!t || looksLikeReasoning(t)) return false;
+    return (
+      /\b(you|you're|your|you'll|you've|we|we're|let's)\b/i.test(t) ||
+      /^(Got it|Hey|Hi|Nice|Great|Solid|Awesome|Love|Good|Congrats|Congratulations|Well done|Yes|Yeah|Absolutely|Perfect|Sounds|Wow|That's|Looks like|Glad|Happy|Sorry|Okay|OK)\b/i.test(t)
+    );
+  };
+  const sentences = remaining.match(/[^.!?…]+(?:[.!?…]+|$)/g) ?? [remaining];
+  if (sentences.length > 1) {
+    const firstCoaching = sentences.findIndex(isCoachingSentence);
+    if (firstCoaching > 0 && sentences.slice(0, firstCoaching).some(looksLikeReasoning)) {
+      const stripped = sentences.slice(firstCoaching).join("").trim();
+      if (stripped) remaining = stripped;
+    }
   }
 
-  return text;
+  return remaining;
 }
 
 /**
@@ -7450,431 +7435,6 @@ NO STRAVA — SET THE TEXT-TRACKING HABIT: This athlete is not on Strava, so the
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Strava activity annotation
-// ─────────────────────────────────────────────────────────────
-
-interface AnnotationContext {
-  activityData: Record<string, unknown> | null;
-  weekMileageSoFar: number;
-  weekTarget: number | null;
-  currentWeek: number | null;
-  upcomingRaces: Array<Record<string, unknown>>;
-  preferredUnits: "imperial" | "metric";
-  // splits_standard from activityData.summary — already fetched by the webhook
-  splits: Array<Record<string, unknown>>;
-  isAnalystMode?: boolean;
-  lthrEstimate?: number | null;
-  maxHrEstimate?: number | null;
-  // Workout-type context for metric selection
-  plannedSessionLabel: string | null;
-}
-
-type WorkoutKind = "easy" | "long" | "tempo" | "interval" | "mountain" | "race";
-
-function detectWorkoutKind(
-  workoutType: number,
-  activityType: string,
-  elevGainFt: number,
-  distanceMiles: number,
-  plannedLabel: string | null,
-  avgHR?: number | null,
-  maxHR?: number | null,
-  peakSplitHR?: number | null
-): WorkoutKind {
-  if (workoutType === 1) return "race";
-  const lower = (plannedLabel ?? "").toLowerCase();
-  if (/interval|repeat|\dx\d|\d+x\d{3}|strides|fartlek/.test(lower)) return "interval";
-  if (/tempo|threshold|cruise|lactate/.test(lower)) return "tempo";
-  if (/\blong\b/.test(lower)) return "long";
-  if (activityType === "TrailRun" && distanceMiles > 0 && elevGainFt / distanceMiles > 150) return "mountain";
-  if (workoutType === 2) return "long";
-  if (workoutType === 3) return "interval";
-  // No plan label and no Strava workout type tag — infer from HR effort level.
-  // peakSplitHR (highest per-mile split avg HR) is more reliable than raw max_heartrate
-  // because each split averages 5-10 minutes, filtering out sensor spikes.
-  if (peakSplitHR && maxHR && maxHR > 0) {
-    const peakPct = peakSplitHR / maxHR;
-    if (peakPct >= 0.88) return "interval"; // sustained Z4-Z5 effort
-    if (peakPct >= 0.82) return "tempo";    // sustained threshold effort
-  }
-  // Fallback to session avg HR when no split data available
-  if (avgHR && maxHR && maxHR > 0) {
-    const hrPct = avgHR / maxHR;
-    if (hrPct >= 0.82) return "interval";
-    if (hrPct >= 0.75) return "tempo";
-  }
-  return "easy";
-}
-
-/**
- * Compute time (minutes) spent in an HR zone defined by [lowPct, highPct) of maxHR.
- * Pass highPct=1.0 for Zone 5 (no upper bound). Returns null if splits lack HR data.
- */
-function computeZoneTime(
-  splits: Array<Record<string, unknown>>,
-  maxHR: number,
-  lowPct: number,
-  highPct = 1.0
-): number | null {
-  const low = maxHR * lowPct;
-  const high = maxHR * highPct;
-  let zoneSecs = 0;
-  let counted = 0;
-  for (const split of splits) {
-    const avgHR = split.average_heartrate as number | null;
-    const movingTime = split.moving_time as number | null;
-    if (avgHR == null || !movingTime) continue;
-    counted++;
-    if (avgHR >= low && avgHR < high) zoneSecs += movingTime;
-  }
-  if (counted === 0) return null;
-  return Math.round(zoneSecs / 60);
-}
-
-/**
- * Compute % of run time in Zone 1-2.
- * When LTHR is available, pass z2BpmCeiling = lthr * 0.89 for accurate LTHR-anchored Z2.
- * Falls back to maxHR * z2UpperPct (75% of max HR) when no LTHR override is provided.
- */
-function computeZone12Pct(
-  splits: Array<Record<string, unknown>>,
-  maxHR: number,
-  z2UpperPct = 0.75,
-  z2BpmCeiling?: number
-): number | null {
-  const threshold = z2BpmCeiling ?? maxHR * z2UpperPct;
-  let z12Secs = 0;
-  let totalSecs = 0;
-  let counted = 0;
-  for (const split of splits) {
-    const avgHR = split.average_heartrate as number | null;
-    const movingTime = split.moving_time as number | null;
-    if (avgHR == null || !movingTime) continue;
-    counted++;
-    totalSecs += movingTime;
-    if (avgHR < threshold) z12Secs += movingTime;
-  }
-  if (counted === 0 || totalSecs === 0) return null;
-  return Math.round((z12Secs / totalSecs) * 100);
-}
-
-async function annotateStravaActivity(
-  userId: string,
-  stravaActivityId: number,
-  ctx: AnnotationContext,
-  userLocation?: { city: string; state: string; timezone: string }
-): Promise<void> {
-  const { activityData, weekMileageSoFar, weekTarget, currentWeek, upcomingRaces, preferredUnits, splits, isAnalystMode, lthrEstimate, maxHrEstimate } = ctx;
-
-  // Fetch token + existing description (one Strava call).
-  // Splits come from DB-stored summary — no duplicate fetch needed.
-  const accessToken = await getValidAccessToken(userId);
-  const [stravaActivity, activityWeather, maxHRRow] = await Promise.all([
-    getActivity(accessToken, stravaActivityId),
-    userLocation
-      ? fetchActivityWeather(
-          userLocation.city,
-          userLocation.state,
-          userLocation.timezone,
-          ((activityData?.start_date as string | null) ?? new Date().toISOString()).slice(0, 10)
-        ).catch(() => null)
-      : Promise.resolve(null),
-    supabase
-      .from("activities")
-      .select("activity_type, workout_type, average_heartrate, max_heartrate, aerobic_efficiency")
-      .eq("user_id", userId)
-      .not("max_heartrate", "is", null)
-      .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
-      .order("start_date", { ascending: false })
-      .limit(150),
-  ]);
-  // Prefer the persisted training_profiles.max_hr_estimate (passed via ctx) so
-  // every coach surface uses the same denominator. Fall back to recomputing
-  // from this query for users whose profile hasn't been backfilled yet.
-  const userMaxHR = maxHrEstimate ?? estimateMaxHR(maxHRRow.data ?? []);
-  const efficiencyTrend = computeEfficiencyTrend(maxHRRow.data ?? []);
-  const existingDescription = (stravaActivity.description as string) || "";
-
-  // Activity stats
-  const isMetric = preferredUnits === "metric";
-  const distanceMeters = (activityData?.distance_meters as number | null) ?? 0;
-  const distanceMiles = distanceMeters / 1609.34;
-  const distanceKm = distanceMeters / 1000;
-  const pace = (activityData?.average_pace as string | null) ?? null;
-  const hr = (activityData?.average_heartrate as number | null) ?? null;
-  const elevGain = (activityData?.elevation_gain as number | null) ?? null;
-  const elevGainFt = elevGain ? elevGain * 3.28084 : 0;
-  const elevDisplay = elevGain
-    ? isMetric
-      ? `${Math.round(elevGain)}m gain`
-      : `${Math.round(elevGainFt)}ft gain`
-    : null;
-
-  // Activity type emoji — trail, intervals, or road run
-  const activityType = (activityData?.activity_type as string | null) ?? "Run";
-  const workoutType = (activityData?.workout_type as number | null) ?? 0;
-  const emoji = selectActivityEmoji(activityType, workoutType, elevGainFt);
-
-  // Week stats
-  const weekMilesDisplay = isMetric
-    ? `${(weekMileageSoFar * 1.60934).toFixed(0)} km`
-    : `${weekMileageSoFar.toFixed(0)} mi`;
-  const weekTargetDisplay = weekTarget
-    ? isMetric
-      ? `${Math.round(weekTarget * 1.60934)} km`
-      : `${weekTarget} mi`
-    : null;
-
-  // Race context — show up to 2 upcoming races, deduped by name so a race that was
-  // inserted twice (e.g. A + B priority entries for the same event) doesn't consume both slots.
-  const seenRaceNames = new Set<string>();
-  const raceData = upcomingRaces
-    .filter(race => {
-      const name = (race.race_name as string | null) ?? "Race";
-      if (seenRaceNames.has(name)) return false;
-      seenRaceNames.add(name);
-      return true;
-    })
-    .slice(0, 2)
-    .map(race => {
-      if (!race.race_date) return null;
-      const d = Math.ceil((new Date(race.race_date as string).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      const name = (race.race_name as string | null) ?? "Race";
-      return { label: `${name} (${d}d)`, shortLabel: `${name} ${d}d out` };
-    })
-    .filter((r): r is { label: string; shortLabel: string } => r !== null);
-  const raceLabels = raceData.map(r => r.label);
-
-  // Split analysis — use DB-stored splits (already fetched by the webhook's getActivity call)
-  const splitAnalysis = buildSplitAnalysis(splits, isMetric);
-
-  // Compute all split-derived metrics in a single pass via helper functions.
-  const metersPerUnit = isMetric ? 1000 : 1609.34;
-  const unitLabel = isMetric ? "/km" : "/mi";
-
-  const avgSpeedMs = (activityData?.moving_time_seconds && activityData?.distance_meters)
-    ? (activityData.distance_meters as number) / (activityData.moving_time_seconds as number)
-    : null;
-
-  const { validSplitMetrics, gaSpeedMs, bestGas, bestGapSplitNum } = processSplitsForMetrics(splits, isMetric);
-
-  // Aerobic efficiency (m/beat): speed per heartbeat — higher = more economical.
-  const { storedEff, efficiencyLine } = computeAerobicEfficiency(hr, avgSpeedMs, gaSpeedMs);
-
-  // Best GAP line
-  const bestGapLine = formatBestGapLine(bestGas, bestGapSplitNum, isMetric);
-
-  // Cardiac decoupling — first-half vs second-half GAP:HR efficiency factor drift.
-  const { decouplingPct, decouplingLine } = computeCardiacDecoupling(validSplitMetrics);
-
-  // Persist aerobic metrics to the activities table for trend analysis over time.
-  // Fire-and-forget — don't block annotation on this write.
-  // Cast required until types are regenerated after migration 029.
-  if (storedEff !== null || decouplingPct !== null) {
-    void supabase.from("activities")
-      .update({
-        ...({ aerobic_efficiency: storedEff !== null ? Math.round(storedEff * 1000) / 1000 : undefined } as Record<string, unknown>),
-        ...({ cardiac_decoupling_pct: decouplingPct ?? undefined } as Record<string, unknown>),
-      } as Record<string, unknown>)
-      .eq("strava_activity_id", stravaActivityId);
-  }
-
-  // Fetch total plan weeks for header
-  const { data: planRow } = await supabase
-    .from("training_plans")
-    .select("total_weeks")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
-  const totalWeeks = (planRow?.total_weeks as number | null) ?? null;
-
-  // Header: emoji + primary race countdown (or week label if no race)
-  const weekLabel = currentWeek
-    ? totalWeeks ? `Week ${currentWeek} of ${totalWeeks}` : `Week ${currentWeek}`
-    : null;
-  const headerLabel = raceData.length > 0
-    ? `${emoji} ${raceData[0].shortLabel}`
-    : weekLabel
-    ? `${emoji} ${weekLabel}`
-    : emoji;
-
-  // Grade-adjusted avg pace (used by mountain + tempo fallback)
-  const gaAvgPaceStr = gaSpeedMs
-    ? (() => { const sec = metersPerUnit / gaSpeedMs; return `${Math.floor(sec / 60)}:${Math.round(sec % 60).toString().padStart(2, "0")}${unitLabel}`; })()
-    : null;
-
-  // Workout-type-specific metric line
-  const { plannedSessionLabel } = ctx;
-  const peakSplitHR = splits.length > 0
-    ? Math.max(...splits.map(s => (s.average_heartrate as number | null) ?? 0).filter(v => v > 0))
-    : null;
-  const workoutKind = detectWorkoutKind(
-    workoutType,
-    activityType,
-    elevGainFt,
-    distanceMiles,
-    plannedSessionLabel,
-    hr,
-    userMaxHR,
-    peakSplitHR || null
-  );
-
-  // Status line — colored verdict + number.
-  // Priority: (1) fitness trend for easy/long, (2) zone metric, (3) plain GAP fallback,
-  // (4) Haiku 1-sentence fallback when no computable metric.
-  let statusLine: string | null = null;
-
-  // Fitness trend (easy + long only — aerobic base signal, needs ≥6 runs of history)
-  // Negative signals (declining) are reserved for SMS coaching, not the public Strava annotation.
-  if (workoutKind === "easy" || workoutKind === "long") {
-    switch (efficiencyTrend) {
-      case "improving": statusLine = "🟢 Aerobic fitness trending up"; break;
-      case "steady":    statusLine = "🟡 Fitness holding steady"; break;
-      case "declining": /* omit — coach will address via SMS */ break;
-    }
-  }
-
-  if (!statusLine) {
-    switch (workoutKind) {
-      case "easy": {
-        const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
-        const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
-        if (z12Pct !== null) {
-          if (z12Pct >= 90)      statusLine = `🟢 Easy zone nailed — ${z12Pct}% Z1-Z2`;
-          else if (z12Pct >= 70) statusLine = `🟡 Mostly easy — ${z12Pct}% Z1-Z2`;
-          // else: ran too hard — omit, coach addresses via SMS
-        }
-        break;
-      }
-      case "long": {
-        if (decouplingPct !== null) {
-          if (decouplingPct < 5)       statusLine = `🟢 Low HR drift (${decouplingPct.toFixed(0)}%) — efficiency held`;
-          else if (decouplingPct < 10) statusLine = `🟡 Moderate HR drift (${decouplingPct.toFixed(0)}%) — normal for long effort`;
-          // else: high drift — omit, coach addresses via SMS
-        } else {
-          const z2Ceiling = lthrEstimate ? Math.round(lthrEstimate * 0.89) : undefined;
-          const z12Pct = userMaxHR ? computeZone12Pct(splits, userMaxHR, 0.75, z2Ceiling) : null;
-          if (z12Pct !== null) {
-            if (z12Pct >= 90)      statusLine = `🟢 Easy zone nailed — ${z12Pct}% Z1-Z2`;
-            else if (z12Pct >= 70) statusLine = `🟡 Mostly easy — ${z12Pct}% Z1-Z2`;
-            // else: ran too hard — omit, coach addresses via SMS
-          }
-        }
-        break;
-      }
-      case "tempo":
-      case "interval": {
-        const qualMins = userMaxHR ? computeZoneTime(splits, userMaxHR, 0.80, 1.0) : null;
-        if (qualMins !== null && qualMins >= 5) {
-          if (qualMins >= 15)     statusLine = `🟢 Quality work locked in — ${qualMins} min Z4-Z5`;
-          else                    statusLine = `🟡 Some quality effort — ${qualMins} min Z4-Z5`;
-          // else (<5 min): didn't reach zones — omit, coach addresses via SMS
-        } else if (gaAvgPaceStr) {
-          statusLine = `Grade-adj pace: ${gaAvgPaceStr}`;
-        }
-        break;
-      }
-      case "mountain": {
-        if (gaAvgPaceStr) statusLine = `Grade-adj pace: ${gaAvgPaceStr}`;
-        break;
-      }
-      case "race": {
-        statusLine = "🏁 Race effort logged";
-        break;
-      }
-    }
-  }
-
-  // Haiku fallback — 1-sentence analysis when there's no computable metric
-  if (!statusLine) {
-    const distDisplay = isMetric ? `${distanceKm.toFixed(1)} km` : `${distanceMiles.toFixed(1)} mi`;
-    const weatherSummary = activityWeather
-      ? `${activityWeather.tempF}°F, ${activityWeather.conditions}`
-      : null;
-    statusLine = await generateAnnotationFallback(
-      workoutKind,
-      distDisplay,
-      pace,
-      elevDisplay,
-      weekLabel,
-      raceData.length > 0 ? raceData[0].shortLabel : null,
-      weatherSummary
-    );
-  }
-
-  // Block: header → status → blank line → coachdean.ai branding
-  const blockLines: string[] = [headerLabel];
-  if (statusLine) blockLines.push(statusLine);
-  blockLines.push("", "coachdean.ai");
-  const block = blockLines.join("\n");
-
-  const newDescription = existingDescription
-    ? `${block}\n\n${existingDescription}`
-    : block;
-
-  await updateActivityDescription(accessToken, stravaActivityId, newDescription);
-  console.log(`[strava-annotation] annotated activity ${stravaActivityId} for user ${userId}`);
-}
-
-/**
- * Compute aerobic efficiency trend from recent runs (last 3 vs prior 3).
- * Returns null when there aren't enough data points to be meaningful.
- */
-function computeEfficiencyTrend(
-  recentRuns: Array<{ aerobic_efficiency?: number | null }>
-): "improving" | "declining" | "steady" | null {
-  const withEff = recentRuns
-    .filter((r): r is typeof r & { aerobic_efficiency: number } => typeof r.aerobic_efficiency === "number")
-    .slice(0, 10);
-  if (withEff.length < 6) return null;
-  const recent3 = withEff.slice(0, 3).map(r => r.aerobic_efficiency);
-  const older3 = withEff.slice(3, 6).map(r => r.aerobic_efficiency);
-  const avgRecent = recent3.reduce((s, v) => s + v, 0) / 3;
-  const avgOlder = older3.reduce((s, v) => s + v, 0) / 3;
-  const delta = avgRecent - avgOlder;
-  if (Math.abs(delta) < 0.02) return "steady";
-  return delta > 0 ? "improving" : "declining";
-}
-
-/**
- * Generate a 1-sentence Strava annotation via Haiku when no HR-based metric is available.
- * Used as a fallback for runs without a heart rate monitor or insufficient split data.
- */
-async function generateAnnotationFallback(
-  workoutKind: WorkoutKind,
-  distanceDisplay: string,
-  pace: string | null,
-  elevDisplay: string | null,
-  weekLabel: string | null,
-  raceShortLabel: string | null,
-  weatherSummary: string | null
-): Promise<string | null> {
-  const lines = [
-    `Workout type: ${workoutKind}`,
-    `Distance: ${distanceDisplay}`,
-    pace ? `Pace: ${pace}` : null,
-    elevDisplay ? `Elevation: ${elevDisplay}` : null,
-    weekLabel ? `Training context: ${weekLabel}` : null,
-    raceShortLabel ? `Race: ${raceShortLabel}` : null,
-    weatherSummary ? `Weather: ${weatherSummary}` : null,
-  ].filter(Boolean).join("\n");
-
-  try {
-    const resp = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 80,
-      messages: [{
-        role: "user",
-        content: `Write one short sentence (max 12 words) summarizing this run for a Strava activity description. Be specific to the data. No intro, no quotes.\n\n${lines}`,
-      }],
-    });
-    return resp.content.find(c => c.type === "text")?.text?.trim() ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Select the activity emoji based on type, workout type, and elevation gain.
