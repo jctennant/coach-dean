@@ -76,6 +76,35 @@ describe("computeACWR", () => {
     expect(result.summary).toContain("high injury-risk");
   });
 
+  it("does NOT flag a high ratio when absolute volume is trivially low", () => {
+    // 2.4mi in last 7 days vs ~1mi/week chronic → ratio ~2.4 but it's noise, not
+    // injury risk. This is the "138% above your 2.2mi/week average" nag we killed.
+    const activities: ActivityForAnalytics[] = [
+      makeActivity({ daysAgo: 1, miles: 2.4 }),
+      makeActivity({ daysAgo: 10, miles: 1 }),
+      makeActivity({ daysAgo: 24, miles: 1 }),
+    ];
+    const result = computeACWR(activities, TZ);
+    expect(result.acwr).not.toBeNull();
+    expect(result.acwr! > 1.3).toBe(true); // ratio IS elevated
+    expect(result.flagged).toBe(false);    // but we do NOT flag it
+    expect(result.summary).toContain("absolute volume is low");
+  });
+
+  it("does NOT flag when the absolute week-over-baseline jump is small", () => {
+    // 18.6mi this week vs ~14mi chronic avg → ratio ~1.33 but only +4.6mi jump.
+    // Borderline ratio at modest volume is a normal build, not a spike to nag about.
+    const activities: ActivityForAnalytics[] = [
+      makeActivity({ daysAgo: 1, miles: 9 }),
+      makeActivity({ daysAgo: 4, miles: 9.6 }),
+      makeActivity({ daysAgo: 9, miles: 13 }),
+      makeActivity({ daysAgo: 16, miles: 13 }),
+      makeActivity({ daysAgo: 23, miles: 13 }),
+    ];
+    const result = computeACWR(activities, TZ);
+    expect(result.flagged).toBe(false);
+  });
+
   it("does not flag ACWR in the safe range", () => {
     // ~8mi each week for 4 weeks → ACWR ≈ 1.0
     const activities: ActivityForAnalytics[] = [
@@ -409,7 +438,9 @@ describe("computeLoadTrend (regression)", () => {
     ];
     const result = computeLoadTrend(activities, TZ);
     expect(result.flagged).toBe(true);
-    expect(result.summary).toContain("⚠️");
+    // No caution-sign glyphs in coach-facing text; the flag now reads as a plain
+    // "jumped meaningfully — mention once" note (athletes find repeated nagging annoying).
+    expect(result.summary).toContain("jumped meaningfully");
   });
 });
 

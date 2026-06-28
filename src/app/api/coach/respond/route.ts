@@ -21,100 +21,11 @@ import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeek
 import { composeStrengthRoutine } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
+import { createLogger } from "@/lib/logger";
+import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, KNOWN_REHAB_PARTS } from "@/lib/exercise-library";
+import { classifyIntent } from "@/lib/intent-classifier";
 
 export const maxDuration = 120;
-
-// Specific rehab exercises injected into the system prompt when body parts are flagged.
-// Keeps Dean's exercise advice concrete and consistent rather than generic "strengthen it".
-const BODY_PART_EXERCISES: Record<string, string[]> = {
-  it_band:      ["Hip abductor clamshells 3×15", "Lateral band walks 2×20 steps each way", "Foam roll TFL and outer glute — NOT the IT band itself (rolling the IT band directly irritates it)", "Hip flexor stretch in lunge position 3×30s each side"],
-  hamstring:    ["Eccentric Nordic hamstring curls 3×8 (use a towel under knees)", "Romanian single-leg deadlifts 3×10 each", "Prone hamstring raises 3×12", "Glute bridges with 2-second hold 3×15"],
-  knee:         ["VMO quad sets 3×15 (sit, tighten quad isometrically, hold 5sec)", "Terminal knee extensions (TKEs) with band 3×15", "Step-downs from 6-inch step, slow 3-second descent 3×10 each", "Straight-leg raises 3×15"],
-  shin:         ["Eccentric calf raises off a step (straight knee) 3×15", "Tibialis anterior raises: stand with back to wall, lift toes 3×15", "Calf stretching bent + straight knee 3×30s each", "Slow toe taps on a stair 2×20"],
-  calf:         ["Eccentric heel drops off step — straight knee 3×15, bent knee 3×15", "Standing calf raises (single-leg) 3×20", "Soleus stretch (bent knee) 3×30s hold", "Ankle circles 2×10 each direction"],
-  foot:         ["Frozen water bottle rolling under arch 2 min each foot", "Towel toe curls 3×15", "Eccentric calf raises 3×15", "Short-foot arch activation 3×10"],
-  hip:          ["Hip flexor stretch in lunge position 3×30s each", "Glute bridges 3×15", "Lateral band walks 2×20 steps", "Pigeon pose 2×60s each side"],
-  piriformis:   ["Figure-4 stretch lying down 3×60s each side", "Pigeon pose 2×60s each side", "Seated piriformis stretch 3×30s", "Clamshells with band 3×15"],
-  glute:        ["Clamshells 3×15", "Single-leg glute bridges 3×12 each", "Hip thrusts (body weight or barbell) 3×15", "Side-lying hip abduction 3×15"],
-  back:         ["Cat-cow 10 slow reps", "Bird-dog 3×10 each side", "Child's pose 2×60s", "Dead bug 3×8 each side"],
-  ankle:        ["Eccentric calf raises off step 3×15", "Single-leg balance on unstable surface 3×30s", "Resistance band dorsiflexion 3×15", "Ankle alphabet (draw A–Z slowly with foot)"],
-  groin:        ["Side-lying hip adduction 3×15 each side (inner thigh, low compression — pregnancy-safe)", "Seated adductor isometric squeeze with pillow/ball between knees 3×15, 10-sec holds (pregnancy-safe)", "Gentle seated butterfly stretch 3×30s — gravity only, no forcing (pregnancy-safe)", "Clamshells with band 3×15 (hip and pelvic stability — pregnancy-safe)"],
-};
-
-// Injury-specific cross-training alternatives — activities that maintain fitness without
-// stressing the injured area. Used to give athletes something concrete to do instead of
-// just telling them to rest.
-const CROSS_TRAINING_ALTERNATIVES: Record<string, string[]> = {
-  shin:      [
-    "Pool running (deep-water belt) — gold standard; mimics running mechanics with zero bone impact",
-    "Uphill treadmill walking or easy jogging — incline reduces ground reaction force on the tibia vs. flat running; start with a walk, progress to an easy jog if pain-free, stop if any shin discomfort",
-    "Cycling or stationary bike — zero tibial loading, full aerobic stimulus",
-    "Elliptical — low-impact if pain-free; stop immediately if shin discomfort starts",
-    "Avoid rowing — plantar flexion under load stresses the anterior tibialis",
-  ],
-  knee:      [
-    "Swimming (any stroke) — zero knee impact, full aerobic workout",
-    "Pool running with deep-water belt — running-specific conditioning, no knee load",
-    "Easy cycling at low resistance — check that it's pain-free through full pedal stroke before pushing effort",
-    "Uphill treadmill walking at low incline — generally knee-friendly but test cautiously; avoid steep grades if quad or patellar pain flares",
-  ],
-  it_band:   [
-    "Swimming — no lateral stress on the IT band at all",
-    "Uphill treadmill walking — uphill is far safer than downhill for IT band; keeps aerobic work going without the lateral knee stress of flat road running",
-    "Cycling (steady seated, avoid climbing out of the saddle) — minimal IT band engagement when seated",
-    "Elliptical — only use if lateral knee is completely pain-free on the machine",
-  ],
-  hamstring: [
-    "Cycling — avoids the eccentric hamstring loading that running creates; keep effort easy",
-    "Swimming — safe for all hamstring issues, full aerobic stimulus",
-    "Elliptical at low incline — check for any pulling sensation and back off if present",
-  ],
-  calf:      [
-    "Pool running or swimming — no plantar flexion load from ground contact",
-    "Cycling with clip shoes (minimizes calf push-off); flat pedals stress the calf more — avoid those",
-    "Avoid uphill treadmill and rowing — both increase calf/Achilles load; test elliptical cautiously",
-  ],
-  foot:      [
-    "Cycling — foot is mostly passive through the pedal stroke, zero ground contact",
-    "Swimming — completely non-weight-bearing",
-    "Pool running with float belt — maintains running conditioning with no foot strike",
-  ],
-  hip:       [
-    "Swimming or aqua jogging — supported range of motion, no impact",
-    "Uphill treadmill walking — hip flexor and glute engagement without impact; easy on the joint",
-    "Cycling — hip-friendly in most cases; avoid if hip flexor tightness flares on the bike",
-    "Elliptical — generally safe; stop if hip pain during",
-  ],
-  glute:     [
-    "Swimming or pool running — low glute loading, full aerobic base maintenance",
-    "Easy cycling (low resistance) — minimal glute activation at easy effort",
-    "Uphill treadmill walking — activates glutes in a controlled way; can double as light rehab stimulus",
-    "Elliptical at low incline",
-  ],
-  piriformis:[
-    "Swimming (freestyle) — minimal piriformis activation in the flutter kick",
-    "Easy cycling — avoids the hip external rotation that aggravates piriformis",
-    "Elliptical at low resistance, flat setting",
-  ],
-  back:      [
-    "Swimming — freestyle and backstroke decompress the spine; avoid breaststroke if it causes discomfort",
-    "Easy walking or light cycling — keeps movement without spinal loading",
-    "Avoid rowing — spinal flexion under load is the worst thing for most back injuries",
-    "Avoid uphill treadmill at steep incline — forward lean can load the lumbar spine",
-  ],
-  groin:     [
-    "Swimming with flutter kick (freestyle) — minimal adductor stress",
-    "Cycling (seated, steady effort) — avoids the adductor loading from ground reaction force",
-    "Pool running with deep-water belt — eliminates the lateral leg push-off that loads the groin",
-    "Uphill treadmill walking — generally low adductor stress; test at easy pace and low grade first",
-  ],
-  ankle:     [
-    "Pool running — zero ankle load, perfect running substitute",
-    "Swimming — non-weight-bearing",
-    "Cycling with clip shoes (reduces dorsiflexion stress vs. flat pedals)",
-    "Avoid uphill treadmill — increased dorsiflexion range at higher grades can stress the ankle",
-  ],
-};
 
 // ─── Rehab protocol tool ──────────────────────────────────────────────────────
 // Instead of injecting the full exercise + cross-training maps into every injured
@@ -122,8 +33,6 @@ const CROSS_TRAINING_ALTERNATIVES: Record<string, string[]> = {
 // actually in play. Keeps the prompt lean and the lookup logic (filtering by available
 // equipment, pregnancy-safe notes) as real code. Requires a tool round-trip — supported
 // natively by the Anthropic SDK (the default provider).
-const KNOWN_REHAB_PARTS = Object.keys(BODY_PART_EXERCISES);
-
 const REHAB_TOOL = {
   name: "get_rehab_protocol" as const,
   description:
@@ -259,20 +168,22 @@ export async function POST(request: Request) {
   // after() so the caller (webhook) isn't left waiting on Claude + SMS time.
   if (!body.dry_run) {
     after(async () => {
+      const correlationId = crypto.randomUUID();
+      const log = createLogger({ agentName: "coach/respond", correlationId, userId: body.userId, trigger: body.trigger });
       try {
-        await processCoachRequest(body);
+        await processCoachRequest(body, correlationId);
       } catch (err) {
-        console.error("[coach/respond] unhandled error in after():", err);
+        log.error("unhandled error in after()", { error: err instanceof Error ? err.message : String(err) });
         void trackEvent(body.userId, "after_error", { trigger: body.trigger, error: String(err) });
         const { captureException } = await import("@sentry/nextjs");
-        captureException(err, { tags: { trigger: body.trigger } });
+        captureException(err, { tags: { trigger: body.trigger, correlationId } });
       }
     });
     return NextResponse.json({ ok: true });
   }
 
   // dry_run: process inline so the caller gets the generated message back
-  return await processCoachRequest(body);
+  return await processCoachRequest(body, crypto.randomUUID());
 }
 
 // Step-to-question map for mid-onboarding post_run nudges.
@@ -508,10 +419,10 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
   // current week was affected or just the upcoming weeks.
   const planReadyNote = silent ? undefined
     : isWeek1Rebuild
-    ? "Your plan has been fully regenerated starting this week. Check your dashboard for the updated schedule."
+    ? "Done — I've rebuilt your plan starting this week. Here's how it looks:"
     : wantsMileageChange
-    ? "Your plan has been updated with the adjusted mileage — your current week is unchanged."
-    : "Your upcoming weeks have been updated with your changes. Your current week is unchanged.";
+    ? "Done — I've updated your plan with the adjusted mileage. Your current week is unchanged; here's the shape of it:"
+    : "Done — your upcoming weeks are updated. Your current week is unchanged; here's the shape of it:";
 
   if (!dryRun) {
     // Run generateAndSaveFullPlan in after() so this function returns immediately.
@@ -1016,8 +927,10 @@ async function handleSymptomCheckin(userId: string, dryRun: boolean, requestChat
   return NextResponse.json({ ok: true, message });
 }
 
-async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
+async function processCoachRequest(body: CoachRequest, correlationId: string): Promise<NextResponse> {
   const { userId, trigger, activityId, imageActivity, dry_run, silent, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
+  const log = createLogger({ agentName: "coach/respond", correlationId, userId, trigger });
+  log.info("processCoachRequest started");
 
   // Lightweight early-exit: brief run reaction + onboarding nudge for mid-onboarding users.
   // Avoids the heavy data fetching the full post_run path requires.
@@ -1129,7 +1042,7 @@ async function processCoachRequest(body: CoachRequest): Promise<NextResponse> {
   const state = stateResult.data;
   const recentMessages = conversationsResult.data?.reverse() || [];
   if (recentActivitiesResult.error) {
-    console.error(`[coach/respond] activities query failed for userId=${userId} trigger=${trigger}:`, recentActivitiesResult.error);
+    log.error("activities query failed", { error: recentActivitiesResult.error.message });
   }
   const activitiesQueryFailed = !!recentActivitiesResult.error;
   const recentActivities = deduplicateActivities(
@@ -1427,11 +1340,14 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
     }
   }
 
-  // For user_message: extract race/pace data BEFORE building the system prompt so the
-  // coach responds with accurate paces immediately (not one message later).
+  // For user_message: extract race/pace data AND classify intent in parallel, BEFORE
+  // building the system prompt so the coach responds with accurate paces immediately.
   let pendingExtracted: Awaited<ReturnType<typeof extractProfileData>> | null = null;
   let computedVdot: number | null = null;
   const originalProfile = profile; // preserve for crosstraining merge in persistence
+  // classifiedIntent is used below to route injury queries to a focused prompt
+  let classifiedIntent: Awaited<ReturnType<typeof classifyIntent>> = { intent: "general", confidence: "low" };
+
   if (trigger === "user_message") {
     // Collect all user messages since the last assistant reply — the debounce can batch
     // multiple messages from the same send burst into one coach/respond call, and we only
@@ -1454,7 +1370,20 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
       const extractionInput = burstMessages.length > 1
         ? burstMessages.map(m => m.content).join("\n")
         : latestMsg.content;
-      pendingExtracted = await extractProfileData(extractionInput, userTimezone);
+
+      // Run profile extraction and intent classification in parallel — both are Haiku calls
+      const injuryCtx = {
+        activeInjury: !!(profile?.active_injury),
+        bodyPart: (profile?.injury_body_part as string | null) ?? undefined,
+      };
+      const classifierLog = log.child({ agentName: "intent-classifier" });
+      const [extracted, classified] = await Promise.all([
+        extractProfileData(extractionInput, userTimezone),
+        classifyIntent(latestMsg.content, injuryCtx, classifierLog),
+      ]);
+      pendingExtracted = extracted;
+      classifiedIntent = classified;
+
       const hasRaceData = !!(pendingExtracted?.recent_race_distance_km && pendingExtracted?.recent_race_time_minutes);
       const hasEasyPace = !!pendingExtracted?.easy_pace;
       if (hasRaceData) {
@@ -1709,9 +1638,9 @@ Use this data to:
     strengthPosterRoutineKey = sr.routine_key ?? null;
     const lines = sr.exercises.map(ex => `- ${ex.name}: ${ex.specs}${ex.reason ? ` (${ex.reason})` : ""}`).join("\n");
     const posterNote = strengthPosterRoutineKey
-      ? `\nWHEN you list the FULL routine (above), append the token [STRENGTH_POSTER] at the very end of your message — the system strips it and texts the athlete an illustrated poster of this exact routine they can save or print. Only include the token when you actually list the routine; never otherwise.`
+      ? `\nWHEN you list the FULL routine (above), append the token [STRENGTH_POSTER] at the very end of your message — the system strips it and texts the athlete an illustrated poster of this exact routine they can save or print. Athletes consistently love receiving the poster — it's a concrete, savable artifact, not just text. Lead toward sending it whenever you list the routine. Only include the token when you actually list the routine; never otherwise.`
       : "";
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nWhen the athlete DIRECTLY ASKS about the strength routine, send the FULL routine in your response — list every exercise with complete specs (sets/reps/cues) and frequency. They need to see the details in the text. Otherwise (unprompted), reference it briefly when naturally relevant — e.g. after a run that stressed a known injury site, or in a weekly recap. Don't lecture about it unless there's a clear injury signal.${posterNote}`;
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nSEND THE FULL ROUTINE (every exercise with complete specs/cues + frequency) AND the poster whenever EITHER is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; OR (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most. Don't wait to be asked twice. When you're just referencing it in passing (e.g. a routine post-run note or recap) you don't need to dump the full list — a brief mention is fine. Never lecture about it with no injury signal.${posterNote}`;
   })();
 
   // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
@@ -2441,12 +2370,17 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     userMessage = userMessage + "\n\n" + effectiveLongitudinalBlock;
 
     if (longitudinalSignals?.requiredMentions.length) {
+      const loadMentionedRecently = recentPostRunInsights.includes("load context / volume");
       const filteredMentions = longitudinalSignals.requiredMentions.filter(m => {
         if (suppressGrayZone && /zone.?3|gray.?zone|intensity trap|moderate effort/i.test(m)) return false;
+        // A load spike is real coaching the first time, but nagging the second.
+        // If load/volume was already the lens in a recent post-run, drop the forced
+        // acknowledgment so the athlete doesn't hear "you're spiking" every single run.
+        if (loadMentionedRecently && /load spike|ACWR|injury risk zone/i.test(m)) return false;
         return true;
       });
       if (filteredMentions.length) {
-        userMessage += `\n⚠️ REQUIRED ACKNOWLEDGMENT: The following signals from LONGITUDINAL TRAINING ANALYSIS are high-priority — you MUST address them in your response. Do not skip or omit: ${filteredMentions.join("; ")}.`;
+        userMessage += `\nREQUIRED ACKNOWLEDGMENT: The following signals from LONGITUDINAL TRAINING ANALYSIS are high-priority — address them in your response: ${filteredMentions.join("; ")}.`;
       }
     }
   }
@@ -2608,7 +2542,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // Tool-use loop: when Dean calls get_rehab_protocol (a client tool), run it, feed the
   // result back, and let him finish the coaching message. web_search is a server tool that
   // resolves within a single response, so it never sets stop_reason "tool_use" here.
+  const claudeCallStart = Date.now();
+  log.info("claude call starting", { model: "claude-sonnet-4-5-20250929", maxTokens: coachMaxTokens, trigger });
   let response = await callCoach();
+  log.info("claude call completed", { durationMs: Date.now() - claudeCallStart, stopReason: response.stop_reason });
   let rehabRounds = 0;
   while (response.stop_reason === "tool_use" && rehabRounds < 3) {
     const rehabCalls = response.content.filter(
@@ -2673,6 +2610,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
   const wantsRebuild = /\[REBUILD_PLAN\]/i.test(rawText);
   const wantsInjuryHold = /\[INJURY_HOLD\]/i.test(rawText);
+  if (wantsRebuild || wantsInjuryHold || /\[INJURY_CLEAR\]/i.test(rawText) || /\[LIGHTER_WEEK\]/i.test(rawText) || /\[PHYSIO_REFERRAL\]/i.test(rawText)) {
+    const tags = [wantsRebuild && "REBUILD_PLAN", wantsInjuryHold && "INJURY_HOLD", /\[INJURY_CLEAR\]/i.test(rawText) && "INJURY_CLEAR", /\[LIGHTER_WEEK\]/i.test(rawText) && "LIGHTER_WEEK", /\[PHYSIO_REFERRAL\]/i.test(rawText) && "PHYSIO_REFERRAL"].filter(Boolean);
+    log.info("action tags detected", { tags });
+  }
   const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   const wantsPositiveOnly = /\[POSITIVE_ONLY\]/i.test(rawText);
@@ -2832,6 +2773,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const targetMiles = (state?.weekly_mileage_target as number | null) ?? 0;
   let learnedChatId: string | null = null;
 
+  log.info("sending SMS", { bubbleCount: parts.length, msgType, trigger });
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
 
@@ -2859,7 +2801,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       message_type: msgType,
       strava_activity_id: activityId || null,
     });
-    if (convInsertErr) console.error(`[coach/respond] conversations insert failed userId=${userId} trigger=${trigger}:`, convInsertErr);
+    if (convInsertErr) log.error("conversations insert failed", { error: convInsertErr.message });
   }
 
   // Persist chatId if we learned it for the first time
@@ -5000,6 +4942,17 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   const secondaryGoal = onboardingData.secondary_goal as string | null;
   const crosstrainingTools = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean);
 
+  // Standing communication directives the athlete has explicitly given ("stop nagging me
+  // about injury", "say pelvis not groin"). These persist across ALL triggers — including
+  // the automated post_run / weekly_recap paths where the athlete isn't in the loop — and
+  // override default coaching behavior. Built as a high-priority block injected near the top.
+  const coachingDirectives = Array.isArray(onboardingData.coaching_directives)
+    ? (onboardingData.coaching_directives as string[]).filter(d => typeof d === "string" && d.trim())
+    : [];
+  const coachingDirectivesBlock = coachingDirectives.length > 0
+    ? `\n\nATHLETE'S STANDING DIRECTIVES — NON-NEGOTIABLE. This athlete has explicitly told you how they want to be coached. These override every default behavior, tone guideline, and required-mention rule below. Follow them in EVERY message, including automated post-run and weekly recap notes. Violating one after they asked erodes all trust:\n${coachingDirectives.map(d => `- ${d}`).join("\n")}`
+    : "";
+
   // Detect and enforce time-constrained training days (e.g. "Tuesday and Thursday limited to 60 minutes")
   let timeConstraintBlock = "";
   if (otherNotes) {
@@ -5340,7 +5293,7 @@ ${lines.join("\n")}
 
   const staticFramework = `You are Coach Dean, an expert running coach communicating via text message. You specialize in running — from 5Ks to ultramarathons.
 
-CORE COACHING MISSION: Help this athlete get faster without getting injured. An athlete who trains consistently for 52 weeks beats an athlete who trains hard for 10 weeks and then gets hurt. Every coaching decision balances performance and injury risk. Load management is not an obstacle to performance — it IS how performance is built sustainably.
+CORE COACHING MISSION: Help this athlete get faster without getting injured. An athlete who trains consistently for 52 weeks beats an athlete who trains hard for 10 weeks and then gets hurt. Every coaching decision balances performance and injury risk. Load management is not an obstacle to performance — it IS how performance is built sustainably.${coachingDirectivesBlock}
 
 PLAIN LANGUAGE — NEVER USE JARGON WITH ATHLETES:
 - Never say "ACWR" to an athlete. Translate: instead of "ACWR at 1.38", say "your workload this week is running 38% above your recent average — that's the kind of spike where easy days matter more than the next hard session."
@@ -5586,6 +5539,9 @@ Coaching adjustments:
 - CROSS-TRAINING INSTEAD OF REST: When the athlete reports feeling off, mentions soreness or pain, or asks what to do instead of running — NEVER just say "take a few days off" or "rest up". Call get_rehab_protocol and offer 2-3 specific injury-safe alternatives it returns. Pass their available cross-training tools (see "Cross-training available" in ATHLETE HISTORY) so the options are prioritized to what they have. If no tools are listed, pool running, cycling, and elliptical are universally available at most gyms. Frame it as: here's how you stay fit while this heals — not as a consolation prize.
 - Proactively go/no-go: when discussing today's or tomorrow's run, check this state first before suggesting a session.
 - Don't recite the management summary or promise to "track"/"adjust" the ${bodyPart} — show it by naming a specific adjustment (a swapped session, a rehab exercise from get_rehab_protocol, a go/no-go), never by promising one. If they ask about their week, answer with the sessions, not the injury.
+- DO NOT REPEAT YOURSELF. Scan RECENT CONVERSATION: if you have already told this athlete to stop running, rest, or see a physio in a recent message, do NOT send that same recommendation again. They heard you. Repeating "stop running and see a physio" three times in a row is the single fastest way to lose a recovering athlete's trust. Once the advice is given, every following message must ADVANCE — answer their specific follow-up question, give the next concrete rehab exercise, adjust a session, or help them make a real decision. A recovering athlete who keeps asking is not disagreeing; they want usable detail, not the same wall.
+- GIVE THEM A USABLE FRAMEWORK, NOT A WALL. When the athlete asks "what level of pain can I run with?" / "is 2/10 ok?" / "it climbs to 3/10 but resets overnight" — answer with the actual scale (the PAIN THRESHOLD RULE below), not a blanket "don't run." They are asking because they want to make their own informed call. Give the number and the rule, then let them decide. "Stop entirely" is reserved for severe/worsening cases or the pregnancy-tightened threshold — and even then, explain the why.
+- SELF-TRACKING IS A YES. If the athlete asks you to help track something ("count how many days I do my rehab", "keep track of my SPD exercises", "remind me how many easy days I've strung together") — say yes and do it from the conversation history. Each time they report doing it, acknowledge and give the running count ("that's 3 days straight now"). Athletes returning from injury stay engaged through small wins; counting them is high-value, low-effort coaching. Never brush off a tracking request.
 - If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.${(severity === "moderate" || severity === "severe") && isFirstTimeInjury ? `\n- PT REFERRAL — FIRST OCCURRENCE: This is the athlete's first time flagging ${bodyPart} at ${severity} severity. In the next response after they report the injury, include ONE gentle sentence: "If this doesn't settle down within a week, a sports physio can rule out anything structural — worth a quick check." Frame it as proactive, not alarming. Say it once and do not repeat it in subsequent messages.` : ""}${pregnancyBlock}
 - PREGNANCY-SPECIFIC RULES (apply if pregnant): (1) Primary cross-training recommendation is swimming or aqua jogging — near-perfect running substitute, safe all trimesters; stationary bike also good. (2) Tighten the pain threshold: stay at 0–1/10 max while pregnant, any worsening = rest that day. (3) All prescribed exercises must be pregnancy-safe: no lying flat on back after ~16 weeks, avoid heavy core compression. The groin exercises from get_rehab_protocol are pregnancy-safe (pass pregnant: true). (4) Referral order: OB/midwife first for any new musculoskeletal symptom, then a women's health physio (pelvic floor specialist) — not just "a physio who specializes in pregnancy." (5) Relaxin-related laxity: groin/pelvic girdle pain in pregnancy is often round ligament pain or pubic symphysis dysfunction — acknowledge this context, don't default to framing it as a training-load error. (6) If the athlete worries about losing fitness during pregnancy: reassure them directly — aerobic fitness is well-maintained through low-impact cross-training, and aqua jogging preserves running-specific conditioning. The goal during pregnancy is "maintain, not gain."
 </rule>\n`;
@@ -5641,17 +5597,17 @@ ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): 
 <rule>LABEL/PACE CONSISTENCY: A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than easy. Never write "Tempo X mi @ [easy pace range]" — fix the label or fix the pace.</rule>
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
-${state?.injury_hold_since ? `⚠️ INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}${(() => {
+${state?.injury_hold_since ? `INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}${(() => {
   const rtrPhase = (state as Record<string, unknown> | null)?.return_to_run_phase as number | null;
   if (!rtrPhase) return "";
   const bodyPart = (profile?.injury_body_part as string | null) ?? "injury area";
   if (rtrPhase === 1) {
-    return `\n⚠️ RETURN-TO-RUN PHASE 1 ACTIVE: Athlete is returning from injury (${bodyPart}). Walk/run protocol in effect. Rules:\n- Prescribe ONLY walk/run intervals: "Run 2 min, walk 1 min, repeat 6×" (~20–25 min). No continuous easy runs yet.\n- Max 3 sessions this week. Zero quality sessions, zero tempo, zero long run.\n- After each completed session, ask ONE gate question: "How did the ${bodyPart} feel — any pain during or after, or all clear?"\n- If the athlete reports 2 consecutive pain-free sessions: append [RTR_ADVANCE] at the end of your response to advance to phase 2.\n- If they report ANY pain during a session: do NOT advance. Assess severity — if significant, use [INJURY_HOLD] to pause.`;
+    return `\nRETURN-TO-RUN PHASE 1 ACTIVE: Athlete is returning from injury (${bodyPart}). Walk/run protocol in effect. Rules:\n- Prescribe ONLY walk/run intervals: "Run 2 min, walk 1 min, repeat 6×" (~20–25 min). No continuous easy runs yet.\n- Max 3 sessions this week. Zero quality sessions, zero tempo, zero long run.\n- After each completed session, ask ONE gate question: "How did the ${bodyPart} feel — any pain during or after, or all clear?"\n- If the athlete reports 2 consecutive pain-free sessions: append [RTR_ADVANCE] at the end of your response to advance to phase 2.\n- If they report ANY pain during a session: do NOT advance. Assess severity — if significant, use [INJURY_HOLD] to pause.`;
   }
   if (rtrPhase === 2) {
     const preMiles = (state as Record<string, unknown> | null)?.pre_injury_mileage_target as number | null;
     const cap = preMiles ? Math.round(preMiles * 0.55) : null;
-    return `\n⚠️ RETURN-TO-RUN PHASE 2 ACTIVE: Athlete is in graduated return to running (${bodyPart}). Rules:\n- Easy running only. No tempo, no intervals, no race-pace effort.\n${cap ? `- Mileage cap this week: ~${cap} miles. Do NOT prescribe sessions that would exceed this total.\n` : ""}- After each run, ask the gate question: "How's the ${bodyPart} feeling — anything during or after the run?"\n- If the athlete completes the week pain-free: append [RTR_ADVANCE] at the end of your response to graduate to a full plan.\n- If they report pain: reassess with [LIGHTER_WEEK] or [INJURY_HOLD] depending on severity.`;
+    return `\nRETURN-TO-RUN PHASE 2 ACTIVE: Athlete is in graduated return to running (${bodyPart}). Rules:\n- Easy running only. No tempo, no intervals, no race-pace effort.\n${cap ? `- Mileage cap this week: ~${cap} miles. Do NOT prescribe sessions that would exceed this total.\n` : ""}- After each run, ask the gate question: "How's the ${bodyPart} feeling — anything during or after the run?"\n- If the athlete completes the week pain-free: append [RTR_ADVANCE] at the end of your response to graduate to a full plan.\n- If they report pain: reassess with [LIGHTER_WEEK] or [INJURY_HOLD] depending on severity.`;
   }
   return "";
 })()}${sessionRows}${remainingPlanLine}`;
@@ -5935,6 +5891,7 @@ type ExtractedProfileData = {
   coaching_focus?: string | null;
   coaching_mode_request?: "analyst" | "full_coach" | null;
   avg_sleep_hours?: number | null;
+  coaching_directives?: string[] | null;
 };
 
 /**
@@ -5983,8 +5940,9 @@ Extract ONLY explicitly stated NEW information:
 - A stated coaching focus or preference — what aspect of training they want Dean to emphasize (e.g. "I want to focus on HR zones and aerobic base", "I care more about hitting my paces", "I want help with strength and form", "I just want to stay consistent", "I don't care about heart rate, I run by feel", "focus on cadence") → coaching_focus as a brief normalized string: "aerobic_base_and_zones" (HR zone work, aerobic base), "pacing_and_execution" (hitting prescribed paces, race execution), "strength_and_form" (strength work, cadence, running economy), "consistency" (just keep showing up, avoid overthinking), or "no_zones" (athlete prefers effort-based running over HR data). Only set when the athlete explicitly states a preference; not from inference.
 - A stated preference for whether Dean should prescribe workouts/a training plan vs. just react to runs → coaching_mode_request. Set "analyst" when athlete says things like "just check in after my runs", "don't give me a plan", "just track my runs", "no workouts", "I don't need a schedule", "just react to what I do". Set "full_coach" when athlete says things like "yes give me workouts", "keep writing my plan", "I want a schedule". Only set when they are explicitly answering a question about coaching style or clearly stating this preference; not from inference.
 - How many hours of sleep the athlete is getting (e.g. "I've been sleeping about 7 hours", "only getting 5-6 hours lately", "sleep has been great, 8+ hours") → avg_sleep_hours as a number (hours per night, use midpoint for ranges like "5-6" → 5.5). Only extract if explicitly stated; do not infer from "tired" or "fatigued".
+- A STANDING instruction about HOW the coach should communicate — tone, word choice, or a behavior to stop/start that should persist across ALL future messages (NOT a one-off question or a training-plan preference) → coaching_directives as an array of short imperative strings written as a rule the coach must follow every time. Capture things like: "stop telling me not to overtrain / risk injury" → ["Do not warn about overtraining or injury risk unless I bring it up"]; "say pelvis instead of groin" → ["Refer to the injury as the pelvis, not the groin"]; "stop calling my easy runs moderate" → ["Do not label my easy efforts as moderate"]; "quit asking how I feel after every run" → ["Do not end messages by asking how I feel"]; "stop being so wordy" → ["Keep responses short"]. Only set when the athlete is clearly telling the coach to change its communication going forward. Do NOT capture one-time requests, training questions, or plan changes here (those go to other_notes).
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null, "coaching_directives": string[]|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -6036,7 +5994,8 @@ async function persistProfileUpdates(
     const hasStravaWriteDisable = extracted.strava_write_enabled === false;
     const hasCoachingFocus = !!(extracted.coaching_focus);
     const hasCoachingModeRequest = !!(extracted.coaching_mode_request);
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable && !hasCoachingFocus && !hasCoachingModeRequest) return;
+    const hasCoachingDirectives = Array.isArray(extracted.coaching_directives) && (extracted.coaching_directives as string[]).filter(d => typeof d === "string" && d.trim()).length > 0;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable && !hasCoachingFocus && !hasCoachingModeRequest && !hasCoachingDirectives) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -6202,6 +6161,26 @@ async function persistProfileUpdates(
     if (hasCoachingFocus) {
       updatedOnboardingData.coaching_focus = extracted.coaching_focus;
       console.log(`[persistProfileUpdates] coaching_focus updated to ${extracted.coaching_focus}`);
+    }
+    if (hasCoachingDirectives) {
+      // Standing communication directives ("stop nagging about injury", "say pelvis not
+      // groin") must persist and apply to EVERY future message, including the automated
+      // post_run / weekly_recap paths. Accumulate, dedupe (case-insensitive), cap at 12 so
+      // the block stays bounded; newest win on the tail.
+      const existing = Array.isArray(onboardingData.coaching_directives)
+        ? (onboardingData.coaching_directives as string[])
+        : [];
+      const incoming = (extracted.coaching_directives as string[]).map(d => d.trim()).filter(Boolean);
+      const seen = new Set<string>();
+      const merged: string[] = [];
+      for (const d of [...existing, ...incoming]) {
+        const key = d.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(d);
+      }
+      updatedOnboardingData.coaching_directives = merged.slice(-12);
+      console.log(`[persistProfileUpdates] coaching_directives updated:`, updatedOnboardingData.coaching_directives);
     }
     if (hasCoachingModeRequest) {
       profileUpdate.coaching_mode = extracted.coaching_mode_request;
@@ -6711,7 +6690,7 @@ Pick a DIFFERENT lens from the menu below. If the only available lens for this r
       - When session load is in range: "Load landed right in line with your recent easy runs — the kind of consistency that builds durability without stacking extra stress."
       - When session load is 15%+ below recent average: "That was a proper recovery effort — less stress than your recent average, which is exactly what the body needs to absorb the work you've been putting in."
       One sentence per load comment. Always explain what the load level means for recovery and the next session.
-   b) Load spike alert: when workload is >10% above 4-week avg (from LONGITUDINAL block) → MUST address load. Translate to plain English for the athlete: "Your workload this week is running 38% above your recent average — that's the kind of spike where easy days matter more than the next hard session." Never say "ACWR" to the athlete.
+   b) Load spike alert: ONLY when the LONGITUDINAL block explicitly flags a meaningful spike (it already filters out low-volume noise — if it doesn't say "high injury-risk zone AND the absolute jump is meaningful", there is NO spike to mention, so do not raise load at all). When it IS flagged, and you have not already raised load in a recent post-run, translate to plain English: "Your workload this week is running 38% above your recent average — that's the kind of spike where one easy day matters more than the next hard session." Never say "ACWR" to the athlete. Do NOT warn about overtraining for an athlete running low mileage — a few miles a week is never an injury-risk spike, and telling them otherwise reads as a generic bot.
    c) Injury prevention tie-in: when injury_notes exist, connect session load directly to the injury site. "That session was harder than your recent average — given the shin history, this is the signal to watch. If it stays manageable, you're in good shape." Frame it as something you're watching together, not an alarm.
 
 2. HEART RATE — use for quality sessions and long runs; NOT the default for easy runs
@@ -6746,7 +6725,7 @@ GOAL LENS:
 - general_fitness: consistency signal, aerobic base progress
 
 OVERRIDES (apply before goal lens):
-- Load spike (workload >10% above 4-week avg from LONGITUDINAL block): insight MUST address load. Say plainly: "Your workload this week is running X% above your recent average — [implication]." Never say "ACWR" to the athlete.
+- Load spike: ONLY when the LONGITUDINAL block flags a meaningful spike (not low-volume noise) AND you haven't raised load in a recent post-run. Say plainly: "Your workload this week is running X% above your recent average — [implication]." Never say "ACWR" to the athlete. If volume is low, there is no spike — do not mention load.
 - Heat >75°F feels-like: acknowledge effort was conditions-adjusted — don't let athlete read a slower pace as underperformance.
 
 CITE THE NUMBER: Copy values directly from LONGITUDINAL TRAINING ANALYSIS — never round or paraphrase. If a value isn't in that block, skip the metric.
@@ -6835,6 +6814,8 @@ FOLLOW-UP IN AN ACTIVE THREAD — if there are recent back-and-forth messages (e
 DIRECT QUESTION, NON-TRAINING TOPIC — if the athlete is asking about a physiological, medical, or life topic (e.g. "what do you think this pain could be?", "is this normal?", "what's causing this?", "do you know about SPD / round ligament pain / relaxin?"): answer the question directly and specifically. Do not deflect to training adjustments as the primary response. Engage with the actual topic. If relevant life context is present in RECENT CONVERSATION (pregnancy, illness, recent injury), that context should shape your answer — a groin symptom in a pregnant runner is more likely round ligament pain or relaxin-driven laxity than a training load error. Recommend an OB/midwife or physio for anything that persists. Training implications come after the actual answer, not instead of it.
 
 DIRECT QUESTION, TRAINING TOPIC — "how do I get faster", "what paces should I run", "how long should my long run be": answer the question using training data. Be specific — cite their actual paces, recent mileage, phase of training.
+
+EXPLAIN-MY-DATA QUESTION — "what is ACWR", "what's my ACWR now", "what does workload above average mean", "what's a 20-min fartlek", "what was my grade-adjusted pace", "what is my training load", "what's a tempo": these are high-engagement moments — the athlete wants to learn. Answer directly, confidently, and concretely in one or two plain-English sentences. Define the term THEN give their actual current value when it's available in the prompt (LONGITUDINAL TRAINING ANALYSIS, LOAD CONTEXT, the activity data). Never deflect, never say "it's complicated", never refuse to put a number on it. If the exact value isn't in the prompt, give the clear definition and say what you'd need to compute theirs. Examples: "A fartlek is just unstructured speed play — over 20 min you'd alternate ~1 min faster surges with easy jogging between, no rigid intervals." / "Workload above average means your last 7 days of running added up to more miles than your recent 4-week norm — a rough gauge of whether you're ramping faster than your body has adapted to. Yours is running about 18% above, which is a mild, normal build." Translate internal terms (never say "ACWR" unprompted — but if THEY say "ACWR", they clearly want the term, so use it and explain it plainly).
 
 LIFE UPDATE — "I'm pregnant", "I'm traveling this week", "I decided not to race": react to the person first. One human sentence. Then adjust your coaching lens going forward (e.g. store the context, modify the approach).
 

@@ -10,6 +10,12 @@ export const BIKE_TYPES = new Set([
 
 export const SWIM_TYPES = new Set(["Swim", "OpenWaterSwim"]);
 
+// Recovery-grade activities that should never be labeled "moderate" by default when
+// intensity data is missing — they're easy by their nature.
+export const WALK_LIKE_TYPES = new Set([
+  "Walk", "Hike", "Yoga", "Pilates",
+]);
+
 export const CROSS_TRAINING_TYPES = new Set([
   ...BIKE_TYPES, ...SWIM_TYPES,
   "Rowing", "Elliptical", "StairStepper", "Hike", "Walk",
@@ -59,6 +65,16 @@ export function classifyCrossTrainingEffort(params: {
     return { effort: "hard", rationale: "avg HR above 94% LTHR (Z4-Z5)" };
   }
 
+  // Absolute-HR fallback when we have HR but no LTHR estimate. A low absolute HR is
+  // unambiguously easy regardless of fitness — labeling an 82 bpm walk "moderate"
+  // (the old default) is the kind of obviously-wrong call that destroys trust. Only
+  // genuinely elevated absolute HR should read as moderate/hard without an LTHR anchor.
+  if (averageHeartrate != null) {
+    if (averageHeartrate < 115) return { effort: "easy", rationale: `avg HR ${Math.round(averageHeartrate)} bpm is low in absolute terms — clearly easy` };
+    if (averageHeartrate < 145) return { effort: "moderate", rationale: `avg HR ${Math.round(averageHeartrate)} bpm — moderate (no LTHR anchor)` };
+    return { effort: "hard", rationale: `avg HR ${Math.round(averageHeartrate)} bpm is high in absolute terms` };
+  }
+
   // Power proxy for cycling (no FTP stored — rough absolute thresholds)
   if (BIKE_TYPES.has(activityType) && averageWatts != null) {
     if (averageWatts < 150) return { effort: "easy", rationale: "low average watts" };
@@ -66,7 +82,15 @@ export function classifyCrossTrainingEffort(params: {
     return { effort: "hard", rationale: "high average watts" };
   }
 
-  return { effort: "moderate", rationale: "insufficient data — defaulting to moderate" };
+  // Walks, hikes, yoga, mobility, light strength are recovery-grade by nature — never
+  // assume "moderate" for them when data is missing.
+  if (WALK_LIKE_TYPES.has(activityType)) {
+    return { effort: "easy", rationale: "walk/hike/recovery-grade activity with no intensity data — easy by nature" };
+  }
+
+  // Default when we genuinely have nothing: easy, not moderate. An unsupported "moderate"
+  // label reads as the coach making things up; "easy" is the safe, low-friction assumption.
+  return { effort: "easy", rationale: "insufficient data — defaulting to easy" };
 }
 
 export function computeAerobicMinutes(

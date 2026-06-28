@@ -169,8 +169,10 @@ function baseConversations(userText: string): Array<Record<string, unknown>> {
  *   3rd+ calls — maybeUpdateTrainingPlanWeeks etc.: return safe no-op JSON
  */
 function mockExtractionThenCoach(extraction: Record<string, unknown>, coachText = "Got it, updating your plan!") {
+  // user_message makes 3 Claude calls: extraction (Haiku), intent classifier (Haiku), then coach (Sonnet)
   (anthropic.messages.create as ReturnType<typeof vi.fn>)
     .mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify(extraction) }] })
+    .mockResolvedValueOnce({ content: [{ type: "text", text: '{"intent":"general","body_part":null,"confidence":"low"}' }] })
     .mockResolvedValueOnce({ content: [{ type: "text", text: coachText }] })
     .mockResolvedValue({ content: [{ type: "text", text: "{}" }] });
 }

@@ -4,6 +4,52 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-28 — Multi-agent architecture Phase 1: structured logging, exercise library extraction, intent classifier
+
+**Type:** Refactor / Improvement
+**Reported by:** Internal architecture review
+**User feedback:** N/A
+**Root cause:** `coach/respond/route.ts` was a 557KB monolith — every trigger loaded the same enormous prompt and made the same Sonnet call regardless of what the user asked. No structured logging made silent failures in `after()` invisible.
+**Fix / Change:**
+- **Structured logger** (`src/lib/logger.ts`): thin JSON-line logger with correlationId per request, agentName, timing, level filtering via `LOG_LEVEL` env var. Sentry capture on error. Used at all key checkpoints: entry, Claude call start/end with duration, action tags detected, SMS send.
+- **Exercise library** (`src/lib/exercise-library.ts`): moved `BODY_PART_EXERCISES` and `CROSS_TRAINING_ALTERNATIVES` out of route.ts into their own module with `getRehabData(bodyPart)` lookup and `normalizeBodyPart()` alias resolution. Zero LLM calls — pure deterministic lookup.
+- **Intent classifier** (`src/lib/intent-classifier.ts`): Haiku pre-pass for `user_message` trigger, runs in parallel with profile extraction. Returns `{ intent: "injury_query" | "plan_question" | "strava_query" | "general", bodyPart?, confidence }`. Falls back to `{ intent: "general" }` on any failure — transparent to the user.
+- **route.ts wiring**: correlationId generated per request; intent classifier runs in `Promise.all` alongside existing profile extraction (no added latency); `after()` error now structured-logged before Sentry; key `console.error` calls replaced with `log.error`.
+**Files changed:** `src/lib/logger.ts` (new), `src/lib/exercise-library.ts` (new), `src/lib/intent-classifier.ts` (new), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/logger.test.ts` (new), `src/__tests__/lib/exercise-library.test.ts` (new), `src/__tests__/lib/intent-classifier.test.ts` (new), `src/__tests__/api/coach-respond.test.ts`, `src/__tests__/api/coach-respond-field-sync.test.ts`
+
+---
+
+## 2026-06-20 — Six fixes from a 2-week conversation scan (load nagging, persistent directives, effort labels, posters, UPDATE PLAN, return-to-running)
+
+**Type:** Improvement
+**Reported by:** Internal — scan of past 2 weeks of user conversations (46 users, 18 active)
+**User feedback (verbatim):**
+- "Can you stop telling me not to overtrain or risk injury. I'm barely exercising I'm not concerned" (and Dean kept warning anyway two days later)
+- "I don't know that this is above my workload"
+- "My heart rate was 82bpm, that was very easy" / "I would not call that moderate effort"
+- "Can you say my pelvis instead of groin" / "You need to update your definition of moderate workout" (both ignored on subsequent messages)
+- "Can you say my pelvis instead of groin when asking?" — preference evaporated next message
+- "UPDATE PLAN" (sent twice, athlete got prose promises and never saw an actual plan)
+- "Can you give me exercises for my groin" / "can you keep track of how many days I do SPD?" (return-to-running athlete wanting real rehab + self-tracking)
+
+**Root cause:**
+1. **Load nagging** — `computeACWR` flagged any ratio >1.3 with no absolute-volume floor, so a 1mi→2.4mi week read as "138% above your average." ~29% of all auto-messages carried injury/easy-day warnings; the forced "REQUIRED ACKNOWLEDGMENT" re-fired load mentions every post-run.
+2. **Directives evaporated** — tone/vocabulary directives ("stop nagging", "say pelvis not groin") were never extracted or persisted, so the automated post_run/recap paths never saw them.
+3. **Effort labels** — `classifyCrossTrainingEffort` defaulted to "moderate" whenever there was no LTHR anchor, mislabeling an 82bpm walk as moderate.
+4. **Posters** — only fired when directly asked; 2 sent in 2 weeks despite many injury mentions.
+5. **UPDATE PLAN** — `generateAndSaveFullPlan` saved the plan but sent NO SMS (`planReadyNote` was dead code), and the few notes that existed pointed to a "dashboard" the product no longer has.
+6. **Return-to-running** — Dean repeated "stop running, see a physio" verbatim 4×, refused to give the usable 0–2/10 pain framework athletes asked for, and brushed off a self-tracking request.
+
+**Fix / Change:**
+1. ACWR/load: added absolute-volume floors — flag only when 7-day load ≥15mi AND the jump over the 4-week avg is ≥8mi (week-over-week trend similarly gated at ≥15mi recent + ≥3mi jump). Low-volume "spikes" now explicitly tell Dean NOT to warn. Forced load acknowledgment now respects the recent-insight dedup so it can't repeat every run. Stripped ⚠️ glyphs.
+2. Directives: new `coaching_directives` extraction field (Haiku) → accumulated/deduped/capped in `onboarding_data.coaching_directives` → injected as a NON-NEGOTIABLE block near the top of the system prompt, applied across every trigger including automated ones.
+3. Effort labels: added an absolute-HR fallback (<115bpm = easy) and a recovery-grade activity set (walk/hike/yoga/pilates → easy); changed the no-data default from "moderate" to "easy."
+4. Posters: routine + poster now lead toward sending whenever the athlete asks about strength/rehab OR reports a new pain at a targeted body part — not only when asked twice.
+5. UPDATE PLAN: `generateAndSaveFullPlan` now texts the actual plan as a TEXT ARTIFACT (current week in full + compact forward arc + peak) and logs it as `initial_plan_link`; rebuilt the plan-ready notes to drop dead "dashboard" references.
+6. Return-to-running: added explicit "do not repeat the stop-running/physio wall," "give the usable pain framework not a wall," and "self-tracking is a yes (count from history)" rules to the active-injury block; removed ⚠️ from injury-hold and RTR-phase blocks; added an explain-my-data fast path for "what is ACWR/fartlek/GAP" questions.
+
+**Files changed:** `src/lib/training-analytics.ts`, `src/lib/cross-training.ts`, `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-analytics.test.ts`, `src/__tests__/lib/cross-training.test.ts` (new)
+
 ## 2026-06-18 — Removed Strava activity annotation feature
 
 **Type:** Refactor

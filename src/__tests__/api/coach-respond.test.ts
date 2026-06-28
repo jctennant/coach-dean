@@ -398,9 +398,9 @@ describe("coach/respond — prompt content guards", () => {
     await flush();
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    // user_message makes 2 Claude calls: extraction (call 0, Haiku) then coaching (call 1, Sonnet).
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    const coachingUserMsg = calls[1][0].messages[0].content as string;
+    // user_message makes 3 Claude calls: extraction (call 0), intent classifier (call 1), coaching (call 2).
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    const coachingUserMsg = calls[2][0].messages[0].content as string;
 
     // The SESSION REFERENCES guard must be passed so Dean doesn't prescribe
     // specific workouts to specific days — plans are now day-agnostic.

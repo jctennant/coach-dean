@@ -720,6 +720,51 @@ No other text.`,
     ...(isNewToken ? { trial_started_at: new Date().toISOString() } : {}),
   }).eq("id", userId);
 
+  // Send the rebuilt plan as a TEXT ARTIFACT. The plan lives in the conversation, not on a
+  // dashboard — athletes who text "UPDATE PLAN" expect to actually SEE the new plan, not a
+  // promise or a link. Skip on silent rebuilds (planReadyNote undefined). Show the current
+  // week in full plus a compact arc so they have something concrete in hand immediately.
+  if (planReadyNote && phoneNumber) {
+    try {
+      const { data: stateRow } = await supabase
+        .from("training_state")
+        .select("current_week")
+        .eq("user_id", userId)
+        .single();
+      const currentWeekNum = resetToWeek1 ? 1 : ((stateRow?.current_week as number | null) ?? 1);
+      const thisWeek = planWeeks.find(w => w.week_number === currentWeekNum) ?? planWeeks[0];
+      const peak = planWeeks.reduce((mx, w) => (w.mileage_target > (mx?.mileage_target ?? 0) ? w : mx), planWeeks[0]);
+
+      const fmtMi = (mi: number | null | undefined) => mi == null ? "—" : `${miToDisplay(mi)}${unitLabel}`;
+      const lines: string[] = [planReadyNote];
+      if (thisWeek) {
+        lines.push(
+          `\nThis week — Week ${thisWeek.week_number} of ${totalWeeks} (${thisWeek.phase}): ~${fmtMi(thisWeek.mileage_target)} total, long run ~${fmtMi(thisWeek.long_run_target)}.${thisWeek.key_workout ? ` Key session: ${thisWeek.key_workout}.` : ""}`
+        );
+      }
+      // Compact forward arc: the next few weeks plus where it peaks.
+      const upcoming = planWeeks.filter(w => w.week_number > currentWeekNum).slice(0, 3);
+      if (upcoming.length) {
+        const arc = upcoming.map(w => `W${w.week_number} ~${fmtMi(w.mileage_target)}`).join(", ");
+        const peakNote = peak && peak.week_number !== currentWeekNum
+          ? ` Peak is ~${fmtMi(peak.mileage_target)} around week ${peak.week_number}.`
+          : "";
+        lines.push(`\nFrom here: ${arc}.${peakNote} Ask me about any week and I'll break it down.`);
+      }
+      await sendSMS(phoneNumber, lines.join("\n"));
+
+      // Log the artifact so dedup/recap logic sees the plan was actually delivered.
+      await supabase.from("conversations").insert({
+        user_id: userId,
+        role: "assistant",
+        content: lines.join("\n"),
+        message_type: "initial_plan_link",
+      });
+    } catch (smsErr) {
+      console.error("[generateAndSaveFullPlan] plan-ready SMS failed (non-fatal):", smsErr);
+    }
+  }
+
   return dashboardToken;
 }
 

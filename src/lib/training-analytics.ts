@@ -119,7 +119,14 @@ export function computeLoadTrend(
   const recent = weeklyMiles[weeklyMiles.length - 1];
   const prior = weeklyMiles[weeklyMiles.length - 2];
   const weekOverWeekChangePct = prior > 0 ? Math.round(((recent - prior) / prior) * 100) : null;
-  const flagged = weekOverWeekChangePct !== null && weekOverWeekChangePct > 10;
+  // A >10% week-over-week jump only matters when the absolute miles are meaningful.
+  // 1mi → 2mi is +100% but irrelevant. Require the recent week to clear a real floor
+  // AND the absolute increase to be at least a couple of miles before flagging.
+  const flagged =
+    weekOverWeekChangePct !== null &&
+    weekOverWeekChangePct > 10 &&
+    recent >= 15 &&
+    recent - prior >= 3;
 
   let summary: string;
   if (weeklyMiles.every(m => m === 0)) {
@@ -132,7 +139,7 @@ export function computeLoadTrend(
       const sign = weekOverWeekChangePct >= 0 ? "+" : "";
       summary += ` Most recent week: ${sign}${weekOverWeekChangePct}% vs prior week.`;
       if (flagged) {
-        summary += ` ⚠️ Weekly mileage jumped >10% — mention load management if relevant.`;
+        summary += ` Weekly mileage jumped meaningfully — mention load management once if relevant, not every run.`;
       }
     }
   }
@@ -272,11 +279,25 @@ export function computeACWR(
   }
 
   const acwr = Math.round((acuteMiles / chronicLoad) * 100) / 100;
-  const flagged = acwr > 1.3;
+
+  // ACWR > 1.3 is the textbook injury-risk threshold (Gabbett), BUT the ratio is
+  // dominated by noise at low absolute volume — a jump from 1mi/week to 2.4mi/week
+  // is a 2.4 ratio that means nothing for tissue injury risk. Athletes were getting
+  // nagged with "138% above your 4-week average" on a couple of miles. Only flag a
+  // spike when the load is meaningful in absolute terms: the 7-day total must clear a
+  // real-training floor AND the week-over-baseline jump must be a real number of miles.
+  const MEANINGFUL_ACUTE_FLOOR = 15; // miles in the trailing 7 days
+  const MEANINGFUL_JUMP_MILES = 8; // acute weekly load minus chronic weekly average
+  const flagged =
+    acwr > 1.3 &&
+    acuteMiles >= MEANINGFUL_ACUTE_FLOOR &&
+    acuteMiles - chronicLoad >= MEANINGFUL_JUMP_MILES;
 
   let summary = `Acute:chronic workload ratio: ${acwr.toFixed(2)} (7-day ${acuteMiles.toFixed(1)}mi vs 4-week avg ${chronicLoad.toFixed(1)}mi/week).`;
   if (flagged) {
-    summary += ` ⚠️ In the high injury-risk zone (>1.3). This week's load significantly exceeds the rolling average — consider scaling back or adding an easy day.`;
+    summary += ` In the high injury-risk zone (>1.3) AND the absolute jump is meaningful (+${(acuteMiles - chronicLoad).toFixed(1)}mi over the rolling average) — worth one easy day this week. Mention once, not every run.`;
+  } else if (acwr > 1.3) {
+    summary += ` Ratio is elevated but absolute volume is low (${acuteMiles.toFixed(1)}mi this week) — this is normal early-rebuild variance, NOT an injury-risk spike. Do NOT warn the athlete about overtraining or load; only cite the ratio if they explicitly ask about it.`;
   } else if (acwr < 0.7 && acuteMiles > 0) {
     summary += ` Load is well below the chronic average — good recovery week or planned step-back.`;
   }
