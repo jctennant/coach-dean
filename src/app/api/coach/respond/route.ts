@@ -22,8 +22,10 @@ import { composeStrengthRoutine } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
-import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, KNOWN_REHAB_PARTS } from "@/lib/exercise-library";
+import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, KNOWN_REHAB_PARTS, getRehabData } from "@/lib/exercise-library";
 import { classifyIntent } from "@/lib/intent-classifier";
+import { buildReminderDynamic } from "@/lib/reminder-prompt";
+import type { ReminderContext } from "@/lib/reminder-prompt";
 
 export const maxDuration = 120;
 
@@ -962,6 +964,10 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
     return await handleSymptomCheckin(userId, dry_run ?? false, requestChatId);
   }
 
+  // Reminder triggers don't use activity data — skip the heavy fetches to save DB reads.
+  // morning_plan keeps the full fetch (needs session status to know if long run was done).
+  const isReminderTrigger = trigger === "morning_reminder" || trigger === "nightly_reminder";
+
   // YTD activities for post_run milestone check — separate from recentActivities which
   // only holds the last 50 activities (~12 weeks). Without this, the YTD sum underflows
   // for year-round runners and incorrectly fires milestone notifications.
@@ -1005,21 +1011,25 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
       .order("created_at", { ascending: false })
       // user_message needs full context; proactive triggers (reminders, post_run, plans) need less
       .limit(trigger === "user_message" ? 15 : 8),
-    supabase
-      .from("activities")
-      .select(
-        "activity_type, distance_meters, moving_time_seconds, average_heartrate, max_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct, workout_type, activity_name, running_impact_load, activity_fatigue_load"
-      )
-      .eq("user_id", userId)
-      .order("start_date", { ascending: false })
-      .limit(50),
-    supabase
-      .from("activities")
-      .select("activity_type, distance_meters, average_pace, start_date, workout_type")
-      .eq("user_id", userId)
-      .eq("workout_type", 1)
-      .order("start_date", { ascending: false })
-      .limit(20),
+    isReminderTrigger
+      ? Promise.resolve({ data: [], error: null })
+      : supabase
+          .from("activities")
+          .select(
+            "activity_type, distance_meters, moving_time_seconds, average_heartrate, max_heartrate, elevation_gain, average_pace, start_date, average_cadence, gear_name, source, aerobic_efficiency, cardiac_decoupling_pct, workout_type, activity_name, running_impact_load, activity_fatigue_load"
+          )
+          .eq("user_id", userId)
+          .order("start_date", { ascending: false })
+          .limit(50),
+    isReminderTrigger
+      ? Promise.resolve({ data: [], error: null })
+      : supabase
+          .from("activities")
+          .select("activity_type, distance_meters, average_pace, start_date, workout_type")
+          .eq("user_id", userId)
+          .eq("workout_type", 1)
+          .order("start_date", { ascending: false })
+          .limit(20),
     supabase
       .from("races")
       .select("id, race_date, race_name, goal, priority, goal_time_minutes, goal_distance_miles, elevation_gain_feet, elevation_loss_feet, race_altitude_ft, trail_subtype")
@@ -2523,12 +2533,107 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   if (shouldUseWebSearch) coachTools.push({ type: "web_search_20250305", name: "web_search" });
   if (offerRehabTool) coachTools.push(REHAB_TOOL);
 
+  // ─── Injury routing ──────────────────────────────────────────────────────────
+  // When the intent classifier identified an injury query with a known body part,
+  // swap out the full dynamic prompt for a focused injury block. This cuts prompt
+  // size by ~70% for injury queries — no activity history, analytics, or VDOT needed.
+  // Falls back to the full prompt on any routing failure (transparent to the user).
+  let activeSystemDynamic = systemDynamic;
+  if (
+    trigger === "user_message" &&
+    classifiedIntent.intent === "injury_query" &&
+    classifiedIntent.bodyPart
+  ) {
+    const rehabData = getRehabData(classifiedIntent.bodyPart);
+    if (rehabData) {
+      log.info("injury routing: using focused prompt", { bodyPart: classifiedIntent.bodyPart, confidence: classifiedIntent.confidence });
+      const now = new Date();
+      const todayFmt = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: userTimezone });
+      const currentWeek = (state?.current_week as number | null) ?? periodization.effectiveWeek;
+      const currentPhase = (state?.current_phase as string | null) ?? periodization.phase;
+      const injuryNotes = (profile?.injury_notes as string | null) ?? null;
+      const physioNotes = (profile?.physio_notes as string | null) ?? null;
+      const injurySeverity = (profile?.injury_severity as string | null) ?? null;
+      const bodyPartLabel = classifiedIntent.bodyPart.replace(/_/g, " ");
+      const conversationBlock = recentMessages.slice(-5).map(m => {
+        const ts = m.created_at ? new Date(m.created_at as string).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
+        return `[${ts}] ${m.role === "user" ? "Athlete" : "Coach"}: ${m.content}`;
+      }).join("\n");
+      activeSystemDynamic = `TODAY: ${todayFmt} | Week ${currentWeek} — ${currentPhase} phase
+
+ATHLETE: ${(user.name as string) ?? "Athlete"} | Goal: ${profile?.goal ? profile.goal as string : "running"}${injuryNotes ? `\nInjury notes: ${injuryNotes}` : ""}${physioNotes ? `\nPhysio notes: ${physioNotes}` : ""}
+
+INJURY FOCUS — ${bodyPartLabel}${injurySeverity ? ` (${injurySeverity})` : ""}:
+Exercises (pick 3–4 for this athlete, use sets×reps already specified):
+${rehabData.exercises.map(e => `• ${e}`).join("\n")}
+
+Injury-safe cross-training alternatives:
+${rehabData.crossTraining.map(e => `• ${e}`).join("\n")}
+
+PAIN THRESHOLD: 0–2/10 ok with monitoring; 3/10 = stop that run; pain that climbs during a run = stop signal even if it eases the next day. Give the athlete this scale if they ask what's OK.
+
+RECENT CONVERSATION:
+${conversationBlock}
+
+OUTPUT CONTRACT:
+1. Lead with the specific injury insight — not a greeting.
+2. Give 3–4 concrete exercises (from the list above) with their sets×reps. Do not invent exercises from memory.
+3. Recommend at least one cross-training alternative that fits what they can actually do.
+4. No sign-offs. Message ends on the coaching point.`;
+    } else {
+      log.info("injury routing: body part not in library, using full prompt", { bodyPart: classifiedIntent.bodyPart });
+    }
+  }
+
+  // ─── Reminder Agent ───────────────────────────────────────────────────────────
+  // For morning_reminder and nightly_reminder: replace the full dynamic with a slim
+  // reminder-focused block. The heavy static (identity/rules) is still shared.
+  // Activity data was already skipped in the data fetch step above.
+  if (trigger === "morning_reminder" || trigger === "nightly_reminder") {
+    const reminderLog = log.child({ agentName: "reminder-agent" });
+    const primaryRace = upcomingRaces[0] ?? null;
+    const daysUntilRace = primaryRace?.race_date
+      ? Math.round((new Date(primaryRace.race_date as string).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+      : null;
+    const plannedSessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+    const reminderCtx: ReminderContext = {
+      trigger,
+      athleteName: (user.name as string) ?? "Athlete",
+      goal: (profile?.goal as string) ?? "running",
+      raceDate: primaryRace ? (primaryRace.race_date as string) : null,
+      raceName: primaryRace ? (primaryRace.race_name as string | null) : null,
+      daysUntilRace,
+      secondaryRaces: upcomingRaces
+        .filter(r => r.priority === "B" || r.priority === "C")
+        .map(r => ({
+          race_name: r.race_name as string,
+          race_date: r.race_date as string,
+          priority: r.priority as "B" | "C",
+          daysUntilRace: Math.round((new Date(r.race_date as string).getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+        })),
+      todayStr: new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: userTimezone }),
+      timezone: userTimezone,
+      weekNumber: (state?.current_week as number | null) ?? periodization.effectiveWeek,
+      totalWeeks: planTotalWeeks,
+      phase: (state?.current_phase as string | null) ?? periodization.phase,
+      weeklyMileageTarget: (state?.weekly_mileage_target as number | null) ?? 0,
+      weekMileageSoFar,
+      plannedSessions,
+      injuryNotes: (profile?.injury_notes as string | null) ?? null,
+      injuryHoldActive: !!(state?.injury_hold_since),
+      recentMessages,
+      preferredUnits: (profile?.preferred_units as "miles" | "km" | null) === "metric" ? "km" : "miles",
+    };
+    activeSystemDynamic = buildReminderDynamic(reminderCtx);
+    reminderLog.info("reminder agent: built focused prompt", { trigger, weekNumber: reminderCtx.weekNumber, phase: reminderCtx.phase });
+  }
+
   // Plans can be longer (full week schedule); SMS triggers cap at 512 (SMS max ~640 chars ≈ 150 tokens).
   // user_message gets 1000 to handle full plan arc requests.
   const coachMaxTokens = (trigger === "initial_plan" || trigger === "weekly_recap") ? 1000 : trigger === "user_message" ? 1000 : 512;
   const coachSystem = [
     { type: "text" as const, text: systemStatic, cache_control: { type: "ephemeral" as const } },
-    { type: "text" as const, text: systemDynamic },
+    { type: "text" as const, text: activeSystemDynamic },
   ];
   const convo: Anthropic.Messages.MessageParam[] = [{ role: "user", content: userMessage }];
   const callCoach = () => anthropic.messages.create({

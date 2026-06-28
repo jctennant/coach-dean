@@ -4,6 +4,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-06-28 — Multi-agent architecture Phase 2: injury routing, reminder agent, B/C race context
+
+**Type:** Refactor / Improvement
+**Reported by:** Internal architecture review
+**User feedback:** N/A
+**Root cause:** Reminder triggers (morning_reminder/nightly_reminder) were building the full 7700-line coaching prompt and loading 50 activities + 20 race history records that reminders never use. Injury queries were also going through the full prompt despite needing only a ~400-token focused context.
+**Fix / Change:**
+- Injury routing: when `classifyIntent` returns `injury_query` with a known body part, `getRehabData()` builds a focused ~400-token dynamic block (athlete, injury, rehab protocol, recent conversation) instead of the full prompt. Falls through to full flow on any failure or unknown body part.
+- Reminder agent: `morning_reminder` and `nightly_reminder` now skip the 50-activity and 20-race-history Supabase queries entirely (saves 2 DB reads per trigger for every user, daily). They build a focused dynamic prompt via `buildReminderDynamic()` from `src/lib/reminder-prompt.ts`, which omits TRAINING PHILOSOPHY, aerobic metrics, VDOT formula, load context, and all activity history.
+- B/C race context: reminder prompts now include B/C secondary race awareness — B race ≤14 days gets a mini-taper note (10-15% volume reduction), B race >14 days gets a mention, C race ≤7 days gets a "quality workout" framing.
+- Added `src/__tests__/lib/reminder-prompt.test.ts` (15 tests).
+**Files changed:** `src/lib/reminder-prompt.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/reminder-prompt.test.ts`
+
+---
+
 ## 2026-06-28 — Multi-agent architecture Phase 1: structured logging, exercise library extraction, intent classifier
 
 **Type:** Refactor / Improvement
