@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { SignupForm } from "@/components/signup-form";
+import { WaitlistForm } from "@/components/waitlist-form";
 import { IMessageMockup } from "@/components/imessage-mockup";
 import { Navbar } from "@/components/navbar";
 import { RaceMarquee } from "@/components/race-marquee";
@@ -289,15 +289,13 @@ const LEVERS = [
 /* ------------------------------------------------------------------ */
 
 export default function Home() {
-  const smsPhone = process.env.LINQ_PHONE_NUMBER ?? "+18336373002";
-  const smsUrl = `sms:${smsPhone}?body=Hi Coach Dean!`;
   return (
     <div className="flex min-h-screen flex-col" style={{ minHeight: "100vh" }}>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
       />
-      <Navbar smsUrl={smsUrl} />
+      <Navbar />
 
       {/* Hero */}
       <section id="get-started" className="flex items-center px-6" style={{ minHeight: "100vh", paddingTop: "calc(4rem + 48px)", paddingBottom: "48px" }}>
@@ -310,8 +308,9 @@ export default function Home() {
             <p className="text-lg" style={{ color: "#4a4a4a" }}>
               Coach Dean reads every run you do and texts you back like a coach who&apos;s actually paying attention — catching the small stuff before it sidelines you.
             </p>
+            <p className="text-sm font-medium text-[#1a5c35]">Join the waitlist — spots opening soon.</p>
             <Suspense>
-              <SignupForm smsPhone={smsPhone} />
+              <WaitlistForm />
             </Suspense>
           </div>
           {/* iPhone mockup */}
@@ -804,10 +803,10 @@ export default function Home() {
           Stop losing weeks to injury.
         </h2>
         <p className="max-w-md text-muted-foreground leading-relaxed">
-          Your first 7 days are free. Tell Coach Dean where you&apos;re at: staying healthy, managing something that flared up, or rebuilding after time off. He&apos;ll take it from there.
+          Join the waitlist and we&apos;ll text you when spots open up.
         </p>
         <Suspense>
-          <SignupForm smsPhone={smsPhone} centered />
+          <WaitlistForm centered />
         </Suspense>
       </section>
 

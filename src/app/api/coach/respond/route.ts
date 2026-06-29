@@ -2622,7 +2622,7 @@ OUTPUT CONTRACT:
       injuryNotes: (profile?.injury_notes as string | null) ?? null,
       injuryHoldActive: !!(state?.injury_hold_since),
       recentMessages,
-      preferredUnits: (profile?.preferred_units as "miles" | "km" | null) === "metric" ? "km" : "miles",
+      preferredUnits: (profile?.preferred_units as string | null) === "metric" ? "km" : "miles",
     };
     activeSystemDynamic = buildReminderDynamic(reminderCtx);
     reminderLog.info("reminder agent: built focused prompt", { trigger, weekNumber: reminderCtx.weekNumber, phase: reminderCtx.phase });
