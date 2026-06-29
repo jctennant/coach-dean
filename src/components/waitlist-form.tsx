@@ -23,7 +23,6 @@ interface WaitlistFormProps {
 }
 
 export function WaitlistForm({ centered }: WaitlistFormProps) {
-  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [error, setError] = useState("");
@@ -44,7 +43,7 @@ export function WaitlistForm({ centered }: WaitlistFormProps) {
     const res = await fetch("/api/waitlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: e164, name: name.trim() || undefined, source: src }),
+      body: JSON.stringify({ phone: e164, source: src }),
     });
 
     if (res.ok) {
@@ -67,14 +66,6 @@ export function WaitlistForm({ centered }: WaitlistFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className={`flex w-full max-w-sm flex-col gap-3 ${centered ? "items-center" : ""}`}>
-      <input
-        type="text"
-        placeholder="Your name"
-        value={name}
-        onChange={e => setName(e.target.value)}
-        className="h-11 w-full rounded-lg border border-gray-300 bg-white px-4 text-sm outline-none focus:border-gray-500 focus:ring-0"
-        autoComplete="given-name"
-      />
       <input
         type="tel"
         placeholder="(555) 000-0000"

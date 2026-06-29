@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { QRCodeSVG } from "qrcode.react";
 
-export function Navbar({ smsUrl }: { smsUrl?: string }) {
+export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -27,32 +25,9 @@ export function Navbar({ smsUrl }: { smsUrl?: string }) {
 
         {/* CTA */}
         <div className="flex items-center gap-4">
-          <a href="/dashboard" className="hidden md:inline text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <a href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Sign in
           </a>
-          {smsUrl ? (
-            <div className="group relative w-fit">
-              <a href={smsUrl}>
-                <Button size="sm" className="h-auto rounded-full px-6 py-3 text-[15px]">
-                  Get started
-                </Button>
-              </a>
-              <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                <div className="flex flex-col items-center gap-3 rounded-2xl border bg-white p-4 shadow-xl">
-                  <QRCodeSVG value={smsUrl} size={128} />
-                  <p className="whitespace-nowrap text-xs text-muted-foreground">
-                    On desktop? Text Coach Dean on your phone
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <a href="#get-started">
-              <Button size="sm" className="h-auto rounded-full px-6 py-3 text-[15px]">
-                Join waitlist
-              </Button>
-            </a>
-          )}
         </div>
       </div>
     </header>
