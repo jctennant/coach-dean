@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-06 — Fix hallucinated stats when Strava activity import fails
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (internal observation)
+**User feedback:** "I have done quite a bit of elevation recently so something is off" — coach said "no vertical training in your recent runs" and cited "38 miles/week" when the Strava import had silently failed (403 Inactive from Strava API).
+**Root cause:** Three compounding issues: (1) When Strava connected but activity import failed, all analytics fields were null but code still proceeded to build stravaContext — empty strings for most lines but `elevLine` for trail goals injected "Avg elevation/run: 0 ft (no vertical training in recent runs)" because null was treated as zero. (2) The `handleDataAnalysis` prompt contained a hardcoded example: `E.g. "You're at 38 miles/week heading into Dipsea..."` — Claude used this example number as real data when no weekly mileage was available. (3) Same issue in the trail race prompt rule which also cited "38 miles/week" in its example.
+**Fix / Change:** (1) Detect import failure (all analytics null + no best Strava race) and short-circuit to a clear failure message telling Claude not to invent numbers. (2) Fixed `elevLine` — null elevation means missing data, not zero vert; the "0 ft (no vertical training)" signal now only fires when `avgElevFtPerRun === 0` explicitly. (3) Removed hardcoded mileage numbers from prompt examples; replaced with instructions to only cite numbers present in the STRAVA context.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-07-05 — Photon (Spectrum) iMessage provider
 
 **Type:** Infra

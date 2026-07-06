@@ -379,6 +379,14 @@ async function handleConversation(
     const estimatedMaxHR = mergedData.strava_estimated_max_hr as number | null ?? null;
     const maxWeeklySpikePct = mergedData.strava_max_weekly_spike_pct as number | null ?? null;
 
+    // If Strava connected but all analytics are null, the activity import failed.
+    // Tell Claude directly so it doesn't hallucinate numbers from missing data.
+    const importFailed = avgWeeklyMiles === null && longestRunMiles === null && avgRunsPerWeek === null && !sbr;
+
+    if (importFailed) {
+      stravaContext = "\nSTRAVA: Connected but activity import failed — no training data is available. CRITICAL: Do NOT invent any mileage, pace, elevation, or frequency numbers. Tell the athlete the import didn't come through and ask them to briefly describe their recent training so you can build the plan from their actual data.";
+    } else {
+
     const weeklyLine = avgWeeklyMiles != null
       ? ` Recent avg: ~${avgWeeklyMiles} mi/week${mileageTrend ? ` (${mileageTrend})` : ""}.`
       : "";
@@ -403,9 +411,11 @@ async function handleConversation(
     const TRAIL_GOALS = ["trail_race", "30k", "50k", "50mi", "100k", "100mi"];
     const mergedGoal = mergedData.goal as string | null;
     const isTrailGoal = mergedGoal ? TRAIL_GOALS.includes(mergedGoal) : false;
+    // Only inject the "0 ft" signal when we have real data showing zero vert.
+    // Null means the import didn't produce elevation data — not that vert is actually 0.
     const elevLine = avgElevFtPerRun
       ? ` Avg elevation/run: ${avgElevFtPerRun} ft.`
-      : isTrailGoal
+      : isTrailGoal && avgElevFtPerRun === 0
         ? " Avg elevation/run: 0 ft (no vertical training in recent runs)."
         : "";
     // Show weekly progression oldest→newest so trend is readable (e.g. "22, 25, 28, 30")
@@ -416,7 +426,7 @@ async function handleConversation(
       ? ` HR zones (% of runs by avg HR): Z1 ${hrZonePct.z1}%, Z2 ${hrZonePct.z2}%, Z3 ${hrZonePct.z3}%, Z4 ${hrZonePct.z4}%, Z5 ${hrZonePct.z5}%.${estimatedMaxHR ? ` Est. max HR: ${estimatedMaxHR} bpm.` : ""}`
       : "";
     const spikeLine = maxWeeklySpikePct != null && maxWeeklySpikePct >= 20
-      ? ` ⚠️ Mileage spike detected: largest week-over-week jump in last 4 weeks was +${maxWeeklySpikePct}%.`
+      ? ` WARNING: Mileage spike detected: largest week-over-week jump in last 4 weeks was +${maxWeeklySpikePct}%.`
       : "";
 
     if (sbr) {
@@ -450,6 +460,8 @@ async function handleConversation(
         : " No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
       stravaContext = `\nSTRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${lastRunLine}${elevLine}${progressionLine}${paceTrendLine}${hrZoneLine}${spikeLine}${paceNote}`;
     }
+
+    } // end: !importFailed
   } else {
     // Strava is mandatory — never treat the athlete as having skipped. If a legacy
     // user has strava_skipped: true, ignore it and re-pitch Strava on the next ask.
@@ -1275,7 +1287,7 @@ ${injuryAlreadyCollected ? `YOUR JOB — INJURY IS THE PRIMARY LENS:
 The athlete already flagged an injury before connecting Strava. That injury is the primary coaching concern. Do NOT lead with HR zone distribution or aerobic efficiency. Use load/volume signals (weekly mileage, trend, weeks to race) as the data backbone, and connect everything back to the injury and race timeline.
 
 Write 3–4 sentences:
-1. Lead with the injury + what the training volume says about risk given the race timeline. Use at least 2 specific numbers (e.g. weekly mileage, weeks to race, mileage trend). E.g. "You're at 38 miles/week heading into Dipsea in 6 weeks — with the shin in play, the question right now is managing load so the tissue can settle before the race, not adding more."
+1. Lead with the injury + what the training volume says about risk given the race timeline. Use at least 2 specific numbers from the STRAVA context above (e.g. weekly mileage, weeks to race, mileage trend). CRITICAL: only cite numbers that appear in the STRAVA data above — never invent figures. If no mileage data is available, say so and ask the athlete instead of guessing.
 2. One specific signal you'll watch: name it clearly (load spike, pace drop, mileage jump). Connect it to the injury. Don't be generic.
 3. One forward-looking sentence about what the coaching relationship will specifically monitor — make the athlete feel watched, not just coached.
 
@@ -1299,7 +1311,7 @@ Rules:
 - PACE TREND: If "Easy pace trend (Z2 runs): improving" appears, mention it explicitly as a positive signal ("your Z2 pace has improved ~22s/mi"). If "declining", flag it. Don't skip this data point.
 - INACTIVITY: If "Last run: X days ago" shows more than 10 days, factor this into the training start timing.
 ${injuryAlreadyCollected ? `- HR ZONES: Do not lead with or headline HR zone analysis when injury is already known. If ≥50% of runs are in Z3 and the pattern is relevant to injury recovery (more fatigue → slower healing), you may mention it as a supporting detail only — never the headline.` : `- HIGH Z3 WARNING: If ≥50% of runs are in Z3, name this clearly but without alarm. Z3 is "no man's land" — hard enough to accumulate fatigue, too easy to build race-specific fitness. Note that wrist-based HR can read high, so the real zones might be slightly lower, but the pattern is still worth polarizing: more true easy (Z1/Z2) and add one genuine quality session (Z4/Z5). Frame it as a direction to move toward, not a condemnation of what they've been doing.`}
-- TRAIL RACES: If "Avg elevation/run: 0 ft (no vertical training)" appears in the Strava context AND the race is a trail/mountain race, lead with the elevation gap. Include the athlete's weekly mileage AND weeks to race alongside it so the coaching read is grounded. Example: "You're building well at 38 miles/week over 5 runs, but zero elevation gain in all of it — with 10 weeks to Snowbird and ~3000ft of climbing in 8.9 miles, adding vert is now the training priority."`;
+- TRAIL RACES: If "Avg elevation/run: 0 ft (no vertical training)" appears explicitly in the Strava context AND the race is a trail/mountain race, lead with the elevation gap. Use the athlete's actual weekly mileage and weeks to race from the data above — do not invent or estimate these numbers.`;
 
   const response = await anthropic.messages.create({
     model: "claude-sonnet-4-5-20250929",
