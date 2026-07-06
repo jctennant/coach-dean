@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-06 — Show concrete from/to miles in mileage spike warning
+
+**Type:** Improvement
+**Reported by:** Jake Tennant (internal observation)
+**User feedback:** Coach said "+65% jump" without explaining what that meant — "22mi → 36mi" is far more actionable than a raw percentage.
+**Root cause:** `strava_max_weekly_spike_pct` was stored as a percentage only. The per-week values exist in `strava_recent_4_weeks` but weren't used when building the spike warning line for Claude.
+**Fix / Change:** In the onboarding stravaContext builder, iterate `strava_recent_4_weeks` to find which two weeks produced the max spike and include the actual mileage in the prompt: "+65% (22mi → 36mi)" instead of just "+65%".
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-07-06 — Fix hallucinated stats when Strava activity import fails
 
 **Type:** Bug Fix

@@ -425,8 +425,22 @@ async function handleConversation(
     const hrZoneLine = hrZonePct
       ? ` HR zones (% of runs by avg HR): Z1 ${hrZonePct.z1}%, Z2 ${hrZonePct.z2}%, Z3 ${hrZonePct.z3}%, Z4 ${hrZonePct.z4}%, Z5 ${hrZonePct.z5}%.${estimatedMaxHR ? ` Est. max HR: ${estimatedMaxHR} bpm.` : ""}`
       : "";
+    // Compute from/to context for the spike so Claude can cite actual numbers.
+    // recent4Weeks is [lastWeek, 2weeksAgo, 3weeksAgo, 4weeksAgo] (newest first).
+    let spikeFromMi: number | null = null;
+    let spikeToMi: number | null = null;
+    if (recent4Weeks && maxWeeklySpikePct != null && maxWeeklySpikePct >= 20) {
+      for (let i = 0; i < recent4Weeks.length - 1; i++) {
+        const older = recent4Weeks[i + 1];
+        const newer = recent4Weeks[i];
+        if (older > 3) {
+          const pct = Math.round(((newer - older) / older) * 100);
+          if (pct === maxWeeklySpikePct) { spikeFromMi = older; spikeToMi = newer; break; }
+        }
+      }
+    }
     const spikeLine = maxWeeklySpikePct != null && maxWeeklySpikePct >= 20
-      ? ` WARNING: Mileage spike detected: largest week-over-week jump in last 4 weeks was +${maxWeeklySpikePct}%.`
+      ? ` WARNING: Mileage spike: largest week-over-week jump in last 4 weeks was +${maxWeeklySpikePct}%${spikeFromMi != null && spikeToMi != null ? ` (${spikeFromMi}mi → ${spikeToMi}mi)` : ""}.`
       : "";
 
     if (sbr) {
