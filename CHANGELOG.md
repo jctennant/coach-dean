@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-05 — Photon (Spectrum) iMessage provider
+
+**Type:** Infra
+**Reported by:** Internal — Linq costs $250/mo; Photon free tier (10 users) allows cost-free testing during iteration
+**User feedback:** N/A
+**Root cause:** Need an SMS provider while Linq subscription is paused
+**Fix / Change:** Added Photon/Spectrum as an optional SMS provider. Set `SMS_PROVIDER=photon` to activate. `linq.ts` delegates to `photon.ts` when the env var is set — all other routes are unchanged and tests don't need updating. A standalone sidecar service (`/sidecar/`) holds the persistent Spectrum SDK connection and exposes HTTP endpoints for send/typing/media. The existing Linq implementation is untouched; switching back is a single env var change.
+**Files changed:** `src/lib/linq.ts`, `src/lib/photon.ts` (new), `src/app/api/webhooks/photon/route.ts` (new), `sidecar/` (new), `.env.local.example`, `tsconfig.json`
+
+---
+
 ## 2026-07-05 — Fix stale race name when athlete changes primary race
 
 **Type:** Bug Fix

@@ -1,3 +1,7 @@
+import * as photon from "@/lib/photon";
+
+const isPhoton = () => process.env.SMS_PROVIDER === "photon";
+
 const LINQ_CHATS_URL = "https://api.linqapp.com/api/partner/v3/chats";
 
 function getConfig() {
@@ -29,6 +33,7 @@ export async function sendSMS(
   to: string,
   body: string
 ): Promise<{ chatId: string | null }> {
+  if (isPhoton()) return photon.sendSMS(to, body);
   const { apiKey, from } = getConfig();
 
   const response = await fetch(LINQ_CHATS_URL, {
@@ -98,6 +103,7 @@ export async function sendMediaSMS(
   mediaUrl: string,
   mimeType = "image/png"
 ): Promise<{ chatId: string | null }> {
+  if (isPhoton()) return photon.sendMediaSMS(to, body, mediaUrl, mimeType);
   const { apiKey, from } = getConfig();
 
   const parts: Array<Record<string, string>> = [];
@@ -132,6 +138,7 @@ export async function sendMessageWithEffect(
   body: string,
   effect: { type: "screen" | "bubble"; name: string }
 ): Promise<void> {
+  if (isPhoton()) return photon.sendMessageWithEffect(chatId, body, effect);
   const { apiKey } = getConfig();
   const res = await fetch(`${LINQ_CHATS_URL}/${chatId}/messages`, {
     method: "POST",
@@ -157,6 +164,7 @@ export async function sendMessageWithEffect(
  * The indicator is automatically cleared when a message is sent.
  */
 export async function startTyping(chatId: string): Promise<void> {
+  if (isPhoton()) return photon.startTyping(chatId);
   const { apiKey } = getConfig();
   try {
     const res = await fetch(`${LINQ_CHATS_URL}/${chatId}/typing`, {
@@ -179,6 +187,7 @@ export async function startTyping(chatId: string): Promise<void> {
  * No request body needed — just POST to the endpoint.
  */
 export async function shareContactCard(chatId: string): Promise<void> {
+  if (isPhoton()) return photon.shareContactCard(chatId);
   const { apiKey } = getConfig();
   try {
     const res = await fetch(`${LINQ_CHATS_URL}/${chatId}/share_contact_card`, {
@@ -200,6 +209,7 @@ export async function shareContactCard(chatId: string): Promise<void> {
  * Call this when we receive an inbound message so the user sees a read receipt.
  */
 export async function markRead(chatId: string): Promise<void> {
+  if (isPhoton()) return photon.markRead(chatId);
   const { apiKey } = getConfig();
   try {
     const res = await fetch(`${LINQ_CHATS_URL}/${chatId}/read`, {
