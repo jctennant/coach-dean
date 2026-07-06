@@ -38,17 +38,19 @@ export async function POST(request: Request) {
 
   if (process.env.PHOTON_WEBHOOK_SECRET && signature) {
     const secret = process.env.PHOTON_WEBHOOK_SECRET;
-    const hmac = (input: string) => crypto.createHmac("sha256", secret).update(input).digest;
-    const bodyHex    = hmac(rawBody)("hex");
-    const bodyB64    = hmac(rawBody)("base64");
-    const tsBodyHex  = hmac(`${timestamp}.${rawBody}`)("hex");
-    const tsBodyB64  = hmac(`${timestamp}.${rawBody}`)("base64");
+    const hmac = (input: string, enc: "hex" | "base64") =>
+      crypto.createHmac("sha256", secret).update(input).digest(enc);
+
+    const bodyHex   = hmac(rawBody, "hex");
+    const bodyB64   = hmac(rawBody, "base64");
+    const tsBodyHex = hmac(`${timestamp}.${rawBody}`, "hex");
+    const tsBodyB64 = hmac(`${timestamp}.${rawBody}`, "base64");
 
     const valid = signature === bodyHex || signature === bodyB64 ||
                   signature === tsBodyHex || signature === tsBodyB64;
 
     if (!valid) {
-      console.warn("[photon-webhook] signature mismatch — got:", signature?.slice(0, 20), "body-hex:", bodyHex.slice(0, 20));
+      console.warn("[photon-webhook] signature mismatch — got:", signature.slice(0, 20), "body-hex:", bodyHex.slice(0, 20));
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
     console.log("[photon-webhook] signature verified");
