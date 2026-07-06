@@ -4901,7 +4901,27 @@ function buildSystemPrompt(
   const profileRaceDate = profile?.race_date ? new Date((profile.race_date as string) + "T00:00:00") : null;
   const profileRaceDaysUntil = profileRaceDate ? Math.ceil((profileRaceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
 
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- For future scheduled sessions, use specific calendar dates (e.g. "Friday, Feb 27") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- When referencing past activities or events: ONLY say "yesterday" if the event's date or conversation timestamp matches Yesterday above. If it was any earlier, use the weekday name instead ("Monday's double header", "last week's long run"). Recent workouts in the system prompt now include a server-computed label like "(yesterday)" or "(3 days ago)" — use those labels as the authoritative recency signal, not your own inference.\n`;
+  // Compute conversation window bounds for temporal anchoring.
+  // The model gets timestamps on individual messages, but without an explicit anchor
+  // it can treat 2-week-old messages as "recent" after a gap in conversation.
+  const conversationWindowNote = (() => {
+    if (recentMessages.length === 0) return "";
+    const oldest = recentMessages[0];
+    const newest = recentMessages[recentMessages.length - 1];
+    const oldestDate = oldest.created_at ? new Date(oldest.created_at as string) : null;
+    const newestDate = newest.created_at ? new Date(newest.created_at as string) : null;
+    if (!oldestDate || !newestDate) return "";
+    const oldestStr = oldestDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: tz });
+    const newestStr = newestDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: tz });
+    const daysSinceNewest = Math.round((now.getTime() - newestDate.getTime()) / 86400000);
+    let note = `- Conversation window: ${recentMessages.length} messages from ${oldestStr} to ${newestStr}\n`;
+    if (daysSinceNewest >= 3) {
+      note += `- GAP ALERT: The most recent message in RECENT CONVERSATION is from ${daysSinceNewest} days ago. There has been a gap in this coaching relationship. Do NOT treat messages from before the gap as current context — they describe a previous period. Greet the athlete as returning, not as if you spoke recently.\n`;
+    }
+    return note;
+  })();
+
+  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n${conversationWindowNote}- For future scheduled sessions, use specific calendar dates (e.g. "Friday, Feb 27") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- When referencing past activities or events: ONLY say "yesterday" if the event's date or conversation timestamp matches Yesterday above. If it was any earlier, use the weekday name instead ("Monday's double header", "last week's long run"). Recent workouts in the system prompt now include a server-computed label like "(yesterday)" or "(3 days ago)" — use those labels as the authoritative recency signal, not your own inference.\n`;
   if (profile?.race_date && profileRaceDaysUntil !== null && profileRaceDaysUntil > 0) {
     const daysUntil = profileRaceDaysUntil;
     const weeksUntil = Math.round(daysUntil / 7);
@@ -5010,7 +5030,10 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
   const sportType = onboardingData.sport_type as string || "running";
   // If the athlete's goal was a non-standard distance (e.g. "25K Marin Headlands"),
   // race_name holds the exact description so we display it instead of the mapped bucket label.
-  const raceName = onboardingData.race_name as string | null;
+  // Prefer the A race's name from the races table (kept in sync when user updates via message)
+  // over onboarding_data.race_name which may lag behind if the user changed their goal race.
+  const aRaceForName = (upcomingRaces as Array<Record<string, unknown>>)?.find(r => r.priority === "A");
+  const raceName = (aRaceForName?.race_name as string | null) ?? (onboardingData.race_name as string | null);
   // Prefer profile.goal_time_minutes (kept in sync by persistProfileUpdates) over
   // onboarding_data.goal_time_minutes (only set at onboarding, never updated after).
   const goalTimeMinutes = (profile?.goal_time_minutes as number | null | undefined)
@@ -5971,6 +5994,7 @@ type ExtractedProfileData = {
   interval_pace?: string | null;
   timezone?: string | null;
   race_date?: string | null;
+  race_name?: string | null;
   goal_time_minutes?: number | null;
   updated_training_days?: string[] | null;
   goal_race_type?: string | null;
@@ -6033,7 +6057,7 @@ Extract ONLY explicitly stated NEW information:
   - elevation_gain: in meters, convert from feet÷3.281 (null if not stated)
   - date_offset: days before today (0=today, -1=yesterday, -2=two days ago, etc.). For named days like "Monday" or "Tuesday", compute the offset from today. Default 0.
 - Their location or timezone if explicitly mentioned (e.g. "I'm in Denver", "I live in Seattle", "I'm on Pacific time", "I'm in PST") → timezone as IANA string (e.g. "America/Denver", "America/Los_Angeles"). Only set if they are clearly stating where they are, not just mentioning a city in passing.
-- A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th", "late May", "end of June") → race_date as "YYYY-MM-DD". Resolve vague phrases: "early [month]" → first Saturday of that month, "mid [month]" → Saturday nearest the 15th, "late [month]" or "end of [month]" → last Saturday of that month, month only → first Saturday of that month. Always use the next upcoming occurrence of that month. Today is ${todayDateStr}. IMPORTANT: Only set race_date when the athlete is CHANGING or SETTING their PRIMARY goal race date. Do NOT set race_date when they are adding a secondary, tune-up, or B-race alongside their existing goal — indicated by phrases like "also", "too", "as well", "build towards that too", "make sure my plan covers", or when the named race is clearly different from their current primary goal.
+- A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th", "late May", "end of June") → race_date as "YYYY-MM-DD". Resolve vague phrases: "early [month]" → first Saturday of that month, "mid [month]" → Saturday nearest the 15th, "late [month]" or "end of [month]" → last Saturday of that month, month only → first Saturday of that month. Always use the next upcoming occurrence of that month. Today is ${todayDateStr}. IMPORTANT: Only set race_date when the athlete is CHANGING or SETTING their PRIMARY goal race date. Do NOT set race_date when they are adding a secondary, tune-up, or B-race alongside their existing goal — indicated by phrases like "also", "too", "as well", "build towards that too", "make sure my plan covers", or when the named race is clearly different from their current primary goal. If the message also names the specific race or event alongside the date (e.g. "I'm running the Boston Marathon", "my Snowbird race", "signed up for Dipsea"), also extract → race_name as string (null if no name given or if the athlete only mentions the distance/type without a proper name).
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip, swap, or "this week only" request (e.g. "I want to run Mon, Tue, Fri this week" should NOT set updated_training_days).
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
@@ -6047,7 +6071,7 @@ Extract ONLY explicitly stated NEW information:
 - How many hours of sleep the athlete is getting (e.g. "I've been sleeping about 7 hours", "only getting 5-6 hours lately", "sleep has been great, 8+ hours") → avg_sleep_hours as a number (hours per night, use midpoint for ranges like "5-6" → 5.5). Only extract if explicitly stated; do not infer from "tired" or "fatigued".
 - A STANDING instruction about HOW the coach should communicate — tone, word choice, or a behavior to stop/start that should persist across ALL future messages (NOT a one-off question or a training-plan preference) → coaching_directives as an array of short imperative strings written as a rule the coach must follow every time. Capture things like: "stop telling me not to overtrain / risk injury" → ["Do not warn about overtraining or injury risk unless I bring it up"]; "say pelvis instead of groin" → ["Refer to the injury as the pelvis, not the groin"]; "stop calling my easy runs moderate" → ["Do not label my easy efforts as moderate"]; "quit asking how I feel after every run" → ["Do not end messages by asking how I feel"]; "stop being so wordy" → ["Keep responses short"]. Only set when the athlete is clearly telling the coach to change its communication going forward. Do NOT capture one-time requests, training questions, or plan changes here (those go to other_notes).
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null, "coaching_directives": string[]|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "race_name": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "preferred_language": string|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null, "coaching_directives": string[]|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -6084,6 +6108,7 @@ async function persistProfileUpdates(
     const hasEasyPace = !!extracted.easy_pace;
     const hasTimezone = !!(extracted.timezone && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(extracted.timezone));
     const hasRaceDate = !!(extracted.race_date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.race_date));
+    const hasRaceName = !!(extracted.race_name && typeof extracted.race_name === "string" && (extracted.race_name as string).trim());
     const hasGoalTime = typeof extracted.goal_time_minutes === "number" && extracted.goal_time_minutes > 0;
     const hasWorkout = !!extracted.workout;
 
@@ -6100,7 +6125,7 @@ async function persistProfileUpdates(
     const hasCoachingFocus = !!(extracted.coaching_focus);
     const hasCoachingModeRequest = !!(extracted.coaching_mode_request);
     const hasCoachingDirectives = Array.isArray(extracted.coaching_directives) && (extracted.coaching_directives as string[]).filter(d => typeof d === "string" && d.trim()).length > 0;
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable && !hasCoachingFocus && !hasCoachingModeRequest && !hasCoachingDirectives) return;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasRaceName && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasPreferredLanguage && !hasStravaWriteDisable && !hasCoachingFocus && !hasCoachingModeRequest && !hasCoachingDirectives) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -6263,6 +6288,10 @@ async function persistProfileUpdates(
       updatedOnboardingData.preferred_language = extracted.preferred_language;
       console.log(`[persistProfileUpdates] preferred_language updated to ${extracted.preferred_language}`);
     }
+    if (hasRaceName) {
+      updatedOnboardingData.race_name = (extracted.race_name as string).trim();
+      console.log(`[persistProfileUpdates] race_name updated to ${extracted.race_name}`);
+    }
     if (hasCoachingFocus) {
       updatedOnboardingData.coaching_focus = extracted.coaching_focus;
       console.log(`[persistProfileUpdates] coaching_focus updated to ${extracted.coaching_focus}`);
@@ -6339,7 +6368,7 @@ async function persistProfileUpdates(
     }
 
     const userUpdate: Record<string, unknown> = {};
-    if (hasOtherNotes || hasPreferredLanguage || hasCoachingFocus) userUpdate.onboarding_data = updatedOnboardingData;
+    if (hasOtherNotes || hasPreferredLanguage || hasCoachingFocus || hasRaceName) userUpdate.onboarding_data = updatedOnboardingData;
     if (hasTimezone) userUpdate.timezone = extracted.timezone;
     if (hasStravaWriteDisable) {
       userUpdate.strava_write_enabled = false;
@@ -6378,6 +6407,14 @@ async function persistProfileUpdates(
         .eq("priority", "A");
     }
 
+    // When race_name changed without a date change, sync the name to the A race row.
+    if (hasRaceName && !hasRaceDate) {
+      await supabase.from("races")
+        .update({ race_name: (extracted.race_name as string).trim() })
+        .eq("user_id", userId)
+        .eq("priority", "A");
+    }
+
     // When the race date changed, propagate it to the races table (A race) and the
     // training plan arc so the dashboard countdown and week count stay accurate.
     let didFullRegenerate = false;
@@ -6385,8 +6422,10 @@ async function persistProfileUpdates(
       const newRaceDate = extracted.race_date as string;
 
       // Update A race row in races table
+      const aRaceUpdate: Record<string, unknown> = { race_date: newRaceDate };
+      if (hasRaceName) aRaceUpdate.race_name = (extracted.race_name as string).trim();
       await supabase.from("races")
-        .update({ race_date: newRaceDate })
+        .update(aRaceUpdate)
         .eq("user_id", userId)
         .eq("priority", "A");
 

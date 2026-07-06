@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-05 — Fix stale race name when athlete changes primary race
+
+**Type:** Bug Fix
+**Reported by:** Jake (user observation)
+**User feedback:** "Why is coach dean off on dates and responding like this? ...Dean said '5 days out from Dipsea' when I have Snowbird this Saturday — already did Dipsea a few weeks ago"
+**Root cause:** When a user updates their primary race via SMS message, the system correctly updates `training_profiles.race_date` via Haiku extraction, but never extracted or persisted `race_name`. So `onboarding_data.race_name` (used to build the GOAL block in the system prompt) stayed as "Dipsea" forever. The prompt showed "GOAL: Dipsea on [Snowbird's date] · 5 days out", causing the model to say "5 days out from Dipsea".
+**Fix / Change:** Added `race_name` to the extraction schema and persistence logic. When a user mentions a new primary race with a name (e.g. "my Snowbird race on Saturday"), both `onboarding_data.race_name` and the `races` table A entry are updated alongside `race_date`. Also added a belt-and-suspenders fix: when building `raceName` for the system prompt, prefer the A race's name from the `races` table (most up-to-date) over `onboarding_data.race_name`.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-06-28 — Multi-agent architecture Phase 2: injury routing, reminder agent, B/C race context
 
 **Type:** Refactor / Improvement

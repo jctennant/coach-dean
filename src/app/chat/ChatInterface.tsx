@@ -13,17 +13,22 @@ interface ChatInterfaceProps {
   userId: string;
   initialMessages: Message[];
   userName?: string;
+  onboardingStep: string | null;
+  adminSecret: string;
 }
 
 const SYS_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
 
-export default function ChatInterface({ userId, initialMessages, userName }: ChatInterfaceProps) {
+export default function ChatInterface({ userId, initialMessages, userName, onboardingStep: initialOnboardingStep, adminSecret }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [onboardingStep, setOnboardingStep] = useState<string | null>(initialOnboardingStep);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const isOnboarding = onboardingStep !== null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -38,22 +43,57 @@ export default function ChatInterface({ userId, initialMessages, userName }: Cha
     setLoading(true);
 
     try {
-      const res = await fetch("/api/coach/respond", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, trigger: "user_message", message: msg, dry_run: true }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      const reply = body.message ?? "(no response)";
+      let reply: string;
+      let nextStep: string | null = onboardingStep;
+
+      if (isOnboarding) {
+        const res = await fetch("/api/onboarding/handle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, message: msg, dry_run: true }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        // onboarding/handle returns { ok: true } without the message text —
+        // fetch the latest assistant message and updated step from the DB.
+        const lastRes = await fetch(`/api/chat/last-message?userId=${userId}`);
+        const lastBody = await lastRes.json();
+        reply = lastBody.message ?? "(no response)";
+        nextStep = lastBody.onboarding_step ?? null;
+        setOnboardingStep(nextStep);
+      } else {
+        const res = await fetch("/api/coach/respond", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, trigger: "user_message", message: msg, dry_run: true }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        reply = body.message ?? "(no response)";
+      }
+
       setMessages(prev => [...prev, { role: "assistant", content: reply }]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
-      setMessages(prev => prev.slice(0, -1)); // remove optimistic user message
+      setMessages(prev => prev.slice(0, -1));
     } finally {
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
+  }
+
+  async function newSession() {
+    const res = await fetch("/api/admin/test-user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: adminSecret }),
+    });
+    if (!res.ok) {
+      setError("Failed to create test user");
+      return;
+    }
+    const { userId: newId } = await res.json();
+    window.location.href = `/chat?userId=${newId}`;
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -70,12 +110,19 @@ export default function ChatInterface({ userId, initialMessages, userName }: Cha
         <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#1a5c35", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: "#fff", letterSpacing: 0.4 }}>CD</span>
         </div>
-        <div>
+        <div style={{ flex: 1 }}>
           <p style={{ fontSize: 15, fontWeight: 600, margin: 0, lineHeight: 1.2 }}>Coach Dean</p>
           <p style={{ fontSize: 12, color: "#8e8e93", margin: 0, lineHeight: 1.2 }}>
-            {userName ? `Chatting as ${userName}` : `userId: ${userId}`} · dry_run
+            {userName ? `Chatting as ${userName}` : `userId: ${userId.slice(0, 8)}…`}
+            {" · "}{isOnboarding ? `onboarding (${onboardingStep})` : "coaching"}{" · dry_run"}
           </p>
         </div>
+        <button
+          onClick={newSession}
+          style={{ fontSize: 12, color: "#8e8e93", background: "none", border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}
+        >
+          New session
+        </button>
       </div>
 
       {/* Messages */}
