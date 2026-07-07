@@ -2471,13 +2471,31 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // Fetch the full plan arc to show the athlete their mileage progression
     const { data: fullPlanData } = await supabase.from("training_plans").select("weeks, total_weeks").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
     type ArcWeek = { week_number: number; mileage_target: number; phase: string };
+    const arcRaceDate = (profile?.race_date as string | null) ?? null;
+    const arcDaysToRace = arcRaceDate
+      ? Math.ceil((new Date(arcRaceDate + "T12:00:00Z").getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+      : null;
+    const raceIsThisWeek = arcDaysToRace !== null && arcDaysToRace <= 7;
     const fullArcSummary = (() => {
       if (!fullPlanData?.weeks || !Array.isArray(fullPlanData.weeks) || fullPlanData.weeks.length === 0) return "";
       const weeks = fullPlanData.weeks as ArcWeek[];
+      const totalWeeks = fullPlanData.total_weeks ?? weeks.length;
+
+      // When the race is this week, week 1 IS the race week — the plan continues
+      // post-race. Don't narrate a build→peak→taper arc that would imply a future race.
+      if (raceIsThisWeek) {
+        const postRaceWeeks = weeks.slice(1);
+        const postPeak = postRaceWeeks.length > 0
+          ? postRaceWeeks.reduce((best, w) => (w.mileage_target ?? 0) > (best.mileage_target ?? 0) ? w : best, postRaceWeeks[0]!)
+          : null;
+        let summary = `Race is THIS WEEK (week 1). The ${fmtArcMi(arcTarget ?? weeks[0]!.mileage_target)}/wk shown is the race-week volume only.`;
+        if (postPeak) summary += ` After the race: plan builds to a post-race peak of ${fmtArcMi(postPeak.mileage_target)}/wk (week ${postPeak.week_number}).`;
+        return summary + ` DO NOT tell the athlete "on Sunday I'll send your first full week plan" — this IS their full plan including race week.`;
+      }
+
       const peakWeek = weeks.reduce((best, w) => (w.mileage_target ?? 0) > (best.mileage_target ?? 0) ? w : best, weeks[0]!);
       const taperWeeks = weeks.filter(w => w.phase === "taper");
       const avgTaperMiles = taperWeeks.length > 0 ? taperWeeks.reduce((s, w) => s + (w.mileage_target ?? 0), 0) / taperWeeks.length : null;
-      const totalWeeks = fullPlanData.total_weeks ?? weeks.length;
       let summary = `Full plan mileage arc (${totalWeeks} weeks): starts at ${fmtArcMi(arcTarget ?? weeks[0]!.mileage_target)}/wk, builds to peak of ${fmtArcMi(peakWeek.mileage_target)}/wk (week ${peakWeek.week_number})`;
       if (avgTaperMiles) summary += `, then tapers to ~${fmtArcMi(avgTaperMiles)}/wk for race prep`;
       return summary + ".";

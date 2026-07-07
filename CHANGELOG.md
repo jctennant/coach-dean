@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-06 — Fix arc summary when race is this week on initial_plan
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (internal observation)
+**User feedback:** Coach said "on Sunday I'll send your first full week plan" and "build to 21.5mi by week 3 then taper into race week at ~14mi" — but the race (Snowbird) was THIS Saturday, 4 days away.
+**Root cause:** `generateAndSaveFullPlan` forces `totalWeeks = max(4, weeksUntilRace)`. With the race 1 week out, totalWeeks=4. The plan's weeks 3-4 are marked "taper" by `computePhaseForPlan` (which doesn't know the A-race is at week 1). The `fullArcSummary` code then mechanically finds peak at week 3 and a taper at week 4 and narrates "builds to peak → tapers to race week" — implying a future race at week 4. Claude followed this and told the athlete it would send a "first full week plan on Sunday," completely misrepresenting that week 1 IS race week.
+**Fix / Change:** Detect `raceIsThisWeek` (daysToRace <= 7) in the arc summary builder. When true, emit a different summary: "Race is THIS WEEK (week 1). The X/wk shown is race-week volume only. After the race: plan builds to post-race peak of Y/wk." Also inject an explicit instruction telling Claude NOT to say "on Sunday I'll send your first full week plan."
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-07-06 — Show concrete from/to miles in mileage spike warning
 
 **Type:** Improvement
