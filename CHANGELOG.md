@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-06 — Fix arc summary for 1–2 week race window on initial_plan
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (internal observation)
+**User feedback:** "What about if there's two weeks to race? Do we have a good approach?"
+**Root cause:** Same underlying bug as the "race this week" fix, extended to 2-week window. With `aRaceWeekNum=2`, the plan has pre-race taper (week 1), race week (week 2), recovery (week 3), and a mechanical `computePhaseForPlan` taper at week 4. The arc summary found peak at week 1 and "taper" at week 4 and said "builds to peak of 20mi in week 1, then tapers to 8mi for race prep" — neither accurate nor meaningful. The "peak in week 1" is actually pre-race taper, and the "race prep" taper at week 4 is post-race.
+**Fix / Change:** Extended the imminent-race arc summary to cover `arcRaceWeekNum <= 2`. For race-next-week (week 2): explicitly label week 1 as "pre-race taper at Xmi", week 2 as "race week at Ymi", and post-race build target. Guards against "build to peak then taper" language when the race is next week.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-07-06 — Fix arc summary when race is this week on initial_plan
 
 **Type:** Bug Fix
