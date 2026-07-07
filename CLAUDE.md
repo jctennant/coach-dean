@@ -3,6 +3,35 @@
 ## Stack
 Next.js 14 App Router · Supabase (PostgreSQL) · Anthropic Claude · Linq SMS (iMessage-like) · Strava OAuth · Vercel
 
+## Prompt Engineering Philosophy
+
+**Don't fix behavioral problems by adding more rules to the prompt.**
+
+The system prompt in `coach/respond/route.ts` is already large. Every time something goes wrong, the temptation is to bolt on another rule. Resist this — a longer prompt means more for the model to juggle, more potential for conflicts, and a codebase that gets harder to reason about over time.
+
+### When to add a rule (rare)
+Only when the behavior is fundamental and applies universally across all triggers — e.g. "never echo internal plan state to athletes." Even then, prefer one concise sentence over a multi-line block.
+
+### When NOT to add a rule
+- One-off response quality issues (tone, word choice, phrasing) — these are noise, not signal
+- Things that can be fixed in code (post-processing, output validation)
+- Things that a separate focused agent handles better
+
+### Preferred alternative: multi-agent decomposition (Poke pattern)
+[Poke](https://techcrunch.com/2026/04/08/poke-makes-ai-agents-as-easy-as-sending-a-text/) (an SMS AI agent that scaled to 400k users) solves this with two-layer architecture:
+
+- **Interaction agent** — handles personality, tone, and user-facing conversation. Focused system prompt.
+- **Execution agents** — spawned on-demand with their own isolated prompts for specific tasks (extraction, validation, plan generation). Pure task machines, zero personality.
+
+This is already partially the pattern here (Haiku for extraction, Sonnet for coaching). When a new concern surfaces, ask: *should this be a separate focused agent call, not a new rule in the monolith?*
+
+Examples of where this applies to Coach Dean:
+- Response quality checks (name repetition, week number leaks, length) → a lightweight post-processing pass or validator call, not prompt rules
+- Structured data extraction → already delegated to Haiku correctly
+- Plan generation → already a separate lib function correctly
+
+**Default question before adding any prompt text:** "Is there a code-level or architectural fix that keeps the prompt smaller?"
+
 ## Core data flow
 
 ```

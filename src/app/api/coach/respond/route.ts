@@ -5423,7 +5423,7 @@ Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, 
       : "";
     const lines = [
       `Today: ${todayStr}`,
-      `Training: Week ${tsEffectiveWeek} · ${tsPhaseLabel} phase${periodization?.isDeloadWeek ? " — recovery week" : ""}${microcycleLabel}`,
+      `Training: ${tsPhaseLabel} phase${periodization?.isDeloadWeek ? " — recovery week" : ""}${microcycleLabel}`,
       `This week: ${milogged}`,
       `Paces: Easy ${easyRange} · Tempo ${tsTempoPace} · Interval ${tsIntervalPace}`,
       ...(injuryHoldFact ? [injuryHoldFact] : []),
@@ -5489,7 +5489,6 @@ PRINCIPLES — these apply to every response. They are stated once here and not 
     - Stated counts MUST match enumerated lists. "4 days left (Mon, Tue, Wed, Thu, Fri)" is 5, not 4 — fix the number.
 11. IDENTITY. Never refer to yourself as "Dean" or in third person. Always use "I".
 12. ATHLETE NAME. Use the athlete's name at most once per response — never to open multiple paragraphs. Using a name twice in one message reads as robotic and salesy.
-13. PLAN WEEK NUMBER. The "Week N of training plan" figure in CURRENT TRAINING STATE is internal tracking — never echo it to the athlete (e.g. "This week is 10" or "You're in week 10"). Use context instead: "race week", "taper week", "this week", "4 days out." The week number means nothing to the athlete.
 
 <rule>EVIDENCE RULE (clarification of principle 4): If you find yourself about to say "I remember you mentioned…" or "based on what you told me…" — stop and check whether that fact actually appears in RECENT CONVERSATION or elsewhere in this prompt. If it doesn't, don't say it.</rule>
 
@@ -5760,7 +5759,7 @@ ${(() => {
   // Session rows, projectedWeekMiles, remainingPlanLine, and tsMileageLine are all
   // pre-computed before the return statement — use them directly here.
   // (Legacy IIFE removed; values computed once in the ts* pre-computation block above.)
-  return `- Week ${tsEffectiveWeek} of training plan, phase: ${tsPhaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""} (week 1 = first week of current plan; advances each Sunday)
+  return `- Training phase: ${tsPhaseLabel}${periodization?.isDeloadWeek ? " — RECOVERY WEEK" : ""}
 ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): ${tsTargetMiles ? tsMi(tsTargetMiles) : "TBD"}
 <rule>THIS WEEK'S MILEAGE: ${tsMileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}</rule>
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses${(profile?.external_plan_notes as string | null) ? `\n- External training plan: ${profile?.external_plan_notes} — factor this into your analysis and coaching context. The athlete is following this plan; Dean's role is to analyze their runs and provide insight on top of it, not replace it.` : ""}
