@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-06 — Fix "This week is 10" and name repetition
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant
+**User feedback:** "do you know what he meant by 'This week is 10.' here"
+**Root cause:** No rule prevented the model from echoing the internal `current_week` plan index (e.g. "This week is 10") directly into messages. Separately, no rule capped how often Dean could use the athlete's name per message — it opened multiple paragraphs with "Jake".
+**Fix / Change:** Added principles 12 and 13 to the coaching rules block: name use capped at once per response; plan week number (`Week N of training plan`) is internal — never echo it, use contextual language instead ("race week", "4 days out", "taper week").
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-07-06 — Remove multi-language support
 
 **Type:** Bug Fix / Simplification
