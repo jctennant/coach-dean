@@ -26,7 +26,7 @@ import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, KNOWN_REHAB_PARTS, ge
 import { classifyIntent } from "@/lib/intent-classifier";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
-import { signSessionToken } from "@/lib/session-token";
+import { signPlanToken } from "@/lib/session-token";
 
 export const maxDuration = 120;
 
@@ -2818,9 +2818,9 @@ OUTPUT CONTRACT:
       .replace(/\[RTR_ADVANCE\]/gi, "")
       .replace(/\[STRENGTH_POSTER\]/gi, (() => {
         if (!strengthPosterRoutineKey) return "";
-        const token = signSessionToken({ routineKey: strengthPosterRoutineKey, userId });
+        const token = signPlanToken(userId);
         const base = process.env.NEXT_PUBLIC_APP_URL?.startsWith("https://") ? process.env.NEXT_PUBLIC_APP_URL : "https://coachdean.ai";
-        return `\n${base}/session/${token}`;
+        return `\n${base}/plan/${token}`;
       })())
       .trim()
   );

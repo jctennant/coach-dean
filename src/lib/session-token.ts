@@ -23,6 +23,29 @@ export interface SessionPayload {
 // Avoids the Next.js static-file bypass that dots trigger in dynamic route segments.
 const SEP = "~";
 
+/** Plan token — encodes only userId. Page looks up all data from DB. */
+export function signPlanToken(userId: string): string {
+  const data = b64url(JSON.stringify({ u: userId, t: Math.floor(Date.now() / 1000) }));
+  const sig = createHmac("sha256", secret()).update(data).digest("hex").slice(0, 32);
+  return `${data}${SEP}${sig}`;
+}
+
+export function verifyPlanToken(token: string): { userId: string } | null {
+  const sepIndex = token.lastIndexOf(SEP);
+  if (sepIndex === -1) return null;
+  const data = token.slice(0, sepIndex);
+  const sig = token.slice(sepIndex + 1);
+  const expected = createHmac("sha256", secret()).update(data).digest("hex").slice(0, 32);
+  if (sig !== expected) return null;
+  try {
+    const obj = JSON.parse(fromB64url(data));
+    if (typeof obj.u !== "string") return null;
+    return { userId: obj.u };
+  } catch {
+    return null;
+  }
+}
+
 export function signSessionToken(payload: Omit<SessionPayload, "sessionKey">): string {
   // t (unix seconds) makes each generated link unique even for the same user + routine.
   const data = b64url(JSON.stringify({ r: payload.routineKey, u: payload.userId, t: Math.floor(Date.now() / 1000) }));
