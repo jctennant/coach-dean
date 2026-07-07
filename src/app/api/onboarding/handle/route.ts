@@ -16,25 +16,6 @@ export const maxDuration = 60;
 // Tracks userIds currently in a dry_run onboarding request.
 const dryRunUsers = new Set<string>();
 
-/**
- * Detect the primary language from a set of user messages.
- * Returns an ISO 639-1 code or "en" as fallback.
- */
-function detectLanguage(userMessages: string[]): string {
-  const frenchWords = /\b(je|tu|il|nous|vous|ils|ne|pas|que|les|des|avec|pour|dans|très|aussi|bien|mais|avoir|être|c'est|j'ai|pardon|merci|bonjour|peux|donc|mon|ma|mes|ton|ta|notre|votre|leur|suis|avez|fait|fais|cette|ça|ca|moi|toi|lui|nous|eux|oui|non|pourquoi|comment|quand|où|quoi|qui|quel|quelle|veux|vouloir|faire|parle|parler|préfère|voudrais|puis|depuis|plus|moins|comme|aussi|après|avant|pendant)\b/i;
-  const spanishWords = /\b(yo|tú|él|nosotros|vosotros|ellos|no|que|los|las|con|para|por|muy|también|bien|pero|haber|ser|estar|es|soy|tengo|hola|gracias|sí|porque|cómo|cuándo|dónde|quién|qué|quiero|puedo|hacer|hablar)\b/i;
-  const frenchCount = userMessages.filter(m => frenchWords.test(m)).length;
-  const spanishCount = userMessages.filter(m => spanishWords.test(m)).length;
-  if (frenchCount >= 2 && frenchCount >= spanishCount) return "fr";
-  if (spanishCount >= 2 && spanishCount > frenchCount) return "es";
-  return "en";
-}
-
-/** Map ISO 639-1 code to English language name. */
-function langCodeToName(code: string): string {
-  const names: Record<string, string> = { fr: "French", es: "Spanish", de: "German", pt: "Portuguese", it: "Italian", nl: "Dutch" };
-  return names[code] ?? code;
-}
 
 
 interface OnboardingRequest {
@@ -327,12 +308,6 @@ async function handleConversation(
   if (mergedData.goal && !VALID_GOAL_BUCKETS.has(mergedData.goal as string)) {
     delete mergedData.goal;
   }
-  // Detect language from user messages once and persist — only set if not already stored
-  if (!mergedData.preferred_language) {
-    const userMsgs = [...history.filter(m => m.role === "user").map(m => m.content), message];
-    const detected = detectLanguage(userMsgs);
-    if (detected !== "en") mergedData.preferred_language = detected;
-  }
   if (mergedData.race_date) {
     const dateStr = mergedData.race_date as string;
     const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(Date.parse(dateStr));
@@ -511,14 +486,9 @@ async function handleConversation(
     return handleOffTopicMessage(user, message, mergedData, stageGoal, history, chatId);
   }
 
-  const onbLang = (mergedData.preferred_language as string | undefined) ?? "en";
-  const langInstruction = onbLang !== "en"
-    ? `\nLANGUAGE: This athlete communicates in ${langCodeToName(onbLang)}. You MUST respond in ${langCodeToName(onbLang)} for every message. Do not switch to English. When the instructions below specify exact English wording (e.g. the three-options question), translate it into ${langCodeToName(onbLang)} while preserving all options and their structure.\n`
-    : "";
-
   const systemPrompt = `${!isFirstResponse ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.
 
-` : ""}${langInstruction}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
+` : ""}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
 
 Dean's core job: help athletes get faster without getting injured. Every conversation should calibrate both performance and injury risk from the start.
 
@@ -824,14 +794,8 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
       .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
       .trim();
     responseText = beforeStrava;
-    const stravaLang = (mergedData.preferred_language as string | undefined) ?? "en";
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    const stravaNote = stravaLang === "fr"
-      ? `Je me connecterai à Strava pour lire tes courses automatiquement.`
-      : stravaLang === "es"
-      ? `Me conectaré a Strava para leer tus carreras automáticamente.`
-      : `I'll connect to Strava to read your runs automatically.`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${writeUrl}\n\n${stravaNote}`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${writeUrl}\n\nI'll connect to Strava to read your runs automatically.`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -945,12 +909,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
         })
         .eq("id", user.id);
       const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-      const lang = (mergedData.preferred_language as string | undefined) ?? "en";
-      const pitch = lang === "fr"
-        ? `Avant qu'on lance — j'ai vraiment besoin de Strava pour te coacher correctement. Je lirai chaque course automatiquement. Connecte ici :\n\n${writeUrl}`
-        : lang === "es"
-        ? `Antes de empezar — necesito Strava para entrenarte bien. Leeré cada carrera automáticamente. Conéctalo aquí:\n\n${writeUrl}`
-        : `Before we kick off — I need Strava to coach you properly. I'll read every run automatically. Takes two minutes:\n\n${writeUrl}`;
+      const pitch = `Before we kick off — I need Strava to coach you properly. I'll read every run automatically. Takes two minutes:\n\n${writeUrl}`;
       await sendAndStore(user.id, user.phone_number, pitch, "awaiting_strava");
       return NextResponse.json({ ok: true });
     }

@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-06 — Remove multi-language support
+
+**Type:** Bug Fix / Simplification
+**Reported by:** Jake Tennant
+**User feedback:** "can you figure out why Dean messaged me in Spanish haha"
+**Root cause:** `detectLanguage()` in onboarding used weak word-matching — Spanish words like `no`, `es`, `bien`, `para` are common in English. "No you can be my coach" alone was enough to trip the threshold of 2 matching messages and switch the interface to Spanish.
+**Fix / Change:** Removed all language detection and multi-language support: `detectLanguage()` and `langCodeToName()` helpers deleted, `preferred_language` field removed from extraction schema and persistence logic, Spanish/French variant strings for Strava link messages replaced with English-only strings, language instruction injection removed from both onboarding and coach system prompts.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-07-06 — Fix arc summary for 1–2 week race window on initial_plan
 
 **Type:** Bug Fix
