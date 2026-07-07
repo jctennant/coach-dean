@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       activities: {
         Row: {
+          activity_fatigue_load: number | null
           activity_name: string | null
           activity_type: string | null
           aerobic_efficiency: number | null
@@ -31,9 +32,11 @@ export type Database = {
           elevation_gain: number | null
           gear_id: string | null
           gear_name: string | null
+          grade_modifier_source: string | null
           id: string
           max_heartrate: number | null
           moving_time_seconds: number | null
+          running_impact_load: number | null
           source: string
           start_date: string | null
           start_lat: number | null
@@ -41,13 +44,10 @@ export type Database = {
           strava_activity_id: number | null
           suffer_score: number | null
           summary: Json | null
+          user_confirmed_incline: boolean | null
           user_id: string
           weather_data: Json | null
           weather_fetched_at: string | null
-          activity_fatigue_load: number | null
-          grade_modifier_source: string | null
-          running_impact_load: number | null
-          user_confirmed_incline: boolean | null
           workout_type: number | null
         }
         Insert: {
@@ -228,6 +228,44 @@ export type Database = {
         }
         Relationships: []
       }
+      pt_sessions: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          exercises_done: string[]
+          id: string
+          routine_key: string
+          session_key: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          exercises_done?: string[]
+          id?: string
+          routine_key: string
+          session_key: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          exercises_done?: string[]
+          id?: string
+          routine_key?: string
+          session_key?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pt_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       races: {
         Row: {
           course_record_minutes: number | null
@@ -340,6 +378,7 @@ export type Database = {
       training_profiles: {
         Row: {
           active_injury: boolean | null
+          avg_sleep_hours: number | null
           coaching_mode: string
           coaching_style: string
           coaching_threads: string | null
@@ -377,7 +416,6 @@ export type Database = {
           manual_prs: Json | null
           max_hr_estimate: number | null
           max_hr_estimate_updated_at: string | null
-          avg_sleep_hours: number | null
           physio_notes: string | null
           physio_prescribed_restrictions: Json | null
           preferred_units: string
@@ -395,6 +433,7 @@ export type Database = {
         }
         Insert: {
           active_injury?: boolean | null
+          avg_sleep_hours?: number | null
           coaching_mode?: string
           coaching_style?: string
           coaching_threads?: string | null
@@ -427,7 +466,6 @@ export type Database = {
           lthr_confidence?: string | null
           lthr_estimate?: number | null
           lthr_history?: Json | null
-          avg_sleep_hours?: number | null
           lthr_last_updated?: string | null
           lthr_source?: string | null
           manual_prs?: Json | null
@@ -450,6 +488,7 @@ export type Database = {
         }
         Update: {
           active_injury?: boolean | null
+          avg_sleep_hours?: number | null
           coaching_mode?: string
           coaching_style?: string
           coaching_threads?: string | null
@@ -482,7 +521,6 @@ export type Database = {
           lthr_confidence?: string | null
           lthr_estimate?: number | null
           lthr_history?: Json | null
-          avg_sleep_hours?: number | null
           lthr_last_updated?: string | null
           lthr_source?: string | null
           manual_prs?: Json | null
@@ -524,6 +562,7 @@ export type Database = {
           leg_day_flag: boolean | null
           leg_day_flag_expires_at: string | null
           long_run_target: number | null
+          pending_sharp_disambiguation: boolean | null
           pending_symptom_checkin: boolean | null
           physio_referral_sent_at: string | null
           physio_visit_confirmed: boolean | null
@@ -553,6 +592,7 @@ export type Database = {
           leg_day_flag?: boolean | null
           leg_day_flag_expires_at?: string | null
           long_run_target?: number | null
+          pending_sharp_disambiguation?: boolean | null
           pending_symptom_checkin?: boolean | null
           physio_referral_sent_at?: string | null
           physio_visit_confirmed?: boolean | null
@@ -582,6 +622,7 @@ export type Database = {
           leg_day_flag?: boolean | null
           leg_day_flag_expires_at?: string | null
           long_run_target?: number | null
+          pending_sharp_disambiguation?: boolean | null
           pending_symptom_checkin?: boolean | null
           physio_referral_sent_at?: string | null
           physio_visit_confirmed?: boolean | null
@@ -701,6 +742,30 @@ export type Database = {
           timezone?: string | null
           trial_started_at?: string | null
           v2_migration_sent_at?: string | null
+        }
+        Relationships: []
+      }
+      waitlist: {
+        Row: {
+          created_at: string
+          id: string
+          name: string | null
+          phone_number: string
+          source: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name?: string | null
+          phone_number: string
+          source?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string | null
+          phone_number?: string
+          source?: string | null
         }
         Relationships: []
       }
