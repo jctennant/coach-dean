@@ -2484,12 +2484,15 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       const weeks = fullPlanData.weeks as ArcWeek[];
       const totalWeeks = fullPlanData.total_weeks ?? weeks.length;
 
-      // When the race is imminent (1–2 weeks out), the plan's mechanical peak/taper labels
-      // don't describe a sensible build arc — they describe pre-race and post-race weeks.
-      // Narrate these explicitly so Claude doesn't imply a future race at the arc's end.
-      if (arcRaceWeekNum !== null && arcRaceWeekNum <= 2) {
+      // When the race is 1–3 weeks out, totalWeeks is clamped to 4 (minimum). The mechanical
+      // peak/taper labels from computePhaseForPlan describe post-race weeks, not a real build
+      // arc. Narrate the actual week-by-week structure explicitly so Claude doesn't average
+      // pre-race and race-week miles into a misleading single "taper" figure, or imply
+      // a future race at the end of the 4-week minimum plan.
+      if (arcRaceWeekNum !== null && arcRaceWeekNum <= 3) {
         const raceWeek = weeks.find(w => w.week_number === arcRaceWeekNum);
-        const preRaceWeek = arcRaceWeekNum === 2 ? weeks.find(w => w.week_number === 1) : null;
+        const buildWeeks = weeks.filter(w => w.week_number < arcRaceWeekNum - 1);
+        const preRaceWeek = weeks.find(w => w.week_number === arcRaceWeekNum - 1);
         const postRaceWeeks = weeks.filter(w => w.week_number > arcRaceWeekNum);
         const postPeak = postRaceWeeks.length > 0
           ? postRaceWeeks.reduce((best, w) => (w.mileage_target ?? 0) > (best.mileage_target ?? 0) ? w : best, postRaceWeeks[0]!)
@@ -2500,13 +2503,23 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
           summary = `Race is THIS WEEK (week 1). The ${fmtArcMi(arcTarget ?? weeks[0]!.mileage_target)}/wk shown is race-week volume only.`;
           if (postPeak) summary += ` After the race: plan builds to a post-race peak of ${fmtArcMi(postPeak.mileage_target)}/wk (week ${postPeak.week_number}).`;
           summary += ` DO NOT tell the athlete "on Sunday I'll send your first full week plan" — this IS their full plan including race week.`;
-        } else {
-          // arcRaceWeekNum === 2: race is next week
+        } else if (arcRaceWeekNum === 2) {
           summary = `Race is NEXT WEEK (week 2).`;
           if (preRaceWeek) summary += ` This week (week 1) is the pre-race taper at ${fmtArcMi(preRaceWeek.mileage_target)}/wk — keep it light, no hard efforts.`;
           if (raceWeek) summary += ` Race week (week 2): ${fmtArcMi(raceWeek.mileage_target)}/wk of pre-race training only (race distance is on top of this).`;
           if (postPeak) summary += ` After the race: plan recovers then builds to ${fmtArcMi(postPeak.mileage_target)}/wk (week ${postPeak.week_number}).`;
           summary += ` DO NOT narrate a "build to peak then taper" arc — the race is next week, not at the end of a long build.`;
+        } else {
+          // arcRaceWeekNum === 3: 3 weeks out — one real build week before the taper begins
+          const buildPeak = buildWeeks.length > 0
+            ? buildWeeks.reduce((best, w) => (w.mileage_target ?? 0) > (best.mileage_target ?? 0) ? w : best, buildWeeks[0]!)
+            : null;
+          summary = `Race is in 3 weeks (week 3).`;
+          if (buildPeak) summary += ` Week 1 is the final build week at ${fmtArcMi(buildPeak.mileage_target)}/wk.`;
+          if (preRaceWeek) summary += ` Week 2 is the pre-race taper at ${fmtArcMi(preRaceWeek.mileage_target)}/wk — no hard efforts.`;
+          if (raceWeek) summary += ` Week 3 is race week at ${fmtArcMi(raceWeek.mileage_target)}/wk of pre-race training (race distance is on top).`;
+          if (postPeak) summary += ` Week 4 is post-race recovery at ${fmtArcMi(postPeak.mileage_target)}/wk.`;
+          summary += ` DO NOT average the taper weeks into a single figure — pre-race and race-week volumes are distinct.`;
         }
         return summary;
       }
