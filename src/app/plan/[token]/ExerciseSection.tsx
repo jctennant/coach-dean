@@ -23,11 +23,19 @@ export function ExerciseSection({ exercises, routineKey, token, today, initialDo
   async function markDone(exerciseId: string) {
     if (done.has(exerciseId)) return;
     setDone((prev) => new Set([...prev, exerciseId]));
-    await fetch("/api/session/complete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, exerciseId, routineKey, date: today }),
-    });
+    try {
+      await fetch("/api/session/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, exerciseId, routineKey, date: today }),
+      });
+    } catch {
+      setDone((prev) => {
+        const next = new Set(prev);
+        next.delete(exerciseId);
+        return next;
+      });
+    }
   }
 
   const doneCount = exercises.filter((ex) => done.has(ex.id)).length;

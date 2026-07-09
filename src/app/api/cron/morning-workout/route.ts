@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   // Fetch active users plus their injury hold state in one query
   const { data: users } = await supabase
     .from("users")
-    .select("id, timezone, training_state!inner(injury_hold_since)")
+    .select("id, timezone, training_state(injury_hold_since)")
     .not("strava_access_token", "is", null)
     .is("onboarding_step", null)
     .not("phone_number", "is", null)

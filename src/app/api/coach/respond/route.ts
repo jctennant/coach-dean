@@ -22,7 +22,7 @@ import { composeStrengthRoutine } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
-import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, getRehabData } from "@/lib/exercise-library";
+import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, getRehabData, buildTimelinePromptText } from "@/lib/exercise-library";
 import { classifyIntent } from "@/lib/intent-classifier";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
@@ -108,8 +108,11 @@ function buildRehabProtocol(input: Record<string, unknown>): string {
       [/row/, "rowing"],
       [/hike/, "hiking"],
     ];
+    // Only test positive recommendations (not "Avoid X" entries) to prevent injecting
+    // contraindicated workout prescriptions for injury-excluded modalities.
+    const positiveOpts = opts.filter(o => !o.toLowerCase().startsWith("avoid"));
     const relevantWorkouts = modalities
-      .filter(([re]) => opts.some(o => re.test(o.toLowerCase())) || available.some(t => re.test(t)))
+      .filter(([re]) => positiveOpts.some(o => re.test(o.toLowerCase())) || available.some(t => re.test(t)))
       .map(([, key]) => CROSS_TRAINING_WORKOUTS[key])
       .filter(Boolean);
     if (relevantWorkouts.length) {
@@ -978,17 +981,17 @@ async function handleInjuryCheckin(userId: string, dryRun: boolean, requestChatI
   ];
 
   // On Sundays, send a weekly recovery progress link as a second bubble
-  if (isSunday && user.dashboard_token) {
+  if (isSunday) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-    messages.push(`Here's your recovery progress this week: ${appUrl}/plan/${user.dashboard_token}`);
+    messages.push(`Here's your recovery progress this week: ${appUrl}/plan/${signPlanToken(userId)}`);
   }
 
   if (!dryRun) {
     const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
     if (chatId) await startTyping(chatId);
-    for (const msg of messages) {
-      await sendSMS(user.phone_number as string, msg);
-      if (messages.length > 1) await new Promise(r => setTimeout(r, 1200));
+    for (let i = 0; i < messages.length; i++) {
+      await sendSMS(user.phone_number as string, messages[i]);
+      if (i < messages.length - 1) await new Promise(r => setTimeout(r, 1200));
     }
     await supabase.from("conversations").insert(
       messages.map(content => ({
@@ -7161,7 +7164,7 @@ INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — 
 
 When signaling [INJURY_HOLD], your response MUST do two things:
 
-1. TIMELINE: If INJURY HOLD ACTIVE does not already appear in CURRENT TRAINING STATE (meaning this is the first hold signal, not a re-check-in), include one sentence giving a realistic return-to-run estimate. Use the known injury type and severity from ATHLETE HISTORY if available. Reference timelines: IT band mild 2–3 wks / moderate 3–5 wks / severe 6–8 wks; shin mild 2–3 wks / moderate 4–6 wks / severe 8–12 wks (rule out stress fracture); knee mild 1–2 wks / moderate 3–5 wks / severe 6–10 wks; hamstring mild 1–2 wks / moderate 3–6 wks / severe 8–12 wks; calf mild 1–2 wks / moderate 3–4 wks / severe 6–8 wks; foot mild 2–3 wks / moderate 4–6 wks / severe 8–12 wks; hip mild 1–2 wks / moderate 3–4 wks / severe 6–8 wks; piriformis mild 2–3 wks / moderate 4–6 wks / severe 6–10 wks; back mild 3–5 days / moderate 2–3 wks / severe 4–6 wks; ankle mild 1–2 wks / moderate 3–5 wks / severe 6–10 wks; groin mild 1–2 wks / moderate 3–5 wks / severe 6–8 wks. Frame it matter-of-factly, not alarmingly: "Most [injury type] cases at this severity are back to easy running in [range] — catching it now rather than running through it is what keeps that timeline on the shorter end." If injury type is unknown, use a conservative general range (2–4 weeks).
+1. TIMELINE: If INJURY HOLD ACTIVE does not already appear in CURRENT TRAINING STATE (meaning this is the first hold signal, not a re-check-in), include one sentence giving a realistic return-to-run estimate. Use the known injury type and severity from ATHLETE HISTORY if available. Reference timelines: ${buildTimelinePromptText()}. Frame it matter-of-factly, not alarmingly: "Most [injury type] cases at this severity are back to easy running in [range] — catching it now rather than running through it is what keeps that timeline on the shorter end." If injury type is unknown, use a conservative general range (2–4 weeks).
 
 2. CROSS-TRAINING WEEK: Include a brief cross-training outline — 3–4 sessions using the injury-appropriate options from the ACTIVE INJURY block above (call get_rehab_protocol if you haven't already), otherwise use the athlete's available tools from their profile, otherwise default to easy walking and elliptical. Format as a compact daily suggestion: "Mon/Wed/Fri — 30min [specific safe option]; Thu — optional [second option]. No high-impact activity." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week." The goal is to give them the best activities for THEIR specific injury — not a generic rest prescription.
 

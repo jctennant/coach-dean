@@ -80,7 +80,7 @@ function PainChart({ points, holdSince, today }: { points: PainPoint[]; holdSinc
   const toX = (dateStr: string) =>
     PAD.left + ((new Date(dateStr).getTime() - startMs) / totalMs) * chartW;
   const toY = (level: number) =>
-    PAD.top + (level / 10) * chartH;
+    PAD.top + ((10 - level) / 10) * chartH;
 
   const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
   const pathD = sorted

@@ -130,7 +130,7 @@ export const CROSS_TRAINING_WORKOUTS: Record<string, string> = {
     "Brisk walking: 45–60 min at a pace where you feel like you're moving with purpose (RPE 4/10, slightly more than a stroll). Good for the first few days of injury hold when cross-training is too much. Flat or gentle incline. Stop if your injury-site pain goes above 2/10.",
 };
 
-/** Parse "N–M weeks" strings from INJURY_TIMELINES into { min, max } week counts. */
+/** Parse "N–M weeks" or "N–M days" strings from INJURY_TIMELINES into { minWeeks, maxWeeks }. */
 export function getRecoveryEstimate(
   bodyPart: string,
   severity: "mild" | "moderate" | "severe" | null,
@@ -139,9 +139,23 @@ export function getRecoveryEstimate(
   const sev = severity ?? "moderate";
   const timeline = INJURY_TIMELINES[key]?.[sev];
   if (!timeline) return null;
-  const match = timeline.match(/(\d+)[–-](\d+)/);
+  const match = timeline.match(/(\d+)[–-](\d+)\s*(days?|weeks?)/i);
   if (!match) return null;
-  return { minWeeks: parseInt(match[1]), maxWeeks: parseInt(match[2]) };
+  const min = parseInt(match[1]);
+  const max = parseInt(match[2]);
+  const isDays = /^days?$/i.test(match[3]);
+  return { minWeeks: isDays ? min / 7 : min, maxWeeks: isDays ? max / 7 : max };
+}
+
+/** Build a compact timeline reference string for use in system prompts. Generated from INJURY_TIMELINES — single source of truth. */
+export function buildTimelinePromptText(): string {
+  const abbrev = (s: string) => s.replace(/\s*weeks?\s*/gi, "wks").trim();
+  return Object.entries(INJURY_TIMELINES)
+    .map(([key, sev]) => {
+      const label = key === "it_band" ? "IT band" : key.replace(/_/g, " ");
+      return `${label} mild ${abbrev(sev.mild)} / moderate ${abbrev(sev.moderate)} / severe ${abbrev(sev.severe)}`;
+    })
+    .join("; ");
 }
 
 export interface RehabData {

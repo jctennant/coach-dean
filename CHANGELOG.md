@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-08 — Fix 9 bugs found in injury/session/plan PRs
+
+**Type:** Bug Fix
+**Reported by:** Internal code review
+**User feedback:** N/A
+**Root cause:** Multiple bugs introduced across the injury hold, plan dashboard, and session tracking PRs.
+**Fix / Change:**
+1. **Sunday plan link always 404** — `handleInjuryCheckin` was passing `user.dashboard_token` (a raw UUID) into the `/plan/` URL but `verifyPlanToken` requires an HMAC-signed token. Fixed to call `signPlanToken(userId)`.
+2. **Back/mild recovery estimate wrong** — `getRecoveryEstimate` regex didn't distinguish "days" from "weeks", so `back.mild = "3–5 days"` returned `{minWeeks:3, maxWeeks:5}` and the dashboard showed a 21–35 day window. Fixed to detect the unit and divide by 7 for day-based entries.
+3. **PainChart Y-axis inverted** — `toY(0)` mapped to SVG top (near the "10" label) so improving pain trended upward on screen. Fixed `toY` formula to `PAD.top + ((10 - level) / 10) * chartH`.
+4. **Rowing prescribed for back injuries** — modality filter in `buildRehabProtocol` was testing regex against all `opts` strings including "Avoid rowing — spinal flexion under load…", which matched `/row/` and injected a rowing prescription for back-injured athletes. Fixed to only test against positive recommendations (filtered out "Avoid" entries).
+5. **`!inner` join silently dropped users without `training_state`** — morning-workout cron excluded any fully-onboarded user whose `training_state` row was missing. Reverted to a plain (left) join.
+6. **Eval harness injected week number that production omits** — `run-evals.mjs` still wrote `Week N ·` into the FACTS block and `Week N of training` into CURRENT TRAINING STATE, but `route.ts` removed both after commit 839c0423. Fixed to match production format.
+7. **`ExerciseSection` had no optimistic update rollback** — unlike `ExerciseList` (session page), a failed API call on the plan page permanently showed an exercise as done. Added try/catch rollback.
+8. **INJURY_TIMELINES and hardcoded prompt table would drift** — the same 11-injury table was both a typed constant in `exercise-library.ts` and hardcoded verbatim in the system prompt. Added `buildTimelinePromptText()` and replaced the hardcoded table with a call to it.
+9. **Delay fired after final SMS in injury check-in loop** — `if (messages.length > 1)` fired after every iteration including the last, adding 1200ms dead wait after sending. Fixed to an index-based guard.
+**Files changed:** `src/lib/exercise-library.ts`, `src/app/plan/[token]/page.tsx`, `src/app/plan/[token]/ExerciseSection.tsx`, `src/app/api/coach/respond/route.ts`, `src/app/api/cron/morning-workout/route.ts`, `evals/run-evals.mjs`
+
+---
+
 ## 2026-07-07 — Recovery dashboard: pain timeline visualization + on-plan cross-training framing
 
 **Type:** Feature
