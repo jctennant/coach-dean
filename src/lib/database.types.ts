@@ -228,6 +228,38 @@ export type Database = {
         }
         Relationships: []
       }
+      pain_checkins: {
+        Row: {
+          created_at: string
+          date: string
+          id: string
+          pain_level: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          id?: string
+          pain_level: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          id?: string
+          pain_level?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pain_checkins_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pt_sessions: {
         Row: {
           completed_at: string | null
@@ -559,9 +591,11 @@ export type Database = {
           injury_hold_since: string | null
           last_activity_date: string | null
           last_activity_summary: Json | null
+          last_pain_level: number | null
           leg_day_flag: boolean | null
           leg_day_flag_expires_at: string | null
           long_run_target: number | null
+          pain_reported_at: string | null
           pending_sharp_disambiguation: boolean | null
           pending_symptom_checkin: boolean | null
           physio_referral_sent_at: string | null
@@ -589,9 +623,11 @@ export type Database = {
           injury_hold_since?: string | null
           last_activity_date?: string | null
           last_activity_summary?: Json | null
+          last_pain_level?: number | null
           leg_day_flag?: boolean | null
           leg_day_flag_expires_at?: string | null
           long_run_target?: number | null
+          pain_reported_at?: string | null
           pending_sharp_disambiguation?: boolean | null
           pending_symptom_checkin?: boolean | null
           physio_referral_sent_at?: string | null
@@ -619,9 +655,11 @@ export type Database = {
           injury_hold_since?: string | null
           last_activity_date?: string | null
           last_activity_summary?: Json | null
+          last_pain_level?: number | null
           leg_day_flag?: boolean | null
           leg_day_flag_expires_at?: string | null
           long_run_target?: number | null
+          pain_reported_at?: string | null
           pending_sharp_disambiguation?: boolean | null
           pending_symptom_checkin?: boolean | null
           physio_referral_sent_at?: string | null

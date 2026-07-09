@@ -91,6 +91,59 @@ export const CROSS_TRAINING_ALTERNATIVES: Record<string, string[]> = {
 
 export const KNOWN_REHAB_PARTS = Object.keys(BODY_PART_EXERCISES);
 
+// Realistic return-to-run timelines by body part and severity.
+// Used on day 1 of injury hold to set honest expectations.
+export const INJURY_TIMELINES: Record<string, Record<"mild" | "moderate" | "severe", string>> = {
+  it_band:    { mild: "2–3 weeks",  moderate: "3–5 weeks",  severe: "6–8 weeks" },
+  shin:       { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "8–12 weeks (rule out stress fracture with a physio)" },
+  knee:       { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–10 weeks" },
+  hamstring:  { mild: "1–2 weeks",  moderate: "3–6 weeks",  severe: "8–12 weeks" },
+  calf:       { mild: "1–2 weeks",  moderate: "3–4 weeks",  severe: "6–8 weeks" },
+  foot:       { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "8–12 weeks (plantar fascia takes time)" },
+  hip:        { mild: "1–2 weeks",  moderate: "3–4 weeks",  severe: "6–8 weeks" },
+  glute:      { mild: "1–2 weeks",  moderate: "2–4 weeks",  severe: "4–6 weeks" },
+  piriformis: { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "6–10 weeks" },
+  back:       { mild: "3–5 days",   moderate: "2–3 weeks",  severe: "4–6 weeks" },
+  ankle:      { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–10 weeks" },
+  groin:      { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–8 weeks" },
+};
+
+// Specific workout prescriptions for each cross-training modality.
+// Injury-agnostic — intensity/duration guidance that's safe and aerobically effective.
+// Injury-specific exclusions are handled in CROSS_TRAINING_ALTERNATIVES.
+export const CROSS_TRAINING_WORKOUTS: Record<string, string> = {
+  pool_running:
+    "Aqua jogging with a float belt: 5 min easy warm-up, then alternate 2 min at moderate effort (feels like your easy run pace effort) / 1 min easy, repeat 10–12× for 35–45 min total. No belt required in shallow water (waist deep) but belt gives better running mechanics. Effort translates: it will feel easy on HR — that's expected.",
+  swimming:
+    "Aerobic swim set: 200m easy warm-up, then 6×100m at moderate effort (not sprinting — you should be able to hold a sentence between lengths) with 15s rest, then 200m easy cool-down. Total ~1100m, ~30–40 min. Any stroke works; freestyle and backstroke are easiest on most running injuries.",
+  bike:
+    "Stationary bike or outdoor easy ride: 5 min spin to warm up, then 40–50 min at Z2 effort (HR 65–75% of max, or 'you can hold a conversation'). Cadence 85–95 rpm — higher cadence, lower resistance protects the legs. For Zwift: any Z2 route or free ride, avoid group rides where pace surges.",
+  elliptical:
+    "Elliptical forward stride: 5 min easy, then 35–45 min at moderate effort (RPE 5–6/10). Keep resistance moderate (not maxed), aim for cadence around 90–100 strides/min. For variety: alternate 5 min moderate / 2 min slightly harder effort, repeat. Reverse stride engages the glutes differently — add 10 min if IT band or glute is the issue.",
+  stair_stepper:
+    "StairMaster or step mill: start at a pace where you can hold a steady rhythm without gripping the rails (holding the rails cuts the aerobic demand significantly). 5 min easy, then 25–35 min at a steady moderate pace — RPE 6/10, HR in Z2. For tempo work: alternate 3 min steady / 1 min faster for 30 min total. Keep your chest up and step through the full range — partial steps reduce the benefit.",
+  rowing:
+    "Rowing machine: 5 min easy rowing to warm up, then 30–40 min at steady aerobic effort. Damper setting 4–5 (not max — lower resistance means more strokes, more aerobic work). Stroke rate 22–24 spm at easy effort, up to 26–28 spm for moderate. Drive with the legs first, then lean back, then pull arms — correct sequencing protects the back. NOTE: avoid if injury involves calves, Achilles, ankles, or lower back.",
+  hiking:
+    "Easy trail or treadmill hiking: 45–60 min at a comfortable pace where you can hold a conversation. Incline 4–8% on a treadmill. This is active recovery, not a workout — the benefit is staying on your feet and maintaining some aerobic base without impact. Downhill increases eccentric leg load — keep it gentle.",
+  walking:
+    "Brisk walking: 45–60 min at a pace where you feel like you're moving with purpose (RPE 4/10, slightly more than a stroll). Good for the first few days of injury hold when cross-training is too much. Flat or gentle incline. Stop if your injury-site pain goes above 2/10.",
+};
+
+/** Parse "N–M weeks" strings from INJURY_TIMELINES into { min, max } week counts. */
+export function getRecoveryEstimate(
+  bodyPart: string,
+  severity: "mild" | "moderate" | "severe" | null,
+): { minWeeks: number; maxWeeks: number } | null {
+  const key = bodyPart.toLowerCase().replace(/[^a-z_]/g, "_");
+  const sev = severity ?? "moderate";
+  const timeline = INJURY_TIMELINES[key]?.[sev];
+  if (!timeline) return null;
+  const match = timeline.match(/(\d+)[–-](\d+)/);
+  if (!match) return null;
+  return { minWeeks: parseInt(match[1]), maxWeeks: parseInt(match[2]) };
+}
+
 export interface RehabData {
   exercises: string[];
   crossTraining: string[];

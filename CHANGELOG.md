@@ -4,6 +4,35 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-07 — Recovery dashboard: pain timeline visualization + on-plan cross-training framing
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Two remaining gaps in injury recovery: (1) no pain progress visualization — athletes couldn't see their own recovery trending, which is a major psychological loss; (2) cross-training during injury hold was framed as "a substitute for running" rather than "the actual plan," undermining confidence.
+**Fix / Change:**
+- Pain timeline visualization: new `pain_checkins` table stores per-day pain scores (upserted when Haiku extracts `pain_level` from a reply). Plan dashboard (`/plan/[token]`) now shows a "Recovery" section instead of "Race" when `injury_hold_since` is set: injury name, days in hold, last pain report with color-coded severity, estimated return date range (from `INJURY_TIMELINES` lookup), and an inline SVG line chart showing pain level over time once 2+ data points exist. Chart renders server-side, no JS dependency.
+- Weekly progress SMS: Sunday injury check-in now appends a second bubble with the recovery dashboard link.
+- On-plan cross-training framing: `buildCrossTrainingContext` now accepts `injuryHoldSince`. When set, the injury context rule changes from "this protects the injury" to "THIS IS THE PLAN — not a substitute, not a consolation prize." Passed from `coach/respond` via the existing cross-training context build path.
+**Files changed:** `src/app/plan/[token]/page.tsx`, `src/lib/cross-training.ts`, `src/lib/exercise-library.ts`, `src/app/api/coach/respond/route.ts`, `supabase/migrations/055_pain_checkins.sql`, `src/lib/database.types.ts`
+
+---
+
+## 2026-07-07 — Return-to-run: daily injury check-in, day-1 timelines, specific cross-training workouts
+
+**Type:** Feature
+**Reported by:** Internal
+**User feedback:** N/A
+**Root cause:** Three gaps in injury recovery flow: (1) no daily morning check-in during injury hold — recovery feedback only came when athletes volunteered it; (2) no realistic timeline estimate on day 1 of injury, leaving athletes to guess and return too early; (3) cross-training prescription said "try the bike" but gave no actual workout format.
+**Fix / Change:**
+- Daily injury check-in: morning cron now detects users with `injury_hold_since` set and fires `injury_checkin` trigger instead of `morning_plan`. Sends "Morning check-in — how's the [body part] today? Pain level 1–10, and did you do yesterday's protocol?" Athlete's reply flows through normal `user_message` path.
+- Pain level storage: Haiku extraction now captures explicit pain level (0–10) from athlete replies. Stored as `last_pain_level` + `pain_reported_at` on `training_state`. Enables future trend visualization.
+- Day-1 timeline: `[INJURY_HOLD]` system prompt rule now instructs Dean to include a realistic return-to-run estimate when first signaling a hold (e.g. "Most IT band cases at this severity are back to easy running in 3–5 weeks"). Full lookup table for all known injury types and severities. Only fires on first hold signal, not subsequent check-ins.
+- Specific cross-training workouts: `CROSS_TRAINING_WORKOUTS` constant in `exercise-library.ts` gives exact session formats for pool running, swimming, bike, elliptical, stair stepper, rowing, hiking. `buildRehabProtocol` now injects these alongside the injury-safe alternatives so Dean gives a real session prescription, not just a category.
+**Files changed:** `src/lib/exercise-library.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/cron/morning-workout/route.ts`, `supabase/migrations/054_injury_checkin.sql`, `src/lib/database.types.ts`
+
+---
+
 ## 2026-07-06 — Fix "This week is 10" and name repetition
 
 **Type:** Bug Fix

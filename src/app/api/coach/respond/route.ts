@@ -22,7 +22,7 @@ import { composeStrengthRoutine } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
-import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, KNOWN_REHAB_PARTS, getRehabData } from "@/lib/exercise-library";
+import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, getRehabData } from "@/lib/exercise-library";
 import { classifyIntent } from "@/lib/intent-classifier";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
@@ -97,6 +97,24 @@ function buildRehabProtocol(input: Record<string, unknown>): string {
     lines.push(
       `Injury-safe cross-training${available.length ? ` (athlete has ${available.join(", ")} — listed first)` : ""}: ${opts.map((o) => `• ${o}`).join("  ")}`
     );
+
+    // Workout prescriptions for available modalities so Dean gives specific sessions, not just "try the bike"
+    const modalities: Array<[RegExp, string]> = [
+      [/pool|aqua.jog/, "pool_running"],
+      [/swim/, "swimming"],
+      [/bike|cycling|zwift|spin/, "bike"],
+      [/elliptical/, "elliptical"],
+      [/stair|step.mill/, "stair_stepper"],
+      [/row/, "rowing"],
+      [/hike/, "hiking"],
+    ];
+    const relevantWorkouts = modalities
+      .filter(([re]) => opts.some(o => re.test(o.toLowerCase())) || available.some(t => re.test(t)))
+      .map(([, key]) => CROSS_TRAINING_WORKOUTS[key])
+      .filter(Boolean);
+    if (relevantWorkouts.length) {
+      lines.push(`Specific session formats for what they have:\n${relevantWorkouts.map(w => `  - ${w}`).join("\n")}`);
+    }
   }
   if (pregnant) {
     lines.push(
@@ -114,7 +132,7 @@ function buildRehabProtocol(input: Record<string, unknown>): string {
 // Free PDF with photos and progressive levels — always send the link, never describe the exercises.
 const UKK_PDF_URL = "https://ukkinstituutti.fi/wp-content/uploads/2024/06/TheRunRCTHipAndCoreProgram.pdf";
 
-type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week" | "symptom_checkin";
+type TriggerType = "morning_plan" | "post_run" | "post_run_onboarding" | "user_message" | "initial_plan" | "weekly_recap" | "nightly_reminder" | "morning_reminder" | "workout_image" | "rebuild_plan" | "injury_hold" | "injury_clear" | "lighter_week" | "symptom_checkin" | "injury_checkin";
 
 interface CoachRequest {
   userId: string;
@@ -928,6 +946,63 @@ async function handleSymptomCheckin(userId: string, dryRun: boolean, requestChat
   return NextResponse.json({ ok: true, message });
 }
 
+/**
+ * Daily morning check-in during an active injury hold.
+ * Asks pain level 1–10 and protocol compliance. The athlete's reply
+ * flows through the normal user_message path so Dean can respond contextually.
+ * Fired by the morning-workout cron when injury_hold_since is set.
+ */
+async function handleInjuryCheckin(userId: string, dryRun: boolean, requestChatId?: string): Promise<NextResponse> {
+  const [userResult, profileResult, stateResult] = await Promise.all([
+    supabase.from("users").select("phone_number, name, linq_chat_id, messaging_opted_out, dashboard_token, timezone").eq("id", userId).single(),
+    supabase.from("training_profiles").select("injury_body_part").eq("user_id", userId).single(),
+    supabase.from("training_state").select("injury_hold_since").eq("user_id", userId).single(),
+  ]);
+
+  const user = userResult.data;
+  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  if (user.messaging_opted_out) return NextResponse.json({ ok: true, skipped: "opted_out" });
+
+  const state = stateResult.data as { injury_hold_since: string | null } | null;
+  if (!state?.injury_hold_since) {
+    return NextResponse.json({ ok: true, skipped: "not_on_hold" });
+  }
+
+  const bodyPart = ((profileResult.data?.injury_body_part as string | null) ?? "injury area").replace(/_/g, " ");
+  const timezone = (user.timezone as string | null) ?? "UTC";
+  const todayDow = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: timezone }).format(new Date());
+  const isSunday = todayDow === "Sunday";
+
+  const messages: string[] = [
+    `Morning check-in — how's the ${bodyPart} today? Pain level 1–10, and did you do yesterday's protocol?`,
+  ];
+
+  // On Sundays, send a weekly recovery progress link as a second bubble
+  if (isSunday && user.dashboard_token) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
+    messages.push(`Here's your recovery progress this week: ${appUrl}/plan/${user.dashboard_token}`);
+  }
+
+  if (!dryRun) {
+    const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+    if (chatId) await startTyping(chatId);
+    for (const msg of messages) {
+      await sendSMS(user.phone_number as string, msg);
+      if (messages.length > 1) await new Promise(r => setTimeout(r, 1200));
+    }
+    await supabase.from("conversations").insert(
+      messages.map(content => ({
+        user_id: userId,
+        role: "assistant",
+        content,
+        message_type: "injury_checkin" as const,
+      }))
+    );
+  }
+
+  return NextResponse.json({ ok: true, messages });
+}
+
 async function processCoachRequest(body: CoachRequest, correlationId: string): Promise<NextResponse> {
   const { userId, trigger, activityId, imageActivity, dry_run, silent, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
   const log = createLogger({ agentName: "coach/respond", correlationId, userId, trigger });
@@ -961,6 +1036,10 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
 
   if (trigger === "symptom_checkin") {
     return await handleSymptomCheckin(userId, dry_run ?? false, requestChatId);
+  }
+
+  if (trigger === "injury_checkin") {
+    return await handleInjuryCheckin(userId, dry_run ?? false, requestChatId);
   }
 
   // Reminder triggers don't use activity data — skip the heavy fetches to save DB reads.
@@ -2059,6 +2138,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         weekRunMileageSoFar: weekMileageSoFar,
         useMetric: isMetricUser,
         injuryNotes: injuryNotes ?? null,
+        injuryHoldSince: (state?.injury_hold_since as string | null) ?? null,
       })
     : null;
   const crossTrainWeeklySummary = trigger === "weekly_recap"
@@ -6070,6 +6150,7 @@ type ExtractedProfileData = {
   coaching_mode_request?: "analyst" | "full_coach" | null;
   avg_sleep_hours?: number | null;
   coaching_directives?: string[] | null;
+  pain_level?: number | null;
 };
 
 /**
@@ -6118,8 +6199,9 @@ Extract ONLY explicitly stated NEW information:
 - A stated preference for whether Dean should prescribe workouts/a training plan vs. just react to runs → coaching_mode_request. Set "analyst" when athlete says things like "just check in after my runs", "don't give me a plan", "just track my runs", "no workouts", "I don't need a schedule", "just react to what I do". Set "full_coach" when athlete says things like "yes give me workouts", "keep writing my plan", "I want a schedule". Only set when they are explicitly answering a question about coaching style or clearly stating this preference; not from inference.
 - How many hours of sleep the athlete is getting (e.g. "I've been sleeping about 7 hours", "only getting 5-6 hours lately", "sleep has been great, 8+ hours") → avg_sleep_hours as a number (hours per night, use midpoint for ranges like "5-6" → 5.5). Only extract if explicitly stated; do not infer from "tired" or "fatigued".
 - A STANDING instruction about HOW the coach should communicate — tone, word choice, or a behavior to stop/start that should persist across ALL future messages (NOT a one-off question or a training-plan preference) → coaching_directives as an array of short imperative strings written as a rule the coach must follow every time. Capture things like: "stop telling me not to overtrain / risk injury" → ["Do not warn about overtraining or injury risk unless I bring it up"]; "say pelvis instead of groin" → ["Refer to the injury as the pelvis, not the groin"]; "stop calling my easy runs moderate" → ["Do not label my easy efforts as moderate"]; "quit asking how I feel after every run" → ["Do not end messages by asking how I feel"]; "stop being so wordy" → ["Keep responses short"]. Only set when the athlete is clearly telling the coach to change its communication going forward. Do NOT capture one-time requests, training questions, or plan changes here (those go to other_notes).
+- A self-reported pain level in response to an injury check-in or when describing injury severity (e.g. "pain is a 3", "about a 4 out of 10", "maybe 2/10", "it's a 6") → pain_level as integer 0–10. Only extract when they give an explicit number; do not infer from "mild" or "bad".
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "race_name": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null, "coaching_directives": string[]|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "race_name": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null, "coaching_directives": string[]|null, "pain_level": integer|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -6367,6 +6449,23 @@ async function persistProfileUpdates(
     if (hasSleepHours) {
       profileUpdate.avg_sleep_hours = extracted.avg_sleep_hours;
       console.log(`[persistProfileUpdates] avg_sleep_hours updated to ${extracted.avg_sleep_hours}`);
+    }
+
+    const hasPainLevel = typeof extracted.pain_level === "number" && extracted.pain_level >= 0 && extracted.pain_level <= 10;
+    if (hasPainLevel) {
+      const today = new Date().toISOString().slice(0, 10);
+      await Promise.all([
+        supabase.from("training_state").update({
+          last_pain_level: extracted.pain_level,
+          pain_reported_at: today,
+        }).eq("user_id", userId),
+        supabase.from("pain_checkins").upsert({
+          user_id: userId,
+          date: today,
+          pain_level: extracted.pain_level as number,
+        }, { onConflict: "user_id,date" }),
+      ]);
+      console.log(`[persistProfileUpdates] pain_level updated to ${extracted.pain_level}`);
     }
 
     // Write manual workout to activities table if reported.
@@ -7060,7 +7159,11 @@ FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (no
 
 INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
 
-When signaling [INJURY_HOLD], your response MUST include a brief cross-training week outline — 3–4 sessions using the injury-appropriate options from the ACTIVE INJURY block above (if active), otherwise use the athlete's available tools from their profile, otherwise default to easy walking and elliptical. Format as a compact daily suggestion: "Mon/Wed/Fri — 30min [specific safe option]; Thu — optional [second option]. No high-impact activity." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week." The goal is to give them the best activities for THEIR specific injury — not a generic rest prescription.
+When signaling [INJURY_HOLD], your response MUST do two things:
+
+1. TIMELINE: If INJURY HOLD ACTIVE does not already appear in CURRENT TRAINING STATE (meaning this is the first hold signal, not a re-check-in), include one sentence giving a realistic return-to-run estimate. Use the known injury type and severity from ATHLETE HISTORY if available. Reference timelines: IT band mild 2–3 wks / moderate 3–5 wks / severe 6–8 wks; shin mild 2–3 wks / moderate 4–6 wks / severe 8–12 wks (rule out stress fracture); knee mild 1–2 wks / moderate 3–5 wks / severe 6–10 wks; hamstring mild 1–2 wks / moderate 3–6 wks / severe 8–12 wks; calf mild 1–2 wks / moderate 3–4 wks / severe 6–8 wks; foot mild 2–3 wks / moderate 4–6 wks / severe 8–12 wks; hip mild 1–2 wks / moderate 3–4 wks / severe 6–8 wks; piriformis mild 2–3 wks / moderate 4–6 wks / severe 6–10 wks; back mild 3–5 days / moderate 2–3 wks / severe 4–6 wks; ankle mild 1–2 wks / moderate 3–5 wks / severe 6–10 wks; groin mild 1–2 wks / moderate 3–5 wks / severe 6–8 wks. Frame it matter-of-factly, not alarmingly: "Most [injury type] cases at this severity are back to easy running in [range] — catching it now rather than running through it is what keeps that timeline on the shorter end." If injury type is unknown, use a conservative general range (2–4 weeks).
+
+2. CROSS-TRAINING WEEK: Include a brief cross-training outline — 3–4 sessions using the injury-appropriate options from the ACTIVE INJURY block above (call get_rehab_protocol if you haven't already), otherwise use the athlete's available tools from their profile, otherwise default to easy walking and elliptical. Format as a compact daily suggestion: "Mon/Wed/Fri — 30min [specific safe option]; Thu — optional [second option]. No high-impact activity." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week." The goal is to give them the best activities for THEIR specific injury — not a generic rest prescription.
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
 

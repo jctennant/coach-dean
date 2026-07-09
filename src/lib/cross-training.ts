@@ -154,10 +154,11 @@ export function buildCrossTrainingContext(params: {
   weekRunMileageSoFar: number;
   useMetric: boolean;
   injuryNotes: string | null;
+  injuryHoldSince?: string | null;
 }): string {
   const { activityType, activityName, movingTimeSeconds, averageHeartrate, averageWatts,
     workoutType, lthrEstimate, crosstrainingTools, phase, weekAerobicMinutesSoFar,
-    weekRunMileageSoFar, useMetric, injuryNotes } = params;
+    weekRunMileageSoFar, useMetric, injuryNotes, injuryHoldSince } = params;
 
   const { effort, rationale } = classifyCrossTrainingEffort({
     activityType, movingTimeSeconds, averageHeartrate, averageWatts,
@@ -170,8 +171,11 @@ export function buildCrossTrainingContext(params: {
     ? `${(weekRunMileageSoFar * 1.60934).toFixed(1)} km`
     : `${weekRunMileageSoFar.toFixed(1)} mi`;
 
+  // Injury hold takes priority over general injury context: this session IS the prescribed plan.
   const hasActiveInjury = !!injuryNotes && !injuryNotes.toLowerCase().startsWith("past");
-  const injuryRule = hasActiveInjury
+  const injuryRule = injuryHoldSince
+    ? `- PRESCRIBED RECOVERY CROSS-TRAINING — MANDATORY FRAMING: Athlete is on a full injury hold (since ${injuryHoldSince}). This session IS the plan — not a substitute, not a consolation prize. Frame it as: "This is exactly what recovery looks like right now — staying aerobic while [body part] heals." Do NOT suggest they should be running or compare this to missing a run. Do NOT say "good alternative." End with a brief check-in on how the injury site is feeling today.`
+    : hasActiveInjury
     ? `- INJURY CONTEXT — MANDATORY: Athlete has an active injury/concern: "${injuryNotes}". Connect this cross-training session to the injury — explain how it protects the injury site or maintains fitness while it heals. Do NOT skip this. Example: "This keeps you aerobic without loading the [body part]" or "Avoids the impact your [body part] needs to stay away from right now." End with a brief check-in on how the injury is feeling.`
     : null;
 
