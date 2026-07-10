@@ -4,6 +4,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-09 — Expand strength routines to full sessions + deterministic weekly scheduling
+
+**Type:** Feature
+**Reported by:** User (Jake) — "do we have strength training in the injury prescription? I wonder if we want to work an actual 20-30 min strength routine in vs just a few small exercises to prevent injury"
+**Root cause:** `strength-library.ts` only ever produced small 4-exercise prehab routines (~5-10 min), and strength was never scheduled into the actual weekly plan — it existed purely as reactive SMS/dashboard advisory text, triggered only when an athlete had injury history or asked. There was no deterministic "when" for strength at all.
+**Fix / Change:**
+1. Every routine in `strength-library.ts` (12 body-part routines + the universal `hip_core` base) expanded from 4-5 exercises to 9-10 — a full 20-30 min session (warm-up + main strengthening block). Added 7 new exercises to the catalog (monster walk, wall sit, leg swings, world's greatest stretch, superman, Copenhagen plank, reverse Nordic).
+2. Added deterministic (non-LLM) weekly strength scheduling: `computeWeeklyStrength()` in `training-plan.ts` runs on every `initial_plan` and `weekly_recap`, for every athlete regardless of injury status. Day = the first day of the week NOT in `training_profiles.training_days` (a day off from running); routine = `composeStrengthRoutine()` re-evaluated fresh each week from current `injury_notes`/`injury_body_part` (falls back to `hip_core` with no injury signal). Deliberately avoids the LLM-extraction pattern that caused the 2026-04-16 removal of day-level `weekly_plan_sessions` tracking for AI-generated plans — this only ever writes 2 simple deterministic columns, not a full Claude-parsed session list.
+3. New `training_state.weekly_strength_day` / `weekly_strength_routine_key` columns (migration `056_weekly_strength_scheduling.sql`). Null day means the athlete trains all 7 days — no day off to schedule a dedicated session on.
+4. `/plan/[token]` dashboard now shows "Scheduled: {day}" under the Strength section, sourced from the new columns (falls back to the existing injury-triggered `dashboard_insights.strength_recovery` routine for pre-migration state).
+5. Also added a shared `PlanSession` interface (`type`/`routine_key` fields) in `training-plan.ts` for future session-shape reuse; existing `{day,date,label,optional?}` read sites are untouched.
+**Files changed:** `src/lib/strength-library.ts`, `src/lib/training-plan.ts`, `src/app/plan/[token]/page.tsx`, `src/lib/database.types.ts`, `supabase/migrations/056_weekly_strength_scheduling.sql`, `src/__tests__/lib/strength-library.test.ts`, `src/__tests__/lib/training-plan.test.ts`
+**Follow-up needed:** Apply migration `056` to the live Supabase DB, then re-run `npm run gen:types` to replace the manually-patched types in `database.types.ts` with generated ones.
+
+---
+
 ## 2026-07-08 — Fix 9 bugs found in injury/session/plan PRs
 
 **Type:** Bug Fix

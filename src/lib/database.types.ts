@@ -615,6 +615,8 @@ export type Database = {
           weekly_mileage_target: number | null
           weekly_plan_sessions: Json | null
           weekly_quality_session: string | null
+          weekly_strength_day: string | null
+          weekly_strength_routine_key: string | null
         }
         Insert: {
           current_phase?: string | null
@@ -647,6 +649,8 @@ export type Database = {
           weekly_mileage_target?: number | null
           weekly_plan_sessions?: Json | null
           weekly_quality_session?: string | null
+          weekly_strength_day?: string | null
+          weekly_strength_routine_key?: string | null
         }
         Update: {
           current_phase?: string | null
@@ -679,6 +683,8 @@ export type Database = {
           weekly_mileage_target?: number | null
           weekly_plan_sessions?: Json | null
           weekly_quality_session?: string | null
+          weekly_strength_day?: string | null
+          weekly_strength_routine_key?: string | null
         }
         Relationships: [
           {

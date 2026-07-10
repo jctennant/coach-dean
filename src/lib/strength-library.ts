@@ -11,9 +11,10 @@
  *      Run `npm run strength:catalog` to print the full list of routines + exercises
  *      to produce images for.
  *
- * The universe is intentionally small and fixed (~40 movements, ~12 routines) so the
- * art is a build-once asset set, never generated at runtime. Keep specs identical to
- * what Dean has always prescribed; the `cue` is a one-line form reminder.
+ * The universe is intentionally small and fixed (~47 movements, ~12 routines, 9-10
+ * exercises each — a full 20-30 min session) so the art is a build-once asset set,
+ * never generated at runtime. Keep specs identical to what Dean has always
+ * prescribed; the `cue` is a one-line form reminder.
  */
 
 export interface Exercise {
@@ -100,57 +101,64 @@ export const EXERCISES: Record<string, Exercise> = {
   single_leg_squat: { id: "single_leg_squat", name: "Single-leg squat (to a chair)", specs: "3×8 each", cue: "sit back to a chair on one leg, knee tracks over the toes, control the lower" },
   front_plank: { id: "front_plank", name: "Front plank", specs: "3×30–45s", cue: "straight line head to heels, brace the core, don't let the hips sag" },
   side_plank: { id: "side_plank", name: "Side plank (hip lifts)", specs: "3×20–30s each", cue: "elbow under the shoulder, lift the hips, add small dips once steady" },
+  monster_walk: { id: "monster_walk", name: "Banded monster walks", specs: "2×20 steps diagonal", cue: "band above the knees, wide low squat stance, small controlled diagonal steps" },
+  wall_sit: { id: "wall_sit", name: "Wall sit", specs: "3×30–45s", cue: "thighs parallel to the floor, back flat against the wall, weight through the heels" },
+  leg_swings: { id: "leg_swings", name: "Leg swings (front-back + side-side)", specs: "2×10 each direction, each leg", cue: "hold something for balance, swing from the hip with a soft knee, don't force the range" },
+  worlds_greatest_stretch: { id: "worlds_greatest_stretch", name: "World's greatest stretch", specs: "5 each side", cue: "lunge forward, drop the back knee, rotate the same-side elbow toward the sky" },
+  superman: { id: "superman", name: "Superman raises", specs: "3×12 (2-sec hold)", cue: "lie face down, lift chest and legs together, squeeze glutes and low back, don't overextend the neck" },
+  copenhagen_plank: { id: "copenhagen_plank", name: "Copenhagen plank (adductor)", specs: "3×15–20s each side", cue: "top foot on a bench, lift the hips level, start with the knee-bent regression if it's too hard" },
+  reverse_nordic: { id: "reverse_nordic", name: "Reverse Nordic (kneeling quad)", specs: "3×8", cue: "kneel tall, lean back slowly from the knees keeping hips extended, catch yourself with control" },
 };
 
 /* ── Routines ───────────────────────────────────────────────────────────────── */
 
-const REHAB_FREQ = "3–5× per week — these are gentle; stop any rep that climbs past 2/10 pain";
-const PREVENT_FREQ = "2× per week, ideally as a 15-min warm-up before an easy run";
+const REHAB_FREQ = "3–5× per week, 20–30 min per session — these are gentle; stop any rep that climbs past 2/10 pain";
+const PREVENT_FREQ = "2× per week as its own 20–30 min session";
 
 /** Routines in priority order — `composeStrengthRoutine` matches the FIRST routine whose
  *  `matches` keyword appears in the athlete's injury text. More specific terms come first. */
 export const ROUTINES: Routine[] = [
   { key: "it_band", label: "IT band", matches: ["it band", "itb", "iliotibial"], frequency: REHAB_FREQ,
     note: "Builds the glute-med strength that stops the IT band overloading, and calms the lateral knee.",
-    exerciseIds: ["clamshells", "lateral_band_walks", "foam_roll_tfl", "hip_flexor_stretch"] },
+    exerciseIds: ["leg_swings", "clamshells", "lateral_band_walks", "monster_walk", "side_lying_hip_abduction", "single_leg_glute_bridge", "foam_roll_tfl", "hip_flexor_stretch", "single_leg_balance"] },
   { key: "shin", label: "Shin splints", matches: ["shin", "tibia", "medial tibial", "mtss"], frequency: REHAB_FREQ,
     note: "Loads the tibialis and calf so the shin can handle ground impact without flaring.",
-    exerciseIds: ["ecc_calf_raise_straight", "tib_anterior_raise", "calf_stretch", "toe_taps"] },
+    exerciseIds: ["toe_taps", "tib_anterior_raise", "band_dorsiflexion", "ecc_calf_raise_straight", "single_leg_calf_raise", "calf_stretch", "soleus_stretch", "ankle_alphabet", "single_leg_balance"] },
   { key: "calf", label: "Calf / Achilles", matches: ["calf", "achilles", "soleus", "gastroc"], frequency: REHAB_FREQ,
     note: "Eccentric calf loading is the best-evidenced rehab for Achilles and calf strain.",
-    exerciseIds: ["ecc_heel_drop", "single_leg_calf_raise", "soleus_stretch", "ankle_circles"] },
+    exerciseIds: ["ankle_circles", "ecc_heel_drop", "single_leg_calf_raise", "soleus_stretch", "calf_stretch", "toe_taps", "tib_anterior_raise", "single_leg_balance", "ankle_alphabet"] },
   { key: "knee", label: "Runner's knee", matches: ["knee", "patella", "patellar", "pf ", "kneecap", "pfps"], frequency: REHAB_FREQ,
     note: "Quad and glute strength to track the kneecap properly and offload the joint.",
-    exerciseIds: ["vmo_quad_set", "tke", "step_down", "straight_leg_raise"] },
+    exerciseIds: ["leg_swings", "vmo_quad_set", "tke", "step_down", "straight_leg_raise", "single_leg_squat", "wall_sit", "glute_bridge", "single_leg_balance", "reverse_nordic"] },
   { key: "hamstring", label: "Hamstring", matches: ["hamstring", "ham ", "biceps femoris"], frequency: REHAB_FREQ,
     note: "Eccentric hamstring loading to build strain resilience through full range.",
-    exerciseIds: ["nordic_curls", "single_leg_rdl", "prone_hamstring_raise", "glute_bridge"] },
+    exerciseIds: ["leg_swings", "nordic_curls", "single_leg_rdl", "prone_hamstring_raise", "glute_bridge", "single_leg_glute_bridge", "hip_thrust", "bird_dog", "single_leg_balance"] },
   { key: "foot", label: "Foot / plantar fascia", matches: ["plantar", "foot", "arch", "fascia", "heel"], frequency: REHAB_FREQ,
     note: "Calms the plantar fascia and rebuilds the intrinsic foot strength that supports the arch.",
-    exerciseIds: ["frozen_bottle_roll", "towel_toe_curl", "ecc_calf_raise_straight", "short_foot"] },
+    exerciseIds: ["ankle_circles", "frozen_bottle_roll", "towel_toe_curl", "short_foot", "ecc_calf_raise_straight", "single_leg_calf_raise", "calf_stretch", "single_leg_balance", "toe_taps"] },
   { key: "piriformis", label: "Piriformis", matches: ["piriformis", "sciatic"], frequency: REHAB_FREQ,
     note: "Releases the piriformis and builds hip rotator control to stop it gripping.",
-    exerciseIds: ["figure_4_stretch", "pigeon_pose", "seated_piriformis_stretch", "clamshells"] },
+    exerciseIds: ["cat_cow", "figure_4_stretch", "pigeon_pose", "seated_piriformis_stretch", "clamshells", "lateral_band_walks", "glute_bridge", "bird_dog", "single_leg_balance"] },
   { key: "groin", label: "Groin / adductor", matches: ["groin", "adductor", "inner thigh", "pubic"], frequency: REHAB_FREQ,
     note: "Low-load adductor strengthening — gentle and pregnancy-safe.",
-    exerciseIds: ["side_lying_hip_adduction", "seated_adductor_isometric", "butterfly_stretch", "clamshells"] },
+    exerciseIds: ["leg_swings", "side_lying_hip_adduction", "seated_adductor_isometric", "butterfly_stretch", "clamshells", "copenhagen_plank", "glute_bridge", "single_leg_balance", "bird_dog"] },
   { key: "glute", label: "Glute", matches: ["glute", "gluteal", "buttock"], frequency: REHAB_FREQ,
     note: "Glute strength is the foundation for hip and knee stability when you run.",
-    exerciseIds: ["clamshells", "single_leg_glute_bridge", "hip_thrust", "side_lying_hip_abduction"] },
+    exerciseIds: ["leg_swings", "clamshells", "single_leg_glute_bridge", "hip_thrust", "side_lying_hip_abduction", "lateral_band_walks", "monster_walk", "single_leg_squat", "front_plank", "single_leg_balance"] },
   { key: "hip", label: "Hip", matches: ["hip flexor", "hip"], frequency: REHAB_FREQ,
     note: "Mobilizes tight hip flexors and strengthens the glutes that share the load.",
-    exerciseIds: ["hip_flexor_stretch", "glute_bridge", "lateral_band_walks", "pigeon_pose"] },
+    exerciseIds: ["worlds_greatest_stretch", "hip_flexor_stretch", "glute_bridge", "lateral_band_walks", "pigeon_pose", "clamshells", "single_leg_glute_bridge", "hip_thrust", "single_leg_balance"] },
   { key: "ankle", label: "Ankle", matches: ["ankle", "sprain", "rolled"], frequency: REHAB_FREQ,
     note: "Rebuilds ankle strength, range, and the balance that prevents re-spraining.",
-    exerciseIds: ["ecc_calf_raise_straight", "single_leg_balance", "band_dorsiflexion", "ankle_alphabet"] },
+    exerciseIds: ["ankle_circles", "ecc_calf_raise_straight", "single_leg_balance", "band_dorsiflexion", "ankle_alphabet", "single_leg_calf_raise", "toe_taps", "soleus_stretch", "calf_stretch"] },
   { key: "back", label: "Lower back", matches: ["back", "lumbar", "si joint", "sacroiliac"], frequency: REHAB_FREQ,
     note: "Gentle mobility plus core control to settle the low back and support running posture.",
-    exerciseIds: ["cat_cow", "bird_dog", "childs_pose", "dead_bug"] },
+    exerciseIds: ["cat_cow", "bird_dog", "childs_pose", "dead_bug", "glute_bridge", "front_plank", "side_plank", "superman", "pigeon_pose"] },
   // Default / universal base — strongest general evidence (Run RCT). Used when there's an
   // injury history but no recognizable body part, or as the everyone-benefits routine.
   { key: "hip_core", label: "Hip & core base", matches: [], frequency: PREVENT_FREQ,
     note: "The strongest general injury-prevention evidence we have (Run RCT, Leppänen 2024): hip + core strength twice a week cut overuse injuries roughly in half.",
-    exerciseIds: ["side_plank", "single_leg_squat", "single_leg_glute_bridge", "lateral_band_walks", "front_plank"] },
+    exerciseIds: ["worlds_greatest_stretch", "side_plank", "single_leg_squat", "single_leg_glute_bridge", "lateral_band_walks", "front_plank", "clamshells", "dead_bug", "bird_dog", "hip_thrust"] },
 ];
 
 const ROUTINE_BY_KEY: Record<string, Routine> = Object.fromEntries(ROUTINES.map((r) => [r.key, r]));

@@ -23,10 +23,10 @@ describe("strength-library — catalog integrity", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("every routine has 4–5 exercises and a non-empty note + frequency", () => {
+  it("every routine has 9–10 exercises (a full 20–30 min session) and a non-empty note + frequency", () => {
     for (const r of ROUTINES) {
-      expect(r.exerciseIds.length).toBeGreaterThanOrEqual(4);
-      expect(r.exerciseIds.length).toBeLessThanOrEqual(5);
+      expect(r.exerciseIds.length).toBeGreaterThanOrEqual(9);
+      expect(r.exerciseIds.length).toBeLessThanOrEqual(10);
       expect(r.note.length).toBeGreaterThan(0);
       expect(r.frequency.length).toBeGreaterThan(0);
     }
@@ -79,7 +79,7 @@ describe("composeStrengthRoutine — generation", () => {
     const r = composeStrengthRoutine({ bodyParts: ["left achilles"], injuryText: null });
     expect(r).not.toBeNull();
     expect(r!.routine_key).toBe("calf");
-    expect(r!.exercises.length).toBe(4);
+    expect(r!.exercises.length).toBe(9);
     expect(r!.exercises[0]).toHaveProperty("name");
     expect(r!.exercises[0]).toHaveProperty("specs");
     expect(r!.poster_url).toBe(posterUrl("calf"));

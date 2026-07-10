@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { computePhaseForPlan, computeWeekSessions, type UploadedPlanWeek } from "@/lib/training-plan";
+import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, type UploadedPlanWeek } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -258,5 +258,48 @@ describe("computeWeekSessions", () => {
     const result = computeWeekSessions(sampleWeeks, 1, "UTC");
     expect(result.find(s => s.day === "Mon")?.date).toBe("6/1");
     expect(result.find(s => s.day === "Sun")?.date).toBe("6/7");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeWeeklyStrength
+// ---------------------------------------------------------------------------
+describe("computeWeeklyStrength", () => {
+  it("picks the first day off (not in training_days) as the strength day", () => {
+    const result = computeWeeklyStrength({ training_days: ["monday", "wednesday", "friday", "sunday"] });
+    // First day-off in Mon..Sun order is Tuesday
+    expect(result.day).toBe("Tue");
+  });
+
+  it("returns null day when the athlete trains all 7 days", () => {
+    const result = computeWeeklyStrength({
+      training_days: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+    });
+    expect(result.day).toBeNull();
+  });
+
+  it("returns Monday when no training_days are set (everyone has a day off)", () => {
+    const result = computeWeeklyStrength({ training_days: [] });
+    expect(result.day).toBe("Mon");
+  });
+
+  it("normalizes casing/whitespace when matching training_days", () => {
+    const result = computeWeeklyStrength({ training_days: [" Monday ", "TUESDAY"] });
+    expect(result.day).toBe("Wed");
+  });
+
+  it("routes to an injury-specific routine when body part is known", () => {
+    const result = computeWeeklyStrength({ training_days: [], injury_body_part: "left achilles" });
+    expect(result.routineKey).toBe("calf");
+  });
+
+  it("falls back to hip_core when there's no injury signal", () => {
+    const result = computeWeeklyStrength({ training_days: [] });
+    expect(result.routineKey).toBe("hip_core");
+  });
+
+  it("re-evaluates from injury_notes free text too", () => {
+    const result = computeWeeklyStrength({ training_days: [], injury_notes: "IT band flare-up last week" });
+    expect(result.routineKey).toBe("it_band");
   });
 });

@@ -3,6 +3,7 @@ import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import type { Json } from "@/lib/database.types";
 import { prescribeCrossTrainingForPhase } from "@/lib/cross-training";
+import { composeStrengthRoutine } from "@/lib/strength-library";
 
 /**
  * Compute training phase for a pre-generated plan arc, based on position
@@ -681,6 +682,7 @@ No other text.`,
   // completed/missed before today) so historical context isn't lost.
   const week1ArcMileage = planWeeks[0]?.mileage_target ?? null;
   const week1MileageTarget = prescribedWeek1Miles ?? week1ArcMileage;
+  const week1Strength = computeWeeklyStrength(profile);
   // Use upsert so a missing training_state row (e.g. completeOnboarding didn't run cleanly)
   // gets created instead of silently no-oping. Without this, the dashboard shows no weekly
   // target / long run / quality.
@@ -692,6 +694,8 @@ No other text.`,
       weekly_plan_sessions: null,
       weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
       weekly_quality_session: planWeeks[0]?.key_workout || null,
+      weekly_strength_day: week1Strength.day,
+      weekly_strength_routine_key: week1Strength.routineKey,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
   } else if (week1Reset) {
@@ -702,6 +706,8 @@ No other text.`,
       weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json,
       weekly_long_run_miles: planWeeks[0]?.long_run_target ?? null,
       weekly_quality_session: planWeeks[0]?.key_workout || null,
+      weekly_strength_day: week1Strength.day,
+      weekly_strength_routine_key: week1Strength.routineKey,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
   }
@@ -780,6 +786,59 @@ No other text.`,
 export interface UploadedPlanSession {
   day: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
   label: string;
+}
+
+/**
+ * Shared shape for entries stored in training_state.weekly_plan_sessions.
+ * `type`/`routine_key` are optional so existing run-only sessions (and any code
+ * reading the old `{day,date,label,optional?}` shape) keep working untouched.
+ */
+export interface PlanSession {
+  day: string;
+  date: string;
+  label: string;
+  optional?: boolean;
+  /** Session kind. Absent/undefined means "run" for backwards compatibility. */
+  type?: "run" | "strength" | "cross_train";
+  /** For type: "strength" — the strength-library.ts routine key to look up exercises from. */
+  routine_key?: string;
+}
+
+const WEEK_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+const WEEK_DAY_ABBREV = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/**
+ * Deterministically compute this week's strength scheduling — day + routine — for every
+ * athlete, every week. Intentionally NOT derived from Claude free text: day-level session
+ * tracking was previously removed because LLM-extracted day assignments were unreliable
+ * (see 2026-04-16 changelog). Both inputs here are already structured, reliable columns:
+ *   - day: the first day of the week the athlete has no run scheduled (complement of
+ *     training_profiles.training_days). Null if the athlete trains all 7 days — there's no
+ *     day off to place a dedicated session on, so no day is scheduled that week.
+ *   - routine_key: re-evaluated fresh each week from current injury_notes/injury_body_part
+ *     via composeStrengthRoutine(), falling back to the universal hip_core base when there's
+ *     no injury signal — every athlete gets a scheduled strength day regardless of injury status.
+ */
+export function computeWeeklyStrength(profile: Record<string, unknown> | null): {
+  day: string | null;
+  routineKey: string | null;
+} {
+  const trainingDays = new Set(
+    ((profile?.training_days as string[] | null) ?? []).map(d => d.toLowerCase().trim())
+  );
+  const dayIndex = WEEK_DAYS.findIndex(d => !trainingDays.has(d));
+  const day = dayIndex === -1 ? null : WEEK_DAY_ABBREV[dayIndex];
+
+  const composed = composeStrengthRoutine({
+    bodyParts: [
+      profile?.injury_body_part as string | null,
+      ...(((profile?.injury_body_parts as string[] | null) ?? [])),
+    ],
+    injuryText: (profile?.injury_notes as string | null) ?? null,
+  });
+  const routineKey = composed?.routine_key ?? "hip_core";
+
+  return { day, routineKey };
 }
 
 export interface UploadedPlanWeek {
@@ -874,6 +933,13 @@ export async function syncWeekFromArc(userId: string, weekNum: number): Promise<
     .single();
   if (!plan?.weeks || !Array.isArray(plan.weeks)) return;
 
+  const { data: profile } = await supabase
+    .from("training_profiles")
+    .select("training_days, injury_notes, injury_body_part, injury_body_parts")
+    .eq("user_id", userId)
+    .single();
+  const strength = computeWeeklyStrength(profile as Record<string, unknown> | null);
+
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
   type DeanWeek = { week_number: number; long_run_target: number; key_workout: string; mileage_target?: number };
@@ -892,6 +958,8 @@ export async function syncWeekFromArc(userId: string, weekNum: number): Promise<
       weekly_long_run_miles: longRun?.targetDistanceMiles ?? null,
       weekly_quality_session: qualitySessions,
       weekly_mileage_target: week.total_miles || null,
+      weekly_strength_day: strength.day,
+      weekly_strength_routine_key: strength.routineKey,
     }).eq("user_id", userId);
   } else {
     const weeks = plan.weeks as DeanWeek[];
@@ -901,6 +969,8 @@ export async function syncWeekFromArc(userId: string, weekNum: number): Promise<
       weekly_long_run_miles: week.long_run_target ?? null,
       weekly_quality_session: week.key_workout || null,
       weekly_mileage_target: week.mileage_target || null,
+      weekly_strength_day: strength.day,
+      weekly_strength_routine_key: strength.routineKey,
     }).eq("user_id", userId);
   }
 }

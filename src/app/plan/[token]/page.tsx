@@ -135,7 +135,7 @@ export default async function PlanPage({
   const [userResult, stateResult, planResult, raceResult, profileResult] = await Promise.all([
     supabase.from("users").select("name, timezone").eq("id", userId).single(),
     supabase.from("training_state")
-      .select("current_week, current_phase, weekly_mileage_target, weekly_plan_sessions, injury_hold_since, last_pain_level, pain_reported_at")
+      .select("current_week, current_phase, weekly_mileage_target, weekly_plan_sessions, weekly_strength_day, weekly_strength_routine_key, injury_hold_since, last_pain_level, pain_reported_at")
       .eq("user_id", userId).maybeSingle(),
     supabase.from("training_plans").select("total_weeks")
       .eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -199,10 +199,15 @@ export default async function PlanPage({
   const sessions = ((state?.weekly_plan_sessions ?? []) as Session[]);
   const activityDates = new Set(activities.map((a) => (a.start_date ?? "").split("T")[0]));
 
-  // Strength routine from stored profile insights
+  // Strength routine: prefer this week's deterministically-scheduled routine key
+  // (weekly_strength_routine_key, re-evaluated every plan generation/recap from current
+  // injury status); fall back to the profile's stored injury-triggered routine for users
+  // whose training_state predates weekly strength scheduling.
   const insights = profile?.dashboard_insights as Record<string, unknown> | null;
   const storedRoutine = insights?.strength_recovery as StoredStrengthRoutine | null;
-  const routine = storedRoutine?.routine_key ? getRoutine(storedRoutine.routine_key) : null;
+  const scheduledStrengthDay = (state?.weekly_strength_day as string | null) ?? null;
+  const routineKey = (state?.weekly_strength_routine_key as string | null) ?? storedRoutine?.routine_key ?? null;
+  const routine = routineKey ? getRoutine(routineKey) : null;
   const exercises = routine ? routine.exerciseIds.map((id) => EXERCISES[id]).filter(Boolean) : [];
 
   const weeksOut = race ? weeksUntil(race.race_date, timezone) : null;
@@ -381,6 +386,9 @@ export default async function PlanPage({
             <div className="mb-3">
               <p className="text-xs font-semibold tracking-widest text-gray-400 uppercase mb-1">Strength</p>
               <p className="font-bold text-gray-900">{routine.label}</p>
+              {scheduledStrengthDay && (
+                <p className="text-sm text-gray-700 mt-0.5">Scheduled: {scheduledStrengthDay}</p>
+              )}
               <p className="text-sm text-gray-500 mt-0.5">{routine.note}</p>
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
