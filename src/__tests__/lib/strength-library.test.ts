@@ -131,9 +131,14 @@ describe("exercisePosterUrl", () => {
 });
 
 describe("hasExerciseImage", () => {
-  it("returns false for exercises with no illustration produced yet", () => {
-    // No art has been committed under public/strength-exercises/ yet.
-    expect(hasExerciseImage("clamshells")).toBe(false);
+  it("returns true once art has been committed under public/strength-exercises/", () => {
+    expect(hasExerciseImage("clamshells")).toBe(true);
+  });
+
+  it("every exercise in the catalog has an image (full 53-exercise rollout is complete)", () => {
+    for (const id of Object.keys(EXERCISES)) {
+      expect(hasExerciseImage(id), `missing image for exercise "${id}"`).toBe(true);
+    }
   });
 
   it("returns false for an unknown exercise id without throwing", () => {
