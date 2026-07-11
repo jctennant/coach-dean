@@ -6,16 +6,24 @@
  *   1. `composeStrengthRoutine()` — picks the right routine for an athlete from their
  *      injury history and returns a stored-routine object (written to
  *      training_profiles.dashboard_insights.strength_recovery and surfaced over SMS).
- *   2. The poster image set — each Routine has a stable `key` that doubles as the
- *      poster filename stem (e.g. routine "it_band" → /strength-posters/it_band.png).
- *      Run `npm run strength:catalog` to print the full list of routines + exercises
- *      to produce images for.
+ *   2. The per-exercise image set — each Exercise has a stable `id` that doubles as the
+ *      image filename stem (e.g. "clamshells" → /strength-exercises/clamshells.png).
+ *      Images are shared across every routine that references that exercise. Run
+ *      `npm run strength:catalog` to print the full art spec (one entry per exercise).
  *
- * The universe is intentionally small and fixed (~47 movements, ~12 routines, 9-10
- * exercises each — a full 20-30 min session) so the art is a build-once asset set,
- * never generated at runtime. Keep specs identical to what Dean has always
- * prescribed; the `cue` is a one-line form reminder.
+ * The universe is intentionally small and fixed (~53 movements, ~13 routines, 9-10
+ * exercises each — a full 20-30 min session; hip_core runs to 13, closing with
+ * running-specific drills that only belong in the no-injury general routine) so the
+ * art is a build-once asset set, never generated at runtime. Keep specs identical to
+ * what Dean has always prescribed; the `cue` is a one-line form reminder.
+ *
+ * Server-only module: `hasExerciseImage()` reads the filesystem (node:fs), so this file
+ * must never be imported from a "use client" component — only from server components
+ * (e.g. /plan/[token]/page.tsx) or API routes.
  */
+
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 export interface Exercise {
   id: string;
@@ -54,6 +62,32 @@ const POSTER_BASE =
 
 export function posterUrl(routineKey: string): string {
   return `${POSTER_BASE}/${routineKey}.png`;
+}
+
+// Base URL for individual per-exercise illustrations — one image per EXERCISES entry,
+// reused across every routine that references it (e.g. clamshells.png is shared by 6
+// routines). Separate from POSTER_BASE/routine posters so each can be hosted/rolled out
+// independently. Override with NEXT_PUBLIC_STRENGTH_EXERCISE_POSTER_BASE for a CDN.
+const EXERCISE_POSTER_BASE =
+  process.env.NEXT_PUBLIC_STRENGTH_EXERCISE_POSTER_BASE?.replace(/\/$/, "") ?? "/strength-exercises";
+
+export function exercisePosterUrl(exerciseId: string): string {
+  return `${EXERCISE_POSTER_BASE}/${exerciseId}.png`;
+}
+
+/**
+ * Whether an illustration has actually been produced for this exercise yet. Art is
+ * rolled out incrementally (53 exercises to commission), so callers must check this
+ * before rendering/sending an image — a 404 breaks the SMS media attachment entirely
+ * (Linq re-hosts the URL and fails the whole send on a missing file) and would show a
+ * broken-image icon on the dashboard.
+ */
+export function hasExerciseImage(exerciseId: string): boolean {
+  try {
+    return existsSync(join(process.cwd(), "public", "strength-exercises", `${exerciseId}.png`));
+  } catch {
+    return false;
+  }
 }
 
 /* ── Exercise catalog ───────────────────────────────────────────────────────── */
@@ -108,6 +142,10 @@ export const EXERCISES: Record<string, Exercise> = {
   superman: { id: "superman", name: "Superman raises", specs: "3×12 (2-sec hold)", cue: "lie face down, lift chest and legs together, squeeze glutes and low back, don't overextend the neck" },
   copenhagen_plank: { id: "copenhagen_plank", name: "Copenhagen plank (adductor)", specs: "3×15–20s each side", cue: "top foot on a bench, lift the hips level, start with the knee-bent regression if it's too hard" },
   reverse_nordic: { id: "reverse_nordic", name: "Reverse Nordic (kneeling quad)", specs: "3×8", cue: "kneel tall, lean back slowly from the knees keeping hips extended, catch yourself with control" },
+  fire_hydrant: { id: "fire_hydrant", name: "Fire hydrants", specs: "3×12 each side", cue: "on hands and knees, lift the bent knee out to the side without rotating the torso or dropping the hip" },
+  a_skip: { id: "a_skip", name: "A-skips", specs: "3×20m", cue: "drive the knee up to hip height with a quick ground contact, pump the opposite arm" },
+  high_knees: { id: "high_knees", name: "High knees", specs: "3×20m", cue: "quick cadence, drive the knees up, land under your hips rather than out in front" },
+  bounding: { id: "bounding", name: "Bounding", specs: "3×20m", cue: "exaggerated running stride, drive off the ground and reach forward, land soft and absorb through the hip" },
 };
 
 /* ── Routines ───────────────────────────────────────────────────────────────── */
@@ -138,7 +176,7 @@ export const ROUTINES: Routine[] = [
     exerciseIds: ["ankle_circles", "frozen_bottle_roll", "towel_toe_curl", "short_foot", "ecc_calf_raise_straight", "single_leg_calf_raise", "calf_stretch", "single_leg_balance", "toe_taps"] },
   { key: "piriformis", label: "Piriformis", matches: ["piriformis", "sciatic"], frequency: REHAB_FREQ,
     note: "Releases the piriformis and builds hip rotator control to stop it gripping.",
-    exerciseIds: ["cat_cow", "figure_4_stretch", "pigeon_pose", "seated_piriformis_stretch", "clamshells", "lateral_band_walks", "glute_bridge", "bird_dog", "single_leg_balance"] },
+    exerciseIds: ["cat_cow", "figure_4_stretch", "pigeon_pose", "seated_piriformis_stretch", "clamshells", "fire_hydrant", "lateral_band_walks", "glute_bridge", "bird_dog", "single_leg_balance"] },
   { key: "groin", label: "Groin / adductor", matches: ["groin", "adductor", "inner thigh", "pubic"], frequency: REHAB_FREQ,
     note: "Low-load adductor strengthening — gentle and pregnancy-safe.",
     exerciseIds: ["leg_swings", "side_lying_hip_adduction", "seated_adductor_isometric", "butterfly_stretch", "clamshells", "copenhagen_plank", "glute_bridge", "single_leg_balance", "bird_dog"] },
@@ -157,8 +195,8 @@ export const ROUTINES: Routine[] = [
   // Default / universal base — strongest general evidence (Run RCT). Used when there's an
   // injury history but no recognizable body part, or as the everyone-benefits routine.
   { key: "hip_core", label: "Hip & core base", matches: [], frequency: PREVENT_FREQ,
-    note: "The strongest general injury-prevention evidence we have (Run RCT, Leppänen 2024): hip + core strength twice a week cut overuse injuries roughly in half.",
-    exerciseIds: ["worlds_greatest_stretch", "side_plank", "single_leg_squat", "single_leg_glute_bridge", "lateral_band_walks", "front_plank", "clamshells", "dead_bug", "bird_dog", "hip_thrust"] },
+    note: "The strongest general injury-prevention evidence we have (Run RCT, Leppänen 2024): hip + core strength twice a week cut overuse injuries roughly in half. Closes with running-specific drills — skip these if returning from injury.",
+    exerciseIds: ["worlds_greatest_stretch", "side_plank", "single_leg_squat", "single_leg_glute_bridge", "lateral_band_walks", "front_plank", "clamshells", "dead_bug", "bird_dog", "hip_thrust", "a_skip", "high_knees", "bounding"] },
 ];
 
 const ROUTINE_BY_KEY: Record<string, Routine> = Object.fromEntries(ROUTINES.map((r) => [r.key, r]));

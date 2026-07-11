@@ -18,7 +18,7 @@ import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
-import { composeStrengthRoutine } from "@/lib/strength-library";
+import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
@@ -3053,32 +3053,47 @@ OUTPUT CONTRACT:
       .eq("id", userId);
   }
 
-  // Strength routine poster: Dean emitted [STRENGTH_POSTER] after listing the full routine,
-  // so follow the text with the illustrated poster image for that routine. Linq fetches the
-  // URL and re-hosts it, so it must be a publicly reachable absolute URL. Best-effort — a
-  // media failure must never break the coaching flow.
+  // Strength routine images: Dean emitted [STRENGTH_POSTER] after listing the full routine,
+  // so follow the text with one illustrated image per exercise (not a single composed
+  // poster — routines now run 9-13 exercises, too many to fit legibly on one image).
+  // sendMediaSMS works identically on Linq and Photon (same signature on both), so this
+  // loop needs no provider-specific branching. Best-effort — a media failure must never
+  // break the coaching flow, and one missing image must never block the rest of the set.
   if (wantsStrengthPoster && strengthPosterRoutineKey) {
-    try {
+    const routine = getRoutine(strengthPosterRoutineKey);
+    if (routine) {
       // Linq requires a public HTTPS URL and re-hosts the image. NEXT_PUBLIC_APP_URL is
       // http://localhost in dev — never send that; fall back to the prod origin so a
-      // misconfigured/dev env can't silently ship a broken (or rejected) poster URL.
+      // misconfigured/dev env can't silently ship a broken (or rejected) image URL.
       const envUrl = process.env.NEXT_PUBLIC_APP_URL;
       const appUrl = envUrl?.startsWith("https://") ? envUrl : "https://coachdean.ai";
-      const posterUrl = `${appUrl}/strength-posters/${strengthPosterRoutineKey}.png`;
       const activeChatId = chatId ?? learnedChatId;
-      if (activeChatId) await startTyping(activeChatId);
-      await new Promise((r) => setTimeout(r, 1200));
-      await sendMediaSMS(user.phone_number, "", posterUrl, "image/png");
-      await supabase.from("conversations").insert({
-        user_id: userId,
-        role: "assistant",
-        content: `[Sent strength routine poster: ${strengthPosterRoutineKey}]`,
-        message_type: "coach_response",
-        strava_activity_id: activityId || null,
-      });
-      void trackEvent(userId, "strength_poster_sent", { routine_key: strengthPosterRoutineKey, trigger });
-    } catch (posterErr) {
-      console.error(`[coach/respond] strength poster send failed userId=${userId} routine=${strengthPosterRoutineKey}:`, posterErr);
+      let sentCount = 0;
+      for (const [i, exerciseId] of routine.exerciseIds.entries()) {
+        const ex = EXERCISES[exerciseId];
+        // Art rolls out incrementally — skip exercises with no illustration yet rather
+        // than sending a URL that 404s (which fails the whole Linq attachment).
+        if (!ex || !hasExerciseImage(exerciseId)) continue;
+        try {
+          const imageUrl = `${appUrl}${exercisePosterUrl(exerciseId)}`;
+          if (activeChatId) await startTyping(activeChatId);
+          await new Promise((r) => setTimeout(r, 1200));
+          await sendMediaSMS(user.phone_number, `${i + 1}. ${ex.name} — ${ex.specs}`, imageUrl, "image/png");
+          sentCount++;
+        } catch (posterErr) {
+          console.error(`[coach/respond] strength exercise image send failed userId=${userId} exercise=${exerciseId}:`, posterErr);
+        }
+      }
+      if (sentCount > 0) {
+        await supabase.from("conversations").insert({
+          user_id: userId,
+          role: "assistant",
+          content: `[Sent strength routine images: ${strengthPosterRoutineKey} (${sentCount}/${routine.exerciseIds.length} exercises)]`,
+          message_type: "coach_response",
+          strava_activity_id: activityId || null,
+        });
+        void trackEvent(userId, "strength_poster_sent", { routine_key: strengthPosterRoutineKey, trigger, exercise_count: sentCount });
+      }
     }
   }
 

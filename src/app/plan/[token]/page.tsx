@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { verifyPlanToken } from "@/lib/session-token";
-import { getRoutine, EXERCISES } from "@/lib/strength-library";
+import { getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage } from "@/lib/strength-library";
 import { supabase } from "@/lib/supabase";
 import { ExerciseSection } from "./ExerciseSection";
 import { getRecoveryEstimate } from "@/lib/exercise-library";
@@ -209,6 +209,11 @@ export default async function PlanPage({
   const routineKey = (state?.weekly_strength_routine_key as string | null) ?? storedRoutine?.routine_key ?? null;
   const routine = routineKey ? getRoutine(routineKey) : null;
   const exercises = routine ? routine.exerciseIds.map((id) => EXERCISES[id]).filter(Boolean) : [];
+  // Per-exercise thumbnails, gated on hasExerciseImage since art rolls out incrementally —
+  // an exercise without an image yet just renders text-only (no broken-image icon).
+  const exerciseImages: Record<string, string | null> = Object.fromEntries(
+    exercises.map((ex) => [ex.id, hasExerciseImage(ex.id) ? exercisePosterUrl(ex.id) : null])
+  );
 
   const weeksOut = race ? weeksUntil(race.race_date, timezone) : null;
   const currentWeek = state?.current_week ?? null;
@@ -391,14 +396,9 @@ export default async function PlanPage({
               )}
               <p className="text-sm text-gray-500 mt-0.5">{routine.note}</p>
             </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/strength-posters/${routine.key}.png`}
-              alt={`${routine.label} exercises`}
-              className="w-full rounded-xl mb-4"
-            />
             <ExerciseSection
               exercises={exercises}
+              exerciseImages={exerciseImages}
               routineKey={routine.key}
               token={token}
               today={today}

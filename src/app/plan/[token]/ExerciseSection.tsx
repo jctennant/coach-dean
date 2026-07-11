@@ -11,13 +11,15 @@ interface Exercise {
 
 interface Props {
   exercises: Exercise[];
+  /** exercise id → image URL, or null when no illustration has been produced yet. */
+  exerciseImages?: Record<string, string | null>;
   routineKey: string;
   token: string;
   today: string; // YYYY-MM-DD
   initialDone: string[];
 }
 
-export function ExerciseSection({ exercises, routineKey, token, today, initialDone }: Props) {
+export function ExerciseSection({ exercises, exerciseImages, routineKey, token, today, initialDone }: Props) {
   const [done, setDone] = useState<Set<string>>(new Set(initialDone));
 
   async function markDone(exerciseId: string) {
@@ -53,6 +55,7 @@ export function ExerciseSection({ exercises, routineKey, token, today, initialDo
       <div className="space-y-3">
         {exercises.map((ex, i) => {
           const isDone = done.has(ex.id);
+          const imageUrl = exerciseImages?.[ex.id] ?? null;
           return (
             <button
               key={ex.id}
@@ -62,6 +65,14 @@ export function ExerciseSection({ exercises, routineKey, token, today, initialDo
               }`}
             >
               <div className="flex items-start gap-3">
+                {imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageUrl}
+                    alt={ex.name}
+                    className="h-14 w-14 shrink-0 rounded-lg border border-gray-100 object-cover"
+                  />
+                )}
                 <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
                   isDone ? "border-green-500 bg-green-500" : "border-gray-300"
                 }`}>

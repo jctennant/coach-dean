@@ -7,6 +7,8 @@ import {
   composeStrengthRoutine,
   buildStoredRoutine,
   posterUrl,
+  exercisePosterUrl,
+  hasExerciseImage,
 } from "@/lib/strength-library";
 
 describe("strength-library — catalog integrity", () => {
@@ -23,13 +25,18 @@ describe("strength-library — catalog integrity", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("every routine has 9–10 exercises (a full 20–30 min session) and a non-empty note + frequency", () => {
+  it("every routine has 9–13 exercises (a full 20–30 min session) and a non-empty note + frequency", () => {
     for (const r of ROUTINES) {
       expect(r.exerciseIds.length).toBeGreaterThanOrEqual(9);
-      expect(r.exerciseIds.length).toBeLessThanOrEqual(10);
+      expect(r.exerciseIds.length).toBeLessThanOrEqual(13);
       expect(r.note.length).toBeGreaterThan(0);
       expect(r.frequency.length).toBeGreaterThan(0);
     }
+  });
+
+  it("hip_core is the largest routine (includes running-form drills) at 13 exercises", () => {
+    const base = getRoutine("hip_core")!;
+    expect(base.exerciseIds.length).toBe(13);
   });
 
   it("includes the universal hip_core base routine with no match keywords (default-only)", () => {
@@ -114,5 +121,40 @@ describe("composeStrengthRoutine — generation", () => {
 describe("posterUrl", () => {
   it("uses the routine key as the filename stem", () => {
     expect(posterUrl("it_band")).toMatch(/it_band\.png$/);
+  });
+});
+
+describe("exercisePosterUrl", () => {
+  it("uses the exercise id as the filename stem, under /strength-exercises", () => {
+    expect(exercisePosterUrl("clamshells")).toBe("/strength-exercises/clamshells.png");
+  });
+});
+
+describe("hasExerciseImage", () => {
+  it("returns false for exercises with no illustration produced yet", () => {
+    // No art has been committed under public/strength-exercises/ yet.
+    expect(hasExerciseImage("clamshells")).toBe(false);
+  });
+
+  it("returns false for an unknown exercise id without throwing", () => {
+    expect(hasExerciseImage("not_a_real_exercise")).toBe(false);
+  });
+});
+
+describe("newly added exercises — routine wiring", () => {
+  it("fire_hydrant is wired into the piriformis routine", () => {
+    expect(getRoutine("piriformis")!.exerciseIds).toContain("fire_hydrant");
+  });
+
+  it("running-form drills (a_skip, high_knees, bounding) are only in hip_core, not injury routines", () => {
+    const drillIds = ["a_skip", "high_knees", "bounding"];
+    for (const r of ROUTINES) {
+      const hasDrills = drillIds.some((id) => r.exerciseIds.includes(id));
+      if (r.key === "hip_core") {
+        expect(hasDrills).toBe(true);
+      } else {
+        expect(hasDrills).toBe(false);
+      }
+    }
   });
 });

@@ -4,6 +4,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-11 — Per-exercise strength images (replaces one-poster-per-routine)
+
+**Type:** Feature
+**Reported by:** User (Jake) — questioned whether the 13 hand-composed multi-exercise posters were sufficient now that routines run 9-13 exercises, and preferred one illustration per exercise for better per-move form guidance.
+**Root cause:** The existing poster system was one static PNG per routine (2x2 grid, 4 exercises max) — physically too small to hold the now-larger routines, and each exercise got only a quarter of a panel regardless of how much form detail it needed.
+**Fix / Change:**
+1. New per-exercise image model: `exercisePosterUrl(exerciseId)` + `hasExerciseImage(exerciseId)` in `strength-library.ts`. One illustration per exercise (53 total), filename `<exercise_id>.png`, reused across every routine that references it (e.g. `clamshells.png` is shared by 6 routines) — art is produced once per move, not once per routine.
+2. `hasExerciseImage()` gates every read site on a filesystem existence check so art can roll out incrementally without 404s breaking SMS sends or showing broken-image icons on the dashboard.
+3. Dashboard (`/plan/[token]`): removed the stale routine-level hero poster; `ExerciseSection.tsx` now renders a thumbnail per exercise row when art exists for that exercise.
+4. SMS: the `[STRENGTH_POSTER]` flow in `coach/respond/route.ts` now loops `sendMediaSMS()` once per exercise (one iMessage bubble per image, captioned with name + specs) instead of sending a single composed poster. Verified this needs no provider-specific handling — `sendMediaSMS` has an identical single-URL signature on both the Linq API path and the Photon sidecar path used for local testing.
+5. Added 4 new exercises after a review of the 49-exercise catalog for running-injury-prevention coverage: `fire_hydrant` (hip external rotator strengthening — the piriformis routine previously had only stretches, no strengthening move) and `a_skip`/`high_knees`/`bounding` (running-form drills, added only to the `hip_core` no-injury routine since plyometric work isn't appropriate during injury rehab).
+6. `scripts/strength-catalog.mjs` rewritten to output a flat, deduped per-exercise art spec (`docs/strength-routines.md`) as the production doc, with a routine-grouped reference section below it.
+7. Extended the same thumbnail treatment to `/session/[token]` (the legacy one-off SMS-link session page) for parity with the `/plan/[token]` dashboard — removed its stale routine-poster `<img>` too, `ExerciseList.tsx` now takes the same `exerciseImages` prop as `ExerciseSection.tsx`.
+**Files changed:** `src/lib/strength-library.ts`, `src/app/api/coach/respond/route.ts`, `src/app/plan/[token]/page.tsx`, `src/app/plan/[token]/ExerciseSection.tsx`, `src/app/session/[token]/page.tsx`, `src/app/session/[token]/ExerciseList.tsx`, `scripts/strength-catalog.mjs`, `src/__tests__/lib/strength-library.test.ts`
+**Follow-up needed:** Art production — 53 PNGs to drop in `public/strength-exercises/<id>.png` per `docs/strength-routines.md`. The old `public/strength-posters/*.png` routine posters are now unreferenced by code but left in place (unused, not deleted).
+
+---
+
 ## 2026-07-09 — Expand strength routines to full sessions + deterministic weekly scheduling
 
 **Type:** Feature

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { verifySessionToken } from "@/lib/session-token";
-import { getRoutine, EXERCISES } from "@/lib/strength-library";
+import { getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage } from "@/lib/strength-library";
 import { supabase } from "@/lib/supabase";
 import { ExerciseList } from "./ExerciseList";
 
@@ -17,6 +17,9 @@ export default async function SessionPage({
   if (!routine) notFound();
 
   const exercises = routine.exerciseIds.map((id) => EXERCISES[id]).filter(Boolean);
+  const exerciseImages: Record<string, string | null> = Object.fromEntries(
+    exercises.map((ex) => [ex.id, hasExerciseImage(ex.id) ? exercisePosterUrl(ex.id) : null])
+  );
 
   // Fetch any previously completed exercises for this session link.
   const { data: session } = await supabase
@@ -42,15 +45,7 @@ export default async function SessionPage({
           <p className="mt-2 text-sm leading-relaxed text-gray-500">{routine.note}</p>
         </div>
 
-        {/* Poster image */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={`/strength-posters/${routine.key}.png`}
-          alt={`${routine.label} exercise poster`}
-          className="w-full"
-        />
-
-        <ExerciseList exercises={exercises} token={token} initialDone={initialDone} />
+        <ExerciseList exercises={exercises} exerciseImages={exerciseImages} token={token} initialDone={initialDone} />
 
         {/* Frequency footer */}
         <div className="border-t border-gray-100 px-5 py-5">
