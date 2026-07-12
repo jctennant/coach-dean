@@ -11,7 +11,7 @@ import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan } from "@/lib/training-plan";
-import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions } from "@/lib/plan-validation";
+import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
@@ -79,25 +79,51 @@ const REHAB_TOOL = {
 // stripReasoningPreamble() below is kept as a defense-in-depth safety net (and as the
 // extraction path for the rare turn where Claude doesn't call any tool at all), not as
 // the primary defense.
-const DELIVER_MESSAGE_TOOL = {
-  name: "deliver_message" as const,
-  description:
-    "Deliver your final athlete-facing text for this turn. This is the ONLY way your reply reaches the athlete — " +
-    "plain text output is never sent. Call this exactly once, as your last action, after any other tool calls you " +
-    "needed (get_rehab_protocol, web_search) have resolved. The `message` argument must be nothing but the finished " +
-    "SMS text (or the exact literal string [NO_REPLY] when instructed to send nothing) — no reasoning, no labels, " +
-    "no explanation of what you're about to do.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      message: {
-        type: "string",
-        description: "The exact text to send the athlete, or the literal string [NO_REPLY].",
+// includePlanFacts is true for initial_plan/weekly_recap — see buildDeliverMessageTool.
+function buildDeliverMessageTool(includePlanFacts: boolean) {
+  return {
+    name: "deliver_message" as const,
+    description:
+      "Deliver your final athlete-facing text for this turn. This is the ONLY way your reply reaches the athlete — " +
+      "plain text output is never sent. Call this exactly once, as your last action, after any other tool calls you " +
+      "needed (get_rehab_protocol, web_search) have resolved. The `message` argument must be nothing but the finished " +
+      "SMS text (or the exact literal string [NO_REPLY] when instructed to send nothing) — no reasoning, no labels, " +
+      "no explanation of what you're about to do." +
+      (includePlanFacts
+        ? " You must also report the `plan` object: the concrete weekly mileage total behind this message, exactly " +
+          "as you intend to state it in your text. This plan is day-agnostic prose (no day-by-day list) — `plan` is " +
+          "how the system verifies the number you write is safe and internally consistent, since it can't be parsed " +
+          "back out of a dated session list the way older plan formats could."
+        : ""),
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        message: {
+          type: "string",
+          description: "The exact text to send the athlete, or the literal string [NO_REPLY].",
+        },
+        ...(includePlanFacts
+          ? {
+              plan: {
+                type: "object" as const,
+                description:
+                  "The concrete weekly-mileage number behind this plan message, in the athlete's display unit " +
+                  "(miles or km per their preference) — the same number you state in your message text.",
+                properties: {
+                  weekly_total: {
+                    type: "number",
+                    description: "Total planned running mileage/km for the week this message describes.",
+                  },
+                },
+                required: ["weekly_total"],
+              },
+            }
+          : {}),
       },
+      required: includePlanFacts ? ["message", "plan"] : ["message"],
     },
-    required: ["message"],
-  },
-};
+  };
+}
 
 /** Execute the get_rehab_protocol tool — returns the tool_result string for Claude. */
 function buildRehabProtocol(input: Record<string, unknown>): string {
@@ -2696,9 +2722,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     (((profile?.injury_body_parts as string[] | null)?.length) ?? 0) > 0;
   const offerRehabTool = hasInjuryContext || trigger === "post_run" || trigger === "user_message";
 
-  // deliver_message is always available — it's the only channel the athlete-facing
-  // text travels through (see comment on DELIVER_MESSAGE_TOOL above).
-  const coachTools: Anthropic.Messages.ToolUnion[] = [DELIVER_MESSAGE_TOOL];
+  // deliver_message is always available — it's the only channel the athlete-facing text
+  // travels through (see comment above buildDeliverMessageTool). initial_plan/weekly_recap
+  // also get the structured `plan` field (weekly_total) for the same reason.
+  const isPlanTrigger = trigger === "initial_plan" || trigger === "weekly_recap";
+  const coachTools: Anthropic.Messages.ToolUnion[] = [buildDeliverMessageTool(isPlanTrigger)];
   if (shouldUseWebSearch) coachTools.push({ type: "web_search_20250305", name: "web_search" });
   if (offerRehabTool) coachTools.push(REHAB_TOOL);
 
@@ -2906,6 +2934,40 @@ OUTPUT CONTRACT:
       return acc + " " + block;
     }, "");
   }
+
+  // Structured weekly-total validation for plan-generating triggers (see
+  // buildDeliverMessageTool). initial_plan/weekly_recap messages are day-agnostic prose —
+  // they no longer contain the dated "Mon D/M · ..." session lines correctMileageTotal/
+  // enforceVolumeCaps depend on, so those functions are effectively no-ops here. This is
+  // the real backstop: Claude reports its intended weekly_total as a structured number
+  // (not one inferred by regex-summing prose), we cap it against a known-safe range, and
+  // force the message text to match.
+  if (deliverBlock && rawText && isPlanTrigger) {
+    const planInput = (deliverBlock.input as { plan?: { weekly_total?: unknown } }).plan;
+    const statedTotal = typeof planInput?.weekly_total === "number" ? planInput.weekly_total : null;
+    if (statedTotal != null && statedTotal > 0) {
+      const capMax = trigger === "initial_plan"
+        ? computeWeekOneVolumeCap(
+            avgWeeklyMileage,
+            (profile?.fitness_level as string | null) ?? null,
+            trigger === "initial_plan" && (profile?.fitness_level as string | null) === "beginner" && (avgWeeklyMileage ?? 0) > 8
+          ).max
+        : periodization.suggestedWeeklyMiles;
+      let validatedTotal = statedTotal;
+      // 15% tolerance above the cap before clamping — the cap/suggestion is a guideline,
+      // not a razor's edge, but a clear blowout (Claude stating 2-3x the safe number) gets
+      // clamped down rather than sent as-is.
+      if (capMax != null && statedTotal > capMax * 1.15) {
+        log.warn("structured plan.weekly_total exceeded safe cap — clamping", { trigger, statedTotal, capMax });
+        void trackEvent(userId, "plan_weekly_total_clamped", { trigger, statedTotal, capMax });
+        validatedTotal = capMax;
+      }
+      rawText = applyStructuredWeeklyTotal(rawText, validatedTotal);
+    } else {
+      log.warn("plan trigger delivered without a usable plan.weekly_total", { trigger });
+    }
+  }
+
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
@@ -3823,17 +3885,9 @@ function correctMileageTotal(message: string, alreadyCompletedMiles = 0): string
   const correctTotal = Math.round((plannedMiles + effectiveCompleted) * 10) / 10;
   const plannedRounded = Math.round(plannedMiles * 10) / 10;
 
-  // Patterns that state a weekly total — replace the number if wrong
-  // Handles: "10 miles total", "Total: 10mi", "stays at 10 miles", "~10mi total", etc.
-  // (?<!-|to ) guards against matching the upper bound of ranges like "20-25 miles" or "20 to 25 miles".
-  const totalPatterns: RegExp[] = [
-    /(Total:\s*~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?[ \t]*(?:total|this week|for the week))/gi,
-    /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(stays?\s+at\s+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(staying\s+at\s+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-    /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(?<!-|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
-  ];
+  // Patterns that state a weekly total — replace the number if wrong. Shared with
+  // applyStructuredWeeklyTotal (plan-validation.ts) so both recognize identical phrasing.
+  const totalPatterns = WEEKLY_TOTAL_PATTERNS;
 
   let corrected = message;
   for (const pattern of totalPatterns) {

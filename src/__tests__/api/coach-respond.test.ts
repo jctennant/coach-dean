@@ -628,6 +628,112 @@ describe("coach/respond — initial_plan beginner tier (stale Strava history)", 
   });
 });
 
+describe("coach/respond — structured plan.weekly_total (deliver_message plan facts)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("requires the plan field on the deliver_message tool for initial_plan", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "This week I'd aim for 12 miles, one quality session mid-week. Total: 12 mi.",
+        plan: { weekly_total: 12 },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 10 } }),
+      profile: baseProfile(),
+      state: baseState({ current_week: 1 }),
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    const sonnetCall = create.mock.calls.find((c: unknown[]) => {
+      const args = c[0] as Record<string, unknown>;
+      return systemText(args.system).length > 200;
+    });
+    expect(sonnetCall).toBeDefined();
+    const tools = (sonnetCall![0] as { tools?: Array<{ name?: string; input_schema?: { required?: string[] } }> }).tools ?? [];
+    const deliverTool = tools.find((t) => t.name === "deliver_message");
+    expect(deliverTool?.input_schema?.required).toContain("plan");
+  });
+
+  it("corrects a mismatched Total: figure to match the structured weekly_total", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        // message understates the total (8) relative to the structured field (12) —
+        // the structured field is source of truth and should win.
+        message: "This week I'd aim for a solid build, one quality session mid-week. Total: 8 mi.",
+        plan: { weekly_total: 12 },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 10 } }),
+      profile: baseProfile(),
+      state: baseState({ current_week: 1 }),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Total: 12 mi");
+    expect(sent).not.toContain("Total: 8 mi");
+  });
+
+  it("clamps a structured weekly_total that blows past the safe Week-1 cap", async () => {
+    // avg weekly_miles=5 (low-volume tier) → cap max = max(ceil(5*1.3), 6) = 7.
+    // Claude reports 30 — a clear blowout that must be clamped, not sent as-is.
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Let's build a strong base this week. Total: 30 mi.",
+        plan: { weekly_total: 30 },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 5 } }),
+      profile: baseProfile(),
+      state: baseState({ current_week: 1 }),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    const { trackEvent } = await import("@/lib/track");
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Total: 7 mi");
+    expect(sent).not.toContain("Total: 30 mi");
+    expect(trackEvent).toHaveBeenCalledWith(
+      "user-001",
+      "plan_weekly_total_clamped",
+      expect.objectContaining({ trigger: "initial_plan", statedTotal: 30 })
+    );
+  });
+
+  it("does not require the plan field for non-plan triggers", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: { message: "Nice easy run today!" } }],
+    });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "post_run" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Nice easy run today!");
+  });
+});
+
 describe("coach/respond — initial_plan beginner tier (stale Strava history)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

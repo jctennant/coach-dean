@@ -288,6 +288,92 @@ export function countRunningSessions(message: string): number {
 }
 
 /**
+ * Patterns matching a stated weekly running-mileage total in a coaching message
+ * (e.g. "Total: 32mi", "puts you at 32 miles for the week"). Exported so
+ * applyStructuredWeeklyTotal (below) and coach/respond's correctMileageTotal recognize
+ * the exact same phrasing — one list instead of two that can silently drift apart.
+ * (?<![-\d]|to ) guards against matching the upper bound of a range like "20-25 miles":
+ * excluding "preceded by a digit" (not just "preceded by -") matters because \d+ can
+ * otherwise start its match mid-number — at the "5" in "20-25" rather than the "2" — since
+ * a lookbehind that only excludes "-" doesn't stop the engine from retrying one character
+ * later once the "-2" start position fails to find "mi" after it.
+ */
+export const WEEKLY_TOTAL_PATTERNS: RegExp[] = [
+  /(Total:\s*~?)(?<![-\d]|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+  /(~?)(?<![-\d]|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?[ \t]*(?:total|this week|for the week))/gi,
+  /(week(?:ly)?\s+(?:mileage|total)[:\s]+~?)(?<![-\d]|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+  /(stays?\s+at\s+~?)(?<![-\d]|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+  /(staying\s+at\s+~?)(?<![-\d]|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+  /(puts\s+(?:you\s+at|the\s+week\s+at)\s+~?)(?<![-\d]|to )(\d+(?:\.\d+)?)(\s*mi(?:les?)?)/gi,
+];
+
+/**
+ * Force the weekly total stated in a plan message to match a known-correct number, using
+ * the same phrasing patterns correctMileageTotal recognizes.
+ *
+ * This exists because initial_plan/weekly_recap messages are day-agnostic prose (per
+ * CLAUDE.md's day-agnostic plan redesign) — they no longer contain the dated
+ * "Mon D/M · ..." session lines correctMileageTotal and enforceVolumeCaps depend on to
+ * compute a correction, which makes both effectively no-ops for these two triggers today.
+ * The real fix is structural: coach/respond's deliver_message tool call now requires a
+ * `plan.weekly_total` field for these triggers (see DELIVER_MESSAGE_TOOL in route.ts) —
+ * a number Claude reports directly rather than one inferred by summing parsed text. The
+ * caller validates/caps that number (see computeWeekOneVolumeCap) and passes the final,
+ * trusted value here to make sure the prose matches it.
+ */
+export function applyStructuredWeeklyTotal(message: string, validatedTotal: number): string {
+  const rounded = Math.round(validatedTotal * 10) / 10;
+  let corrected = message;
+  for (const pattern of WEEKLY_TOTAL_PATTERNS) {
+    corrected = corrected.replace(pattern, (full, pre, num, post, offset, str) => {
+      const numStart = offset + pre.length;
+      const before = str.slice(Math.max(0, numStart - 8), numStart);
+      if (/\bto\s+$/.test(before)) return full; // upper bound of a word range — leave alone
+      const stated = parseFloat(num);
+      if (Math.abs(stated - rounded) <= 0.4) return full; // already correct
+      console.warn(`[applyStructuredWeeklyTotal] stated ${stated}mi, structured total is ${rounded}mi — correcting`);
+      return `${pre}${rounded}${post}`;
+    });
+  }
+  return corrected;
+}
+
+/**
+ * Safe Week-1 weekly-mileage range for a brand-new training plan, by fitness tier.
+ *
+ * This MUST stay numerically identical to the WEEK 1 VOLUME CAP <rule> blocks in
+ * coach/respond's buildSystemPrompt (route.ts) — those blocks are what tells Claude the
+ * cap, this function is what validates the structured plan.weekly_total field Claude
+ * reports back. The prompt text itself isn't generated from this function (each is a
+ * large, delicate template literal not worth the risk of programmatic coupling), so if
+ * you change one, change the other and verify the numbers still match.
+ *
+ * max is null where the prompt only asserts a floor (advanced/intermediate no-history
+ * tiers) — there's no numeric ceiling to enforce there, only a "don't go below"
+ * recommendation, which this function deliberately does not enforce: going under a
+ * suggested floor isn't an injury risk, exceeding a ceiling is. Callers should only ever
+ * clamp downward against max, never force a value up to min.
+ */
+export function computeWeekOneVolumeCap(
+  avgWeeklyMileage: number | null,
+  fitnessLevel: string | null,
+  forceBeginnerTier: boolean
+): { min: number; max: number | null } {
+  if (avgWeeklyMileage == null || forceBeginnerTier) {
+    if (fitnessLevel === "advanced") return { min: 20, max: null };
+    if (fitnessLevel === "intermediate") return { min: 12, max: null };
+    return { min: 0, max: 10 }; // beginner — stale history or no history
+  }
+  if (avgWeeklyMileage < 10) {
+    return { min: 0, max: Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6) };
+  }
+  if (avgWeeklyMileage < 30) {
+    return { min: Math.round(avgWeeklyMileage * 0.90), max: Math.round(avgWeeklyMileage * 1.2) };
+  }
+  return { min: Math.round(avgWeeklyMileage * 0.90), max: Math.round(avgWeeklyMileage * 1.12) };
+}
+
+/**
  * Remove exact duplicate session lines from a plan.
  *
  * A duplicate is defined as two lines with the identical "DDD D/M · description"

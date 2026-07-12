@@ -6,6 +6,8 @@ import {
   fixSessionDistanceErrors,
   fixSessionDayAbbreviations,
   countRunningSessions,
+  applyStructuredWeeklyTotal,
+  computeWeekOneVolumeCap,
 } from "@/lib/plan-validation";
 
 // ---------------------------------------------------------------------------
@@ -308,5 +310,76 @@ describe("countRunningSessions", () => {
   it("does not count cross-training sessions as running", () => {
     const msg = `Mon 4/6 · Easy 5mi\nTue 4/7 · Bike 45min\nThu 4/9 · Swim 30min`;
     expect(countRunningSessions(msg)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyStructuredWeeklyTotal
+// ---------------------------------------------------------------------------
+
+describe("applyStructuredWeeklyTotal", () => {
+  it("corrects a wrong Total: figure to the validated number", () => {
+    const msg = "This week I'd aim for 32 miles, one quality session mid-week. Total: 25 mi.";
+    expect(applyStructuredWeeklyTotal(msg, 32)).toContain("Total: 32 mi");
+  });
+
+  it("leaves an already-correct total untouched", () => {
+    const msg = "Total: 32 mi this week — long run and one tempo.";
+    expect(applyStructuredWeeklyTotal(msg, 32)).toBe(msg);
+  });
+
+  it("recognizes 'puts you at X miles' phrasing", () => {
+    const msg = "That puts you at 40 miles for the week.";
+    expect(applyStructuredWeeklyTotal(msg, 36)).toContain("puts you at 36 miles");
+  });
+
+  it("does not touch the upper bound of a stated range", () => {
+    const msg = "Aim for 20-25 miles this week.";
+    expect(applyStructuredWeeklyTotal(msg, 32)).toBe(msg);
+  });
+
+  it("is a no-op when no total phrasing is present", () => {
+    const msg = "Great week of running! Keep the easy days easy.";
+    expect(applyStructuredWeeklyTotal(msg, 32)).toBe(msg);
+  });
+
+  it("rounds to one decimal place", () => {
+    const msg = "Total: 20 mi.";
+    expect(applyStructuredWeeklyTotal(msg, 22.34)).toContain("Total: 22.3 mi");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeWeekOneVolumeCap
+// ---------------------------------------------------------------------------
+
+describe("computeWeekOneVolumeCap", () => {
+  it("caps beginners with no Strava history at 10mi, no floor", () => {
+    expect(computeWeekOneVolumeCap(null, "beginner", false)).toEqual({ min: 0, max: 10 });
+  });
+
+  it("caps beginners with stale/forced-beginner history at 10mi", () => {
+    expect(computeWeekOneVolumeCap(15, "beginner", true)).toEqual({ min: 0, max: 10 });
+  });
+
+  it("gives advanced no-history athletes a floor of 20 and no ceiling", () => {
+    expect(computeWeekOneVolumeCap(null, "advanced", false)).toEqual({ min: 20, max: null });
+  });
+
+  it("gives intermediate no-history athletes a floor of 12 and no ceiling", () => {
+    expect(computeWeekOneVolumeCap(null, "intermediate", false)).toEqual({ min: 12, max: null });
+  });
+
+  it("caps low-volume athletes (<10mi avg) at current × 1.3, floor 6", () => {
+    expect(computeWeekOneVolumeCap(5, null, false)).toEqual({ min: 0, max: 7 }); // ceil(5*1.3)=7
+    expect(computeWeekOneVolumeCap(2, null, false)).toEqual({ min: 0, max: 6 }); // floor of 6 applies
+  });
+
+  it("bounds moderate-volume athletes (10-30mi avg) to 0.90x-1.2x", () => {
+    expect(computeWeekOneVolumeCap(20, null, false)).toEqual({ min: 18, max: 24 });
+  });
+
+  it("bounds high-volume athletes (30mi+ avg) to 0.90x-1.12x", () => {
+    expect(computeWeekOneVolumeCap(40, null, false)).toEqual({ min: 36, max: 45 });
   });
 });
