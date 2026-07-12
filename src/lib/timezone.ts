@@ -75,17 +75,25 @@ export interface DateFacts {
   today: string;
   yesterday: string;
   tomorrow: string;
+  /** The 7 days starting tomorrow (index 0 === tomorrow), same weekday+date format. */
+  next7Days: string[];
 }
 
 /**
- * Compute today/yesterday/tomorrow (as full weekday + date strings) for the
- * given IANA timezone. Single source of truth for the two consumers that need
+ * Compute today/yesterday/tomorrow/next7Days (as full weekday + date strings) for
+ * the given IANA timezone. Single source of truth for every consumer that needs
  * these exact strings to agree with each other: formatDateAnchor (prepended to
- * every generation turn) and checkDateConsistency (the advisory validator that
- * runs on the output, in date-consistency-check.ts).
+ * every generation turn), checkDateConsistency (the advisory validator that runs
+ * on the output, in date-consistency-check.ts), and the DATE CONTEXT block built
+ * by buildDateContext (coach-date-context.ts).
+ *
+ * Pass `now` explicitly when a caller already has a single `Date` instance it
+ * needs every date fact to agree with (e.g. buildSystemPrompt, which also uses
+ * `now` for race-countdown math right after building this context) — this keeps
+ * everything computed from one instant instead of drifting across separate
+ * `new Date()` calls a few lines apart.
  */
-export function getDateFacts(tz: string): DateFacts {
-  const now = new Date();
+export function getDateFacts(tz: string, now: Date = new Date()): DateFacts {
   const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
   const [y, m, d] = todayLocal.split("-").map(Number);
   // The y/m/d above are already the correct *local* calendar date — Date.UTC just
@@ -103,10 +111,14 @@ export function getDateFacts(tz: string): DateFacts {
     month: "short",
     day: "numeric",
   });
+  const next7Days = Array.from({ length: 7 }, (_, i) =>
+    dayFormatter.format(new Date(Date.UTC(y, m - 1, d + i + 1)))
+  );
   return {
     yesterday: dayFormatter.format(new Date(Date.UTC(y, m - 1, d - 1))),
     today: dayFormatter.format(new Date(Date.UTC(y, m - 1, d))),
-    tomorrow: dayFormatter.format(new Date(Date.UTC(y, m - 1, d + 1))),
+    tomorrow: next7Days[0],
+    next7Days,
   };
 }
 

@@ -17,6 +17,7 @@ import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/timezone";
 import { checkDateConsistency } from "@/lib/date-consistency-check";
+import { buildDateContext } from "@/lib/coach-date-context";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
@@ -5237,100 +5238,28 @@ function buildSystemPrompt(
     ? (profile.training_days as string[]).join(", ")
     : "TBD";
 
-  const ALL_WEEK_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-
-  // Build date context in user's timezone
+  // Build date context in user's timezone. The pure today/yesterday/tomorrow/next-7-days/
+  // rest-days computation lives in coach-date-context.ts (extracted 2026-07-12 as the first
+  // slice of pulling computed facts out of this file's inline template literals — see
+  // CHANGELOG). The race-countdown and taper-protocol sections appended below remain inline
+  // here; they're more entangled with profile/race state and are a separate extraction.
   const tz = timezone || "America/New_York";
   const now = new Date();
-  const dateFormatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
+  const { header: dateContextHeader, todayStr, todayLocal, restDays } = buildDateContext({
+    tz,
+    now,
+    trainingDays: (profile?.training_days as string[] | null) ?? null,
+    overrideDays: (profile?.this_week_override_days as string[] | null) ?? null,
+    overrideExpires: (profile?.this_week_override_expires as string | null) ?? null,
+    recentMessages,
   });
-  const todayStr = dateFormatter.format(now);
-
-  // Determine today's calendar date in the user's local timezone, then build
-  // the next 7 days using explicit UTC date arithmetic so the weekday and date
-  // always align correctly. Using Date.UTC avoids any server-timezone influence.
-  // We use "en-CA" to get "YYYY-MM-DD" format reliably.
-  const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
-  const [ty, tm, td] = todayLocal.split("-").map(Number);
-
-  // Compute effective training days — use this-week override if active, else base schedule.
-  // This mirrors the logic in the nightly-reminder cron (effectiveTrainingDays()) so the
-  // rest-days rule Claude sees is consistent with which days the cron fires on.
-  const overrideDays = profile?.this_week_override_days as string[] | null;
-  const overrideExpires = profile?.this_week_override_expires as string | null;
-  const effectiveProfileTrainingDays: string[] = (
-    overrideDays && overrideDays.length > 0 && overrideExpires && todayLocal <= overrideExpires
-      ? overrideDays
-      : (profile?.training_days as string[] | null) ?? []
-  ).map((d: string) => d.toLowerCase());
-
-  const restDays = effectiveProfileTrainingDays.length > 0
-    ? ALL_WEEK_DAYS
-        .filter(d => !effectiveProfileTrainingDays.includes(d))
-        .map(d => d.charAt(0).toUpperCase() + d.slice(1))
-    : [];
-
-  // Full weekday name ("Friday, Feb 27") matches the long format used for
-  // todayStr and eliminates any ambiguity from abbreviated day names.
-  //
-  // timeZone here is deliberately "UTC", not tz. ty/tm/td above are already the
-  // correct *local* calendar date (resolved via todayLocal above); Date.UTC just
-  // encodes them unambiguously so day arithmetic (+i, -1) doesn't hit DST edge
-  // cases. Formatting those reconstructed timestamps back through the original
-  // tz would re-apply that zone's offset a SECOND time — for any timezone behind
-  // UTC (all of the Americas), that silently rolls every result back a full day,
-  // e.g. "Tomorrow" would print as today's date, "Yesterday" as two days ago.
-  // (Bug found 2026-07-12 while building the date-consistency validator — see
-  // CHANGELOG. getDateFacts in lib/timezone.ts had the identical bug and is
-  // fixed the same way.)
-  const dayFormatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
-
-  // Pre-compute the next 7 days using explicit calendar arithmetic.
-  // Joined with " | " so the comma inside "Friday, Feb 27" is never confused
-  // with the list separator.
-  const upcomingDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(Date.UTC(ty, tm - 1, td + i + 1));
-    return dayFormatter.format(d);
-  });
-  const tomorrowStr = upcomingDays[0];
-  const yesterdayStr = dayFormatter.format(new Date(Date.UTC(ty, tm - 1, td - 1)));
 
   // Pre-compute days until the profile race date. Used in both dateContext and the
   // ATHLETE header section so we can gate both on the race being in the future.
   const profileRaceDate = profile?.race_date ? new Date((profile.race_date as string) + "T00:00:00") : null;
   const profileRaceDaysUntil = profileRaceDate ? Math.ceil((profileRaceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
 
-  // Compute conversation window bounds for temporal anchoring.
-  // The model gets timestamps on individual messages, but without an explicit anchor
-  // it can treat 2-week-old messages as "recent" after a gap in conversation.
-  const conversationWindowNote = (() => {
-    if (recentMessages.length === 0) return "";
-    const oldest = recentMessages[0];
-    const newest = recentMessages[recentMessages.length - 1];
-    const oldestDate = oldest.created_at ? new Date(oldest.created_at as string) : null;
-    const newestDate = newest.created_at ? new Date(newest.created_at as string) : null;
-    if (!oldestDate || !newestDate) return "";
-    const oldestStr = oldestDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: tz });
-    const newestStr = newestDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: tz });
-    const daysSinceNewest = Math.round((now.getTime() - newestDate.getTime()) / 86400000);
-    let note = `- Conversation window: ${recentMessages.length} messages from ${oldestStr} to ${newestStr}\n`;
-    if (daysSinceNewest >= 3) {
-      note += `- GAP ALERT: The most recent message in RECENT CONVERSATION is from ${daysSinceNewest} days ago. There has been a gap in this coaching relationship. Do NOT treat messages from before the gap as current context — they describe a previous period. Greet the athlete as returning, not as if you spoke recently.\n`;
-    }
-    return note;
-  })();
-
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${tomorrowStr}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n${conversationWindowNote}- For future scheduled sessions, use specific calendar dates (e.g. "Friday, Feb 27") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- When referencing past activities or events: ONLY say "yesterday" if the event's date or conversation timestamp matches Yesterday above. If it was any earlier, use the weekday name instead ("Monday's double header", "last week's long run"). Recent workouts in the system prompt now include a server-computed label like "(yesterday)" or "(3 days ago)" — use those labels as the authoritative recency signal, not your own inference.\n`;
+  let dateContext = dateContextHeader;
   if (profile?.race_date && profileRaceDaysUntil !== null && profileRaceDaysUntil > 0) {
     const daysUntil = profileRaceDaysUntil;
     const weeksUntil = Math.round(daysUntil / 7);

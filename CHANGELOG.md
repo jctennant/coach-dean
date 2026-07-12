@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-12 — Phase A of the CoachContext extraction: pulled the DATE CONTEXT header out of buildSystemPrompt into a tested lib module
+
+**Type:** Refactor / Reliability
+**Reported by:** Jake Tennant — "go ahead on A" from the scoping discussion after the date-of-week bug fixes earlier today (Phase A: extract computed facts out of `buildSystemPrompt`/`buildUserMessage`'s inline template literals into pure, independently testable functions; Phase B — a facts-required `deliver_message` schema + equality check — is scoped separately and not started).
+**Root cause / motivation:** The timezone reformatting bug fixed earlier today shipped unnoticed for a long time specifically because the fact computation (today/yesterday/tomorrow/next-7-days/rest-days) was interleaved inline inside `buildSystemPrompt`'s ~1,100-line template-literal builder — there was no seam to hang a unit test on. This is the first slice of un-interleaving that: pull the fact computation into its own module with its own tests, leave the templating/prose in `route.ts`.
+**Fix / Change:** New `src/lib/coach-date-context.ts` exporting `buildDateContext()` — computes `todayStr`, `todayLocal`, `restDays`, and the exact DATE CONTEXT header text (today/yesterday/tomorrow/next 7 days/timezone/conversation-gap alert/formatting rules), using `getDateFacts` (`timezone.ts`, extended with a `next7Days` field) for the day-of-week math. `buildSystemPrompt` now calls this and destructures the result into the same local variable names it used before (`todayStr`, `todayLocal`, `restDays`) — those three are still referenced later in the function (ATHLETE snapshot, injury-hold day count, REST DAYS rule) unchanged. The race-countdown and taper-protocol sections that get appended to `dateContext` after this header remain inline in `route.ts` for now — more entangled with profile/race state, a separate future extraction. Verified the extracted header is character-for-character identical to the original inline version (manual side-by-side render with fixed inputs) before relying on the test suite.
+**Files changed:** `src/lib/coach-date-context.ts` (new), `src/lib/timezone.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/coach-date-context.test.ts` (new)
+**Follow-up needed:** Continue Phase A opportunistically (per the scoping doc) — next candidate sections are the race-countdown/taper-protocol continuation of `dateContext`, and the mileage/pace facts currently assembled inline elsewhere in `buildSystemPrompt`. Phase B (facts-required schema + equality check) stays a separate, scheduled piece of work with its own eval pass.
+
 ## 2026-07-12 — Found and fixed the actual root cause of the date bug: "Tomorrow"/"Yesterday" were silently off by one day for every US-timezone athlete
 
 **Type:** Bug Fix (supersedes/deepens the same-day entry below)
