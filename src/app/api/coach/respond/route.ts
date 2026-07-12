@@ -1700,29 +1700,27 @@ Use this data to:
   const strengthRoutineBlock = await (async () => {
     if (trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message") return "";
     const insights = (profile?.dashboard_insights as Record<string, unknown> | null) ?? null;
-    let sr = (insights?.strength_recovery as {
-      exercises?: Array<{ name: string; specs: string; reason?: string }>;
-      frequency?: string;
-      routine_key?: string;
-    } | null) ?? null;
 
-    if (!sr?.exercises?.length) {
-      const composed = composeStrengthRoutine({
-        bodyParts: [
-          profile?.injury_body_part as string | null,
-          ...(((profile?.injury_body_parts as string[] | null) ?? [])),
-        ],
-        injuryText: (profile?.injury_notes as string | null) ?? null,
-      });
-      if (composed) {
-        sr = composed;
-        // Persist the generated routine (merge into dashboard_insights). Fire-and-forget —
-        // this request renders from the in-memory copy regardless.
-        void supabase
-          .from("training_profiles")
-          .update({ dashboard_insights: { ...(insights ?? {}), strength_recovery: composed } as unknown as Json })
-          .eq("user_id", userId);
-      }
+    // Always recompute fresh from the current strength-library.ts catalog — composeStrengthRoutine
+    // is cheap/deterministic (no LLM call), so there's no reason to trust a stale cached blob.
+    // Trusting insights.strength_recovery here previously meant any athlete whose routine was
+    // generated before a library change (e.g. exercise count expansions) stayed stuck on the old
+    // version indefinitely, since it was only regenerated when nothing was cached at all.
+    const sr = composeStrengthRoutine({
+      bodyParts: [
+        profile?.injury_body_part as string | null,
+        ...(((profile?.injury_body_parts as string[] | null) ?? [])),
+      ],
+      injuryText: (profile?.injury_notes as string | null) ?? null,
+    });
+    if (sr) {
+      // Persist the freshly-computed routine (merge into dashboard_insights) so the cached
+      // copy — used as a fallback elsewhere (e.g. the dashboard, pre-migration state) — stays
+      // current too. Fire-and-forget — this request renders from the in-memory copy regardless.
+      void supabase
+        .from("training_profiles")
+        .update({ dashboard_insights: { ...(insights ?? {}), strength_recovery: sr } as unknown as Json })
+        .eq("user_id", userId);
     }
 
     if (!sr?.exercises?.length) return `\n\nNO STRENGTH ROUTINE STORED: No personalized routine is on file (no injury history was captured for this athlete). Do NOT imply a stored personalized routine exists. If the athlete asks about strength work, recommend the hip & core base protocol (see the HIP & CORE INJURY PREVENTION PROTOCOL block) — that's the strongest general evidence and benefits everyone.`;
