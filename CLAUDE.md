@@ -32,6 +32,61 @@ Examples of where this applies to Coach Dean:
 
 **Default question before adding any prompt text:** "Is there a code-level or architectural fix that keeps the prompt smaller?"
 
+### Before you patch a *recurring* behavioral bug — check the fix mechanism, not just the fix
+
+Three bug classes have each recurred multiple times across the changelog: Claude's internal
+reasoning leaking into an athlete's SMS, Claude repeating the same coaching angle/phrase
+across consecutive messages, and Claude hallucinating a fact. Each individual fix was
+reasonable, but the *pattern* — "add a phrase to a list", "add a pattern to a regex", "add
+another `<rule>` block" — is exactly what this file warns against, because it's chasing
+phrasing variety with a classifier that can never be complete. If you're about to fix a bug
+in one of these three families, use the decision order below instead of reaching straight
+for another regex/phrase/`<rule>` addition:
+
+1. **Can the channel itself make the bug structurally impossible?** This is the strongest
+   fix and should be tried first. Example already in the codebase: `coach/respond/route.ts`
+   forces every coaching turn through a `deliver_message` tool call (`tool_choice: {type:
+   "any"}` on every request to `anthropic.messages.create`) — Claude's reasoning has no
+   free-text channel to leak through anymore, because the only text read out of the response
+   is the `message` argument of that specific tool call. `stripReasoningPreamble()` still
+   exists as a defense-in-depth safety net (and as the extraction path for the rare turn
+   where no tool gets called at all), but it is no longer the primary defense, and it should
+   not be extended with new regex patterns as the main way to fix a new leak — if a new leak
+   shape appears, first ask whether the structural constraint itself needs strengthening.
+2. **If the channel can't be constrained, can a separate, focused validator judge *meaning*
+   instead of *phrasing*?** This is the Poke-pattern execution agent, applied as a checker
+   rather than a generator. Example already in the codebase: `src/lib/repetition-check.ts`
+   — a one-purpose Haiku call that judges whether a new message repeats the same coaching
+   angle as a recent one, semantically, so it doesn't need a maintained regex/phrase list at
+   all (contrast with the `recentPostRunInsights` lens-pattern array and the `weekly_recap`
+   `FORBIDDEN PHRASES` block in `route.ts`, both of which need a new entry every time Dean
+   invents new wording for an old idea). New instances of this pattern don't have to be
+   advisory-only forever — `repetition-check.ts` ships v1 as log-only specifically because it
+   touches the live SMS send path; if you're adding a validator somewhere with more room for
+   a blocking check (e.g. before a batch/cron send, or with a retry budget), it's fine to
+   have it gate the response.
+3. **Only if neither of the above applies** — i.e., the behavior is fundamental and
+   universal, not phrasing-shaped — add the one-sentence prompt rule, per the "when to add a
+   rule" section above.
+
+### `route.ts` size
+
+`coach/respond/route.ts` is large (thousands of lines, hundreds of functions) because the
+default move for years was "add to the file that's already there." Don't make it worse by
+default:
+- New pure logic (parsing, scoring, validation, correction) belongs in `src/lib/*.ts`, not
+  as another function in `route.ts` — `plan-validation.ts`, `load-score.ts`, and
+  `repetition-check.ts` are the pattern to follow, not the exception.
+- New Claude/Haiku calls that do one narrow job (extraction, validation, classification)
+  belong in their own `src/lib/*.ts` file with their own prompt, not inline in the coaching
+  system prompt.
+- If you find yourself about to add a fourth or fifth variant of "scan recent messages for
+  pattern X" directly in `route.ts`, that's a signal to extract a shared helper (or a
+  validator agent) rather than writing another bespoke loop in place.
+- A full decomposition of `route.ts` along interaction-agent / execution-agent lines is worth
+  doing eventually, but it's a planned refactor with its own test/eval pass, not something to
+  attempt piecemeal inside an unrelated bug fix.
+
 ## Core data flow
 
 ```

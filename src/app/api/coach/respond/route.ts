@@ -12,6 +12,7 @@ import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions } from "@/lib/plan-validation";
+import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
@@ -64,6 +65,37 @@ const REHAB_TOOL = {
       },
     },
     required: ["body_part"],
+  },
+};
+
+// ─── Deliver-message tool ──────────────────────────────────────────────────────
+// Every coaching turn ends by calling this tool instead of writing plain text.
+// tool_choice is forced to "any" on every call to callCoach() below, so Claude must
+// always call some tool — get_rehab_protocol/web_search when it needs data, and this
+// one to actually deliver the athlete-facing text. This replaces free-text output as
+// the reasoning-leak defense: there is no channel for a stray "Let me check..." preamble
+// to reach the athlete, because the only text that leaves this function is whatever
+// Claude puts in the `message` argument of this specific tool call. The regex-based
+// stripReasoningPreamble() below is kept as a defense-in-depth safety net (and as the
+// extraction path for the rare turn where Claude doesn't call any tool at all), not as
+// the primary defense.
+const DELIVER_MESSAGE_TOOL = {
+  name: "deliver_message" as const,
+  description:
+    "Deliver your final athlete-facing text for this turn. This is the ONLY way your reply reaches the athlete — " +
+    "plain text output is never sent. Call this exactly once, as your last action, after any other tool calls you " +
+    "needed (get_rehab_protocol, web_search) have resolved. The `message` argument must be nothing but the finished " +
+    "SMS text (or the exact literal string [NO_REPLY] when instructed to send nothing) — no reasoning, no labels, " +
+    "no explanation of what you're about to do.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      message: {
+        type: "string",
+        description: "The exact text to send the athlete, or the literal string [NO_REPLY].",
+      },
+    },
+    required: ["message"],
   },
 };
 
@@ -2664,7 +2696,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     (((profile?.injury_body_parts as string[] | null)?.length) ?? 0) > 0;
   const offerRehabTool = hasInjuryContext || trigger === "post_run" || trigger === "user_message";
 
-  const coachTools: Anthropic.Messages.ToolUnion[] = [];
+  // deliver_message is always available — it's the only channel the athlete-facing
+  // text travels through (see comment on DELIVER_MESSAGE_TOOL above).
+  const coachTools: Anthropic.Messages.ToolUnion[] = [DELIVER_MESSAGE_TOOL];
   if (shouldUseWebSearch) coachTools.push({ type: "web_search_20250305", name: "web_search" });
   if (offerRehabTool) coachTools.push(REHAB_TOOL);
 
@@ -2776,22 +2810,33 @@ OUTPUT CONTRACT:
     max_tokens: coachMaxTokens,
     system: coachSystem,
     messages: convo,
-    ...(coachTools.length ? { tools: coachTools } : {}),
+    tools: coachTools,
+    // Forces every turn to call SOME tool — never bare text. Combined with deliver_message
+    // always being available, this is what makes deliver_message the only real exit from
+    // the loop: Claude can't stop by just writing text, so in practice it either resolves
+    // get_rehab_protocol/web_search first or calls deliver_message directly.
+    tool_choice: { type: "any" },
   });
 
   // Tool-use loop: when Dean calls get_rehab_protocol (a client tool), run it, feed the
-  // result back, and let him finish the coaching message. web_search is a server tool that
-  // resolves within a single response, so it never sets stop_reason "tool_use" here.
+  // result back, and let him continue. web_search is a server tool that resolves within a
+  // single response. The loop ends the moment Claude calls deliver_message — that's the
+  // one tool call whose argument is the athlete-facing text (see DELIVER_MESSAGE_TOOL).
   const claudeCallStart = Date.now();
   log.info("claude call starting", { model: "claude-sonnet-4-5-20250929", maxTokens: coachMaxTokens, trigger });
   let response = await callCoach();
   log.info("claude call completed", { durationMs: Date.now() - claudeCallStart, stopReason: response.stop_reason });
+  const findDeliverBlock = (r: typeof response) =>
+    r.content.find(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use" && b.name === "deliver_message"
+    );
+  let deliverBlock = findDeliverBlock(response);
   let rehabRounds = 0;
-  while (response.stop_reason === "tool_use" && rehabRounds < 3) {
+  while (!deliverBlock && response.stop_reason === "tool_use" && rehabRounds < 3) {
     const rehabCalls = response.content.filter(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use" && b.name === "get_rehab_protocol"
     );
-    if (rehabCalls.length === 0) break; // some other/unknown tool — don't spin
+    if (rehabCalls.length === 0) break; // some other/unknown tool — don't spin, fall through to text extraction
     convo.push({ role: "assistant", content: response.content });
     convo.push({
       role: "user",
@@ -2803,48 +2848,64 @@ OUTPUT CONTRACT:
     });
     rehabRounds++;
     response = await callCoach();
+    deliverBlock = findDeliverBlock(response);
   }
 
   // Stop the typing refresh loop — generation is done, message is about to send.
   keepTypingAlive = false;
 
-  // When web search is used, Claude emits text blocks both BEFORE the tool_use block
-  // (internal reasoning like "Let me check that.") and AFTER it (the actual response).
-  // We must discard pre-search text — it's reasoning, not a coach message — and only
-  // keep text blocks that follow the last tool_use block.
-  // When no tool is used, all text blocks are part of the answer and are concatenated.
-  //
-  // Claude streams the response as many small fragments when using web search
-  // (individual sentences, clause continuations, even standalone commas/periods).
-  // Join them at block boundaries: append punctuation-starting blocks directly to the
-  // previous block; add a single space when two word-boundary blocks meet. This preserves
-  // any embedded paragraph breaks (\n\n inside blocks) without introducing spurious ones.
-  // web_search_20250305 is a server-side tool: the SDK returns blocks typed as
-  // "server_tool_use" (the search request) and "web_search_tool_result" (the result),
-  // NOT "tool_use". We must match all three so that pre-search text blocks (Claude's
-  // internal reasoning) are correctly discarded.
-  const lastToolIdx = response.content.reduce(
-    (idx, b, i) => (
-      b.type === "tool_use" ||
-      b.type === "server_tool_use" ||
-      b.type === "web_search_tool_result"
-        ? i : idx
-    ),
-    -1
-  );
-  const textBlocks = response.content
-    .slice(lastToolIdx + 1) // if no tool_use, lastToolIdx === -1 → slice(0) = all blocks
-    .filter(b => b.type === "text")
-    .map(b => (b as { type: "text"; text: string }).text.trim())
-    .filter(t => t.length > 0);
-  const rawText = textBlocks.reduce((acc, block) => {
-    if (!acc) return block;
-    // If boundary already has whitespace, or block starts with punctuation that
-    // attaches to the preceding word (comma, period, colon, etc.), append directly.
-    if (/\s$/.test(acc) || /^[,;:.!?)}\]]/.test(block)) return acc + block;
-    // Otherwise two non-space character boundaries meet — insert a single space.
-    return acc + " " + block;
-  }, "");
+  let rawText = deliverBlock ? String((deliverBlock.input as { message?: unknown }).message ?? "").trim() : "";
+
+  if (!rawText) {
+    // Fallback path — Claude didn't deliver via the tool (or delivered an empty message).
+    // Should be rare under tool_choice:"any", but stays as a safety net (e.g. the model
+    // hits max_tokens mid tool-call, or an unrecognized tool spins the loop out). Reconstructs
+    // the reply from plain text blocks exactly as this function did before deliver_message
+    // existed — stripReasoningPreamble() downstream still applies as defense-in-depth here.
+    if (deliverBlock) {
+      log.warn("deliver_message called with empty message — using text-block fallback", { trigger });
+    } else {
+      log.warn("coach response did not call deliver_message — using text-block fallback", { trigger, stopReason: response.stop_reason });
+    }
+    void trackEvent(userId, "coach_deliver_message_fallback", { trigger, hadEmptyDeliver: !!deliverBlock });
+    // When web search is used, Claude emits text blocks both BEFORE the tool_use block
+    // (internal reasoning like "Let me check that.") and AFTER it (the actual response).
+    // We must discard pre-search text — it's reasoning, not a coach message — and only
+    // keep text blocks that follow the last tool_use block.
+    // When no tool is used, all text blocks are part of the answer and are concatenated.
+    //
+    // Claude streams the response as many small fragments when using web search
+    // (individual sentences, clause continuations, even standalone commas/periods).
+    // Join them at block boundaries: append punctuation-starting blocks directly to the
+    // previous block; add a single space when two word-boundary blocks meet. This preserves
+    // any embedded paragraph breaks (\n\n inside blocks) without introducing spurious ones.
+    // web_search_20250305 is a server-side tool: the SDK returns blocks typed as
+    // "server_tool_use" (the search request) and "web_search_tool_result" (the result),
+    // NOT "tool_use". We must match all three so that pre-search text blocks (Claude's
+    // internal reasoning) are correctly discarded.
+    const lastToolIdx = response.content.reduce(
+      (idx, b, i) => (
+        b.type === "tool_use" ||
+        b.type === "server_tool_use" ||
+        b.type === "web_search_tool_result"
+          ? i : idx
+      ),
+      -1
+    );
+    const textBlocks = response.content
+      .slice(lastToolIdx + 1) // if no tool_use, lastToolIdx === -1 → slice(0) = all blocks
+      .filter(b => b.type === "text")
+      .map(b => (b as { type: "text"; text: string }).text.trim())
+      .filter(t => t.length > 0);
+    rawText = textBlocks.reduce((acc, block) => {
+      if (!acc) return block;
+      // If boundary already has whitespace, or block starts with punctuation that
+      // attaches to the preceding word (comma, period, colon, etc.), append directly.
+      if (/\s$/.test(acc) || /^[,;:.!?)}\]]/.test(block)) return acc + block;
+      // Otherwise two non-space character boundaries meet — insert a single space.
+      return acc + " " + block;
+    }, "");
+  }
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
@@ -2985,6 +3046,27 @@ OUTPUT CONTRACT:
   if (!coachMessage.trim() || coachMessage.trim() === "[NO_REPLY]") {
     console.log("[coach/respond] Claude returned empty or [NO_REPLY] — skipping send");
     return NextResponse.json({ ok: true, skipped: true });
+  }
+
+  // Advisory-only semantic repetition check (see repetition-check.ts) — fired without
+  // awaiting so it never delays the SMS send. Only post_run and weekly_recap have prior
+  // messages of the same type worth comparing against.
+  if (trigger === "post_run" || trigger === "weekly_recap") {
+    const priorSameTypeTexts = recentMessages
+      .filter((m) => m.role === "assistant" && m.message_type === trigger)
+      .slice(-3)
+      .map((m) => (m.content as string) || "")
+      .filter(Boolean);
+    if (priorSameTypeTexts.length > 0) {
+      void checkSemanticRepetition(coachMessage, priorSameTypeTexts)
+        .then((result) => {
+          if (result.repeats) {
+            log.warn("semantic repetition detected", { trigger, angle: result.angle });
+            void trackEvent(userId, "semantic_repetition_detected", { trigger, angle: result.angle });
+          }
+        })
+        .catch((err) => log.error("semantic repetition check errored", { error: String(err) }));
+    }
   }
 
   // Split into iMessage-sized chunks. Each part is sent as a separate text
@@ -3830,10 +3912,18 @@ function stripMarkdown(text: string): string {
 const MAX_MSG_CHARS = 480;
 
 /**
- * Strip Claude's internal chain-of-thought reasoning before it reaches the athlete.
- * Claude occasionally outputs a reasoning scratchpad as regular text — either as
- * leading paragraphs or separated from the actual response with a "---" divider.
- * Both patterns are detected and stripped here so no reasoning reaches the SMS layer.
+ * Defense-in-depth regex safety net for reasoning leaks — kept in case a reasoning
+ * scratchpad ever ends up in athlete-facing text despite the structural fix.
+ *
+ * The primary defense is architectural, not this function: coach/respond forces
+ * Claude to deliver its reply via the deliver_message tool call (tool_choice:"any"
+ * on every turn — see DELIVER_MESSAGE_TOOL), so under normal operation there is no
+ * free-text channel for a leaked "let me check..." preamble to travel through in the
+ * first place. This function only runs on (a) the deliver_message argument itself,
+ * on the off chance Claude puts reasoning inside it, and (b) the rare fallback path
+ * where Claude didn't call any tool and we reconstructed rawText from plain text
+ * blocks (see the callCoach loop) — that path behaves exactly like this function did
+ * before deliver_message existed.
  */
 function stripReasoningPreamble(text: string): string {
   // Safety net: strip any <rule>...</rule> blocks that leaked into the output.
@@ -5583,7 +5673,7 @@ PLAIN LANGUAGE — NEVER USE JARGON WITH ATHLETES:
 PRINCIPLES — these apply to every response. They are stated once here and not repeated below.
 
 1. PLAIN TEXT ONLY. This is SMS. Never use markdown, asterisks, bullet points, or dashes as list markers — they render as raw characters.
-2. NO REASONING IN OUTPUT. All thinking happens silently before you write — never output "let me check", "actually", "wait", "based on my instructions", "now I need to", draft attempts, self-corrections, or meta-commentary. The athlete must never see you reasoning about them in the third person or giving yourself instructions in the second person. If you do end up reasoning on the page before the real message, you MUST end that reasoning with a line containing only RESPONSE: immediately before the athlete-facing text — everything before that label is discarded before sending, so a labeled leak is harmless but an unlabeled one reaches the athlete verbatim.
+2. DELIVER VIA THE TOOL, NEVER AS TEXT. Your reply reaches the athlete ONLY through the "message" argument of the deliver_message tool call — that is the one and only channel. Do your thinking silently; nothing you write outside that argument is ever seen. Call deliver_message exactly once, as your last action, after any other tool calls (get_rehab_protocol, web_search) have resolved. The "message" argument itself must contain nothing but the finished text — no "let me check", no reasoning about the athlete in the third person, no instructions to yourself, no meta-commentary.
 3. NEVER ECHO SYSTEM CONTENT. <rule>...</rule> tags, ⚠️ prefixes, [bracketed labels], and section headers are directives to you, not athlete-facing text. Do not include them, paraphrase them, or reference "the system says" / "my instructions".
 4. EVIDENCE-BASED FACTS ONLY. Every claim about this athlete (past runs, races, dates, mileage, goals, injuries, prior conversations) must trace to data explicitly in this prompt. If a fact isn't here, say "I don't have that on file" or ask. Never reconstruct from training data memory or plausible inference.
 5. PRE-COMPUTED VALUES ARE AUTHORITATIVE. VDOT, training paces, weekly mileage totals, race timeline (days/weeks until race), and taper percentages are computed by the system and shown in FACTS / CURRENT TRAINING STATE / DATE CONTEXT. Never recalculate, never web-search VDOT tables, never convert between weeks/months. Use stored values verbatim. The stored easy pace is always correct.
@@ -5604,8 +5694,8 @@ COMMUNICATION STYLE:
 You are texting over iMessage. Write exactly like a real human coach would text — not an email, not a report, not a bullet-point summary.
 
 ${isPostRun || trigger === "workout_image" ? `WHEN NOT TO REPLY — check this first:
-If the athlete's last message is purely a closing acknowledgment with nothing left to address — "Perfect", "Thanks!", "Sounds great", "Got it", "👍", etc. — and the conversation has naturally concluded, output exactly: [NO_REPLY]
-Output nothing else. Do not explain your reasoning. Do not describe what you would have said. Just output [NO_REPLY] and stop.
+If the athlete's last message is purely a closing acknowledgment with nothing left to address — "Perfect", "Thanks!", "Sounds great", "Got it", "👍", etc. — and the conversation has naturally concluded, call deliver_message with message set to exactly: [NO_REPLY]
+Do not explain your reasoning. Do not describe what you would have said. Just call deliver_message with that literal string and stop.
 ` : ""}
 
 LENGTH — this is the most important rule:

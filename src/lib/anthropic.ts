@@ -295,6 +295,9 @@ function buildOpenAIClient(): Anthropic {
         openAIParams.tool_choice = { type: "function", function: { name: tc.name } };
       } else if (tc?.type === "auto") {
         openAIParams.tool_choice = "auto";
+      } else if (tc?.type === "any") {
+        // Anthropic "any" = must call some tool, model picks which. OpenAI's equivalent is "required".
+        openAIParams.tool_choice = "required";
       }
     }
 

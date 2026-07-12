@@ -1147,3 +1147,90 @@ describe("coach/respond — rehab protocol tool", () => {
     expect(tools.some((t) => t.name === "get_rehab_protocol")).toBe(false);
   });
 });
+
+describe("coach/respond — deliver_message tool (structural reasoning-leak fix)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("sends the deliver_message argument verbatim, always requests tools with tool_choice any, and never runs the text-block fallback", async () => {
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create.mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: { message: "Solid effort out there today!" } }],
+    });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    await POST(mockRequest({ userId: "user-001", trigger: "post_run" }));
+    await flush();
+
+    // Only one model call — no fallback/retry needed once deliver_message is present.
+    expect(create.mock.calls.length).toBe(1);
+    const firstCallParams = create.mock.calls[0][0] as { tool_choice?: unknown; tools?: Array<{ name?: string }> };
+    expect(firstCallParams.tool_choice).toEqual({ type: "any" });
+    expect(firstCallParams.tools?.some((t) => t.name === "deliver_message")).toBe(true);
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Solid effort out there today!");
+  });
+
+  it("ignores text blocks that precede a deliver_message tool_use block in the same response", async () => {
+    // Simulates a leak-prone shape: Claude emits reasoning-ish text, then still calls
+    // deliver_message. The structural fix means only the tool argument is ever read.
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create.mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [
+        { type: "text", text: "Let me check the athlete's recent mileage before responding." },
+        { type: "tool_use", id: "tu-1", name: "deliver_message", input: { message: "Great long run this weekend." } },
+      ],
+    });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    await POST(mockRequest({ userId: "user-001", trigger: "post_run" }));
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Great long run this weekend.");
+    expect(sent).not.toContain("Let me check");
+  });
+
+  it("continues the get_rehab_protocol round-trip and extracts the final deliver_message call", async () => {
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "tu-1", name: "get_rehab_protocol", input: { body_part: "it_band", available_tools: ["pool"] } }],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "tu-2", name: "deliver_message", input: { message: "For the IT band: clamshells and lateral band walks." } }],
+      });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ active_injury: true, injury_body_part: "it_band", injury_severity: "moderate", injury_body_parts: ["it_band"] }),
+      state: baseState(),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    expect(create.mock.calls.length).toBe(2);
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("clamshells");
+  });
+
+  it("falls back to text-block extraction when deliver_message is never called", async () => {
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    // No stop_reason "tool_use" and no deliver_message block — the pre-existing fallback path.
+    create.mockResolvedValue({ content: [{ type: "text", text: "Easy 5mi today, keep it conversational." }] });
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const { sendSMS } = await import("@/lib/linq");
+    await POST(mockRequest({ userId: "user-001", trigger: "post_run" }));
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Easy 5mi today");
+  });
+});
