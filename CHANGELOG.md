@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-12 — Fix internal reasoning leaking into real SMS messages
+
+**Type:** Bug Fix
+**Reported by:** User (Jake) — live-tested against his own account/phone while verifying the strength-image feature; two real texts arrived reading as internal notes-to-self rather than coaching messages ("This is a direct question — answer it. You already gave the routine. Don't repeat the full list again..." and "They've done 2 miles easy yesterday (didn't feel good)... You already told them the core routine + the three extras = a complete session...").
+**Root cause:** Two compounding issues. (1) `stripReasoningPreamble()` in `coach/respond/route.ts` uses a 4-pattern regex cascade to detect and strip leaked reasoning, but it's a content classifier built on ~20 known reasoning-marker phrases — it missed both live cases because they used novel phrasing (a narrative recap with no marker phrases at all, and reasoning written in second-person imperative voice that the "contains 'you' → this is the coaching reply" heuristic mistook for athlete-directed text). (2) The system prompt's own PRINCIPLES rule #2 explicitly told Claude "Never output... RESPONSE:" — meaning the one 100%-reliable detection method already in the code (Pattern 1, an exact string match on a `RESPONSE:` label) could never fire, since Claude was instructed never to produce that label in the first place.
+**Fix / Change:** Flipped rule #2 from forbidding the `RESPONSE:` label to requiring it as a mandatory safety net: Claude must still avoid reasoning in output, but if it does reason first, it must end that reasoning with a line containing only `RESPONSE:` immediately before the athlete-facing text. Turns an unreliable semantic-classification problem into a reliable structural parse (Pattern 1 already handled this correctly — it just needed to actually be triggered). Patterns 2-4 (regex-based) remain in place as defense-in-depth for cases where Claude doesn't comply with the label requirement. Updated in both `route.ts` and the mirrored PRINCIPLES block in `evals/run-evals.mjs` per the documented parity requirement.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+**Follow-up needed:** No eval fixture currently exercises this exact leak pattern (second-person-imperative reasoning, or marker-free narrative recap) — consider adding one to `response_quality` fixtures if it recurs.
+
+---
+
 ## 2026-07-11 — Per-exercise strength images (replaces one-poster-per-routine)
 
 **Type:** Feature
