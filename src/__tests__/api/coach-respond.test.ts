@@ -732,6 +732,142 @@ describe("coach/respond — structured plan.weekly_total (deliver_message plan f
     const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
     expect(sent).toContain("Nice easy run today!");
   });
+
+  it("tracks an advisory event when structured long_run_distance exceeds the low-volume cap", async () => {
+    // avg weekly_miles=5 (low-volume) -> long run cap = max(ceil(5*0.35),3) = 3
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "This week I'd aim for 6 miles, with a long run around 6 miles. Total: 6 mi.",
+        plan: { weekly_total: 6, long_run_distance: 6 },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 5 } }),
+      profile: baseProfile(),
+      state: baseState({ current_week: 1 }),
+    });
+    const { trackEvent } = await import("@/lib/track");
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    expect(trackEvent).toHaveBeenCalledWith(
+      "user-001",
+      "plan_long_run_exceeded_cap",
+      expect.objectContaining({ trigger: "initial_plan", statedLongRun: 6, longRunCap: 3 })
+    );
+  });
+
+  it("tracks an advisory event when a structured quality-session pace isn't faster than easy pace", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "This week: 20 miles total with a tempo run at 9:30/mi. Total: 20 mi.",
+        plan: {
+          weekly_total: 20,
+          quality_sessions: [{ distance: 4, pace: "9:30/mi" }], // slower than stored easy pace below
+        },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 20 } }),
+      profile: baseProfile({ current_easy_pace: "9:00/mi" }),
+      state: baseState({ current_week: 1 }),
+    });
+    const { trackEvent } = await import("@/lib/track");
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    expect(trackEvent).toHaveBeenCalledWith(
+      "user-001",
+      "plan_quality_pace_not_faster_than_easy",
+      expect.objectContaining({ trigger: "initial_plan", qualityPace: "9:30/mi", easyPace: "9:00/mi" })
+    );
+  });
+
+  it("does not flag a quality pace that is genuinely faster than easy pace", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "This week: 20 miles total with a tempo run at 8:00/mi. Total: 20 mi.",
+        plan: {
+          weekly_total: 20,
+          quality_sessions: [{ distance: 4, pace: "8:00/mi" }],
+        },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ dashboard_token: null, onboarding_data: { weekly_miles: 20 } }),
+      profile: baseProfile({ current_easy_pace: "9:00/mi" }),
+      state: baseState({ current_week: 1 }),
+    });
+    const { trackEvent } = await import("@/lib/track");
+    const req = mockRequest({ userId: "user-001", trigger: "initial_plan" });
+    await POST(req);
+    await flush();
+
+    expect(trackEvent).not.toHaveBeenCalledWith(
+      "user-001",
+      "plan_quality_pace_not_faster_than_easy",
+      expect.anything()
+    );
+  });
+});
+
+describe("coach/respond — enforceVolumeCaps re-gated to user_message", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("scales down an over-cap dated session list in a user_message schedule response", async () => {
+    // avg weekly_miles=5 (low-volume) -> weekly cap = max(ceil(5*1.3),6) = 7
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Here's the updated schedule:\nMon 3/9 · Easy 5mi\nWed 3/11 · Easy 5mi\nSat 3/14 · Long run 5mi\nTotal: 15mi",
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ onboarding_data: { weekly_miles: 5 } }),
+      profile: baseProfile(),
+      state: baseState(),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).not.toContain("Total: 15mi");
+    const totalMatch = sent.match(/Total:\s*~?(\d+(?:\.\d+)?)\s*mi/);
+    expect(totalMatch).toBeTruthy();
+    expect(parseFloat(totalMatch![1])).toBeLessThanOrEqual(7.5);
+  });
+
+  it("does not touch a moderate-volume athlete's user_message session list", async () => {
+    // avg weekly_miles=25 (moderate) -> no low-volume cap applies at all
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Here's the updated schedule:\nMon 3/9 · Easy 8mi\nWed 3/11 · Tempo 6mi\nSat 3/14 · Long run 14mi\nTotal: 28mi",
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ onboarding_data: { weekly_miles: 25 } }),
+      profile: baseProfile(),
+      state: baseState(),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Total: 28mi");
+  });
 });
 
 describe("coach/respond — initial_plan beginner tier (stale Strava history)", () => {

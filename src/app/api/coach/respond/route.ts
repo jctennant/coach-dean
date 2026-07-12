@@ -11,7 +11,7 @@ import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan } from "@/lib/training-plan";
-import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap } from "@/lib/plan-validation";
+import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
@@ -90,10 +90,10 @@ function buildDeliverMessageTool(includePlanFacts: boolean) {
       "SMS text (or the exact literal string [NO_REPLY] when instructed to send nothing) — no reasoning, no labels, " +
       "no explanation of what you're about to do." +
       (includePlanFacts
-        ? " You must also report the `plan` object: the concrete weekly mileage total behind this message, exactly " +
-          "as you intend to state it in your text. This plan is day-agnostic prose (no day-by-day list) — `plan` is " +
-          "how the system verifies the number you write is safe and internally consistent, since it can't be parsed " +
-          "back out of a dated session list the way older plan formats could."
+        ? " You must also report the `plan` object: the concrete numbers behind this message, exactly as you intend " +
+          "to state them in your text (same values, same unit). This plan is day-agnostic prose (no day-by-day " +
+          "list) — `plan` is how the system verifies those numbers are safe and internally consistent, since they " +
+          "can't be parsed back out of a dated session list the way older plan formats could."
         : ""),
     input_schema: {
       type: "object" as const,
@@ -107,12 +107,35 @@ function buildDeliverMessageTool(includePlanFacts: boolean) {
               plan: {
                 type: "object" as const,
                 description:
-                  "The concrete weekly-mileage number behind this plan message, in the athlete's display unit " +
-                  "(miles or km per their preference) — the same number you state in your message text.",
+                  "The concrete numbers behind this plan message, in the athlete's display unit (miles or km per " +
+                  "their preference) — the same values you state in your message text.",
                 properties: {
                   weekly_total: {
                     type: "number",
                     description: "Total planned running mileage/km for the week this message describes.",
+                  },
+                  long_run_distance: {
+                    type: "number",
+                    description:
+                      "This week's single long run distance, if the plan has a distinct long run. Omit if there " +
+                      "isn't one (e.g. a very early beginner week of short easy runs only).",
+                  },
+                  quality_sessions: {
+                    type: "array",
+                    description: "The 0-2 quality/speed sessions in this week's plan, if any.",
+                    items: {
+                      type: "object" as const,
+                      properties: {
+                        distance: {
+                          type: "number",
+                          description: "Session distance, if you stated one.",
+                        },
+                        pace: {
+                          type: "string",
+                          description: "The target pace for this session exactly as stated in your message text, including its unit, e.g. \"8:15/mi\" or \"4:30/km\".",
+                        },
+                      },
+                    },
                   },
                 },
                 required: ["weekly_total"],
@@ -2943,7 +2966,9 @@ OUTPUT CONTRACT:
   // (not one inferred by regex-summing prose), we cap it against a known-safe range, and
   // force the message text to match.
   if (deliverBlock && rawText && isPlanTrigger) {
-    const planInput = (deliverBlock.input as { plan?: { weekly_total?: unknown } }).plan;
+    const planInput = (deliverBlock.input as {
+      plan?: { weekly_total?: unknown; long_run_distance?: unknown; quality_sessions?: unknown };
+    }).plan;
     const statedTotal = typeof planInput?.weekly_total === "number" ? planInput.weekly_total : null;
     if (statedTotal != null && statedTotal > 0) {
       const capMax = trigger === "initial_plan"
@@ -2965,6 +2990,43 @@ OUTPUT CONTRACT:
       rawText = applyStructuredWeeklyTotal(rawText, validatedTotal);
     } else {
       log.warn("plan trigger delivered without a usable plan.weekly_total", { trigger });
+    }
+
+    // Advisory checks below (telemetry only, no text rewrite) — unlike weekly_total,
+    // the long-run distance and quality-session pace aren't anchored by a reliable,
+    // consistently-phrased substring in free-form prose the way "Total: X mi" is, so
+    // auto-correcting them risks mangling the surrounding sentence. These log/track a
+    // mismatch so we can see how often they'd fire before deciding whether a stronger
+    // (correcting) mechanism is worth the added risk — same reasoning as
+    // repetition-check.ts shipping advisory-only first.
+
+    // Long-run cap only has an explicit numeric value in the prompt for the LOW VOLUME
+    // tier on initial_plan (see computeLongRunCap) — no invented cap for other tiers.
+    if (trigger === "initial_plan") {
+      const longRunCap = computeLongRunCap(avgWeeklyMileage);
+      const statedLongRun = typeof planInput?.long_run_distance === "number" ? planInput.long_run_distance : null;
+      if (longRunCap != null && statedLongRun != null && statedLongRun > longRunCap * 1.15) {
+        log.warn("structured plan.long_run_distance exceeded safe cap", { trigger, statedLongRun, longRunCap });
+        void trackEvent(userId, "plan_long_run_exceeded_cap", { trigger, statedLongRun, longRunCap });
+      }
+    }
+
+    // Quality pace must be faster than easy pace (PRINCIPLES 10 / LABEL-PACE CONSISTENCY)
+    // — checked here against real stored pace data instead of relying on Claude's own
+    // self-check.
+    const easySecPerMile = parsePaceStrToSecPerMile((profile?.current_easy_pace as string | null) ?? null);
+    const qualitySessions = Array.isArray(planInput?.quality_sessions)
+      ? (planInput!.quality_sessions as Array<{ pace?: unknown }>)
+      : [];
+    if (easySecPerMile != null) {
+      for (const qs of qualitySessions) {
+        const qualityPace = typeof qs?.pace === "string" ? qs.pace : null;
+        const qualitySecPerMile = parsePaceStrToSecPerMile(qualityPace);
+        if (qualitySecPerMile != null && qualitySecPerMile >= easySecPerMile) {
+          log.warn("structured quality session pace not faster than easy pace", { trigger, qualityPace, easyPace: profile?.current_easy_pace });
+          void trackEvent(userId, "plan_quality_pace_not_faster_than_easy", { trigger, qualityPace, easyPace: profile?.current_easy_pace as string | null });
+        }
+      }
     }
   }
 
@@ -3078,19 +3140,26 @@ OUTPUT CONTRACT:
   // SESSION_LIST correction removed — no day-level session list in responses anymore.
   let mileageCorrected = mileageCorrectedBase;
 
-  // Enforce hard volume caps for plan-generating triggers when the athlete is
-  // in the low-volume tier (< 10 mi/week). Prompt instructions alone are not
-  // reliable enough for this safety-critical constraint.
-  const planTriggers = new Set<TriggerType>(["initial_plan", "weekly_recap"]);
+  // Enforce hard volume caps on dated session-line plans (Mon D/M · ...) for the
+  // low-volume tier (< 10 mi/week). Prompt instructions alone are not reliable enough
+  // for this safety-critical constraint.
+  //
+  // This used to gate on ["initial_plan", "weekly_recap"], but the 2026-04-19 day-agnostic
+  // plan redesign removed dated session lines from those two triggers entirely (they're
+  // prose now: weekly total + long run + quality sessions, no day-by-day list) — so
+  // parseSessionLines finds nothing there and this was a silent no-op for exactly the
+  // triggers it names. initial_plan/weekly_recap's weekly-total safety net is now the
+  // structured plan.weekly_total check above (see buildDeliverMessageTool), which works
+  // against real numbers instead of parsed text. The dated-line format this function
+  // actually depends on is still produced by user_message when Claude shows an updated
+  // schedule (see "WHEN AN ATHLETE REQUESTS A STRUCTURAL CHANGE" / "...CONSOLIDATES OR
+  // DROPS A SESSION" in the prompt) — that's the trigger this check now protects.
   const isLowVolume = avgWeeklyMileage != null && avgWeeklyMileage < 10;
-  const weeklyCapMiles =
-    planTriggers.has(trigger) && isLowVolume
-      ? Math.max(Math.ceil(avgWeeklyMileage! * 1.3), 6)
-      : null;
-  const longRunCapMiles =
-    planTriggers.has(trigger) && isLowVolume
-      ? Math.max(Math.ceil(avgWeeklyMileage! * 0.35), 3)
-      : null;
+  const weekOneCapForSessionLines = trigger === "user_message" && isLowVolume
+    ? computeWeekOneVolumeCap(avgWeeklyMileage, (profile?.fitness_level as string | null) ?? null, false)
+    : null;
+  const weeklyCapMiles = weekOneCapForSessionLines?.max ?? null;
+  const longRunCapMiles = trigger === "user_message" ? computeLongRunCap(avgWeeklyMileage) : null;
   const { message: volumeChecked } = enforceVolumeCaps(
     mileageCorrected,
     weeklyCapMiles,

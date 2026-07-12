@@ -8,6 +8,8 @@ import {
   countRunningSessions,
   applyStructuredWeeklyTotal,
   computeWeekOneVolumeCap,
+  computeLongRunCap,
+  parsePaceStrToSecPerMile,
 } from "@/lib/plan-validation";
 
 // ---------------------------------------------------------------------------
@@ -381,5 +383,50 @@ describe("computeWeekOneVolumeCap", () => {
 
   it("bounds high-volume athletes (30mi+ avg) to 0.90x-1.12x", () => {
     expect(computeWeekOneVolumeCap(40, null, false)).toEqual({ min: 36, max: 45 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeLongRunCap
+// ---------------------------------------------------------------------------
+
+describe("computeLongRunCap", () => {
+  it("caps low-volume athletes at 35% of current weekly mileage, floor 3", () => {
+    expect(computeLongRunCap(5)).toBe(3); // ceil(5*0.35)=2 -> floor of 3 applies
+    expect(computeLongRunCap(9)).toBe(4); // ceil(9*0.35)=4
+  });
+
+  it("returns null for athletes at or above 10mi/week — no stated cap for that tier", () => {
+    expect(computeLongRunCap(10)).toBeNull();
+    expect(computeLongRunCap(40)).toBeNull();
+  });
+
+  it("returns null when average mileage is unknown", () => {
+    expect(computeLongRunCap(null)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePaceStrToSecPerMile
+// ---------------------------------------------------------------------------
+
+describe("parsePaceStrToSecPerMile", () => {
+  it("parses a mile pace as-is", () => {
+    expect(parsePaceStrToSecPerMile("8:15/mi")).toBe(8 * 60 + 15);
+  });
+
+  it("converts a km pace to mile-equivalent seconds", () => {
+    // 4:30/km = 270s/km * 1.60934 = 434.5s/mi -> rounds to 435 (7:15/mi)
+    const result = parsePaceStrToSecPerMile("4:30/km");
+    expect(result).toBe(435);
+  });
+
+  it("assumes min/mile when no unit is present", () => {
+    expect(parsePaceStrToSecPerMile("9:00")).toBe(9 * 60);
+  });
+
+  it("returns null for unparseable or missing input", () => {
+    expect(parsePaceStrToSecPerMile(null)).toBeNull();
+    expect(parsePaceStrToSecPerMile("easy effort")).toBeNull();
   });
 });

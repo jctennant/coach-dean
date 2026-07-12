@@ -374,6 +374,33 @@ export function computeWeekOneVolumeCap(
 }
 
 /**
+ * Safe Week-1 long-run cap, in the athlete's mileage unit — mirrors the
+ * "LONG RUN CAP — HARD LIMIT" `<rule>` in buildSystemPrompt (route.ts), which only
+ * asserts an explicit numeric long-run cap for the LOW VOLUME tier (avg < 10mi/week).
+ * Other tiers give a weekly-total cap but no separately-stated long-run number, so this
+ * deliberately returns null for them rather than inventing a cap the prompt never asserts.
+ */
+export function computeLongRunCap(avgWeeklyMileage: number | null): number | null {
+  if (avgWeeklyMileage == null || avgWeeklyMileage >= 10) return null;
+  return Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3);
+}
+
+/**
+ * Parse a pace string like "8:15/mi" or "4:30/km" into seconds-per-mile, so paces in
+ * different units can be compared. Unit-less strings (or "/mi") are assumed to already
+ * be min/mile — this matches how paces are stored throughout the codebase ("always
+ * stored as min/mile", per paces.ts) and how coach/respond's PACE SANITY CHECK rule
+ * requires every pace Claude states to include its unit.
+ */
+export function parsePaceStrToSecPerMile(paceStr: string | null): number | null {
+  if (!paceStr) return null;
+  const match = paceStr.match(/(\d+):(\d{2})/);
+  if (!match) return null;
+  const sec = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+  return /\/\s*km\b/i.test(paceStr) ? Math.round(sec * 1.60934) : sec;
+}
+
+/**
  * Remove exact duplicate session lines from a plan.
  *
  * A duplicate is defined as two lines with the identical "DDD D/M · description"

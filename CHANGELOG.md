@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-11 — Structured plan output, slice 2: long run / quality pace telemetry + enforceVolumeCaps re-gated to user_message
+
+**Type:** Refactor / Reliability (structured plan output, slice 2 — follow-up to the weekly_total change earlier today)
+**Reported by:** Internal review (Jake) — explicit follow-up request on the two items flagged as "not done here" in the weekly_total changelog entry.
+**Root cause:** Same investigation as slice 1, two more angles on it. (1) The prompt's LONG RUN CAP and quality-pace-faster-than-easy rules were self-check-only for `initial_plan`/`weekly_recap` — no code verified them, same category of gap as `weekly_total` before today. (2) `enforceVolumeCaps`'s trigger gate (`["initial_plan", "weekly_recap"]`) was confirmed to be a no-op for both triggers it named (day-agnostic plans don't produce the dated session lines it parses), while `user_message` — which still produces dated lines for schedule-change responses ("WHEN AN ATHLETE REQUESTS A STRUCTURAL CHANGE", "...CONSOLIDATES OR DROPS A SESSION") — got no volume-cap protection at all. No test in the suite exercised this path before today, which is how the mismatch went unnoticed.
+**Fix / Change:**
+1. `deliver_message`'s `plan` object (for `initial_plan`/`weekly_recap`) gained two optional fields: `long_run_distance` (number) and `quality_sessions` (array of `{distance, pace}`).
+2. New `plan-validation.ts` functions: `computeLongRunCap(avgWeeklyMileage)` — mirrors the LOW VOLUME tier's "LONG RUN CAP — HARD LIMIT" `<rule>` exactly, returns null for tiers the prompt doesn't assert an explicit long-run number for — and `parsePaceStrToSecPerMile(paceStr)`, which normalizes a "M:SS/mi" or "M:SS/km" pace string for comparison.
+3. Unlike `weekly_total`, these two checks are **advisory-only** (logged + `trackEvent`, no text rewrite): `plan_long_run_exceeded_cap` and `plan_quality_pace_not_faster_than_easy`. Reasoning: "Total: X mi" is a reliably-phrased, regex-anchorable substring; a long-run distance or a quality-session pace is usually embedded in free-form prose with no consistent anchor, so auto-correcting risks mangling the sentence around it. Same "ship the detector before the corrector" call as `repetition-check.ts` — telemetry now, decide on auto-correction once it's clear how often these actually fire and how clean the surrounding prose typically is.
+4. `enforceVolumeCaps` (weekly-total + long-run cap enforcement on dated session-line text) is now gated on `user_message` instead of `initial_plan`/`weekly_recap`, reusing `computeWeekOneVolumeCap`/`computeLongRunCap` instead of its own inline copies of the same formulas.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/plan-validation.ts`, `src/__tests__/lib/plan-validation.test.ts`, `src/__tests__/api/coach-respond.test.ts`
+**Follow-up needed:** If `plan_long_run_exceeded_cap` / `plan_quality_pace_not_faster_than_easy` telemetry shows either firing with any regularity, worth designing an actual correction mechanism (likely a lightweight placeholder-token convention, since prose has no reliable anchor the way "Total:" does) rather than leaving them advisory-only indefinitely.
+
 ## 2026-07-11 — Structured plan.weekly_total closes a dead mileage-total guard on initial_plan/weekly_recap
 
 **Type:** Bug Fix / Refactor (structured plan output, slice 1)
