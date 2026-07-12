@@ -1716,11 +1716,17 @@ Use this data to:
     if (sr) {
       // Persist the freshly-computed routine (merge into dashboard_insights) so the cached
       // copy — used as a fallback elsewhere (e.g. the dashboard, pre-migration state) — stays
-      // current too. Fire-and-forget — this request renders from the in-memory copy regardless.
-      void supabase
+      // current too. Awaited (not fire-and-forget): this write sits near the end of a long
+      // request, and an un-awaited promise here was observed in production to get silently
+      // dropped before it resolved — the request finishes and the runtime tears down before
+      // the write lands, leaving the cache stale forever with no error ever logged.
+      const { error: strengthCacheErr } = await supabase
         .from("training_profiles")
         .update({ dashboard_insights: { ...(insights ?? {}), strength_recovery: sr } as unknown as Json })
         .eq("user_id", userId);
+      if (strengthCacheErr) {
+        console.error(`[coach/respond] dashboard_insights.strength_recovery write failed userId=${userId}:`, strengthCacheErr);
+      }
     }
 
     if (!sr?.exercises?.length) return `\n\nNO STRENGTH ROUTINE STORED: No personalized routine is on file (no injury history was captured for this athlete). Do NOT imply a stored personalized routine exists. If the athlete asks about strength work, recommend the hip & core base protocol (see the HIP & CORE INJURY PREVENTION PROTOCOL block) — that's the strongest general evidence and benefits everyone.`;
