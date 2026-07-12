@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { getRestrictedPhones } from "@/lib/admin-restrict";
 
 /**
  * GET /api/cron/morning-workout
@@ -14,13 +15,18 @@ export async function GET(request: Request) {
   }
 
   // Fetch active users plus their injury hold state in one query
-  const { data: users } = await supabase
+  let query = supabase
     .from("users")
     .select("id, timezone, training_state(injury_hold_since)")
     .not("strava_access_token", "is", null)
     .is("onboarding_step", null)
     .not("phone_number", "is", null)
     .eq("messaging_opted_out", false);
+
+  const restrictedPhones = getRestrictedPhones();
+  if (restrictedPhones) query = query.in("phone_number", restrictedPhones);
+
+  const { data: users } = await query;
 
   if (!users || users.length === 0) {
     return NextResponse.json({ ok: true, sent: 0, checkins: 0 });

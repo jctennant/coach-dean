@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getAthleteStats } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
+import { getRestrictedPhones } from "@/lib/admin-restrict";
 
 export const maxDuration = 300;
 
@@ -36,6 +37,9 @@ export async function GET(request: Request) {
 
   if (testUserId) query = query.eq("id", testUserId);
   if (excludeUserIds.length > 0) query = query.not("id", "in", `(${excludeUserIds.join(",")})`)
+
+  const restrictedPhones = getRestrictedPhones();
+  if (restrictedPhones) query = query.in("phone_number", restrictedPhones);
 
   const { data: users } = await query;
 

@@ -4,6 +4,14 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-12 — Added a temporary kill-switch to scope LLM-calling crons to specific phone numbers
+
+**Type:** Infra
+**Reported by:** Jake Tennant — Coach Dean access is paused for most users while adjustments are made; wanted confirmation crons weren't still burning Anthropic tokens on behalf of paused users.
+**Root cause / motivation:** No code-level way existed to stop `morning-workout`, `sunday-recap`, `missed-messages`, and `analyze-conversations` from firing `coach/respond` (or calling Claude directly) for every eligible user each time the cron ran, regardless of whether Linq/SMS delivery was working. Confirmed `anthropic.messages.create` always runs before `sendSMS` in `coach/respond/route.ts`, so a Linq outage would not have prevented Claude spend — this needed an explicit gate.
+**Fix / Change:** New `getRestrictedPhones()` helper in `src/lib/admin-restrict.ts` reads a comma-separated `RESTRICT_TO_PHONES` env var. When set, `morning-workout` and `missed-messages` filter their `users` query with `.in("phone_number", ...)`, `sunday-recap` does the same alongside its existing `?userId=` test override, and `analyze-conversations` resolves the matching user id(s) first and filters both the conversation digest and the plan-health section by `user_id`. Unset the env var (or leave it empty) to resume normal operation for all users. Set `RESTRICT_TO_PHONES=+15107084020` in `.env.local` and as a Vercel Production env var.
+**Files changed:** `src/lib/admin-restrict.ts` (new), `src/app/api/cron/morning-workout/route.ts`, `src/app/api/cron/sunday-recap/route.ts`, `src/app/api/cron/missed-messages/route.ts`, `src/app/api/cron/analyze-conversations/route.ts`, `.env.local`
+
 ## 2026-07-12 — Phase A of the CoachContext extraction: pulled the DATE CONTEXT header out of buildSystemPrompt into a tested lib module
 
 **Type:** Refactor / Reliability

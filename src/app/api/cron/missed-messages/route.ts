@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { trackEvent } from "@/lib/track";
+import { getRestrictedPhones } from "@/lib/admin-restrict";
 
 export const maxDuration = 60;
 
@@ -60,12 +61,17 @@ export async function GET(request: Request) {
   const userIds = Array.from(latestByUser.keys());
 
   // Fetch user state: onboarding_step, opted_out
-  const { data: users } = await supabase
+  let usersQuery = supabase
     .from("users")
     .select("id, phone_number, onboarding_step, messaging_opted_out, linq_chat_id")
     .in("id", userIds)
     .is("onboarding_step", null)           // fully onboarded only
     .eq("messaging_opted_out", false);
+
+  const restrictedPhones = getRestrictedPhones();
+  if (restrictedPhones) usersQuery = usersQuery.in("phone_number", restrictedPhones);
+
+  const { data: users } = await usersQuery;
 
   if (!users || users.length === 0) {
     return NextResponse.json({ ok: true, retried: 0 });

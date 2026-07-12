@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { Resend } from "resend";
+import { getRestrictedPhones } from "@/lib/admin-restrict";
 
 /** Strip markdown code fences (```html ... ``` or ``` ... ```) that Claude sometimes wraps around HTML output. */
 function stripMarkdownFences(text: string): string {
@@ -35,13 +36,29 @@ export async function GET(request: Request) {
 
   const dateLabel = dayStart.toISOString().slice(0, 10);
 
+  // While RESTRICT_TO_PHONES is set, scope the whole digest (and the plan
+  // health section below) to just those users instead of everyone.
+  const restrictedPhones = getRestrictedPhones();
+  let restrictedUserIds: string[] | null = null;
+  if (restrictedPhones) {
+    const { data: adminUsers } = await supabase
+      .from("users")
+      .select("id")
+      .in("phone_number", restrictedPhones);
+    restrictedUserIds = (adminUsers ?? []).map((u) => u.id);
+  }
+
   // Fetch all conversations from yesterday, with user phone for context
-  const { data: messages, error } = await supabase
+  let messagesQuery = supabase
     .from("conversations")
     .select("user_id, role, content, message_type, created_at, strava_activity_id")
     .gte("created_at", dayStart.toISOString())
     .lte("created_at", dayEnd.toISOString())
     .order("created_at", { ascending: true });
+
+  if (restrictedUserIds) messagesQuery = messagesQuery.in("user_id", restrictedUserIds);
+
+  const { data: messages, error } = await messagesQuery;
 
   if (error) {
     console.error("[analyze-conversations] DB error:", error);
@@ -186,7 +203,7 @@ ${transcripts}`;
       max_tokens: 4096,
       messages: [{ role: "user", content: analysisPrompt }],
     }),
-    buildPlanHealthSection(now),
+    buildPlanHealthSection(now, restrictedUserIds),
   ]);
 
   const analysisHtml = stripMarkdownFences(
@@ -240,12 +257,16 @@ ${transcripts}`;
  * 3. Is the plan arc's starting mileage reasonable given the user's stated
  *    fitness level and Strava history?
  */
-async function buildPlanHealthSection(now: Date): Promise<string> {
+async function buildPlanHealthSection(now: Date, restrictedUserIds: string[] | null): Promise<string> {
   try {
     // Fetch all users who have a training_state (actively being coached)
-    const { data: states } = await supabase
+    let statesQuery = supabase
       .from("training_state")
       .select("user_id, current_week, current_phase, weekly_mileage_target, weekly_plan_sessions, updated_at");
+
+    if (restrictedUserIds) statesQuery = statesQuery.in("user_id", restrictedUserIds);
+
+    const { data: states } = await statesQuery;
 
     if (!states || states.length === 0) {
       return `<h2 style="font-size: 16px; margin-top: 32px;">Plan Health</h2><p style="color: #6b7280;">No active users.</p>`;
