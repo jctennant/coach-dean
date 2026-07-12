@@ -870,6 +870,65 @@ describe("coach/respond — enforceVolumeCaps re-gated to user_message", () => {
   });
 });
 
+describe("coach/respond — fixSessionDayAbbreviations wired into user_message (date/weekday hallucination guard)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    // Sunday, July 12, 2026 — same date the "Dean doesn't know what day it is" bug
+    // was reported on, so a nearby session date exercises the same-month path.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-12T15:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("corrects a weekday abbreviation that doesn't match its stated calendar date", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        // July 13, 2026 is a Monday — this claims it's a Tuesday.
+        message: "Here's the updated schedule:\nTue 7/13 · Easy 5mi\nTotal: 5mi",
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ onboarding_data: { weekly_miles: 25 } }),
+      profile: baseProfile(),
+      state: baseState(),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Mon 7/13");
+    expect(sent).not.toContain("Tue 7/13");
+  });
+
+  it("leaves an already-correct weekday abbreviation untouched", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Here's the updated schedule:\nMon 7/13 · Easy 5mi\nTotal: 5mi",
+      } }],
+    });
+    setupSupabase({
+      user: baseUser({ onboarding_data: { weekly_miles: 25 } }),
+      profile: baseProfile(),
+      state: baseState(),
+    });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Mon 7/13");
+  });
+});
+
 describe("coach/respond — initial_plan beginner tier (stale Strava history)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1407,8 +1466,12 @@ describe("coach/respond — deliver_message tool (structural reasoning-leak fix)
     await POST(mockRequest({ userId: "user-001", trigger: "post_run" }));
     await flush();
 
-    // Only one model call — no fallback/retry needed once deliver_message is present.
-    expect(create.mock.calls.length).toBe(1);
+    // Two model calls: one to generate the message (tool_choice: any, deliver_message
+    // tool) — no fallback/retry needed once deliver_message is present — and one from
+    // the advisory date-consistency check (date-consistency-check.ts), which fires
+    // because the message mentions "today". That second call is a post-hoc validator,
+    // not a regeneration of the coaching message.
+    expect(create.mock.calls.length).toBe(2);
     const firstCallParams = create.mock.calls[0][0] as { tool_choice?: unknown; tools?: Array<{ name?: string }> };
     expect(firstCallParams.tool_choice).toEqual({ type: "any" });
     expect(firstCallParams.tools?.some((t) => t.name === "deliver_message")).toBe(true);

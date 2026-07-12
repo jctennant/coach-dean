@@ -185,7 +185,11 @@ function buildEvalSystemPrompt(fixture) {
   // Pre-compute next 7 days (mirrors route.ts date injection so coach gets correct weekday↔date mapping)
   const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(today);
   const [ty, tm, td] = todayLocal.split("-").map(Number);
-  const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long", month: "short", day: "numeric" });
+  // timeZone: "UTC" here, not tz — ty/tm/td are already the correct local calendar
+  // date; reformatting the Date.UTC-reconstructed values through tz again would
+  // re-apply the offset a second time and roll the result back a day for any
+  // timezone behind UTC (mirrors the route.ts fix — see CHANGELOG 2026-07-12).
+  const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" });
   const upcomingDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(Date.UTC(ty, tm - 1, td + i + 1));
     return dayFmt.format(d);

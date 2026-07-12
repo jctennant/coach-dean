@@ -70,3 +70,63 @@ export function inferTimezoneFromPhone(phone: string): string {
   if (phone.startsWith("+1"))   return "America/New_York"; // US/Canada
   return "America/New_York";
 }
+
+export interface DateFacts {
+  today: string;
+  yesterday: string;
+  tomorrow: string;
+}
+
+/**
+ * Compute today/yesterday/tomorrow (as full weekday + date strings) for the
+ * given IANA timezone. Single source of truth for the two consumers that need
+ * these exact strings to agree with each other: formatDateAnchor (prepended to
+ * every generation turn) and checkDateConsistency (the advisory validator that
+ * runs on the output, in date-consistency-check.ts).
+ */
+export function getDateFacts(tz: string): DateFacts {
+  const now = new Date();
+  const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
+  const [y, m, d] = todayLocal.split("-").map(Number);
+  // The y/m/d above are already the correct *local* calendar date — Date.UTC just
+  // encodes them unambiguously so we can add/subtract days without DST edge cases.
+  // Formatting must read them back with timeZone: "UTC", NOT the original tz: since
+  // the value is midnight UTC of that date, re-applying tz here would shift it by
+  // that zone's offset a second time. For any timezone behind UTC (all of the
+  // Americas), that silently rolls the result back a full day — e.g. "tomorrow" in
+  // America/New_York would print as today, and "yesterday" would print as two days
+  // ago. This is the same reconstruction pattern used in buildSystemPrompt's
+  // dateContext (route.ts) — fixed there too.
+  const dayFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+  return {
+    yesterday: dayFormatter.format(new Date(Date.UTC(y, m - 1, d - 1))),
+    today: dayFormatter.format(new Date(Date.UTC(y, m - 1, d))),
+    tomorrow: dayFormatter.format(new Date(Date.UTC(y, m - 1, d + 1))),
+  };
+}
+
+/**
+ * Compact "today/tomorrow" anchor for the given IANA timezone.
+ *
+ * The full DATE CONTEXT block (today, yesterday, tomorrow, next 7 days, race
+ * countdown, etc.) lives early in the system prompt in coach/respond/route.ts.
+ * That's fine for a direct "what day is it?" question, but it sits far ahead
+ * of the trigger-specific generation instructions in the token stream — by
+ * the time the model is composing relative-day language ("today", "tomorrow",
+ * "Monday or Tuesday"), that anchor can get lost in the middle and the model
+ * ends up improvising day arithmetic instead of reading it off a fact.
+ *
+ * This helper re-states just the two facts that matter for that failure mode,
+ * meant to be prepended to the per-turn user message (right next to where
+ * generation actually happens) rather than relying solely on the earlier,
+ * more detailed system-prompt block.
+ */
+export function formatDateAnchor(tz: string): string {
+  const { today, tomorrow } = getDateFacts(tz);
+  return `[DATE ANCHOR — Today: ${today}. Tomorrow: ${tomorrow}. Any "today"/"tomorrow"/weekday reference in your reply must be consistent with these two facts — do not infer the day from earlier conversation turns or from relative math like "a few days from Friday."]`;
+}

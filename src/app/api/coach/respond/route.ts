@@ -15,7 +15,8 @@ import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, f
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
-import { inferTimezoneFromPhone } from "@/lib/timezone";
+import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/timezone";
+import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
@@ -2530,6 +2531,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle);
 
+  // Re-anchor today/tomorrow right next to the generation instructions. The full
+  // DATE CONTEXT block lives early in the (much longer) system prompt — by the time
+  // the model composes relative-day language it can lose track of that anchor and
+  // improvise day arithmetic instead (e.g. calling Monday both a rest day and a test
+  // day in the same reply). See formatDateAnchor in lib/timezone.ts.
+  userMessage = `${formatDateAnchor(userTimezone)}\n\n${userMessage}`;
+
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
     // Suppress zone 3 / gray zone lines from the block when:
@@ -3166,8 +3174,20 @@ OUTPUT CONTRACT:
     longRunCapMiles
   );
 
+  // Deterministic correction for dated session lines (e.g. "Mon 3/2 · ...", still
+  // produced by user_message when Claude proposes a schedule change — see the
+  // enforceVolumeCaps comment above). This function already existed in
+  // plan-validation.ts but had never been wired up here; it fixes the "stated
+  // weekday doesn't match the stated calendar date" hallucination the same way
+  // enforceVolumeCaps fixes mileage hallucinations — deterministically, against
+  // real calendar math, rather than leaving it to prompt instructions alone.
+  const [refYearStr, refMonthStr] = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone })
+    .format(new Date())
+    .split("-");
+  const dayAbbrevFixed = fixSessionDayAbbreviations(volumeChecked, Number(refYearStr), Number(refMonthStr));
+
   // Day-level session postprocessing removed — coach no longer assigns sessions to specific days.
-  const coachMessage = stripBoilerplateSignoffs(volumeChecked);
+  const coachMessage = stripBoilerplateSignoffs(dayAbbrevFixed);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage, strength_poster: (wantsStrengthPoster && strengthPosterRoutineKey) ? strengthPosterRoutineKey : null });
 
@@ -3199,6 +3219,20 @@ OUTPUT CONTRACT:
         .catch((err) => log.error("semantic repetition check errored", { error: String(err) }));
     }
   }
+
+  // Advisory-only date consistency check (see date-consistency-check.ts) — fired without
+  // awaiting so it never delays the SMS send. Runs for every trigger (not gated to specific
+  // ones, unlike repetition) since a message from any trigger can reference relative days.
+  // checkDateConsistency itself no-ops (no API call) when the message doesn't mention any
+  // relative day language, so this is cheap for the common case.
+  void checkDateConsistency(coachMessage, getDateFacts(userTimezone))
+    .then((result) => {
+      if (result.inconsistent) {
+        log.warn("date consistency issue detected", { trigger, issue: result.issue });
+        void trackEvent(userId, "date_consistency_issue_detected", { trigger, issue: result.issue });
+      }
+    })
+    .catch((err) => log.error("date consistency check errored", { error: String(err) }));
 
   // Split into iMessage-sized chunks. Each part is sent as a separate text
   // with its own typing indicator so it feels like a real person composing
@@ -5243,8 +5277,19 @@ function buildSystemPrompt(
 
   // Full weekday name ("Friday, Feb 27") matches the long format used for
   // todayStr and eliminates any ambiguity from abbreviated day names.
+  //
+  // timeZone here is deliberately "UTC", not tz. ty/tm/td above are already the
+  // correct *local* calendar date (resolved via todayLocal above); Date.UTC just
+  // encodes them unambiguously so day arithmetic (+i, -1) doesn't hit DST edge
+  // cases. Formatting those reconstructed timestamps back through the original
+  // tz would re-apply that zone's offset a SECOND time — for any timezone behind
+  // UTC (all of the Americas), that silently rolls every result back a full day,
+  // e.g. "Tomorrow" would print as today's date, "Yesterday" as two days ago.
+  // (Bug found 2026-07-12 while building the date-consistency validator — see
+  // CHANGELOG. getDateFacts in lib/timezone.ts had the identical bug and is
+  // fixed the same way.)
   const dayFormatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
+    timeZone: "UTC",
     weekday: "long",
     month: "short",
     day: "numeric",
