@@ -20,6 +20,7 @@ import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
+import { buildFitnessTierBlock } from "@/lib/coach-fitness-tier";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
@@ -5802,38 +5803,13 @@ You are coaching ${user.name || "this athlete"} for ${goalDisplay}${raceIsUpcomi
 ${dateContext}
 CALIBRATE TO ATHLETE'S ACTUAL FITNESS FIRST:
 Before applying any training philosophy, anchor the plan to what the data shows. The athlete's recent weekly mileage, pace distribution, and workout history in RECENT WORKOUTS are ground truth. The philosophy principles below are defaults — they yield to observed fitness. An athlete already running 40+ miles/week with quality sessions in their history does not need to earn intensity; they need a plan that matches where they actually are. Apply conservative defaults only where the data is thin, the athlete is clearly new to consistent training, or injury history warrants it.
-${
-  (avgWeeklyMileage == null || forceBeginnerTier)
-    ? (() => {
-        const fl = (profile?.fitness_level as string | null) ?? "beginner";
-        const isIntermediate = fl === "intermediate";
-        const isAdvanced = fl === "advanced";
-        if (isAdvanced) {
-          return `FITNESS TIER: No Strava history yet, but athlete self-reports as ADVANCED. Treat this like a moderate-to-high volume athlete returning to training — do not apply beginner volume defaults.
-<rule>WEEK 1 VOLUME CAP (no history, advanced): Start at ${spMi(25)}–${spMi(35)} for the week. Spread across ${profile?.days_per_week ?? 5}+ days. Include 1 quality session. Do not prescribe fewer than ${spMi(20)} — that is inconsistent with advanced fitness.</rule>`;
-        } else if (isIntermediate) {
-          return `FITNESS TIER: No Strava history yet, but athlete self-reports as INTERMEDIATE. Treat as an athlete with an established aerobic base — do not apply beginner volume defaults.
-<rule>WEEK 1 VOLUME CAP (no history, intermediate): Start at ${spMi(15)}–${spMi(25)} for the week. Spread across ${profile?.days_per_week ?? 4}+ days. Include at least 1 easy quality session (strides or short tempo). Do not prescribe fewer than ${spMi(12)} — that is inconsistent with intermediate fitness.</rule>`;
-        } else {
-          return forceBeginnerTier
-            ? `FITNESS TIER: Beginner self-report. Strava shows ${spMi(avgWeeklyMileage ?? 0)} avg but athlete self-identifies as a current beginner — historical Strava data reflects past fitness, not current ability. Default to a conservative, base-building approach.
-<rule>WEEK 1 VOLUME CAP (beginner, stale history): Week 1 must not exceed ${spMi(10)} total. Start extremely conservatively — 3–4 short sessions of ${spMi(2)}–${spMi(3)} each is appropriate. Do NOT use the Strava historical average to set this week's volume. It is much easier to add volume next week than to walk back an injury in week one.</rule>`
-            : `FITNESS TIER: No activity data yet. Default to a conservative, base-building approach until training history establishes their level.
-<rule>WEEK 1 VOLUME CAP (no history, beginner): Since no mileage data exists and this is a beginner, Week 1 must not exceed ${spMi(10)} total. Start extremely conservatively — 3 short sessions of ${spMi(2)}–${spMi(3)} each is appropriate. It is much easier to add volume next week than to walk back an injury in week one.</rule>`;
-        }
-      })()
-    : avgWeeklyMileage < 10
-    ? `FITNESS TIER: LOW VOLUME (avg ${spMi(avgWeeklyMileage)}). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
-<rule>WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${spMi(avgWeeklyMileage)}. Week 1 MUST NOT exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6))} total (current volume × 1.30, floor ${spMi(6)}). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. Do not exceed this cap under any circumstances, regardless of race goals or timelines.</rule>
-<rule>LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3))} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`
-    : avgWeeklyMileage < 30
-    ? `FITNESS TIER: MODERATE VOLUME (avg ${spMi(avgWeeklyMileage)}). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
-<rule>WEEK 1 VOLUME CAP — LIMIT: Current avg is ${spMi(avgWeeklyMileage)}. Week 1 should target ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.15))}. Do not exceed ${spMi(Math.round(avgWeeklyMileage * 1.2))} — if your sessions sum above this ceiling, reduce at least one easy run until the total is under it. A first-week spike risks overuse injury at the start of the plan.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(Math.round(avgWeeklyMileage * 0.90))}. Starting below the athlete's current base has no training rationale — they are already adapted to their current volume. Even for first-timers, dropping significantly below current base wastes existing fitness.</rule>`
-    : `FITNESS TIER: HIGH VOLUME (avg ${spMi(avgWeeklyMileage)}). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
-<rule>WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${spMi(avgWeeklyMileage)} → Week 1 target: ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.12))}. Don't jump to peak volume on Day 1.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(Math.round(avgWeeklyMileage * 0.90))}. Even for masters athletes, first-timers, or conservative builds, starting significantly below current base wastes the fitness already built. 90% of current average is the floor.</rule>`
-}
+${buildFitnessTierBlock({
+  avgWeeklyMileage: avgWeeklyMileage ?? null,
+  forceBeginnerTier,
+  fitnessLevel: (profile?.fitness_level as string | null) ?? "beginner",
+  daysPerWeek: (profile?.days_per_week as number | null) ?? null,
+  isMetric: spUseMetric,
+})}
 
 ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:
 

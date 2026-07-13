@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-12 — Phase A, slice 3: pulled the FITNESS TIER volume-cap block out of buildSystemPrompt, closed a duplicate-formula gap with plan-validation.ts
+
+**Type:** Refactor / Reliability
+**Reported by:** Jake Tennant — "sure keep going" on Phase A, following slices 1 (DATE CONTEXT header) and 2 (race-countdown/taper-protocol).
+**Root cause / motivation:** `plan-validation.ts`'s `computeWeekOneVolumeCap`/`computeLongRunCap` already compute the exact Week-1 volume-cap numbers (current-volume × 1.30 floored at 6, × 0.35 floored at 3, × 0.90/1.2/1.12 for moderate/high tiers, and the 20/12/10 no-history floors) — but the FITNESS TIER prompt block in `buildSystemPrompt` re-derived the same arithmetic separately, inline, rather than calling those functions. `plan-validation.ts`'s own doc comment already flagged this as an accepted risk ("if you change one, change the other and verify the numbers still match") rather than a coupling worth the churn at the time. With slices 1-2 having proven the extraction pattern out, this was the natural next candidate to actually close that gap instead of just documenting it.
+**Fix / Change:** New `src/lib/coach-fitness-tier.ts` — `buildFitnessTierBlock()` now calls `computeWeekOneVolumeCap`/`computeLongRunCap` directly for every hard floor/ceiling in all 7 tier variants (no-history advanced/intermediate/beginner×2, low/moderate/high volume), so the prompt text and the `plan.weekly_total`/long-run validators derive from one arithmetic source. The "target range" display numbers that aren't part of the validators' contract (e.g. "Start at 25–35mi" for no-history advanced — the validator only enforces the 20mi floor, not the 35mi ceiling, since going over isn't asserted anywhere) stay as local constants, clearly separated in the code from the shared hard-cap numbers. Verified byte-for-byte output parity against the original inline code across all 7 tiers before relying on the 12-test suite (`coach-fitness-tier.test.ts`), which pins the exact numbers per tier including boundary values (exactly 10mi, exactly 30mi) and the very-low-mileage floor cases (2mi avg → 6mi/3mi floors, not the raw ×1.3/×0.35 figures).
+**Files changed:** `src/lib/coach-fitness-tier.ts` (new), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/coach-fitness-tier.test.ts` (new)
+**Follow-up needed:** `route.ts` is down to 8,000 lines (8,207 before Phase A started today). Remaining Phase A candidates: pace-zone display ranges (`easyPaceRange` callers) and any other fact families still assembled inline in `buildSystemPrompt`/`buildUserMessage`.
+
 ## 2026-07-12 — Phase A, slice 2: pulled the race-countdown/taper-protocol section out of buildSystemPrompt
 
 **Type:** Refactor / Reliability
