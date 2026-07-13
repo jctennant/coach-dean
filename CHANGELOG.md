@@ -4,6 +4,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-12 — Phase A, slice 4: pulled the pace-computation block out of buildSystemPrompt into coach-pace-context.ts
+
+**Type:** Refactor / Reliability
+**Reported by:** Jake Tennant — "sure keep going" on Phase A, following slices 1-3 (DATE CONTEXT header, race-countdown/taper-protocol, FITNESS TIER volume caps).
+**Root cause:** The pace-sanity-check block (stored/estimated tempo & interval derivation, the tempo-corruption check, the easy-pace guard used by the PACE SANITY CHECK rule) lived inline in `buildSystemPrompt` as a chain of IIFEs. Two small duplicate-work gaps had crept in: `easyPaceRange(easyPaceRaw, useMetric)` was called three separate times inline (FACTS block, "Current paces" line, PACE SANITY CHECK rule) with identical inputs, and `tsTempoPace`/`tsTempoPaceGuard` independently re-derived the same `estimatePacesFromEasyPace` + pace-formatting logic in two separate closures that a future edit could drift apart.
+**Fix / Change:** Extracted `computePaceContext(params)` into `src/lib/coach-pace-context.ts` — a pure function taking `{easyPaceRaw, tempoPaceRaw, intervalPaceRaw, useMetric}` and returning `{tempoPace, intervalPace, easyGuard, tempoPaceGuard, easyRange, pacesAreSane}`. The stored-pace corruption check (tempo ≥ easy pace, or slower than a 13:00/mi floor — almost always a km/mi confusion at intake) is preserved exactly. `easyPaceRange` is now computed once and reused at all three call sites. Removed the now-unused inline `tsFormatPace` helper and the `easyPaceRange` import from route.ts (still used elsewhere via `estimatePacesFromEasyPace`, which stays imported). Verified byte-for-byte output parity before trusting the new tests.
+**Files changed:** `src/lib/coach-pace-context.ts` (new), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/coach-pace-context.test.ts` (new, 8 tests)
+
+---
+
 ## 2026-07-12 — Phase A, slice 3: pulled the FITNESS TIER volume-cap block out of buildSystemPrompt, closed a duplicate-formula gap with plan-validation.ts
 
 **Type:** Refactor / Reliability

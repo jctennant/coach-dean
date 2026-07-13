@@ -1,6 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { calculateVDOTPaces, estimatePacesFromEasyPace, easyPaceRange } from "@/lib/paces";
+import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { buildHRZoneContext, deriveZones, type LTHRConfidence } from "@/lib/hr-zones";
 import { anthropic } from "@/lib/anthropic";
@@ -21,6 +21,7 @@ import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
 import { buildFitnessTierBlock } from "@/lib/coach-fitness-tier";
+import { computePaceContext } from "@/lib/coach-pace-context";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
@@ -5370,57 +5371,17 @@ function buildSystemPrompt(
   const tsUseMetric = spUseMetric;
   const tsMi = spMi;
   const tsTargetMiles = (state?.weekly_mileage_target as number) || 0;
-  const tsFormatPace = (paceStr: string | null | undefined): string => {
-    if (!paceStr) return "TBD";
-    if (!tsUseMetric) return paceStr;
-    const match = paceStr.match(/(\d+):(\d+)/);
-    if (!match) return paceStr;
-    const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
-    const kmSec = Math.round(totalSec / 1.60934);
-    const min = Math.floor(kmSec / 60);
-    const sec = kmSec % 60;
-    return `${min}:${String(sec).padStart(2, "0")}/km`;
-  };
   const tsEasyPaceRaw = profile?.current_easy_pace as string | null;
 
-  // Parse easy pace to seconds for sanity-checking derived paces.
-  const tsEasySec = (() => {
-    if (!tsEasyPaceRaw) return null;
-    const m = tsEasyPaceRaw.match(/(\d+):(\d+)/);
-    return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null;
-  })();
-  // Sanity-check stored tempo/interval paces. A valid tempo must be:
-  //   - at least 30s/mi faster than easy pace, AND
-  //   - faster than 13:00/mi (absolute floor — anything slower is walking, not tempo)
-  // If either fails, the stored paces are corrupt (likely a km/mi confusion at intake)
-  // and we should NOT let Claude use them in prescriptions.
-  const TEMPO_FLOOR_SEC = 13 * 60; // 13:00/mi
-  const getRawPaceSec = (paceStr: string | null): number | null => {
-    if (!paceStr) return null;
-    const m = paceStr.match(/(\d+):(\d+)/);
-    return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null;
-  };
-  const storedTempoPaceRaw = profile?.current_tempo_pace as string | null;
-  const tempoSecRaw = getRawPaceSec(storedTempoPaceRaw) ?? getRawPaceSec(estimatePacesFromEasyPace(tsEasyPaceRaw).tempo);
-  const pacesAreSane = tempoSecRaw == null || (
-    tempoSecRaw < TEMPO_FLOOR_SEC &&
-    (tsEasySec == null || tempoSecRaw < tsEasySec - 30)
-  );
-
-  const tsTempoPace = (() => {
-    if (!pacesAreSane) return "INVALID — paces appear corrupted (tempo ≥ easy or slower than 13:00/mi). Use effort-based language only (e.g. 'comfortably hard', 'easy effort'). Do not prescribe specific paces until the athlete provides a recent race time or easy pace to recalibrate.";
-    const stored = profile?.current_tempo_pace as string | null;
-    if (stored) return tsFormatPace(stored);
-    const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
-    return est.tempo ? `${tsFormatPace(est.tempo)} (estimated)` : "TBD";
-  })();
-  const tsIntervalPace = (() => {
-    if (!pacesAreSane) return "INVALID — see tempo note above";
-    const stored = profile?.current_interval_pace as string | null;
-    if (stored) return tsFormatPace(stored);
-    const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
-    return est.interval ? `${tsFormatPace(est.interval)} (estimated)` : "TBD";
-  })();
+  const paceCtx = computePaceContext({
+    easyPaceRaw: tsEasyPaceRaw,
+    tempoPaceRaw: profile?.current_tempo_pace as string | null,
+    intervalPaceRaw: profile?.current_interval_pace as string | null,
+    useMetric: tsUseMetric,
+  });
+  const pacesAreSane = paceCtx.pacesAreSane;
+  const tsTempoPace = paceCtx.tempoPace;
+  const tsIntervalPace = paceCtx.intervalPace;
   const tsEffectiveWeek = periodization?.effectiveWeek ?? (state?.current_week as number | null) ?? 1;
   const tsPhaseDisplay = (() => {
     const rawPhase = periodization?.phase ?? (state?.current_phase as string | null) ?? "base";
@@ -5439,14 +5400,8 @@ function buildSystemPrompt(
   const tsProgressionLine = !periodization?.isDeloadWeek && periodization?.suggestedWeeklyMiles != null && tsPhaseDisplay !== "taper"
     ? `- Progression target this week: ~${tsMi(periodization.suggestedWeeklyMiles)} (~${tsPhaseDisplay === "peak" ? "5%" : "8%"} step up from recent avg)\n`
     : "";
-  const tsEasyGuard = tsEasyPaceRaw ? tsFormatPace(tsEasyPaceRaw) : null;
-  const tsTempoPaceGuard = (() => {
-    if (!pacesAreSane) return null; // guard: suppress invalid paces from plan generation
-    const stored = profile?.current_tempo_pace as string | null;
-    if (stored) return tsFormatPace(stored);
-    const est = estimatePacesFromEasyPace(tsEasyPaceRaw);
-    return est.tempo ? tsFormatPace(est.tempo) : null;
-  })();
+  const tsEasyGuard = paceCtx.easyGuard;
+  const tsTempoPaceGuard = paceCtx.tempoPaceGuard;
   const { sessionRows, projectedWeekMiles, remainingPlanLine } = (() => {
     const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
     if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
@@ -5625,7 +5580,7 @@ function buildSystemPrompt(
       : hasStrava || weekMileageSoFar > 0
       ? `${tsMi(weekMileageSoFar)} logged (${weekRunCount} run${weekRunCount !== 1 ? "s" : ""})`
       : "not tracked (no Strava)";
-    const easyRange = easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD";
+    const easyRange = paceCtx.easyRange || "TBD";
     const raceLine = raceIsUpcoming && profileRaceDaysUntil !== null
       ? `Race: ${goalDisplay} on ${profile!.race_date as string} · ${profileRaceDaysUntil} day${profileRaceDaysUntil !== 1 ? "s" : ""} / ~${Math.round(profileRaceDaysUntil / 7)} week${Math.round(profileRaceDaysUntil / 7) !== 1 ? "s" : ""} out`
       : "";
@@ -5947,8 +5902,8 @@ ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): 
 <rule>THIS WEEK'S MILEAGE: ${tsMileageLine}.${!!(user.strava_athlete_id as number | null) ? ` The "done so far" figure is the ONLY authoritative source for the athlete's current week mileage — it is computed directly from Strava data and covers Monday through today. NEVER compute or estimate week mileage yourself by adding up individual run mentions from the conversation. NEVER include runs from previous weeks as "carryover" — each week's mileage resets on Monday. If the athlete mentions a run that is not yet reflected here, acknowledge it but do not add it to the week total yourself. Use the "done" figure as-is when discussing current mileage; use the "projected" figure only when discussing the week plan. IMPORTANT: If your own prior messages in this conversation stated a different mileage total, those messages were wrong — do not defend, re-cite, or re-state them. Re-anchor to the authoritative figure in this system prompt immediately. When an athlete corrects you on mileage, agree and state the correct Strava figure without qualification.` : ` Since this athlete is not on Strava, estimate current week mileage from what they have reported in the RECENT CONVERSATION — but only count runs they explicitly placed in the current week (Monday onward). Do not carry forward runs from previous weeks. When referencing the total, frame it as an estimate ("based on what you've told me this week, you're around X miles") — never state it as a precise verified figure.`}</rule>
 - Athlete preferred units: ${profile?.preferred_units || "imperial"} — use ${profile?.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses${(profile?.external_plan_notes as string | null) ? `\n- External training plan: ${profile?.external_plan_notes} — factor this into your analysis and coaching context. The athlete is following this plan; Dean's role is to analyze their runs and provide insight on top of it, not replace it.` : ""}
 - Athlete VDOT: ${freshVdot != null ? freshVdot : (profile?.current_vdot != null ? profile.current_vdot : "unknown (no race data on file)")}
-- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "TBD"}, Tempo ${tsTempoPace}, Interval ${tsIntervalPace}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
-<rule>PACE SANITY CHECK (extends principle 10):${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace at ${tsEasyGuard} or slower is wrong — use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead.` : " Use the stored Tempo and Interval values above."} Warm-up and cool-down pace = easy pace range (${easyPaceRange(tsEasyPaceRaw, tsUseMetric) || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit on every pace.</rule>
+- Current paces (computed by Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth): Easy ${paceCtx.easyRange || "TBD"}, Tempo ${tsTempoPace}, Interval ${tsIntervalPace}${(() => { const prYear = onboardingData?.pr_year as number | null; if (prYear && (new Date().getFullYear() - prYear) >= 2) { return ` (NOTE: PR data is from ${prYear} — ${new Date().getFullYear() - prYear} years ago. These paces may be conservative if fitness has improved, or too aggressive if there's been a long break. Treat as a starting estimate and adjust based on actual workout performance.)`; } return ""; })()}
+<rule>PACE SANITY CHECK (extends principle 10):${tsEasyGuard ? ` This athlete's easy pace is ${tsEasyGuard}. Any tempo or interval pace at ${tsEasyGuard} or slower is wrong — use the stored Tempo (${tsTempoPaceGuard ?? "see paces above"}) instead.` : " Use the stored Tempo and Interval values above."} Warm-up and cool-down pace = easy pace range (${paceCtx.easyRange || "see above"}); never prescribe WU/CD more than 30 sec${tsUseMetric ? "/km" : "/mi"} slower than easy. Always include the unit on every pace.</rule>
 <rule>LABEL/PACE CONSISTENCY: A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than easy. Never write "Tempo X mi @ [easy pace range]" — fix the label or fix the pace.</rule>
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
