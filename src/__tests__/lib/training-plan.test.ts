@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, type UploadedPlanWeek } from "@/lib/training-plan";
+import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, type UploadedPlanWeek } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -301,5 +301,140 @@ describe("computeWeeklyStrength", () => {
   it("re-evaluates from injury_notes free text too", () => {
     const result = computeWeeklyStrength({ training_days: [], injury_notes: "IT band flare-up last week" });
     expect(result.routineKey).toBe("it_band");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeArcWeekSkeleton
+// ---------------------------------------------------------------------------
+describe("computeArcWeekSkeleton", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Pin to Wednesday 2026-05-27 — week is Mon 5/25 .. Sun 5/31, same anchor as
+  // the computeWeekSessions tests above.
+  function pinToWednesday() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00Z"));
+  }
+
+  const fiveDayTraining = ["monday", "tuesday", "wednesday", "friday", "sunday"];
+
+  it("places the long run on Sunday when Sunday is a training day", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining,
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    const longRun = slots.find(s => s.type === "long_run");
+    expect(longRun?.day).toBe("Sun");
+    expect(longRun?.date).toBe("5/31");
+    expect(longRun?.distanceMiles).toBe(10);
+  });
+
+  it("falls back to the last training day for the long run when neither Sat nor Sun train", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: ["monday", "tuesday", "wednesday", "thursday"],
+      weeklyTotalMiles: 20,
+      longRunMiles: 8,
+      keyWorkoutText: null,
+      strengthDay: "Fri",
+      timezone: "UTC",
+    });
+    expect(slots.find(s => s.type === "long_run")?.day).toBe("Thu");
+  });
+
+  it("parses the quality session distance from the key_workout prefix", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining,
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    const quality = slots.find(s => s.type === "quality");
+    expect(quality?.distanceMiles).toBe(5);
+    expect(quality?.keyWorkoutText).toBe("Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)");
+    // Quality day must not be the long-run day.
+    expect(quality?.day).not.toBe("Sun");
+  });
+
+  it("splits leftover mileage across easy days so the total is exact", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining, // Mon, Tue, Wed, Fri, Sun
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    const runningTotal = slots
+      .filter(s => s.type === "long_run" || s.type === "quality" || s.type === "easy")
+      .reduce((sum, s) => sum + (s.distanceMiles ?? 0), 0);
+    expect(runningTotal).toBeCloseTo(30, 5);
+  });
+
+  it("assigns rest to non-training days and strength to the computed strength day", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining, // Mon, Tue, Wed, Fri, Sun — Thu and Sat are off
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    expect(slots.find(s => s.day === "Thu")?.type).toBe("strength");
+    expect(slots.find(s => s.day === "Sat")?.type).toBe("rest");
+  });
+
+  it("returns slots sorted chronologically Mon through Sun", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining,
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    expect(slots).toHaveLength(7);
+    const order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    expect(slots.map(s => s.day)).toEqual(order);
+  });
+
+  it("returns [] when the athlete has no training days set", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: [],
+      weeklyTotalMiles: 20,
+      longRunMiles: 8,
+      keyWorkoutText: null,
+      strengthDay: "Mon",
+      timezone: "UTC",
+    });
+    expect(slots).toEqual([]);
+  });
+
+  it("falls back to a loose distance scan when the key_workout has no parenthetical breakdown", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining,
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "6x800m repeats, roughly 4mi total",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    expect(slots.find(s => s.type === "quality")?.distanceMiles).toBe(4);
   });
 });

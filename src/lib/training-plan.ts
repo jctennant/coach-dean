@@ -886,6 +886,157 @@ export function computeWeekSessions(
     });
 }
 
+const ORDERED_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+export interface ArcWeekSlot {
+  day: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+  date: string; // "M/D"
+  type: "long_run" | "quality" | "easy" | "rest" | "strength" | "cross_train";
+  distanceMiles: number | null;
+  /** Full key_workout text (with WU/CD breakdown) — set only on quality slots. */
+  keyWorkoutText?: string;
+}
+
+/**
+ * Parse the leading distance out of a key_workout string like
+ * "Tempo 3.5mi (1mi WU + 1.5mi @ threshold + 1mi CD)" — reuses the same prefix
+ * shape fixKeyWorkoutMath already validates, since Dean's arc-generated
+ * key_workout text always carries this format.
+ */
+function parseLeadingDistanceMiles(text: string): number | null {
+  const prefixRe = /^(.+?)\s+(\d+(?:\.\d+)?)mi\b/;
+  const m = prefixRe.exec(text.trim());
+  if (m) return parseFloat(m[2]);
+  const loose = /(\d+(?:\.\d+)?)\s*mi\b/.exec(text);
+  return loose ? parseFloat(loose[1]) : null;
+}
+
+/**
+ * Deterministically compute a full week's session skeleton (day, date, type,
+ * distance) for an arc-generated week — the same "compute it in code, don't
+ * trust LLM free text" pattern as computeWeeklyStrength/computeWeekSessions
+ * above, extended to arc-generated plans (which previously had no day/date
+ * assignment logic at all; Claude free-handed both in weekly_recap prose).
+ *
+ * Distance/day/date here are treated as ground truth — an LLM only supplies
+ * descriptive content (pace, purpose, terrain cues) for the slots this
+ * function has already placed.
+ */
+export function computeArcWeekSkeleton(params: {
+  trainingDays: string[]; // lowercase day names, training_profiles.training_days
+  weeklyTotalMiles: number; // pre-clamped by the caller
+  longRunMiles: number;
+  keyWorkoutText: string | null;
+  keyWorkoutText2?: string | null;
+  strengthDay: string | null; // "Mon".."Sun", from computeWeeklyStrength()
+  timezone: string;
+}): ArcWeekSlot[] {
+  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, timezone } = params;
+
+  const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  const tz = timezone || "America/New_York";
+  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  const [ty, tm, td] = localStr.split("-").map(Number);
+  const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
+  const daysFromMonday = todayDow === 0 ? 6 : todayDow - 1;
+  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday));
+  const dateFor = (abbrev: string) => {
+    const offset = dayOffset[abbrev]!;
+    const d = new Date(Date.UTC(
+      mondayUTC.getUTCFullYear(),
+      mondayUTC.getUTCMonth(),
+      mondayUTC.getUTCDate() + offset
+    ));
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  };
+
+  const normalizedTrainingDays = new Set(trainingDays.map(d => d.toLowerCase().trim()));
+  const trainDayAbbrevs = WEEK_DAYS
+    .map((full, i) => (normalizedTrainingDays.has(full) ? WEEK_DAY_ABBREV[i] : null))
+    .filter((d): d is string => d !== null);
+
+  if (trainDayAbbrevs.length === 0) return [];
+
+  const dayDistance = (a: string, b: string) => {
+    const ia = ORDERED_DAYS.indexOf(a as typeof ORDERED_DAYS[number]);
+    const ib = ORDERED_DAYS.indexOf(b as typeof ORDERED_DAYS[number]);
+    return Math.min(Math.abs(ia - ib), 7 - Math.abs(ia - ib));
+  };
+
+  // Long-run day: prefer Sun, then Sat, else the chronologically-last training day.
+  const longRunDay = trainDayAbbrevs.includes("Sun")
+    ? "Sun"
+    : trainDayAbbrevs.includes("Sat")
+    ? "Sat"
+    : trainDayAbbrevs[trainDayAbbrevs.length - 1]!;
+
+  // Quality day(s): training days that aren't the long-run day, preferring ones
+  // not immediately adjacent to it.
+  const candidateQualityDays = trainDayAbbrevs.filter(d => d !== longRunDay);
+  const nonAdjacent = candidateQualityDays.filter(d => dayDistance(d, longRunDay) > 1);
+  const qualityDay = nonAdjacent[0] ?? candidateQualityDays[0] ?? null;
+
+  let qualityDay2: string | null = null;
+  if (keyWorkoutText2 && qualityDay) {
+    const remaining = candidateQualityDays.filter(d => d !== qualityDay);
+    const remainingNonAdjacent = remaining.filter(d => dayDistance(d, longRunDay) > 1);
+    qualityDay2 = remainingNonAdjacent[0] ?? remaining[0] ?? null;
+    if (!qualityDay2) {
+      console.warn("[computeArcWeekSkeleton] no room for a second quality session this week — dropping key_workout_2");
+    }
+  }
+
+  const qualityDistance = keyWorkoutText ? parseLeadingDistanceMiles(keyWorkoutText) : null;
+  const qualityDistance2 = keyWorkoutText2 ? parseLeadingDistanceMiles(keyWorkoutText2) : null;
+  if (keyWorkoutText && qualityDistance == null) {
+    console.warn(`[computeArcWeekSkeleton] could not parse a distance from key_workout: "${keyWorkoutText}"`);
+  }
+
+  const slots: ArcWeekSlot[] = [];
+  const usedDays = new Set<string>();
+
+  slots.push({ day: longRunDay as ArcWeekSlot["day"], date: dateFor(longRunDay), type: "long_run", distanceMiles: longRunMiles });
+  usedDays.add(longRunDay);
+
+  if (qualityDay && keyWorkoutText) {
+    slots.push({ day: qualityDay as ArcWeekSlot["day"], date: dateFor(qualityDay), type: "quality", distanceMiles: qualityDistance, keyWorkoutText });
+    usedDays.add(qualityDay);
+  }
+  if (qualityDay2 && keyWorkoutText2) {
+    slots.push({ day: qualityDay2 as ArcWeekSlot["day"], date: dateFor(qualityDay2), type: "quality", distanceMiles: qualityDistance2, keyWorkoutText: keyWorkoutText2 });
+    usedDays.add(qualityDay2);
+  }
+
+  // Remaining training days -> easy, splitting leftover mileage evenly (rounded to
+  // the nearest 0.5, with the exact remainder absorbed into the last easy slot).
+  const easyDays = trainDayAbbrevs.filter(d => !usedDays.has(d));
+  const qualityTotal = (qualityDistance ?? 0) + (qualityDistance2 ?? 0);
+  const leftover = Math.max(0, weeklyTotalMiles - longRunMiles - qualityTotal);
+  if (easyDays.length > 0) {
+    const base = Math.floor((leftover / easyDays.length) * 2) / 2;
+    let assigned = 0;
+    easyDays.forEach((d, i) => {
+      const isLast = i === easyDays.length - 1;
+      const dist = isLast ? Math.round((leftover - assigned) * 10) / 10 : base;
+      assigned += dist;
+      slots.push({ day: d as ArcWeekSlot["day"], date: dateFor(d), type: "easy", distanceMiles: Math.max(0, dist) });
+    });
+  }
+
+  // Non-training days -> rest, except the pre-computed strength day.
+  ORDERED_DAYS.forEach(d => {
+    if (trainDayAbbrevs.includes(d)) return;
+    slots.push({
+      day: d,
+      date: dateFor(d),
+      type: strengthDay === d ? "strength" : "rest",
+      distanceMiles: null,
+    });
+  });
+
+  return slots.sort((a, b) => ORDERED_DAYS.indexOf(a.day) - ORDERED_DAYS.indexOf(b.day));
+}
+
 /**
  * Read plan_sessions_all_weeks from the user's onboarding_data, compute absolute
  * dates for the given week number, and write to training_state.weekly_plan_sessions.
@@ -923,7 +1074,7 @@ export async function syncWeekFromUploadedPlan(
   console.log(`[syncWeekFromUploadedPlan] wrote ${sessions.length} sessions for week ${weekNumber} to training_state`);
 }
 
-export async function syncWeekFromArc(userId: string, weekNum: number): Promise<void> {
+export async function syncWeekFromArc(userId: string, weekNum: number, timezone = "America/New_York"): Promise<void> {
   const { data: plan } = await supabase
     .from("training_plans")
     .select("weeks, plan_source")
@@ -942,7 +1093,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number): Promise<
 
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
-  type DeanWeek = { week_number: number; long_run_target: number; key_workout: string; mileage_target?: number };
+  type DeanWeek = { week_number: number; long_run_target: number; key_workout: string; key_workout_2?: string | null; mileage_target?: number };
 
   if (plan.plan_source === "uploaded") {
     const weeks = plan.weeks as UploadedWeek[];
@@ -965,12 +1116,43 @@ export async function syncWeekFromArc(userId: string, weekNum: number): Promise<
     const weeks = plan.weeks as DeanWeek[];
     const week = weeks.find(w => w.week_number === weekNum);
     if (!week) return;
+    // Recompute the same deterministic skeleton weekly_recap builds at response time
+    // (see computeArcWeekSkeleton above) rather than threading Claude's slot_annotations
+    // through — everything it needs is derivable from DB state, so this stays correct
+    // even when called from a path other than the weekly_recap response (e.g. after a
+    // plan patch in user_message, see the syncWeekFromArc call sites in route.ts).
+    const trainingDays = (profile?.training_days as string[] | null) ?? [];
+    const skeleton = computeArcWeekSkeleton({
+      trainingDays,
+      weeklyTotalMiles: week.mileage_target ?? 0,
+      longRunMiles: week.long_run_target ?? 0,
+      keyWorkoutText: week.key_workout || null,
+      keyWorkoutText2: week.key_workout_2 ?? null,
+      strengthDay: strength.day,
+      timezone,
+    });
+    const planSessions: PlanSession[] = skeleton
+      .filter(s => s.type !== "rest")
+      .map(s => ({
+        day: s.day,
+        date: s.date,
+        label: s.type === "long_run"
+          ? `Long run ${s.distanceMiles ?? 0}mi`
+          : s.type === "quality"
+          ? (s.keyWorkoutText ?? `Quality ${s.distanceMiles ?? 0}mi`)
+          : s.type === "easy"
+          ? `Easy ${s.distanceMiles ?? 0}mi`
+          : "Strength + mobility",
+        type: s.type === "long_run" || s.type === "quality" || s.type === "easy" ? "run" : "strength",
+        routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
+      }));
     await supabase.from("training_state").update({
       weekly_long_run_miles: week.long_run_target ?? null,
       weekly_quality_session: week.key_workout || null,
       weekly_mileage_target: week.mileage_target || null,
       weekly_strength_day: strength.day,
       weekly_strength_routine_key: strength.routineKey,
+      ...(planSessions.length > 0 ? { weekly_plan_sessions: planSessions as unknown as Json } : {}),
     }).eq("user_id", userId);
   }
 }

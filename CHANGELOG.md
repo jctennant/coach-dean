@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-12 — Fixed weekly_recap previewing the wrong week, an unsafe mileage jump, and out-of-order dates
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant, relaying a user's Sunday recap
+**User feedback:** "1. He shared the plan for the following week, not this coming week. 2. He has the plan as jumping from 6 miles to 36 miles week over week, which doesn't seem right." Follow-up: "also the days are not in chronological order" (Sun 7/19, Mon 7/20, then Tue 7/14, Thu 7/16 — dates jumped backward).
+**Root cause:** Three compounding bugs, all downstream of the same drift: an April redesign made `weekly_recap` day-agnostic prose (framework only, no dated sessions), but a later commit re-added a full dated-session/`[SESSION_LIST]` block to the same prompt without updating the code that assumed it was gone.
+1. **Off-by-one week selection** — `storedNextPlanWeek` (`route.ts`) was `periodization.effectiveWeek + 1`. For `weekly_recap`, `effectiveWeek` is *already* `storedWeek + 1` (see `buildPeriodization`), so `storedPlanWeek` (at `effectiveWeek`) already IS the upcoming week — `storedNextPlanWeek` was actually two weeks ahead of the week just completed. The "NEXT WEEK — ARC DATA" preview block sourced from `storedNextPlanWeek`, previewing the wrong week entirely (plus baking in an extra ramp step, contributing to the mileage jump).
+2. **No ramp clamp against the actual last-completed week** — the arc's baked-in `mileage_target` was used as-is; the only existing cap compared against a multi-week trailing average, which doesn't catch a short/injury week specifically (this athlete had run only 6mi due to a shin issue).
+3. **Contradictory prompt + no deterministic day/date assignment** — the prompt had a "no day-by-day schedule" instruction immediately followed by a dated-session-list spec, so Claude nondeterministically followed one or the other. `fixSessionDayAbbreviations` (the deterministic date corrector) only ran for `user_message`, never `weekly_recap`, so any date-arithmetic error the LLM made in the legacy dated-list format was never caught.
+**Fix / Change:** Per the codebase's "structural fix over another prompt rule" philosophy (see CLAUDE.md), split "what/when" (day, date, distance) from "how to describe it" (pace, purpose, framing):
+- Fixed the off-by-one: the "NEXT WEEK" preview and the phase-transition comparison now read from `storedPlanWeek` (the correct upcoming week), not `storedNextPlanWeek`.
+- Added `computeArcWeekSkeleton()` in `training-plan.ts` — deterministically computes the upcoming week's day/date/type/distance for every slot (long run, quality, easy, strength, rest), reusing the same day→date math as `computeWeekSessions()` and the same key-workout distance parsing as `fixKeyWorkoutMath()`. This is the same "compute it in code, don't trust LLM free text" pattern already proven by `computeWeeklyStrength()`.
+- Added a ramp clamp: the upcoming week's mileage target is capped at 1.15× the athlete's actual last-completed week, unless that week was a scheduled deload (in which case bouncing back toward the trailing-average target is expected).
+- When a skeleton is built (has an arc, not on injury hold/complement/analyst mode), `weekly_recap`'s prompt presents it as fixed context and the `deliver_message` tool switches to a new `slot_annotations` schema — Claude can only add pace/purpose/framing per slot, not invent days, dates, distances, or a divergent total. The legacy dated-list/`[SESSION_LIST]` prose path remains for athletes without a skeleton (no arc, non-Strava, complement/analyst mode).
+- `syncWeekFromArc` now recomputes the same skeleton and writes it to `training_state.weekly_plan_sessions`, so arc-generated plans finally get real day-specific data the same way uploaded plans already did.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`, `src/__tests__/lib/training-plan.test.ts`
+**Follow-up not done in this slice:** `morning_plan` still reads scalar `weekly_long_run_miles`/`weekly_quality_session` fields for arc plans rather than the new `weekly_plan_sessions` data — wiring it to read the skeleton uniformly (like uploaded plans) is a natural next step.
+
+---
+
 ## 2026-07-12 — Phase A, slice 4: pulled the pace-computation block out of buildSystemPrompt into coach-pace-context.ts
 
 **Type:** Refactor / Reliability

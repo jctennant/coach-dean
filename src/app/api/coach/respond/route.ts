@@ -10,7 +10,8 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength } from "@/lib/training-plan";
+import type { ArcWeekSlot } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
@@ -85,8 +86,20 @@ const REHAB_TOOL = {
 // stripReasoningPreamble() below is kept as a defense-in-depth safety net (and as the
 // extraction path for the rare turn where Claude doesn't call any tool at all), not as
 // the primary defense.
-// includePlanFacts is true for initial_plan/weekly_recap — see buildDeliverMessageTool.
-function buildDeliverMessageTool(includePlanFacts: boolean) {
+// deliverMessageMode:
+// - "none": plain message, no structured plan data (most triggers).
+// - "plan_facts": initial_plan, and weekly_recap when there's no deterministic day skeleton
+//   to schedule from — Claude reports the plan's numbers as structured facts (`plan`) so the
+//   system can verify them, since day-agnostic prose can't be parsed back into numbers the
+//   way an older dated session list could.
+// - "skeleton_annotations": weekly_recap when computeArcWeekSkeleton() already built the
+//   upcoming week's day/date/distance skeleton (see training-plan.ts). Day/date/type/distance
+//   are already fixed by that skeleton — Claude only supplies descriptive content
+//   (`slot_annotations`) per slot, so it can no longer invent days, dates, or a mileage total
+//   that diverges from what the skeleton already decided.
+type DeliverMessageMode = "none" | "plan_facts" | "skeleton_annotations";
+
+function buildDeliverMessageTool(mode: DeliverMessageMode) {
   return {
     name: "deliver_message" as const,
     description:
@@ -95,11 +108,15 @@ function buildDeliverMessageTool(includePlanFacts: boolean) {
       "needed (get_rehab_protocol, web_search) have resolved. The `message` argument must be nothing but the finished " +
       "SMS text (or the exact literal string [NO_REPLY] when instructed to send nothing) — no reasoning, no labels, " +
       "no explanation of what you're about to do." +
-      (includePlanFacts
+      (mode === "plan_facts"
         ? " You must also report the `plan` object: the concrete numbers behind this message, exactly as you intend " +
           "to state them in your text (same values, same unit). This plan is day-agnostic prose (no day-by-day " +
           "list) — `plan` is how the system verifies those numbers are safe and internally consistent, since they " +
           "can't be parsed back out of a dated session list the way older plan formats could."
+        : mode === "skeleton_annotations"
+        ? " You must also report `slot_annotations`: one entry per non-rest slot in the fixed week skeleton given " +
+          "to you in this prompt. The skeleton already decided every slot's day, date, type, and distance — do not " +
+          "restate or alter those. `slot_annotations` is only where you add pace, purpose, and framing content."
         : ""),
     input_schema: {
       type: "object" as const,
@@ -108,7 +125,7 @@ function buildDeliverMessageTool(includePlanFacts: boolean) {
           type: "string",
           description: "The exact text to send the athlete, or the literal string [NO_REPLY].",
         },
-        ...(includePlanFacts
+        ...(mode === "plan_facts"
           ? {
               plan: {
                 type: "object" as const,
@@ -148,8 +165,40 @@ function buildDeliverMessageTool(includePlanFacts: boolean) {
               },
             }
           : {}),
+        ...(mode === "skeleton_annotations"
+          ? {
+              slot_annotations: {
+                type: "array" as const,
+                description:
+                  "One entry per non-rest slot in the pre-built week skeleton given to you above, in any order. " +
+                  "Day/date/type/distance are already fixed — do not restate or alter them here.",
+                items: {
+                  type: "object" as const,
+                  properties: {
+                    day: {
+                      type: "string",
+                      description: "Must exactly match one of the fixed skeleton days (e.g. \"Mon\", \"Sat\").",
+                    },
+                    pace: {
+                      type: "string",
+                      description: "Target pace with unit, e.g. \"8:15/mi\" or \"4:30/km\". Omit for rest/strength.",
+                    },
+                    why: {
+                      type: "string",
+                      description: "One short clause on this session's purpose — quality sessions only.",
+                    },
+                    description: {
+                      type: "string",
+                      description: "A short athlete-facing cue (terrain, effort, recovery framing) — no distance number, that's already fixed by the skeleton.",
+                    },
+                  },
+                  required: ["day"],
+                },
+              },
+            }
+          : {}),
       },
-      required: includePlanFacts ? ["message", "plan"] : ["message"],
+      required: mode === "plan_facts" ? ["message", "plan"] : mode === "skeleton_annotations" ? ["message", "slot_annotations"] : ["message"],
     },
   };
 }
@@ -1929,7 +1978,60 @@ Apply this to bias which metric lens you pick and what advice you give proactive
       storedPlanAllWeeks = planData.weeks as StoredPlanWeek[];
       storedPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum) ?? null;
       storedNextPlanWeek = storedPlanAllWeeks.find(w => w.week_number === currentWeekNum + 1) ?? null;
+
+      // Clamp the arc's baked-in mileage_target for the upcoming week against what the
+      // athlete actually just ran — the arc number alone doesn't know about an injury or
+      // short week. periodization.isDeloadWeek describes the UPCOMING week (effectiveWeek),
+      // not the one just completed, so we recompute deload status for the just-completed
+      // week (effectiveWeek - 1) directly rather than reusing that flag.
+      if (trigger === "weekly_recap" && storedPlanWeek && weekMileageSoFar > 0) {
+        const justCompletedWeekNum = periodization.effectiveWeek - 1;
+        const justCompletedWasDeload = justCompletedWeekNum % 4 === 0
+          && periodization.phase !== "taper" && periodization.phase !== "peak";
+        const rampCeiling = weekMileageSoFar * 1.15;
+        if (!justCompletedWasDeload && storedPlanWeek.mileage_target > rampCeiling) {
+          log.warn("arc week mileage_target exceeded ramp ceiling from last actual week — clamping", {
+            userId, statedTarget: storedPlanWeek.mileage_target, clampedTo: rampCeiling, weekMileageSoFar,
+          });
+          void trackEvent(userId, "arc_week_mileage_clamped", {
+            statedTarget: storedPlanWeek.mileage_target, clampedTo: rampCeiling, weekMileageSoFar,
+          });
+          storedPlanWeek = { ...storedPlanWeek, mileage_target: Math.round(rampCeiling * 2) / 2 };
+          storedPlanAllWeeks = storedPlanAllWeeks.map(w =>
+            w.week_number === storedPlanWeek!.week_number ? storedPlanWeek! : w
+          );
+        }
+      }
     }
+  }
+
+  // Deterministic day/date/distance skeleton for the upcoming week — replaces having
+  // Claude free-hand a day-by-day schedule in weekly_recap prose (see
+  // computeArcWeekSkeleton in training-plan.ts for why). Only built when there's a real
+  // arc week to schedule from and the athlete isn't in a mode where Dean shouldn't be
+  // prescribing running sessions at all (injury hold, complement, analyst).
+  let arcWeekSkeleton: ArcWeekSlot[] | null = null;
+  if (
+    trigger === "weekly_recap" &&
+    storedPlanWeek &&
+    !(state?.injury_hold_since as string | null) &&
+    !isComplementMode &&
+    !isAnalystMode
+  ) {
+    const trainingDaysForSkeleton = (profile?.training_days as string[] | null) ?? [];
+    const strengthForSkeleton = computeWeeklyStrength(profile);
+    const skeleton = computeArcWeekSkeleton({
+      trainingDays: trainingDaysForSkeleton,
+      weeklyTotalMiles: storedPlanWeek.mileage_target,
+      longRunMiles: storedPlanWeek.long_run_target,
+      keyWorkoutText: storedPlanWeek.key_workout || null,
+      keyWorkoutText2: storedPlanWeek.key_workout_2 ?? null,
+      strengthDay: strengthForSkeleton.day,
+      timezone: userTimezone,
+    });
+    // computeArcWeekSkeleton returns [] when the athlete has no training_days set —
+    // fall back to the prose-only path in that case rather than sending an empty schedule.
+    arcWeekSkeleton = skeleton.length > 0 ? skeleton : null;
   }
 
   // Build user message based on trigger
@@ -2534,7 +2636,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return questions;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton);
 
   // Re-anchor today/tomorrow right next to the generation instructions. The full
   // DATE CONTEXT block lives early in the (much longer) system prompt — by the time
@@ -2760,9 +2862,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
 
   // deliver_message is always available — it's the only channel the athlete-facing text
   // travels through (see comment above buildDeliverMessageTool). initial_plan/weekly_recap
-  // also get the structured `plan` field (weekly_total) for the same reason.
+  // also get structured plan data back — `slot_annotations` when a deterministic day
+  // skeleton was built for weekly_recap (see arcWeekSkeleton above), otherwise `plan`.
   const isPlanTrigger = trigger === "initial_plan" || trigger === "weekly_recap";
-  const coachTools: Anthropic.Messages.ToolUnion[] = [buildDeliverMessageTool(isPlanTrigger)];
+  const deliverMessageMode: DeliverMessageMode =
+    trigger === "weekly_recap" && arcWeekSkeleton ? "skeleton_annotations" :
+    isPlanTrigger ? "plan_facts" : "none";
+  const coachTools: Anthropic.Messages.ToolUnion[] = [buildDeliverMessageTool(deliverMessageMode)];
   if (shouldUseWebSearch) coachTools.push({ type: "web_search_20250305", name: "web_search" });
   if (offerRehabTool) coachTools.push(REHAB_TOOL);
 
@@ -2978,7 +3084,7 @@ OUTPUT CONTRACT:
   // the real backstop: Claude reports its intended weekly_total as a structured number
   // (not one inferred by regex-summing prose), we cap it against a known-safe range, and
   // force the message text to match.
-  if (deliverBlock && rawText && isPlanTrigger) {
+  if (deliverBlock && rawText && deliverMessageMode === "plan_facts") {
     const planInput = (deliverBlock.input as {
       plan?: { weekly_total?: unknown; long_run_distance?: unknown; quality_sessions?: unknown };
     }).plan;
@@ -3040,6 +3146,26 @@ OUTPUT CONTRACT:
           void trackEvent(userId, "plan_quality_pace_not_faster_than_easy", { trigger, qualityPace, easyPace: profile?.current_easy_pace as string | null });
         }
       }
+    }
+  }
+
+  // slot_annotations validation for weekly_recap with a deterministic skeleton: confirm
+  // Claude only annotated days that actually exist in the fixed skeleton — day/date/
+  // distance are ground truth from computeArcWeekSkeleton, this just checks Claude didn't
+  // invent a day. Advisory only (telemetry), no auto-correction of free-text content.
+  if (deliverBlock && rawText && deliverMessageMode === "skeleton_annotations" && arcWeekSkeleton) {
+    const slotAnnotations = (deliverBlock.input as { slot_annotations?: unknown }).slot_annotations;
+    const skeletonDays = new Set(arcWeekSkeleton.map(s => s.day));
+    if (Array.isArray(slotAnnotations)) {
+      const invalidDays = (slotAnnotations as Array<{ day?: unknown }>)
+        .map(a => (typeof a?.day === "string" ? a.day : null))
+        .filter((d): d is string => d !== null && !skeletonDays.has(d as ArcWeekSlot["day"]));
+      if (invalidDays.length > 0) {
+        log.warn("slot_annotations referenced a day not in the fixed skeleton", { trigger, invalidDays });
+        void trackEvent(userId, "arc_week_slot_annotation_day_mismatch", { invalidDays });
+      }
+    } else {
+      log.warn("weekly_recap skeleton mode delivered without usable slot_annotations", { trigger });
     }
   }
 
@@ -3477,7 +3603,7 @@ OUTPUT CONTRACT:
         // During injury hold: don't sync arc — the arc will be rebuilt when injury clears.
         if (!isOnInjuryHold) {
           // Advance simplified week-level plan state from the training arc.
-          await syncWeekFromArc(userId, periodization.effectiveWeek);
+          await syncWeekFromArc(userId, periodization.effectiveWeek, userTimezone);
           console.log(`[weekly_recap] synced arc week ${periodization.effectiveWeek} to training_state`);
 
           // For complement-mode users with an uploaded plan, advance weekly_plan_sessions
@@ -3722,7 +3848,7 @@ OUTPUT CONTRACT:
           const changedWeeks = await maybeUpdateTrainingPlanWeeks(storedPlanId, storedPlanAllWeeks, latestUserMsg.content, coachMessage);
           // If the current week was patched, sync training_state so the dashboard reflects it.
           if (changedWeeks.includes(periodization.effectiveWeek)) {
-            void syncWeekFromArc(userId, periodization.effectiveWeek).catch(err =>
+            void syncWeekFromArc(userId, periodization.effectiveWeek, userTimezone).catch(err =>
               console.error("[user_message] syncWeekFromArc after plan patch failed:", err)
             );
           }
@@ -6743,6 +6869,7 @@ function buildUserMessage(
   mostRecentRunSplitsBlock: string | null = null,
   recentPostRunQuestions: string[] = [],
   isPositiveOnlyStyle = false,
+  arcWeekSkeleton: ArcWeekSlot[] | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -7310,11 +7437,16 @@ Keep the whole thing under 480 characters.`;
         const allWeeks = storedPlanAllWeeks ?? [];
         if (!storedPlanWeek || allWeeks.length === 0) return "";
         const totalWeeks = allWeeks.length;
+        // storedPlanWeek.week_number is periodization.effectiveWeek, which for weekly_recap
+        // is ALREADY storedWeek + 1 (see buildPeriodization) — i.e. storedPlanWeek is the
+        // upcoming week, not the one just completed. The phase transition must compare the
+        // just-completed week's phase (week_number - 1) against storedPlanWeek's phase, not
+        // storedPlanWeek against storedNextPlanWeek (which is two weeks out).
         const currentWeekNum = storedPlanWeek.week_number;
         const currentPhase = storedPlanWeek.phase;
-        const nextPhase = storedNextPlanWeek?.phase ?? null;
-        const phaseEnding = !!(nextPhase && nextPhase !== currentPhase);
         const raceDateStr = raceDate;
+        const justCompletedPhase = computePhase(currentWeekNum - 1, raceDateStr);
+        const phaseEnding = !!(justCompletedPhase && justCompletedPhase !== currentPhase);
         let daysToRace: number | null = null;
         if (raceDateStr) {
           const today = new Date(); today.setUTCHours(0, 0, 0, 0);
@@ -7323,7 +7455,7 @@ Keep the whole thing under 480 characters.`;
         }
         const raceClause = daysToRace !== null && daysToRace >= 0 ? ` — ${daysToRace} days to race day` : "";
         const phaseEndLine = phaseEnding
-          ? `\n<rule>PHASE TRANSITION: This is the FINAL week of the ${currentPhase} phase — next week begins the ${nextPhase} phase. Name the transition explicitly in your first text (e.g. "this wraps the base phase — build phase starts next week"). Don't bury it.</rule>`
+          ? `\n<rule>PHASE TRANSITION: Last week was the FINAL week of the ${justCompletedPhase} phase — this week begins the ${currentPhase} phase. Name the transition explicitly in your first text (e.g. "this wraps the base phase — build phase starts next week"). Don't bury it.</rule>`
           : "";
         return `TRAINING ARC POSITION: Week ${currentWeekNum} of ${totalWeeks} · ${currentPhase} phase${raceClause}. Reference this position naturally once in your first text — athletes want to know where they are in the bigger picture (e.g. "Week ${currentWeekNum} of ${totalWeeks}, still in ${currentPhase}${raceClause}").${phaseEndLine}\n\n`;
       })();
@@ -7352,11 +7484,15 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
         // Complement mode: athlete follows an external plan — don't prescribe Dean's next-week sessions.
         : isComplementMode
         ? "\n<rule>COMPLEMENT MODE: This athlete follows their own external training plan. For the second text — DO NOT prescribe specific sessions, a mileage target, or a Dean-generated schedule. Give 1 training observation from this week (e.g. pacing quality, volume trend, aerobic efficiency), then tell them to follow their plan for next week. One sentence pointing them to their plan is enough — no session prescriptions from Dean.</rule>\n"
-        // Prefer the arc's stored next-week entry when available.
-        // More accurate than re-deriving from periodization math — matches what the dashboard shows.
-        : storedNextPlanWeek
+        // Prefer the arc's stored entry for the upcoming week when available.
+        // storedPlanWeek.week_number === periodization.effectiveWeek, which for weekly_recap
+        // is already storedWeek + 1 — i.e. storedPlanWeek IS the upcoming week's arc data.
+        // (storedNextPlanWeek is the week AFTER that — do not use it here, it previews the
+        // wrong week to the athlete.) More accurate than re-deriving from periodization math
+        // — matches what the dashboard shows.
+        : storedPlanWeek
         ? (() => {
-          const nwt = storedNextPlanWeek.mileage_target;
+          const nwt = storedPlanWeek.mileage_target;
           const compLabel = weekMileageSoFar > 0
             ? (nwt / weekMileageSoFar < 0.85
               ? ` — LIGHTER than last week (${recapMi(weekMileageSoFar)}; planned pullback — do NOT say 'stepping up')`
@@ -7364,7 +7500,7 @@ Tone: supportive, not alarmed. Injuries are part of training. Focus on what they
               ? ` — HEAVIER than last week (${recapMi(weekMileageSoFar)}; progressive step up)`
               : ` — SIMILAR to last week (${recapMi(weekMileageSoFar)})`)
             : "";
-          return `\nNEXT WEEK — ARC DATA (week ${storedNextPlanWeek.week_number}): ~${recapMi(nwt)}${compLabel} | Phase: ${storedNextPlanWeek.phase} | Long run: ~${recapMi(storedNextPlanWeek.long_run_target)} | Key workout: ${storedNextPlanWeek.key_workout || "n/a"}\nUse the arc data above as the anchor for next week's plan — match the mileage target, include the long run, and build in the key workout. Do not invent a different progression.\n`;
+          return `\nNEXT WEEK — ARC DATA (week ${storedPlanWeek.week_number}): ~${recapMi(nwt)}${compLabel} | Phase: ${storedPlanWeek.phase} | Long run: ~${recapMi(storedPlanWeek.long_run_target)} | Key workout: ${storedPlanWeek.key_workout || "n/a"}\nUse the arc data above as the anchor for next week's plan — match the mileage target, include the long run, and build in the key workout. Do not invent a different progression.\n`;
         })()
         : periodization?.isDeloadWeek
         ? `\n<rule>RECOVERY WEEK — THIS OVERRIDES NORMAL PROGRESSION:\nThis is a scheduled recovery week. The first text MUST frame it explicitly: "Recovery week this week — pulling back the volume intentionally, this is when your body adapts to the work you've been putting in" or similar. All session distances must be 25–30% shorter than last week.${periodization.suggestedWeeklyMiles != null ? ` Target total: ~${recapMi(periodization.suggestedWeeklyMiles)}.` : ""} Remove or replace all quality sessions (tempo, intervals) with easy runs or strides. No new intensity. Same number of runs, just shorter and easier. CRITICAL: Do NOT add extra rest days to hit this target — keep the same number of running days. If the athlete mentioned soreness or tightness, annotate the affected runs (e.g. "(softer surface, stop if pain)") rather than canceling them. The mileage reduction is the recovery — not fewer running days. Recovery weeks are not optional — skipping them is how athletes break down.</rule>\n`
@@ -7410,6 +7546,78 @@ Pick a different lens. If the same trend keeps being the most actionable, find a
 - Generic build-week affirmations like "another solid block" or "another good week in the books" — replace with a specific observation about WHAT made it solid.
 If your draft contains any of these, rewrite the sentence with a specific number, trend, or named workout outcome — or cut it entirely.
 
+`;
+      // When computeArcWeekSkeleton() already built the upcoming week's day/date/distance
+      // skeleton, present it as fixed context and ask Claude only for descriptive content
+      // per slot (via slot_annotations — see buildDeliverMessageTool). This replaces the
+      // legacy day-by-day/[SESSION_LIST] instructions below, which previously coexisted
+      // with the "no day-by-day schedule" PLAN FORMAT guidance above and let Claude
+      // nondeterministically invent days, dates, and mileage totals. Athletes without a
+      // skeleton (no arc, injury hold, complement/analyst mode) keep the legacy path.
+      const scheduleBlock = arcWeekSkeleton
+        ? (() => {
+            const lines = arcWeekSkeleton!.map(slot => {
+              const dist = slot.distanceMiles != null ? ` · ${recapMi(slot.distanceMiles)}` : "";
+              const workout = slot.type === "quality" && slot.keyWorkoutText ? ` · ${slot.keyWorkoutText}` : "";
+              const label = slot.type === "long_run" ? "long run" : slot.type === "cross_train" ? "cross-training" : slot.type;
+              return `${slot.day} ${slot.date} · ${label}${dist}${workout}`;
+            });
+            return `THIS WEEK'S SCHEDULE IS ALREADY DECIDED — DO NOT INVENT DAYS, DATES, OR DISTANCES:
+${lines.join("\n")}
+Describe these slots across your two texts in prose (not a day-by-day list) — pace, purpose, and terrain/effort cues, same style as PLAN FORMAT above. Then return \`slot_annotations\` in deliver_message with one entry per non-rest slot above (the \`day\` field must match exactly). Do not state a day, date, distance, or weekly total that differs from the schedule above, and do not add or remove sessions — the system already validated this schedule against the athlete's training days and a safe mileage ramp from last week.
+`;
+          })()
+        : `SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
+<rule>CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.</rule>
+
+TRAINING DAY COUNT VALIDATION — CRITICAL: The number of running sessions in your plan must exactly match the athlete's stated days/week preference ("Training days" in ATHLETE HISTORY). If the athlete wants 5 days of running, the plan must have exactly 5 running sessions — not 4, not 6. If the count is wrong, fix the plan. This is one of the most common plan errors.
+
+For the sessions text, put each session on its own line using this compact format, sorted chronologically by date — never group by type:
+${recapIsMetric
+  ? `Mon 3/2 · Easy 8km @ 6:00-6:30/km
+Tue 3/3 · Strength + mobility 20 min
+Wed 3/4 · Tempo 6.5km (3km @ 5:15/km)
+Sat 3/7 · Long run 13km easy`
+  : `Mon 3/2 · Easy 5mi @ 9:30/mi
+Tue 3/3 · Strength + mobility 20 min
+Wed 3/4 · Tempo 4mi (2mi @ 8:45)
+Sat 3/7 · Long run 8mi easy`}
+Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
+NO DUPLICATE ENTRIES: Each date must appear at most once per session type. Before sending, scan your session list — if the same date and session description appear more than once, remove the duplicate. A plan with "Thu 3/26 · Easy ${recapIsMetric ? "3km" : "2mi"}" listed twice is wrong and confusing.
+SESSION DISTANCE FORMAT: Running sessions must include distance in ${recapIsMetric ? "km (e.g. \"Easy 8km\")" : "miles (e.g. \"Easy 5mi\")"}. Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance — use duration or activity name only (e.g. "Strength + mobility 30 min", "Zwift ride 60 min", "Master's swim"). Putting distance on a non-running session causes it to be incorrectly counted as running volume.
+
+STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate. When you prescribe a strength session, always follow the session list with a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
+OPTIONAL CROSS-TRAINING SESSIONS: If the athlete has requested optional workouts (e.g. "optional bike", "optional strength", "optional cross-training"), include them in the sessions list on rest days. Mark them with "(Optional)" at the start of the label. Example: "Mon 3/2 · (Optional) Easy bike 45 min" or "Fri 3/6 · (Optional) Strength + climbing drills 30 min". Optional sessions are a suggestion — the athlete can skip them freely. Do NOT include their duration in the Total mileage count.
+
+QUALITY SESSION DISTANCE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. ${recapIsMetric ? "Use defaults of 1.5km warmup and 1km cooldown if the athlete hasn't specified." : "Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified."} Format the label to show the breakdown in parentheses. Examples:
+${recapIsMetric
+  ? `- "Tempo 10km (1.5km WU + 7km @ 5:15/km tempo + 1.5km CD)"
+- "Intervals 8km (1.5km WU + 6×800m @ 4:30/km + 1km CD)"
+- "Treadmill hills 10km (1.5km WU + 7km at 8% grade + 1.5km CD)"`
+  : `- "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
+- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
+- "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"`}
+Never write a short quality distance when the athlete will also run warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava. This prevents the plan from understating the week's actual volume.
+
+VOLUME ACCURACY: Any weekly volume total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero. If the sum doesn't match your stated total, correct the plan before sending. Never show the calculation. If you're not listing every session, omit the total entirely.
+TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the ${recapIsMetric ? "km" : "miles"} from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: ${recapIsMetric ? "52 km" : "32.5 mi"}". Wrong: adding past-week volume to next week's total.
+<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER '${recapIsMetric ? "km" : "mi"}'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60${recapIsMetric ? "km" : "mi"}". Writing distance on a cross-training session causes it to be counted as running volume and will inflate your stated total.</rule>
+`;
+      // The [SESSION_LIST] text tag is only needed on the legacy prose path — skeleton mode
+      // reports the same information back structurally via slot_annotations (see
+      // buildDeliverMessageTool), so there's nothing left for this tag to do.
+      const sessionTagsBlock = arcWeekSkeleton
+        ? ""
+        : `
+SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the upcoming week's plan. Format exactly:
+[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"${recapIsMetric ? "Easy 10km" : "Easy 6mi"}","optional":false},{"day":"Wed","date":"M/D","label":"${recapIsMetric ? "6×800m @ 5K pace 5km" : "6×800m @ 5K pace 3mi"}","optional":false}]]
+Rules:
+- day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
+- date: M/D format matching the calendar date you assigned to this session
+- label: concise session description including distance in ${recapIsMetric ? "km" : "miles"} (e.g. "${recapIsMetric ? "Easy 10km" : "Easy 6mi"}", "${recapIsMetric ? "Long run 16km" : "Long run 10mi"}", "${recapIsMetric ? "6×800m @ 5K pace 8km" : "6×800m @ 5K pace 3mi"}", "Strength 30min")
+- optional: true only for explicitly optional sessions, false otherwise
+- Include every session in the upcoming week — do not omit any
+- The tag is stripped before the athlete sees the message — they will never see it
 `;
       if (isAnalystMode) {
         return `${recapWinsBlock}${recapAntiRepBlock}${recapForbiddenBlock}${weekMileageContext}${crossTrainRecapBlock}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts reflecting on last week's training. First text: what stood out — lead with the most notable signal (a milestone, a trend, a specific run). Include the total mileage figure. Second text: 1–2 training observations or coaching notes based on what you saw in the data — pacing, aerobic efficiency, recovery quality, or a pattern worth watching. Do NOT prescribe next week's sessions, a mileage target, or a training schedule. This athlete runs without a structured plan; keep it observational and forward-looking without locking them into a schedule.`;
@@ -7492,45 +7700,11 @@ STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested stre
 
 YTD MILESTONES: Check "Year-to-date" in ATHLETE HISTORY. If the athlete has crossed a round-number milestone this week (100, 200, 250, 300, 500, 1000 miles) or is within striking distance of one in the coming week, call it out naturally — one short sentence woven into the recap, not a separate announcement. e.g. "You also just crossed 500 miles on the year — that's a real number." Keep it earned, not forced. Skip it if the number isn't notable.
 
-SCHEDULE CONSTRAINT — CRITICAL: Only schedule *running* sessions on the athlete's confirmed training days listed under "Training days" in ATHLETE HISTORY. Do not put runs on other days. Strength, mobility, or cross-training sessions may appear on rest days (days not in the training days list) — especially if the athlete has requested them or has injury notes. If the athlete has mentioned specific day conflicts for running (e.g. "Saturday is spin class", "I have soccer Monday"), do not put a run on those days. If training days is "TBD", distribute runs across weekdays and weekends reasonably.
-<rule>CROSS-TRAINING DAY PROTECTION: If ATHLETE HISTORY shows the athlete does a specific activity on a specific day (e.g., "swimming on Fridays", "yoga on Tuesdays", "spin class on Saturdays"), that day MUST show the cross-training activity — do NOT override it with a run. If they requested a specific count of a non-running session (e.g., "strength twice a week"), that exact count must appear in the plan.</rule>
-
-TRAINING DAY COUNT VALIDATION — CRITICAL: The number of running sessions in your plan must exactly match the athlete's stated days/week preference ("Training days" in ATHLETE HISTORY). If the athlete wants 5 days of running, the plan must have exactly 5 running sessions — not 4, not 6. If the count is wrong, fix the plan. This is one of the most common plan errors.
-
-For the sessions text, put each session on its own line using this compact format, sorted chronologically by date — never group by type:
-${recapIsMetric
-  ? `Mon 3/2 · Easy 8km @ 6:00-6:30/km
-Tue 3/3 · Strength + mobility 20 min
-Wed 3/4 · Tempo 6.5km (3km @ 5:15/km)
-Sat 3/7 · Long run 13km easy`
-  : `Mon 3/2 · Easy 5mi @ 9:30/mi
-Tue 3/3 · Strength + mobility 20 min
-Wed 3/4 · Tempo 4mi (2mi @ 8:45)
-Sat 3/7 · Long run 8mi easy`}
-Use short day abbreviations (Mon/Tue/Wed/Thu/Fri/Sat/Sun) and M/D date format. No prose between sessions.
-NO DUPLICATE ENTRIES: Each date must appear at most once per session type. Before sending, scan your session list — if the same date and session description appear more than once, remove the duplicate. A plan with "Thu 3/26 · Easy ${recapIsMetric ? "3km" : "2mi"}" listed twice is wrong and confusing.
-SESSION DISTANCE FORMAT: Running sessions must include distance in ${recapIsMetric ? "km (e.g. \"Easy 8km\")" : "miles (e.g. \"Easy 5mi\")"}. Non-running sessions (strength, cross-training, swimming, cycling, spin, Zwift, yoga, etc.) must NEVER include distance — use duration or activity name only (e.g. "Strength + mobility 30 min", "Zwift ride 60 min", "Master's swim"). Putting distance on a non-running session causes it to be incorrectly counted as running volume.
-
-STRENGTH & CROSS-TRAINING: If the athlete has injury notes or has requested strength/mobility work, include a "Strength + mobility" session on a rest day in the week preview (see STRENGTH, MOBILITY & CROSS-TRAINING in system prompt). If they have cross-training tools, include a cross-training day where appropriate. When you prescribe a strength session, always follow the session list with a separate bubble giving 3–5 specific exercises — never leave it at "30 min" with no detail. See STRENGTH SESSION SPECIFICS in the system prompt.
-OPTIONAL CROSS-TRAINING SESSIONS: If the athlete has requested optional workouts (e.g. "optional bike", "optional strength", "optional cross-training"), include them in the sessions list on rest days. Mark them with "(Optional)" at the start of the label. Example: "Mon 3/2 · (Optional) Easy bike 45 min" or "Fri 3/6 · (Optional) Strength + climbing drills 30 min". Optional sessions are a suggestion — the athlete can skip them freely. Do NOT include their duration in the Total mileage count.
-
-QUALITY SESSION DISTANCE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo runs, interval sessions, hill repeats, fartlek, threshold work), the stated session distance must be the TOTAL distance including warmup and cooldown — NOT just the hard portion. ${recapIsMetric ? "Use defaults of 1.5km warmup and 1km cooldown if the athlete hasn't specified." : "Use defaults of 1mi warmup and 0.5–1mi cooldown if the athlete hasn't specified."} Format the label to show the breakdown in parentheses. Examples:
-${recapIsMetric
-  ? `- "Tempo 10km (1.5km WU + 7km @ 5:15/km tempo + 1.5km CD)"
-- "Intervals 8km (1.5km WU + 6×800m @ 4:30/km + 1km CD)"
-- "Treadmill hills 10km (1.5km WU + 7km at 8% grade + 1.5km CD)"`
-  : `- "Tempo 6.5mi (1mi WU + 4.5mi @ 8:45/mi tempo + 1mi CD)"
-- "Intervals 5mi (1mi WU + 6×800m @ 7:30/mi + 0.5mi CD)"
-- "Treadmill hills 6.5mi (1mi WU + 5mi at 8% grade + 0.5mi CD)"`}
-Never write a short quality distance when the athlete will also run warmup/cooldown — the stored session distance must reflect the full activity that will sync from Strava. This prevents the plan from understating the week's actual volume.
-
-VOLUME ACCURACY: Any weekly volume total you state must equal the sum of running session distances — strength, mobility, and cross-training sessions contribute zero. If the sum doesn’t match your stated total, correct the plan before sending. Never show the calculation. If you’re not listing every session, omit the total entirely.
-TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the ${recapIsMetric ? "km" : "miles"} from the week you just recapped. Those belong to the recap. The Total line shows ONLY the sum of the planned upcoming sessions. Correct: "Total: ${recapIsMetric ? "52 km" : "32.5 mi"}". Wrong: adding past-week volume to next week’s total.
-<rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use ‘min’ for duration — NEVER ‘${recapIsMetric ? "km" : "mi"}’. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60${recapIsMetric ? "km" : "mi"}". Writing distance on a cross-training session causes it to be counted as running volume and will inflate your stated total.</rule>
+${scheduleBlock}
 
 WEEKLY RECOVERY CHECK-IN: If sleep, energy, or strength work hasn’t come up naturally in this week’s conversation, close with a brief check-in — "How’s sleep and energy been? Any strength work this week?" — at the very end of your second text. Skip it if the athlete already mentioned any of these in recent messages, or if the recap is already addressing an injury or other open question. Don’t ask every week if they consistently don’t respond to it.
 
-COACHING THREADS — REQUIRED MACHINE TAG: At the very end of your response (before [SESSION_LIST]), append a [THREADS: ...] tag with 1–3 short sentences capturing what you'll be watching on this athlete over the coming weeks. These are the through-line stories — patterns, recoveries, progressions — that make Dean feel like a coach who pays attention across runs, not just a stat reporter on a single run. Examples:
+COACHING THREADS — REQUIRED MACHINE TAG: At the very end of your human-readable text, append a [THREADS: ...] tag with 1–3 short sentences capturing what you'll be watching on this athlete over the coming weeks. These are the through-line stories — patterns, recoveries, progressions — that make Dean feel like a coach who pays attention across runs, not just a stat reporter on a single run. Examples:
 - [THREADS: Cadence climbed from 168 → 174 spm over the last 6 weeks — keep nudging toward 178. Long-run HR drift is high (>10%) when total weekly miles >35; backing off easy effort is the next test. Left achilles flared in week 3, fully calm now — green light on hill work.]
 - [THREADS: Aerobic efficiency improving steadily — pace at 145 bpm dropped 12s/mi vs 6 weeks ago. Plateau at 12mi long run for 4 weeks; ready to bump to 14 next time. Marathon goal pace feels achievable on tempo days.]
 Rules:
@@ -7539,17 +7713,7 @@ Rules:
 - Update don't replace: if "WHAT YOU'RE WATCHING" already exists in ATHLETE HISTORY, keep what's still relevant, drop what's resolved, add what's new.
 - The tag is stripped before the athlete sees the message — they will never see it.
 - Keep total under 500 characters.
-
-SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the upcoming week’s plan. Format exactly:
-[SESSION_LIST: [{"day":"Mon","date":"M/D","label":"${recapIsMetric ? "Easy 10km" : "Easy 6mi"}","optional":false},{"day":"Wed","date":"M/D","label":"${recapIsMetric ? "6×800m @ 5K pace 5km" : "6×800m @ 5K pace 3mi"}","optional":false}]]
-Rules:
-- day: 3-letter abbreviation (Mon/Tue/Wed/Thu/Fri/Sat/Sun)
-- date: M/D format matching the calendar date you assigned to this session
-- label: concise session description including distance in ${recapIsMetric ? "km" : "miles"} (e.g. "${recapIsMetric ? "Easy 10km" : "Easy 6mi"}", "${recapIsMetric ? "Long run 16km" : "Long run 10mi"}", "${recapIsMetric ? "6×800m @ 5K pace 8km" : "6×800m @ 5K pace 3mi"}", "Strength 30min")
-- optional: true only for explicitly optional sessions, false otherwise
-- Include every session in the upcoming week — do not omit any
-- The tag is stripped before the athlete sees the message — they will never see it
-`;
+${sessionTagsBlock}`;
     }
     case "workout_image": {
       const imageGuard = buildActivityDataGuard(imageActivity ?? null);
