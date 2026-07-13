@@ -18,6 +18,8 @@ import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/timezone";
 import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { buildDateContext } from "@/lib/coach-date-context";
+import { formatGoalLabel } from "@/lib/goal-labels";
+import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
@@ -5259,107 +5261,17 @@ function buildSystemPrompt(
   const profileRaceDate = profile?.race_date ? new Date((profile.race_date as string) + "T00:00:00") : null;
   const profileRaceDaysUntil = profileRaceDate ? Math.ceil((profileRaceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
 
-  let dateContext = dateContextHeader;
-  if (profile?.race_date && profileRaceDaysUntil !== null && profileRaceDaysUntil > 0) {
-    const daysUntil = profileRaceDaysUntil;
-    const weeksUntil = Math.round(daysUntil / 7);
-    dateContext += `- Race date: ${profile.race_date} (${daysUntil} days / ~${weeksUntil} weeks away)\n`;
-    dateContext += `- Plan backwards from race date: allocate taper (2 weeks), peak (2-3 weeks), build, and base phases\n`;
-
-    // Inject a code-computed taper plan when 21 days or fewer remain.
-    // Use the stored taper_peak_miles if available — this locks in the peak on first
-    // entry so targets don't shift as avgWeeklyMileage fluctuates between messages.
-    // If not yet stored, use avgWeeklyMileage and persist it as a side-effect.
-    if (daysUntil > 0 && daysUntil <= 21 && avgWeeklyMileage && avgWeeklyMileage > 0) {
-      const storedPeak = state?.taper_peak_miles as number | null;
-      const peak = storedPeak ?? Math.round(avgWeeklyMileage * 10) / 10;
-      const goal = profile?.goal as string | null;
-      const isUltra = ["50k","100k","50mi","100mi"].includes(goal ?? "");
-      const is30k = goal === "30k";
-      const isMarathon = goal === "marathon";
-      const isHalf = goal === "half_marathon";
-      const isMile = goal === "mile";
-
-      // Mile PR is a track/time-trial event — no traditional 3-week taper.
-      // Within 7 days: cut volume ~30%, keep intensity, one short tune-up effort.
-      if (isMile) {
-        if (daysUntil <= 7) {
-          dateContext += `- MILE SHARPENING WEEK: Time trial is ${daysUntil} days away. Cut total volume ~30% this week — keep one short speed session (4-6x400m @ mile effort), drop everything else to easy. No heavy quality work in the final 48 hours before the time trial.\n`;
-        }
-        // No action needed 8-21 days out — normal training continues
-      } else {
-      // Volume percentages by race type and taper stage.
-      // 30K (~18.6 mi) is a trail race closer to marathon distance than to 5K/10K —
-      // give it marathon-style taper rather than the short-race defaults.
-      // w1Pct = race week training miles only (pre-race), intentionally low.
-      // The race itself adds a major distance on top (e.g. marathon +26.2mi).
-      let w3Pct = 0.88, w2Pct = 0.72, w1Pct = 0.25;
-      if (isUltra)    { w3Pct = 0.78; w2Pct = 0.62; w1Pct = 0.25; }
-      else if (isMarathon || is30k) { w3Pct = 0.88; w2Pct = 0.72; w1Pct = 0.25; }
-      else if (isHalf)     { w3Pct = 0.90; w2Pct = 0.75; w1Pct = 0.28; }
-      else               { w3Pct = 0.90; w2Pct = 0.78; w1Pct = 0.35; } // 5K/10K
-
-      const w3 = Math.round(peak * w3Pct);
-      const w2 = Math.round(peak * w2Pct);
-      const w1 = Math.round(peak * w1Pct);
-
-      if (daysUntil > 14) {
-        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${spMi(peak)}. This week (3 weeks out): ${spMi(w3)} total. Next week (2 weeks out): ${spMi(w2)} total. Race week: ${spMi(w1)} total. No quality sessions in race week — easy miles only. One short race-pace tune-up (${spMi(2.5)} @ goal pace) allowed 10-12 days out.\n`;
-      } else if (daysUntil > 7) {
-        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${spMi(peak)}. This week (2 weeks out): ${spMi(w2)} total. Race week: ${spMi(w1)} total. No quality sessions in race week — easy miles only. One short race-pace tune-up (${spMi(2.5)} @ goal pace) is acceptable this week.\n`;
-      } else {
-        dateContext += `- TAPER PROTOCOL (rules-based — follow exactly): Peak volume ~${spMi(peak)}. Race week: ${spMi(w1)} total. Easy miles only — no hard workouts. Shakeout run (15-30 min easy) the day before is optional — place it ONLY on a confirmed running day (check athlete's training days). Do NOT schedule the shakeout on a gym-only, cross-training-only, or rest day.\n`;
-      }
-      } // end non-mile taper block
-    }
-  }
-
-  // B/C race context: list upcoming secondary races, inject coaching guidance when close.
-  const nonARaces = (upcomingRaces ?? []).filter(r => r.priority === "B" || r.priority === "C");
-  if (nonARaces.length > 0) {
-    for (const race of nonARaces) {
-      const bRaceDate = new Date((race.race_date as string) + "T12:00:00Z");
-      const daysUntilBRace = Math.ceil((bRaceDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-      const weeksUntilBRace = Math.round(daysUntilBRace / 7);
-      const bRaceLabel = (race.race_name as string | null) ?? (race.goal ? formatGoalLabel(race.goal as string) : "race");
-      if (race.priority === "B") {
-        if (daysUntilBRace <= 14) {
-          dateContext += `- B RACE (tune-up): ${bRaceLabel} on ${race.race_date} (${daysUntilBRace} days away). Reduce total volume 10-15% this week. Race at a strong controlled effort — this is a tune-up, not an all-out peak. Resume normal training 2-3 days after.\n`;
-        } else {
-          dateContext += `- Upcoming B race (tune-up): ${bRaceLabel} on ${race.race_date} (~${weeksUntilBRace} weeks away). Keep in mind when scheduling hard sessions — leave a light day or two before it.\n`;
-        }
-      } else {
-        if (daysUntilBRace <= 7) {
-          dateContext += `- C RACE (for-fun): ${bRaceLabel} on ${race.race_date} (${daysUntilBRace} days away). No taper — treat it as a quality workout day. Normal training week otherwise.\n`;
-        } else {
-          dateContext += `- Upcoming C race (for-fun/workout): ${bRaceLabel} on ${race.race_date} (~${weeksUntilBRace} weeks away).\n`;
-        }
-      }
-    }
-  }
-
-  // Post-race recovery context: inject when the athlete's goal race has passed within the
-  // last 6 weeks. Tells Dean the race is done, gives recovery guidance, and opens the door
-  // to next-goal conversation — without requiring any new trigger or flow.
-  if (profileRaceDaysUntil !== null && profileRaceDaysUntil <= 0 && profileRaceDaysUntil >= -42) {
-    const daysSinceRace = Math.abs(profileRaceDaysUntil);
-    const onboardingDataForRace = (user.onboarding_data as Record<string, unknown>) || {};
-    const raceNameForContext = (onboardingDataForRace.race_name as string | null) ?? (profile?.goal ? formatGoalLabel(profile.goal as string) : "their goal race");
-    let recoveryGuidance: string;
-    if (daysSinceRace <= 7) {
-      recoveryGuidance = `Week 1 post-race: easy running only. No tempo, intervals, or quality sessions. Keep efforts short and comfortable — this is active recovery, not training. Celebrate what they accomplished.`;
-    } else if (daysSinceRace <= 14) {
-      recoveryGuidance = `Week 2 post-race: reduced volume (roughly 60–70% of normal). Easy running is fine. One light quality session (strides or very short tempo) is okay if they feel good, but don't push it.`;
-    } else {
-      recoveryGuidance = `Weeks 3–6 post-race: fairly normal training. Rebuild toward their usual volume and reintroduce quality sessions. Follow their lead on how they're feeling.`;
-    }
-    dateContext += `
-POST-RACE CONTEXT:
-This athlete completed their goal race — ${raceNameForContext} on ${profile!.race_date} (${daysSinceRace} day${daysSinceRace === 1 ? "" : "s"} ago). The training plan they built with you led them to this race.
-${recoveryGuidance}
-Next goal: At the right moment, ask what's next — a new race, a fitness goal, or just maintaining. Don't force it; let the athlete bring it up or ask once naturally when they seem ready (typically week 2–3 post-race). When they share a new goal, handle it conversationally — update the plan from there without needing a full re-onboarding.
-Do NOT reference the completed race as an upcoming event. Do NOT suggest taper, race-week, or race-prep protocols. The race is done.\n`;
-  }
+  let dateContext = dateContextHeader + buildRaceContext({
+    now,
+    raceDate: (profile?.race_date as string | null) ?? null,
+    goal: (profile?.goal as string | null) ?? null,
+    profileRaceDaysUntil,
+    avgWeeklyMileage: avgWeeklyMileage ?? null,
+    storedTaperPeakMiles: (state?.taper_peak_miles as number | null) ?? null,
+    upcomingRaces: upcomingRaces as UpcomingRaceInput[] | null | undefined,
+    onboardingRaceName: ((user.onboarding_data as Record<string, unknown> | null)?.race_name as string | null) ?? null,
+    isMetric: spUseMetric,
+  });
 
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
   const swimPace = onboardingData.swim_pace as string | null;
@@ -6293,30 +6205,6 @@ function transformSplitForClaude(split: Record<string, unknown>, isMetric = fals
   delete result.elevation_difference;
   delete result.total_elevation_gain;
   return result;
-}
-
-function formatGoalLabel(goal: string): string {
-  const labels: Record<string, string> = {
-    "mile": "a mile time trial",
-    "5k": "a 5K",
-    "10k": "a 10K",
-    half_marathon: "a half marathon",
-    marathon: "a marathon",
-    general_fitness: "general fitness",
-    return_to_running: "returning to running",
-    "30k": "a 30K trail race",
-    "50k": "a 50K ultra",
-    "50mi": "a 50-mile ultra",
-    "100k": "a 100K ultra",
-    "100mi": "a 100-mile ultra",
-    sprint_tri: "a sprint triathlon",
-    olympic_tri: "an Olympic-distance triathlon",
-    "70.3": "a 70.3 Half Ironman",
-    ironman: "a Full Ironman",
-    cycling: "a cycling event",
-    injury_recovery: "injury recovery and return to running",
-  };
-  return labels[goal] || goal;
 }
 
 type ExtractedProfileData = {

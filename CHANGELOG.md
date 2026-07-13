@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-12 — Phase A, slice 2: pulled the race-countdown/taper-protocol section out of buildSystemPrompt
+
+**Type:** Refactor / Reliability
+**Reported by:** Jake Tennant — "let's continue" on Phase A, following slice 1 (the DATE CONTEXT header extraction).
+**Root cause / motivation:** This is the section explicitly deferred from slice 1 as "more entangled with profile/race state" — race countdown, the rules-based taper-protocol volume math (by race type and days-out), B/C race tune-up guidance, and post-race recovery context. It's also the highest safety-relevance target for this pattern: the taper percentages (e.g. marathon 88/72/25% of peak by weeks-out tier, ultra 78/62/25%, half 90/75/28%, 5K/10K 90/78/35%) were previously only checkable by reading prose output, the same gap that let the date-reformatting bug ship unnoticed.
+**Fix / Change:**
+1. New `src/lib/coach-race-context.ts` — `buildRaceContext()` combines three independent sections (taper protocol, B/C race context, post-race recovery), each broken into its own small function. Takes `profileRaceDaysUntil` as an input rather than recomputing it, since that value is also needed later in `buildSystemPrompt` well past this block (fitness-tier gating, phase/taper detection, the ATHLETE snapshot's race line) — keeping it a single caller-owned value avoids two independent "days until race" computations silently drifting apart.
+2. Moved `formatGoalLabel` (goal enum → prose label) out of `route.ts` into new `src/lib/goal-labels.ts`, since it's used both by the new module and by three other call sites still in `route.ts` — same function, just relocated, not duplicated.
+3. Added a 23-test suite (`coach-race-context.test.ts`) pinning the exact taper percentages per race type and days-out tier, B/C race framing at each distance threshold, and post-race recovery guidance at each week boundary — this is the area of the file where an unnoticed formula drift would be worst, so it gets the most exact-value coverage of any slice so far.
+4. Verified byte-for-byte output parity against the original inline code with fixed sample inputs before relying on the test suite.
+**Files changed:** `src/lib/coach-race-context.ts` (new), `src/lib/goal-labels.ts` (new), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/coach-race-context.test.ts` (new)
+**Follow-up needed:** Remaining Phase A candidates: the mileage/pace facts still assembled inline elsewhere in `buildSystemPrompt` (fitness-tier volume math, pace-zone display ranges). `route.ts` is down to 8,024 lines (from 8,207 before Phase A started today).
+
 ## 2026-07-12 — Added a temporary kill-switch to scope LLM-calling crons to specific phone numbers
 
 **Type:** Infra
