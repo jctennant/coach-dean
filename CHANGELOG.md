@@ -4,6 +4,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-16 — Phase A slice 5: unified three drifted copies of the session-mileage parser, deleted dead code
+
+**Type:** Refactor / Bug Fix
+**Reported by:** Jake Tennant — "lets go" on extraction candidate #1 from a research pass scoping the rest of Phase A.
+**Root cause:** Three independent regex implementations of "parse planned miles out of a stored session label" existed in `coach/respond/route.ts` — inline in `planDeviationFlag`, inline in the `sessionRows`/`projectedWeekMiles` IIFE, and inside a standalone `computeProjectedWeekMiles` function. They had already drifted: only the `sessionRows` version had the `(?!n)` guard (stops "35 min" from being misread as "35 mi") and, before this fix, `planDeviationFlag`'s copy had neither the guard nor km-label support — so a metric athlete's completed session miles were silently read as 0 mi per session, meaning `planDeviationFlag` (the "you're running way more than planned" nudge) could never accumulate enough `plannedCompletedMiles` to fire for metric users. Additionally, `computeProjectedWeekMiles` turned out to be dead code — defined but never called anywhere (confirmed via grep across route.ts and all tests) — a third, silently-diverging copy of the same logic that nothing actually used.
+**Fix / Change:** Extracted the canonical (most complete) parser into `src/lib/session-mileage.ts` as `parseSessionMiles(label, ...)`, used by both live call sites now. Deleted `computeProjectedWeekMiles` entirely (dead code, zero callers). This is the same duplicate-formula shape the FITNESS TIER extraction closed for volume caps — one parser now, not three that can silently diverge.
+**Files changed:** `src/lib/session-mileage.ts` (new), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/session-mileage.test.ts` (new, 10 tests)
+
+---
+
 ## 2026-07-12 — Fixed weekly_recap previewing the wrong week, an unsafe mileage jump, and out-of-order dates
 
 **Type:** Bug Fix

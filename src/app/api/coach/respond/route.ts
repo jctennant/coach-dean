@@ -23,6 +23,7 @@ import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
 import { buildFitnessTierBlock } from "@/lib/coach-fitness-tier";
 import { computePaceContext } from "@/lib/coach-pace-context";
+import { parseSessionMiles } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
@@ -2236,13 +2237,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     const localTodayStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
     const [ty, tm, td] = localTodayStr.split("-").map(Number);
     const localTodayUTC = new Date(Date.UTC(ty, tm - 1, td));
-    // Parse miles from a session label (same logic as computeProjectedWeekMiles)
-    const parseSessionMiles = (label: string): number => {
-      const m = label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
-        || label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i)
-        || label.match(/(\d+(?:\.\d+)?)\s*mi/i);
-      return m ? parseFloat(m[1]) : 0;
-    };
     // Only look at sessions whose date has already passed (not today, not future)
     const pastSessions = sessions.filter(s => {
       const [m, d] = (s.date ?? "").split("/").map(Number);
@@ -3239,7 +3233,7 @@ OUTPUT CONTRACT:
   // doesn't match the sum of session distances in the response.
   // - post_run: uses correctProjectedTotal instead — no session plan in the response
   //   but still need to fix "on track for X mi" when Dean's number diverges from the
-  //   system-computed projection (see computeProjectedWeekMiles).
+  //   system-computed projection (see the projectedWeekMiles calc, session-mileage.ts).
   // - user_message: run with weekMileageSoFar — catches cases like Ian's where Dean
   //   removes a session from the list but forgets to recalculate the stated total.
   // - weekly_recap / initial_plan: run with alreadyCompletedMiles=0 — full week being planned.
@@ -3921,50 +3915,6 @@ OUTPUT CONTRACT:
  * Strip markdown formatting that Claude occasionally generates despite instructions.
  * SMS renders all characters literally — asterisks, hashes, etc. appear as-is.
  */
-/**
- * Compute the system-authoritative projected week total from stored sessions + done miles.
- * Mirrors the logic in buildCurrentTrainingState so they stay in sync.
- */
-function computeProjectedWeekMiles(
-  sessions: Array<{ day: string; date: string; label: string }> | null,
-  weekMileageSoFar: number,
-  weeklyMileageTarget?: number | null
-): number | null {
-  if (!sessions || sessions.length === 0) return null;
-  const now = new Date();
-  const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const activeSessions = sessions.filter(s => {
-    const [m, d] = s.date.split("/").map(Number);
-    if (isNaN(m) || isNaN(d)) return true;
-    const sessionDate = new Date(Date.UTC(now.getUTCFullYear(), m - 1, d));
-    return sessionDate.getTime() >= todayUTC.getTime();
-  });
-  if (activeSessions.length === 0) return weekMileageSoFar;
-  let remainingMiles = 0;
-  for (const s of activeSessions) {
-    const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi/i)
-      || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?:\s+total)?\)/i);
-    const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi/i);
-    const mMatch = explicitTotal || firstMi;
-    if (mMatch) { remainingMiles += parseFloat(mMatch[1]); continue; }
-    // Also handle km labels (metric users)
-    const explicitKm = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*km/i)
-      || s.label.match(/\((\d+(?:\.\d+)?)\s*km(?:\s+total)?\)/i);
-    const firstKm = s.label.match(/(\d+(?:\.\d+)?)\s*km/i);
-    const kmMatch = explicitKm || firstKm;
-    if (kmMatch) remainingMiles += parseFloat(kmMatch[1]) / 1.60934;
-  }
-  const projection = weekMileageSoFar + remainingMiles;
-  // If the projection significantly exceeds the planned weekly target, it likely reflects
-  // stale or incorrectly-labelled sessions — cap at the target to avoid alarming athletes
-  // with implausible numbers (e.g. "on track for 77mi" on a 40mi-target week).
-  if (weeklyMileageTarget && weeklyMileageTarget > 0 && projection > weeklyMileageTarget * 1.2) {
-    console.warn(`[computeProjectedWeekMiles] projection ${projection.toFixed(1)}mi exceeds target ${weeklyMileageTarget}mi by >20% — capping at target`);
-    return weeklyMileageTarget;
-  }
-  return projection;
-}
-
 /**
  * Correct "on track for X mi" / "projected X mi" in post_run responses.
  * Dean computes this himself from the session list, but may only mention a subset
@@ -5550,19 +5500,8 @@ function buildSystemPrompt(
     });
     const activeSessions = [...todaySessions, ...futureSessions];
     if (activeSessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
-    const parseSessionMiles = (s: { label: string }) => {
-      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
-      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
-      const mMatch = explicitTotal || firstMi;
-      if (mMatch) return parseFloat(mMatch[1]);
-      // Handle km labels (metric users)
-      const explicitKm = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*km/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*km(?:\s+total)?\)/i);
-      const firstKm = s.label.match(/(\d+(?:\.\d+)?)\s*km/i);
-      const kmMatch = explicitKm || firstKm;
-      return kmMatch ? parseFloat(kmMatch[1]) / 1.60934 : 0;
-    };
-    const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s), 0);
-    const todaySessionMiles = trigger !== "post_run" ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s), 0) : 0;
+    const remainingSessionMiles = futureSessions.reduce((sum, s) => sum + parseSessionMiles(s.label), 0);
+    const todaySessionMiles = trigger !== "post_run" ? todaySessions.reduce((sum, s) => sum + parseSessionMiles(s.label), 0) : 0;
     const totalRemainingPlanMiles = todaySessionMiles + remainingSessionMiles;
     const targetAlreadyMet = tsTargetMiles > 0 && weekMileageSoFar >= tsTargetMiles;
     let sessionRows = "";
