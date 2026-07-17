@@ -10,7 +10,7 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest } from "@/lib/training-plan";
 import type { ArcWeekSlot } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
@@ -2012,6 +2012,10 @@ Apply this to bias which metric lens you pick and what advice you give proactive
   // arc week to schedule from and the athlete isn't in a mode where Dean shouldn't be
   // prescribing running sessions at all (injury hold, complement, analyst).
   let arcWeekSkeleton: ArcWeekSlot[] | null = null;
+  // Claude's per-slot pace/why narration for arcWeekSkeleton, captured below once the
+  // skeleton_annotations tool call comes back — read by the weekly_recap after() block to
+  // flavor the deterministic weekly_plan_digest without re-calling the model.
+  let arcSlotAnnotations: Array<{ day: string; pace?: string; why?: string }> | null = null;
   if (
     trigger === "weekly_recap" &&
     storedPlanWeek &&
@@ -3158,6 +3162,13 @@ OUTPUT CONTRACT:
         log.warn("slot_annotations referenced a day not in the fixed skeleton", { trigger, invalidDays });
         void trackEvent(userId, "arc_week_slot_annotation_day_mismatch", { invalidDays });
       }
+      arcSlotAnnotations = (slotAnnotations as Array<{ day?: unknown; pace?: unknown; why?: unknown }>)
+        .filter((a): a is { day: string; pace?: string; why?: string } => typeof a?.day === "string" && skeletonDays.has(a.day as ArcWeekSlot["day"]))
+        .map(a => ({
+          day: a.day,
+          ...(typeof a.pace === "string" ? { pace: a.pace } : {}),
+          ...(typeof a.why === "string" ? { why: a.why } : {}),
+        }));
     } else {
       log.warn("weekly_recap skeleton mode delivered without usable slot_annotations", { trigger });
     }
@@ -3363,6 +3374,16 @@ OUTPUT CONTRACT:
   // with its own typing indicator so it feels like a real person composing
   // multiple follow-up messages.
   const parts = splitIntoMessages(coachMessage);
+
+  // Deterministic day-by-day schedule bubble for arc-generated weekly_recap weeks — code
+  // renders it from the same fixed skeleton/annotations Claude was constrained to (see the
+  // "THIS WEEK'S SCHEDULE IS ALREADY DECIDED" prompt block below), which deliberately keeps
+  // Claude's own prose free of a day-by-day list. This bubble can't drift from what the
+  // schema-validated slot_annotations already committed to, since no model call produces it
+  // (see 2026-04-16 changelog on why day-by-day schedules generated freeform were unreliable).
+  if (trigger === "weekly_recap" && arcWeekSkeleton) {
+    parts.push(formatWeeklyPlanDigest(arcWeekSkeleton, arcSlotAnnotations, isMetricUser));
+  }
 
   // For initial_plan, hard-cap at 2 SMS bubbles regardless of how many blank-line
   // separators Claude generated. A 3rd bubble (e.g. strength block detail) overloads
@@ -5594,11 +5615,28 @@ function buildSystemPrompt(
     return `INJURY HOLD: active for ${daysDiff} day${daysDiff !== 1 ? "s" : ""} (since ${holdDateFormatted}) — no running sessions`;
   })();
 
+  // Derive this week's long-run/quality facts from weekly_plan_sessions (same source
+  // sessionRows above reads) so morning_plan and weekly_recap share one source of truth,
+  // per the "compute it in code, don't trust legacy scalar duplication" pattern. Falls back
+  // to the legacy scalar columns when session labels don't match the arc-generated
+  // "Long run Xmi" / "Easy Xmi" convention (e.g. complement-mode uploaded-plan wording).
+  const planSessionsForFacts = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+  const derivedLongRunMiles = (() => {
+    const longRunSession = planSessionsForFacts.find(s => /^long run/i.test(s.label));
+    if (!longRunSession) return null;
+    const miles = parseSessionMiles(longRunSession.label);
+    return miles > 0 ? miles : null;
+  })();
+  const derivedQualitySession = planSessionsForFacts.find(
+    s => !/^long run/i.test(s.label) && !/^easy/i.test(s.label) && !/^strength/i.test(s.label)
+  )?.label ?? null;
+  const weeklyLongRunMiles = derivedLongRunMiles ?? (state?.weekly_long_run_miles as number | null) ?? null;
+  const weeklyQualitySession = derivedQualitySession ?? (state?.weekly_quality_session as string | null) ?? null;
+
   // Quality session: explicit YES/NO so Claude doesn't have to infer from absence.
   const qualitySessionFact = (() => {
-    const qualitySession = (state?.weekly_quality_session as string | null) ?? null;
-    if (qualitySession) return `Quality session this week: YES — ${qualitySession}`;
-    if (tsTargetMiles || (state?.weekly_long_run_miles as number | null)) {
+    if (weeklyQualitySession) return `Quality session this week: YES — ${weeklyQualitySession}`;
+    if (tsTargetMiles || weeklyLongRunMiles) {
       return `Quality session this week: NO${periodization?.isDeloadWeek ? " (recovery week)" : " (base building — easy miles only)"}`;
     }
     return null;
@@ -5611,8 +5649,8 @@ function buildSystemPrompt(
   const sessionsStatus = computeSessionsStatus(
     recentActivities,
     timezone ?? "UTC",
-    (state?.weekly_long_run_miles as number | null) ?? null,
-    (state?.weekly_quality_session as string | null) ?? null,
+    weeklyLongRunMiles,
+    weeklyQualitySession,
     weekRefDate
   );
   const sessionsStatusBlock = (() => {

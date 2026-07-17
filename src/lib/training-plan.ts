@@ -1086,10 +1086,11 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
 
   const { data: profile } = await supabase
     .from("training_profiles")
-    .select("training_days, injury_notes, injury_body_part, injury_body_parts")
+    .select("training_days, injury_notes, injury_body_part, injury_body_parts, preferred_units")
     .eq("user_id", userId)
     .single();
   const strength = computeWeeklyStrength(profile as Record<string, unknown> | null);
+  const isMetric = (profile?.preferred_units as string | null) === "metric";
 
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
@@ -1136,13 +1137,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
       .map(s => ({
         day: s.day,
         date: s.date,
-        label: s.type === "long_run"
-          ? `Long run ${s.distanceMiles ?? 0}mi`
-          : s.type === "quality"
-          ? (s.keyWorkoutText ?? `Quality ${s.distanceMiles ?? 0}mi`)
-          : s.type === "easy"
-          ? `Easy ${s.distanceMiles ?? 0}mi`
-          : "Strength + mobility",
+        label: arcWeekSlotLabel(s, isMetric),
         type: s.type === "long_run" || s.type === "quality" || s.type === "easy" ? "run" : "strength",
         routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
       }));
@@ -1155,4 +1150,51 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
       ...(planSessions.length > 0 ? { weekly_plan_sessions: planSessions as unknown as Json } : {}),
     }).eq("user_id", userId);
   }
+}
+
+/**
+ * Render an arc week slot's session label — shared by syncWeekFromArc (persisted to
+ * training_state.weekly_plan_sessions) and formatWeeklyPlanDigest (the athlete-facing SMS
+ * bubble), so the two never drift into describing the same slot differently.
+ * `isMetric` mirrors route.ts's recapMi() conversion (miles * 1.60934, 1 decimal, "km") so
+ * this label matches the units Dean's own weekly_recap prose uses for the same athlete —
+ * distanceMiles is always stored in miles internally regardless of preferred_units.
+ * keyWorkoutText (quality sessions) is left as-is: it's baked in the athlete's preferred
+ * units at plan-generation time already, same assumption Dean's own prompt makes.
+ */
+function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
+  const fmtDist = (miles: number) => isMetric ? `${(miles * 1.60934).toFixed(1)}km` : `${miles}mi`;
+  return slot.type === "long_run"
+    ? `Long run ${fmtDist(slot.distanceMiles ?? 0)}`
+    : slot.type === "quality"
+    ? (slot.keyWorkoutText ?? `Quality ${fmtDist(slot.distanceMiles ?? 0)}`)
+    : slot.type === "easy"
+    ? `Easy ${fmtDist(slot.distanceMiles ?? 0)}`
+    : "Strength + mobility";
+}
+
+/**
+ * Deterministically format an arc week skeleton into a plain-text SMS bubble — no LLM
+ * call. This is pure string templating over the same fixed skeleton Claude was constrained
+ * to during weekly_recap (see computeArcWeekSkeleton above and the "THIS WEEK'S SCHEDULE IS
+ * ALREADY DECIDED" prompt block in route.ts), which deliberately keeps Claude's own prose
+ * free of a day-by-day list. The prior day-level weekly plan feature was removed on
+ * 2026-04-16 because Claude free-handed these numbers in prose; this can't drift because no
+ * model call produces it. `slotAnnotations` (pace/why), when present, come from Claude's
+ * already schema-validated skeleton_annotations tool call — merged in as flavor text only.
+ */
+export function formatWeeklyPlanDigest(
+  skeleton: ArcWeekSlot[],
+  slotAnnotations?: Array<{ day: string; pace?: string; why?: string }> | null,
+  isMetric = false
+): string {
+  const annotationByDay = new Map((slotAnnotations ?? []).map(a => [a.day, a]));
+  const lines = skeleton
+    .filter(s => s.type !== "rest")
+    .map(s => {
+      const annotation = annotationByDay.get(s.day);
+      const pace = annotation?.pace ? ` (${annotation.pace})` : "";
+      return `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}`;
+    });
+  return `This week's plan:\n${lines.join("\n")}`;
 }

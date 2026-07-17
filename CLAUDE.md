@@ -131,7 +131,7 @@ Crons → POST /api/coach/respond (various triggers)
 The DB has a `CHECK` constraint (`conversations_message_type_check`) enforcing valid values. **Whenever you add a new message_type, you must also add it to this constraint via a migration**, otherwise inserts will fail silently (the error is swallowed unless logged).
 
 Current valid values:
-`post_run`, `initial_plan`, `initial_plan_link`, `morning_plan`, `nightly_reminder`, `morning_reminder`, `weekly_recap`, `user_message`, `coach_response`, `onboarding`, `awaiting_strava`, `reengagement`, `plan_import_week_ask`, `plan_upload`, `changelog`, `dashboard_announcement`, `welcome_tips`, `workout_image`
+`post_run`, `initial_plan`, `initial_plan_link`, `morning_plan`, `nightly_reminder`, `morning_reminder`, `weekly_recap`, `user_message`, `coach_response`, `onboarding`, `awaiting_strava`, `reengagement`, `plan_import_week_ask`, `plan_upload`, `changelog`, `dashboard_announcement`, `welcome_tips`, `workout_image`, `symptom_checkin`, `injury_checkin`
 
 Migration pattern to add a new type:
 ```sql

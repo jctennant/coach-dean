@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, type UploadedPlanWeek } from "@/lib/training-plan";
+import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, formatWeeklyPlanDigest, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -436,5 +436,72 @@ describe("computeArcWeekSkeleton", () => {
       timezone: "UTC",
     });
     expect(slots.find(s => s.type === "quality")?.distanceMiles).toBe(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatWeeklyPlanDigest — deterministic SMS text, no LLM call
+// ---------------------------------------------------------------------------
+describe("formatWeeklyPlanDigest", () => {
+  const skeleton: ArcWeekSlot[] = [
+    { day: "Mon", date: "7/20", type: "rest", distanceMiles: null },
+    { day: "Wed", date: "7/22", type: "quality", distanceMiles: 4, keyWorkoutText: "Tempo 4mi (1mi WU + 2mi @ threshold + 1mi CD)" },
+    { day: "Thu", date: "7/23", type: "strength", distanceMiles: null },
+    { day: "Fri", date: "7/24", type: "easy", distanceMiles: 5 },
+    { day: "Sat", date: "7/25", type: "long_run", distanceMiles: 12 },
+  ];
+
+  it("lists each non-rest slot on its own line, using the same label mapping as syncWeekFromArc", () => {
+    const digest = formatWeeklyPlanDigest(skeleton);
+    expect(digest).toContain("Wed 7/22 — Tempo 4mi (1mi WU + 2mi @ threshold + 1mi CD)");
+    expect(digest).toContain("Thu 7/23 — Strength + mobility");
+    expect(digest).toContain("Fri 7/24 — Easy 5mi");
+    expect(digest).toContain("Sat 7/25 — Long run 12mi");
+  });
+
+  it("omits rest days entirely", () => {
+    const digest = formatWeeklyPlanDigest(skeleton);
+    expect(digest).not.toContain("Mon 7/20");
+  });
+
+  it("merges in pace from slotAnnotations when present, matched by day", () => {
+    const digest = formatWeeklyPlanDigest(skeleton, [
+      { day: "Wed", pace: "8:15/mi", why: "build lactate threshold" },
+    ]);
+    expect(digest).toContain("Wed 7/22 — Tempo 4mi (1mi WU + 2mi @ threshold + 1mi CD) (8:15/mi)");
+    // No annotation for Sat — no parenthetical appended.
+    expect(digest).toContain("Sat 7/25 — Long run 12mi");
+    expect(digest).not.toContain("Sat 7/25 — Long run 12mi (");
+  });
+
+  it("omits pace entirely when slotAnnotations is null or has no match for a day", () => {
+    const digest = formatWeeklyPlanDigest(skeleton, null);
+    expect(digest).not.toContain("(8:15/mi)");
+    const digestNoMatch = formatWeeklyPlanDigest(skeleton, [{ day: "Mon", pace: "9:00/mi" }]);
+    expect(digestNoMatch).not.toContain("9:00/mi");
+  });
+
+  it("falls back to a generic quality label when keyWorkoutText is absent", () => {
+    const noText: ArcWeekSlot[] = [{ day: "Wed", date: "7/22", type: "quality", distanceMiles: 4 }];
+    expect(formatWeeklyPlanDigest(noText)).toContain("Wed 7/22 — Quality 4mi");
+  });
+
+  it("returns just the header when the skeleton is empty or all-rest", () => {
+    expect(formatWeeklyPlanDigest([])).toBe("This week's plan:\n");
+    expect(formatWeeklyPlanDigest([{ day: "Mon", date: "7/20", type: "rest", distanceMiles: null }])).toBe("This week's plan:\n");
+  });
+
+  it("converts long-run/easy/quality-fallback distances to km for metric users, matching route.ts's recapMi conversion", () => {
+    const digest = formatWeeklyPlanDigest(skeleton, null, true);
+    expect(digest).toContain("Fri 7/24 — Easy 8.0km"); // 5mi * 1.60934 = 8.0468 -> 8.0
+    expect(digest).toContain("Sat 7/25 — Long run 19.3km"); // 12mi * 1.60934 = 19.312 -> 19.3
+    // keyWorkoutText (quality with a stored workout string) is left as-is — it's already
+    // baked in the athlete's preferred units at plan-generation time.
+    expect(digest).toContain("Wed 7/22 — Tempo 4mi (1mi WU + 2mi @ threshold + 1mi CD)");
+  });
+
+  it("converts the quality fallback label to km for metric users when keyWorkoutText is absent", () => {
+    const noText: ArcWeekSlot[] = [{ day: "Wed", date: "7/22", type: "quality", distanceMiles: 4 }];
+    expect(formatWeeklyPlanDigest(noText, null, true)).toContain("Wed 7/22 — Quality 6.4km"); // 4mi * 1.60934 = 6.437 -> 6.4
   });
 });
