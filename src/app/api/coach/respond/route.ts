@@ -26,7 +26,7 @@ import { computePaceContext } from "@/lib/coach-pace-context";
 import { parseSessionMiles } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
-import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes } from "@/lib/cross-training";
+import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, RUN_TYPES } from "@/lib/cross-training";
 import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
@@ -650,6 +650,10 @@ async function handleInjuryHold(userId: string, dryRun: boolean): Promise<NextRe
       weekly_mileage_target: 0,
       weekly_plan_sessions: null,
     }).eq("user_id", userId);
+    // active_injury is otherwise only set by the separate Haiku profile-extraction pass
+    // (persistProfileUpdates) — sync it here too so a hold can never leave the two signals
+    // disagreeing (see 2026-07-17 changelog on the active_injury/injury_hold_since desync).
+    await supabase.from("training_profiles").update({ active_injury: true }).eq("user_id", userId);
     void trackEvent(userId, "injury_hold_set", { injury_hold_since: today, pre_injury_mileage_target: currentTarget });
   }
 
@@ -743,6 +747,10 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
       pre_injury_mileage_target: null,
       return_to_run_phase: null,
     }).eq("user_id", userId);
+    // Graduation is the point the athlete has actually returned to full running — sync
+    // active_injury here (not at RTR phase 1 start above, which is still injury-adjacent
+    // monitoring) so the two signals can't disagree (see 2026-07-17 changelog).
+    await supabase.from("training_profiles").update({ active_injury: false }).eq("user_id", userId);
   }
 
   // Fetch Strava avg and B/C races for the plan rebuild.
@@ -1649,11 +1657,10 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
       48
     );
 
-    const RUNNING_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
     // Last 5 running sessions (excluding the current activity) with load data
     const currentActivityStartDate = activityData?.start_date ?? null;
     const recentRunLoads = (recentActivities as Array<{ activity_type: string; running_impact_load: number | null; start_date: string }>)
-      .filter(a => RUNNING_TYPES.has(a.activity_type) && a.running_impact_load != null && a.start_date !== currentActivityStartDate)
+      .filter(a => RUN_TYPES.has(a.activity_type) && a.running_impact_load != null && a.start_date !== currentActivityStartDate)
       .slice(0, 5)
       .map(a => a.running_impact_load as number);
     const recentAvgLoad = recentRunLoads.length >= 2
@@ -1759,9 +1766,8 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
   // Included for post_run and user_message so Dean can spot improvements or overreaching.
   let aerobicTrendBlock = "";
   if (trigger === "post_run" || trigger === "user_message") {
-    const runTypes = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
     const runsWithMetrics = recentActivities
-      .filter(a => runTypes.has(a.activity_type) && (a.aerobic_efficiency !== null || a.cardiac_decoupling_pct !== null))
+      .filter(a => RUN_TYPES.has(a.activity_type) && (a.aerobic_efficiency !== null || a.cardiac_decoupling_pct !== null))
       .slice(0, 10);
     if (runsWithMetrics.length >= 2) {
       const rows = runsWithMetrics.map(a => {
@@ -2104,9 +2110,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // for runs that happened 2+ days ago.
   const mostRecentRunRef = (() => {
     if (trigger !== "user_message") return null;
-    const RUN_TYPES_REF = new Set(["Run", "TrailRun", "VirtualRun"]);
     const sortedRuns = [...recentActivities]
-      .filter(a => RUN_TYPES_REF.has(a.activity_type as string))
+      .filter(a => RUN_TYPES.has(a.activity_type as string))
       .sort((a, b) => (b.start_date as string).localeCompare(a.start_date as string));
     if (sortedRuns.length === 0) return null;
     const mostRecent = sortedRuns[0];
@@ -2122,7 +2127,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     const yesterdayDayName = new Date(yesterdayUTC).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
     const yesterdayHadRun = recentActivities.some(a => {
       const aLocal = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date(a.start_date as string));
-      return aLocal === yesterdayLocal && RUN_TYPES_REF.has(a.activity_type as string);
+      return aLocal === yesterdayLocal && RUN_TYPES.has(a.activity_type as string);
     });
     return `<rule>MOST RECENT RUN: ${dayName} (${daysAgo} days ago). Always reference as "${dayName}'s run" — do NOT say "yesterday". Yesterday was ${yesterdayDayName}${yesterdayHadRun ? " (also a run day)" : " (a rest day — no runs)"}.</rule>`;
   })();
@@ -2131,9 +2136,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // specific follow-up questions about GAP, per-mile pace, HR by mile, etc.
   let mostRecentRunSplitsBlock: string | null = null;
   if (trigger === "user_message") {
-    const RUN_TYPES_SPLITS = new Set(["Run", "TrailRun", "VirtualRun"]);
     const latestRun = [...recentActivities]
-      .filter(a => RUN_TYPES_SPLITS.has(a.activity_type as string))
+      .filter(a => RUN_TYPES.has(a.activity_type as string))
       .sort((a, b) => (b.start_date as string).localeCompare(a.start_date as string))[0];
     if (latestRun) {
       const { data: actWithSplits } = await supabase
@@ -2365,7 +2369,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // of these fire, Dean must lead with the finding rather than the generic insight menu.
   const nonObviousWins = (() => {
     if (trigger !== "post_run") return [] as string[];
-    const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
     const isRun = RUN_TYPES.has(((activityData as Record<string, unknown> | null)?.type as string) ?? ((activityData as Record<string, unknown> | null)?.activity_type as string) ?? "");
     if (!isRun) return [];
     const thisRunMiles = activityData?.distance_meters != null
@@ -2493,7 +2496,6 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // completed, longest run of the cycle, fastest sustained tempo of the cycle.
   const recapWeeklyWins = (() => {
     if (trigger !== "weekly_recap") return [] as string[];
-    const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
     const isImperial = ((profile?.preferred_units as string) ?? "imperial") !== "metric";
     const unitLabel = isImperial ? "mi" : "km";
     const findings: string[] = [];
@@ -4417,8 +4419,6 @@ function weekCalcRefDate(trigger: string | undefined, timezone: string): Date {
   return now;
 }
 
-const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
-
 /** Format a fractional minutes-per-mile value as "M:SS/mi". Safe against :60 rollover. */
 function fmtPace(minsPerMile: number, unit: "mi" | "km" = "mi"): string {
   const totalSec = Math.round(minsPerMile * 60);
@@ -4650,11 +4650,10 @@ function computeAvgWeeklyMileage(activities: ActivityRow[], timezone: string): n
  * These are surfaced in the system prompt so Dean can bring them up at natural moments.
  */
 function computeCoachingSignals(activities: ActivityRow[], timezone: string, raceDate?: string | null, currentWeekMiles?: number): CoachingSignals {
-  const runTypes = new Set(["Run", "TrailRun", "VirtualRun"]);
 
   // Average cadence from the 10 most recent runs with cadence data
   const runsWithCadence = activities
-    .filter(a => runTypes.has(a.activity_type) && a.average_cadence && a.average_cadence > 100)
+    .filter(a => RUN_TYPES.has(a.activity_type) && a.average_cadence && a.average_cadence > 100)
     .slice(0, 10);
   const avgCadenceSpm = runsWithCadence.length >= 3
     ? runsWithCadence.reduce((s, a) => s + (a.average_cadence ?? 0), 0) / runsWithCadence.length
@@ -4680,7 +4679,7 @@ function computeCoachingSignals(activities: ActivityRow[], timezone: string, rac
   // Recent long effort: any run ≥ 10 miles or ≥ 75 min in the last 14 days
   const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const hasRecentLongEffort = activities.some(a => {
-    if (!runTypes.has(a.activity_type)) return false;
+    if (!RUN_TYPES.has(a.activity_type)) return false;
     if (new Date(a.start_date) < cutoff) return false;
     const miles = (a.distance_meters || 0) / 1609.34;
     const minutes = (a.moving_time_seconds || 0) / 60;
@@ -5635,6 +5634,23 @@ function buildSystemPrompt(
     return `INJURY HOLD: active for ${daysDiff} day${daysDiff !== 1 ? "s" : ""} (since ${holdDateFormatted}) — no running sessions`;
   })();
 
+  // Deterministic corroborating signal for a possibly-unflagged injury: no injury_hold_since
+  // on record, but Strava shows N+ consecutive days of cross-training with no run. Gives
+  // Claude the objective fact fresh every message instead of relying on conversation memory
+  // to notice this — the exact gap that let a real account's DB state drift from what Dean's
+  // own prose had been saying for days (see 2026-07-17 changelog). Log-only trackEvent below
+  // for admin visibility; the [INJURY_HOLD] judgment call itself stays exactly as strict as
+  // it already is — this only makes sure the input feeding it is never silently missing.
+  const POSSIBLE_UNFLAGGED_INJURY_THRESHOLD_DAYS = 5;
+  const possibleUnflaggedInjuryFact = (() => {
+    if (state?.injury_hold_since) return null; // already flagged — no need to re-surface
+    const { daysSinceLastRun, consecutiveCrossTrainOnlyDays } = computeRunGapSignal(recentActivities, timezone ?? "America/New_York");
+    if (consecutiveCrossTrainOnlyDays < POSSIBLE_UNFLAGGED_INJURY_THRESHOLD_DAYS) return null;
+    void trackEvent(user.id as string, "possible_unflagged_injury_detected", { consecutiveCrossTrainOnlyDays, daysSinceLastRun });
+    return `POSSIBLE UNFLAGGED INJURY: no logged run in ${daysSinceLastRun} days, cross-training only, and no injury hold is on record — if this reflects an ongoing injury the athlete hasn't formally confirmed, ask directly and consider [INJURY_HOLD] if warranted.`;
+  })();
+
+
   // Derive this week's long-run/quality facts from weekly_plan_sessions (same source
   // sessionRows above reads) so morning_plan and weekly_recap share one source of truth,
   // per the "compute it in code, don't trust legacy scalar duplication" pattern. Falls back
@@ -5716,6 +5732,7 @@ function buildSystemPrompt(
       `This week: ${milogged}`,
       `Paces: Easy ${easyRange} · Tempo ${tsTempoPace} · Interval ${tsIntervalPace}`,
       ...(injuryHoldFact ? [injuryHoldFact] : []),
+      ...(possibleUnflaggedInjuryFact ? [possibleUnflaggedInjuryFact] : []),
       ...(qualitySessionFact ? [qualitySessionFact] : []),
       ...(sessionsStatusBlock ? [sessionsStatusBlock] : []),
       ...(raceLine ? [raceLine] : []),

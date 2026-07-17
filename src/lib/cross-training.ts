@@ -22,6 +22,11 @@ export const CROSS_TRAINING_TYPES = new Set([
   "WeightTraining", "Yoga", "Pilates", "Crossfit",
 ]);
 
+// Canonical run-activity classification, shared across the engine so "is this a run" can't
+// silently drift between call sites (route.ts previously redefined this ~10 times inline,
+// two of which omitted "Treadmill").
+export const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+
 const CROSS_TRAINING_RE = /\b(strength|mobility|stretch|yoga|bike|biking|cycling|swim|swimming|elliptical|cross.train|zwift|spin|row|rowing|hike|hiking)\b/i;
 
 export function isCrossTrainingSession(label: string): boolean {
@@ -233,7 +238,7 @@ export function computeWeekCrossTrainingAerobicMinutes(
   let total = 0;
   for (const a of activities) {
     if (!a.activity_type || !a.moving_time_seconds) continue;
-    if (CROSS_TRAINING_TYPES.has(a.activity_type) || !["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(a.activity_type)) {
+    if (CROSS_TRAINING_TYPES.has(a.activity_type) || !RUN_TYPES.has(a.activity_type)) {
       const actMonday = weekMonday(new Date(a.start_date), timezone);
       if (actMonday !== currentMonday) continue;
       const { effort } = classifyCrossTrainingEffort({
@@ -249,6 +254,62 @@ export function computeWeekCrossTrainingAerobicMinutes(
     }
   }
   return total;
+}
+
+export interface RunGapSignal {
+  /** Days since the most recent run in the provided activity history, null if no run appears at all. */
+  daysSinceLastRun: number | null;
+  /**
+   * Same as daysSinceLastRun, but only non-zero when at least one cross-training activity was
+   * also logged in that gap — corroborating evidence the athlete has been actively
+   * substituting cross-training for running, not just quiet/no data. 0 when there's no run gap
+   * or no corroborating cross-training signal.
+   */
+  consecutiveCrossTrainOnlyDays: number;
+}
+
+/**
+ * Deterministic "how long has it been since this athlete last ran" signal, computed purely
+ * from Strava activity data — no LLM involved. Exists so injury-hold-adjacent prompt facts
+ * don't have to rely on Claude reconstructing this from conversation memory (see the
+ * 2026-07-17 changelog entry on why that drifted from the DB's actual injury_hold_since).
+ */
+export function computeRunGapSignal(
+  activities: Array<{ activity_type: string | null; start_date: string }>,
+  timezone: string,
+  refDate: Date = new Date(),
+): RunGapSignal {
+  const tz = timezone || "America/New_York";
+  const localDateStr = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(d);
+  const todayStr = localDateStr(refDate);
+
+  const sorted = activities
+    .filter((a): a is { activity_type: string; start_date: string } => !!a.activity_type)
+    .map(a => ({ type: a.activity_type, dateStr: localDateStr(new Date(a.start_date)) }))
+    .sort((a, b) => (a.dateStr < b.dateStr ? 1 : -1)); // most recent first
+
+  let lastRunDateStr: string | null = null;
+  let hasCrossTrainSinceLastRun = false;
+  for (const a of sorted) {
+    if (RUN_TYPES.has(a.type)) {
+      lastRunDateStr = a.dateStr;
+      break;
+    }
+    if (CROSS_TRAINING_TYPES.has(a.type)) hasCrossTrainSinceLastRun = true;
+  }
+
+  if (!lastRunDateStr) {
+    return { daysSinceLastRun: null, consecutiveCrossTrainOnlyDays: 0 };
+  }
+
+  const daysSinceLastRun = Math.round(
+    (new Date(`${todayStr}T00:00:00Z`).getTime() - new Date(`${lastRunDateStr}T00:00:00Z`).getTime()) / 86400000
+  );
+
+  return {
+    daysSinceLastRun,
+    consecutiveCrossTrainOnlyDays: hasCrossTrainSinceLastRun ? daysSinceLastRun : 0,
+  };
 }
 
 /** Human-readable summary of this week's cross-training sessions, for weekly recap context. */

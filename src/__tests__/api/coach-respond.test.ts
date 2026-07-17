@@ -1010,8 +1010,10 @@ describe("coach/respond — injury_hold trigger", () => {
       data: { weekly_mileage_target: 28, injury_hold_since: null },
       error: null,
     });
+    const profileChain = makeChain({ data: null, error: null });
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       if (table === "training_state") return stateChain;
+      if (table === "training_profiles") return profileChain;
       return makeChain({ data: null, error: null });
     });
 
@@ -1028,6 +1030,12 @@ describe("coach/respond — injury_hold trigger", () => {
     expect(holdUpdate![0].weekly_mileage_target).toBe(0);
     expect(holdUpdate![0].weekly_plan_sessions).toBeNull();
     expect((result as { data: unknown }).data).toMatchObject({ ok: true });
+
+    // active_injury must be synced alongside injury_hold_since so the two signals can't
+    // disagree (see 2026-07-17 changelog on the desync this fixes).
+    const profileUpdateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const activeInjuryUpdate = profileUpdateCalls.find(([p]: [Record<string, unknown>]) => p?.active_injury === true);
+    expect(activeInjuryUpdate).toBeDefined();
   });
 
   it("skips update when already on hold", async () => {
@@ -1104,9 +1112,10 @@ describe("coach/respond — injury_clear trigger", () => {
       data: { injury_hold_since: holdDate, pre_injury_mileage_target: 30, weekly_mileage_target: 0, return_to_run_phase: 2 },
       error: null,
     });
+    const profileChain = makeChain({ data: { goal: "half_marathon", race_date: null }, error: null });
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       if (table === "users") return makeChain({ data: { phone_number: "+12025550001", strava_athlete_id: null, onboarding_data: {}, linq_chat_id: null }, error: null });
-      if (table === "training_profiles") return makeChain({ data: { goal: "half_marathon", race_date: null }, error: null });
+      if (table === "training_profiles") return profileChain;
       if (table === "training_state") return stateChain;
       if (table === "races") return makeChain({ data: [], error: null });
       return makeChain({ data: null, error: null });
@@ -1124,6 +1133,11 @@ describe("coach/respond — injury_clear trigger", () => {
     expect(clearUpdate).toBeDefined();
     expect(clearUpdate![0].pre_injury_mileage_target).toBeNull();
 
+    // active_injury clears at graduation (full return to running), not at RTR phase 1 start.
+    const profileUpdateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const activeInjuryUpdate = profileUpdateCalls.find(([p]: [Record<string, unknown>]) => p?.active_injury === false);
+    expect(activeInjuryUpdate).toBeDefined();
+
     // Should trigger plan rebuild with 60% ramp (2 weeks injured)
     const { generateAndSaveFullPlan } = await import("@/lib/training-plan");
     expect(generateAndSaveFullPlan).toHaveBeenCalled();
@@ -1134,6 +1148,30 @@ describe("coach/respond — injury_clear trigger", () => {
     expect(opts.resetToWeek1).toBe(false);
 
     expect((result as { data: unknown }).data).toMatchObject({ ok: true });
+  });
+
+  it("does NOT clear active_injury when starting RTR phase 1 (still injury-adjacent monitoring)", async () => {
+    const holdDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const stateChain = makeChain({
+      data: { injury_hold_since: holdDate, pre_injury_mileage_target: 30, weekly_mileage_target: 0, return_to_run_phase: null },
+      error: null,
+    });
+    const profileChain = makeChain({ data: { goal: "half_marathon", race_date: null, injury_body_part: "shin" }, error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: { phone_number: "+12025550001", strava_athlete_id: null, onboarding_data: {}, linq_chat_id: null }, error: null });
+      if (table === "training_profiles") return profileChain;
+      if (table === "training_state") return stateChain;
+      if (table === "races") return makeChain({ data: [], error: null });
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "injury_clear" });
+    await POST(req);
+    await flush();
+
+    const profileUpdateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const activeInjuryUpdate = profileUpdateCalls.find(([p]: [Record<string, unknown>]) => Object.prototype.hasOwnProperty.call(p, "active_injury"));
+    expect(activeInjuryUpdate).toBeUndefined();
   });
 });
 
