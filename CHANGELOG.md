@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-16 — Fixed back-to-back long run weekend key_workout misplacement in weekly schedule bubble
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant, live-testing the new weekly_recap schedule bubble on his own 50k-training test account
+**User feedback:** Bubble showed `"Tue 7/14 — Sat 14mi trail (mix easy and moderate effort) + Sun 10mi easy (back-to-back long run weekend)"` — a session whose own text names Saturday/Sunday, attached to a Tuesday slot.
+**Root cause:** Ultra plans use a special `key_workout` format for "back-to-back long run weekends" (a stimulus specific to ultra training — see the `ultraGuidance` enrichment prompt in `generateAndSaveFullPlan`) where the text itself names two specific days, e.g. `"Sat 14mi trail + Sun 10mi easy (back-to-back)"`. `computeArcWeekSkeleton()` was built assuming `key_workout` is always a normal midweek quality session and blindly placed it on its own computed "quality day" (Tuesday, picked to be non-adjacent to the long run) — producing a slot whose attached text names entirely different days than the one it's on.
+**Fix / Change:** `computeArcWeekSkeleton` now detects back-to-back-formatted `key_workout` text (`/back-to-back/i`) and excludes it from deterministic quality-slot placement entirely, for both `key_workout` and `key_workout_2`. Its mileage flows into the leftover pool and gets distributed across easy days instead of being silently dropped. Dean's own weekly_recap prose still describes the back-to-back weekend correctly — it reads `key_workout` directly, not through this skeleton. Not fixed in this pass: the deeper plan-generation-time inconsistency where `long_run_target` and a back-to-back `key_workout` can independently describe different mileage for the same day (e.g. "Long run 12mi" from `long_run_target` vs. "Sat 14mi" inside the excluded `key_workout` text) — flagging as a follow-up, since reconciling those two fields is a separate, riskier change to `generateAndSaveFullPlan`.
+**Files changed:** `src/lib/training-plan.ts` (`computeArcWeekSkeleton`), `src/__tests__/lib/training-plan.test.ts`
+
 ## 2026-07-16 — Unified deterministic cross-training: injury recovery + non-injured supplementary
 
 **Type:** Feature / Refactor

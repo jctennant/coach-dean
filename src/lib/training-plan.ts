@@ -1042,9 +1042,24 @@ export function computeArcWeekSkeleton(params: {
     }
   }
 
-  const qualityDistance = keyWorkoutText ? parseLeadingDistanceMiles(keyWorkoutText) : null;
-  const qualityDistance2 = keyWorkoutText2 ? parseLeadingDistanceMiles(keyWorkoutText2) : null;
-  if (keyWorkoutText && qualityDistance == null) {
+  // Ultra plans use a "back-to-back long run weekend" key_workout format that names its own
+  // days directly (e.g. "Sat 14mi trail + Sun 10mi easy (back-to-back long run weekend)" —
+  // see the ultraGuidance enrichment prompt above). That text is NOT a normal midweek quality
+  // session — placing it on this function's own computed quality day (e.g. Tuesday) produces
+  // a nonsensical slot whose own text names different days than the one it's attached to.
+  // Exclude it from deterministic quality-slot placement entirely; its mileage flows into the
+  // leftover pool and gets distributed across easy days instead. Dean's own prose (which reads
+  // key_workout directly, not through this skeleton) still describes the back-to-back weekend.
+  const isBackToBackText = (text: string) => /back-to-back/i.test(text);
+  const keyWorkoutUsable = !!keyWorkoutText && !isBackToBackText(keyWorkoutText);
+  const keyWorkoutText2Usable = !!keyWorkoutText2 && !isBackToBackText(keyWorkoutText2);
+  if (keyWorkoutText && !keyWorkoutUsable) {
+    console.warn(`[computeArcWeekSkeleton] key_workout is a back-to-back long run weekend — excluding from quality-slot placement: "${keyWorkoutText}"`);
+  }
+
+  const qualityDistance = keyWorkoutUsable ? parseLeadingDistanceMiles(keyWorkoutText!) : null;
+  const qualityDistance2 = keyWorkoutText2Usable ? parseLeadingDistanceMiles(keyWorkoutText2!) : null;
+  if (keyWorkoutUsable && qualityDistance == null) {
     console.warn(`[computeArcWeekSkeleton] could not parse a distance from key_workout: "${keyWorkoutText}"`);
   }
 
@@ -1054,12 +1069,12 @@ export function computeArcWeekSkeleton(params: {
   slots.push({ day: longRunDay as ArcWeekSlot["day"], date: dateFor(longRunDay), type: "long_run", distanceMiles: longRunMiles });
   usedDays.add(longRunDay);
 
-  if (qualityDay && keyWorkoutText) {
-    slots.push({ day: qualityDay as ArcWeekSlot["day"], date: dateFor(qualityDay), type: "quality", distanceMiles: qualityDistance, keyWorkoutText });
+  if (qualityDay && keyWorkoutUsable) {
+    slots.push({ day: qualityDay as ArcWeekSlot["day"], date: dateFor(qualityDay), type: "quality", distanceMiles: qualityDistance, keyWorkoutText: keyWorkoutText! });
     usedDays.add(qualityDay);
   }
-  if (qualityDay2 && keyWorkoutText2) {
-    slots.push({ day: qualityDay2 as ArcWeekSlot["day"], date: dateFor(qualityDay2), type: "quality", distanceMiles: qualityDistance2, keyWorkoutText: keyWorkoutText2 });
+  if (qualityDay2 && keyWorkoutText2Usable) {
+    slots.push({ day: qualityDay2 as ArcWeekSlot["day"], date: dateFor(qualityDay2), type: "quality", distanceMiles: qualityDistance2, keyWorkoutText: keyWorkoutText2! });
     usedDays.add(qualityDay2);
   }
 

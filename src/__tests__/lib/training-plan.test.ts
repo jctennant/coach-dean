@@ -438,6 +438,27 @@ describe("computeArcWeekSkeleton", () => {
     expect(slots.find(s => s.type === "quality")?.distanceMiles).toBe(4);
   });
 
+  it("excludes a back-to-back long run weekend key_workout from quality-slot placement", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining, // Mon, Tue, Wed, Fri, Sun
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Sat 14mi trail (mix easy and moderate effort) + Sun 10mi easy (back-to-back long run weekend)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    // No slot anywhere should carry the back-to-back text — especially not on a day the
+    // text itself doesn't name (the original bug: it landed on Tuesday).
+    expect(slots.some(s => s.keyWorkoutText?.includes("back-to-back"))).toBe(false);
+    expect(slots.find(s => s.type === "quality")).toBeUndefined();
+    // Its mileage still flows into the week via easy days rather than vanishing.
+    const runningTotal = slots
+      .filter(s => s.type === "long_run" || s.type === "quality" || s.type === "easy")
+      .reduce((sum, s) => sum + (s.distanceMiles ?? 0), 0);
+    expect(runningTotal).toBeCloseTo(30, 5);
+  });
+
   // trainingDays: Mon/Wed/Fri, strengthDay: Thu -> remaining candidate rest days: Tue, Sat, Sun (3)
   const threeDayTraining = ["monday", "wednesday", "friday"];
 
