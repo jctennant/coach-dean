@@ -286,36 +286,3 @@ export function buildWeeklyCrossTrainingSummary(
 
   return sessions.join("; ");
 }
-
-/**
- * Phase-appropriate cross-training prescription string for the plan arc.
- * Used by Haiku enrichment when the athlete has bike/pool tools.
- */
-export function prescribeCrossTrainingForPhase(
-  phase: string,
-  crosstrainingTools: string[],
-): string | null {
-  const hasBike = crosstrainingTools.some(t => /bike|cycling|zwift|spin/i.test(t));
-  const hasPool = crosstrainingTools.some(t => /swim|pool/i.test(t));
-  if (!hasBike && !hasPool) return null;
-
-  const p = phase.toLowerCase();
-
-  if (hasBike) {
-    if (p === "base" || p === "deload") return "Z2 ride 45 min (easy aerobic, keep HR in Z2)";
-    if (p === "build") return "Sweetspot ride 45 min (15 min easy + 20 min moderate effort + 10 min easy)";
-    if (p === "peak") return "Sweetspot ride 40 min or easy spin 30 min";
-    if (p === "taper") return "Easy spin 25–30 min (active recovery only — no intensity)";
-    return "Easy Z2 ride 40 min";
-  }
-
-  if (hasPool) {
-    if (p === "base" || p === "deload") return "Easy aerobic swim 30 min";
-    if (p === "build") return "Swim drill sets 40 min (500m warm-up + 6×100m moderate + 200m cool-down)";
-    if (p === "peak") return "Steady swim 30 min or drill set 35 min";
-    if (p === "taper") return "Easy swim 20 min, focus on form";
-    return "Easy swim 30 min";
-  }
-
-  return null;
-}

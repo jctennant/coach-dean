@@ -130,6 +130,36 @@ export const CROSS_TRAINING_WORKOUTS: Record<string, string> = {
     "Brisk walking: 45–60 min at a pace where you feel like you're moving with purpose (RPE 4/10, slightly more than a stroll). Good for the first few days of injury hold when cross-training is too much. Flat or gentle incline. Stop if your injury-site pain goes above 2/10.",
 };
 
+// Maps free-text cross-training descriptions (as they appear in CROSS_TRAINING_ALTERNATIVES
+// entries or an athlete's own words) to the canonical CROSS_TRAINING_WORKOUTS keys. Shared by
+// buildRehabProtocol (route.ts) and computeRecoveryWeekSkeleton (training-plan.ts) so the two
+// can't drift into recognizing modalities differently.
+export const MODALITY_PATTERNS: Array<[RegExp, string]> = [
+  [/pool|aqua.jog/, "pool_running"],
+  [/swim/, "swimming"],
+  [/bike|cycling|zwift|spin/, "bike"],
+  [/elliptical/, "elliptical"],
+  [/stair|step.mill/, "stair_stepper"],
+  [/row/, "rowing"],
+  [/hike/, "hiking"],
+];
+
+// Athlete-facing display label for each canonical modality key.
+export const MODALITY_DISPLAY_NAMES: Record<string, string> = {
+  pool_running: "Pool running",
+  swimming: "Swim",
+  bike: "Bike",
+  elliptical: "Elliptical",
+  stair_stepper: "Stair stepper",
+  rowing: "Row",
+  hiking: "Hike",
+  walking: "Walk",
+};
+
+// Fallback modality rotation when the athlete's injury body part isn't in
+// CROSS_TRAINING_ALTERNATIVES (unknown/unlisted injury) — low-impact, broadly safe defaults.
+export const DEFAULT_SAFE_MODALITIES = ["bike", "swimming", "elliptical"];
+
 /** Parse "N–M weeks" or "N–M days" strings from INJURY_TIMELINES into { minWeeks, maxWeeks }. */
 export function getRecoveryEstimate(
   bodyPart: string,

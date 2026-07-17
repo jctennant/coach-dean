@@ -585,3 +585,45 @@ describe("persistProfileUpdates — no spurious writes", () => {
     expect(goalUpdate).toBeUndefined();
   });
 });
+
+describe("persistProfileUpdates — cross-training day preference", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("lowercases updated_crosstraining_days before saving to training_profiles", async () => {
+    mockExtractionThenCoach({ updated_crosstraining_days: ["Tuesday", "Thursday"] });
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: baseConversations("I usually bike on Tuesdays and Thursdays"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const update = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls
+      .find(([p]: [Record<string, unknown>]) => p?.crosstraining_days != null);
+    expect(update).toBeDefined();
+    expect(update?.[0].crosstraining_days).toEqual(["tuesday", "thursday"]);
+  });
+
+  it("does not touch crosstraining_days when nothing was extracted", async () => {
+    mockExtractionThenCoach({ goal_time_minutes: 55 });
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: baseConversations("New goal: sub-55"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const update = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls
+      .find(([p]: [Record<string, unknown>]) => Object.prototype.hasOwnProperty.call(p, "crosstraining_days"));
+    expect(update).toBeUndefined();
+  });
+});

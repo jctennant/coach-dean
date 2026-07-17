@@ -10,8 +10,8 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest } from "@/lib/training-plan";
-import type { ArcWeekSlot } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest } from "@/lib/training-plan";
+import type { ArcWeekSlot, RecoveryWeekSlot } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
@@ -31,7 +31,7 @@ import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasEx
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
-import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, getRehabData, buildTimelinePromptText } from "@/lib/exercise-library";
+import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, getRehabData, buildTimelinePromptText } from "@/lib/exercise-library";
 import { classifyIntent } from "@/lib/intent-classifier";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
@@ -235,20 +235,10 @@ function buildRehabProtocol(input: Record<string, unknown>): string {
       `Injury-safe cross-training${available.length ? ` (athlete has ${available.join(", ")} — listed first)` : ""}: ${opts.map((o) => `• ${o}`).join("  ")}`
     );
 
-    // Workout prescriptions for available modalities so Dean gives specific sessions, not just "try the bike"
-    const modalities: Array<[RegExp, string]> = [
-      [/pool|aqua.jog/, "pool_running"],
-      [/swim/, "swimming"],
-      [/bike|cycling|zwift|spin/, "bike"],
-      [/elliptical/, "elliptical"],
-      [/stair|step.mill/, "stair_stepper"],
-      [/row/, "rowing"],
-      [/hike/, "hiking"],
-    ];
     // Only test positive recommendations (not "Avoid X" entries) to prevent injecting
     // contraindicated workout prescriptions for injury-excluded modalities.
     const positiveOpts = opts.filter(o => !o.toLowerCase().startsWith("avoid"));
-    const relevantWorkouts = modalities
+    const relevantWorkouts = MODALITY_PATTERNS
       .filter(([re]) => positiveOpts.some(o => re.test(o.toLowerCase())) || available.some(t => re.test(t)))
       .map(([, key]) => CROSS_TRAINING_WORKOUTS[key])
       .filter(Boolean);
@@ -2024,6 +2014,7 @@ Apply this to bias which metric lens you pick and what advice you give proactive
     !isAnalystMode
   ) {
     const trainingDaysForSkeleton = (profile?.training_days as string[] | null) ?? [];
+    const crosstrainingToolsForSkeleton = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
     const strengthForSkeleton = computeWeeklyStrength(profile);
     const skeleton = computeArcWeekSkeleton({
       trainingDays: trainingDaysForSkeleton,
@@ -2032,11 +2023,38 @@ Apply this to bias which metric lens you pick and what advice you give proactive
       keyWorkoutText: storedPlanWeek.key_workout || null,
       keyWorkoutText2: storedPlanWeek.key_workout_2 ?? null,
       strengthDay: strengthForSkeleton.day,
+      crosstrainingTools: crosstrainingToolsForSkeleton,
       timezone: userTimezone,
     });
     // computeArcWeekSkeleton returns [] when the athlete has no training_days set —
     // fall back to the prose-only path in that case rather than sending an empty schedule.
     arcWeekSkeleton = skeleton.length > 0 ? skeleton : null;
+  }
+
+  // Deterministic cross-training/strength skeleton for injury-hold weeks — the recovery
+  // analog of arcWeekSkeleton above, mutually exclusive with it by construction (hold vs.
+  // not). Replaces having Claude free-hand which days get cross-training during hold (see
+  // computeRecoveryWeekSkeleton in training-plan.ts).
+  let recoveryWeekSkeleton: RecoveryWeekSlot[] | null = null;
+  if (
+    trigger === "weekly_recap" &&
+    !!(state?.injury_hold_since as string | null) &&
+    !isComplementMode &&
+    !isAnalystMode
+  ) {
+    const trainingDaysForRecovery = (profile?.training_days as string[] | null) ?? [];
+    const crosstrainingDaysForRecovery = (profile?.crosstraining_days as string[] | null)?.filter(Boolean) ?? null;
+    const crosstrainingToolsForRecovery = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
+    const strengthForRecovery = computeWeeklyStrength(profile);
+    const skeleton = computeRecoveryWeekSkeleton({
+      trainingDays: trainingDaysForRecovery,
+      crosstrainingDays: crosstrainingDaysForRecovery,
+      crosstrainingTools: crosstrainingToolsForRecovery,
+      bodyPart: (profile?.injury_body_part as string | null) ?? null,
+      strengthDay: strengthForRecovery.day,
+      timezone: userTimezone,
+    });
+    recoveryWeekSkeleton = skeleton.length > 0 ? skeleton : null;
   }
 
   // Build user message based on trigger
@@ -2634,7 +2652,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return questions;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton);
 
   // Re-anchor today/tomorrow right next to the generation instructions. The full
   // DATE CONTEXT block lives early in the (much longer) system prompt — by the time
@@ -3383,6 +3401,8 @@ OUTPUT CONTRACT:
   // (see 2026-04-16 changelog on why day-by-day schedules generated freeform were unreliable).
   if (trigger === "weekly_recap" && arcWeekSkeleton) {
     parts.push(formatWeeklyPlanDigest(arcWeekSkeleton, arcSlotAnnotations, isMetricUser));
+  } else if (trigger === "weekly_recap" && recoveryWeekSkeleton) {
+    parts.push(formatRecoveryWeekDigest(recoveryWeekSkeleton));
   }
 
   // For initial_plan, hard-cap at 2 SMS bubbles regardless of how many blank-line
@@ -5620,15 +5640,18 @@ function buildSystemPrompt(
   // per the "compute it in code, don't trust legacy scalar duplication" pattern. Falls back
   // to the legacy scalar columns when session labels don't match the arc-generated
   // "Long run Xmi" / "Easy Xmi" convention (e.g. complement-mode uploaded-plan wording).
-  const planSessionsForFacts = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
+  const planSessionsForFacts = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string; type?: string }> | null) ?? [];
   const derivedLongRunMiles = (() => {
     const longRunSession = planSessionsForFacts.find(s => /^long run/i.test(s.label));
     if (!longRunSession) return null;
     const miles = parseSessionMiles(longRunSession.label);
     return miles > 0 ? miles : null;
   })();
+  // Exclude by type (not just label regex) so a cross-train slot's display name (e.g.
+  // "Bike", "Swim") — which doesn't match /^long run|^easy|^strength/ — can never be
+  // misread as the week's quality session.
   const derivedQualitySession = planSessionsForFacts.find(
-    s => !/^long run/i.test(s.label) && !/^easy/i.test(s.label) && !/^strength/i.test(s.label)
+    s => s.type !== "cross_train" && s.type !== "strength" && !/^long run/i.test(s.label) && !/^easy/i.test(s.label) && !/^strength/i.test(s.label)
   )?.label ?? null;
   const weeklyLongRunMiles = derivedLongRunMiles ?? (state?.weekly_long_run_miles as number | null) ?? null;
   const weeklyQualitySession = derivedQualitySession ?? (state?.weekly_quality_session as string | null) ?? null;
@@ -6258,6 +6281,7 @@ type ExtractedProfileData = {
   race_name?: string | null;
   goal_time_minutes?: number | null;
   updated_training_days?: string[] | null;
+  updated_crosstraining_days?: string[] | null;
   goal_race_type?: string | null;
   new_b_races?: Array<{
     date: string;
@@ -6321,6 +6345,7 @@ Extract ONLY explicitly stated NEW information:
 - A new or updated target race date (e.g. "I just signed up for Boston on April 21st", "my marathon is October 13th", "late May", "end of June") → race_date as "YYYY-MM-DD". Resolve vague phrases: "early [month]" → first Saturday of that month, "mid [month]" → Saturday nearest the 15th, "late [month]" or "end of [month]" → last Saturday of that month, month only → first Saturday of that month. Always use the next upcoming occurrence of that month. Today is ${todayDateStr}. IMPORTANT: Only set race_date when the athlete is CHANGING or SETTING their PRIMARY goal race date. Do NOT set race_date when they are adding a secondary, tune-up, or B-race alongside their existing goal — indicated by phrases like "also", "too", "as well", "build towards that too", "make sure my plan covers", or when the named race is clearly different from their current primary goal. If the message also names the specific race or event alongside the date (e.g. "I'm running the Boston Marathon", "my Snowbird race", "signed up for Dipsea"), also extract → race_name as string (null if no name given or if the athlete only mentions the distance/type without a proper name).
 - A new or revised finish time goal (e.g. "I want to run sub-3:30", "revised my goal to 1:55", "aiming for under 4 hours") → goal_time_minutes as total minutes (e.g. sub-3:30 → 210, 1:55 → 115).
 - A change to the athlete's recurring weekly schedule (e.g. "I can only run Tuesday, Thursday, Sunday from now on", "I'm switching my long run to Saturday", "I do Mon/Wed/Fri going forward") → updated_training_days as array of full day names (e.g. ["Tuesday", "Thursday", "Sunday"]). Only set when the athlete is changing their standing schedule, NOT for a one-off skip, swap, or "this week only" request (e.g. "I want to run Mon, Tue, Fri this week" should NOT set updated_training_days).
+- A stated preference for which days work for cross-training, distinct from their normal running days (e.g. "I usually bike on Tuesdays and Thursdays", "let's do the pool on Mon/Wed/Fri") → updated_crosstraining_days as array of full day names. Only set when explicitly stated; not from inference.
 - A correction or change to the athlete's goal race type (e.g. "actually I'm doing a half marathon not a full", "I signed up for a 10K instead", "I'm training for a 5K now") → goal_race_type as one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "general_fitness". Only set when the athlete is clearly changing their goal distance, not just mentioning a race in passing.
 - A secondary (B or C) race mentioned alongside their existing primary goal — e.g. "I also signed up for X on [date]", "I'm doing Y as a tune-up", "there's a local 10K on [date] I want to do", "I registered for Z too" → new_b_races as array of objects with: date (YYYY-MM-DD, resolve the same way as race_date), name (string or null), priority ("B" for tune-up/goal races, "C" for low-key/fun runs), goal_race_type (the race's own distance type — one of: "5k", "10k", "half_marathon", "marathon", "50k", "100k", "50mi", "100mi", "30k", "mile", "trail_race", or null if unclear), goal_distance_miles (number or null — 5K=3.107, 10K=6.214, half=13.109, marathon=26.219, null if unknown). Only set when the race is ADDITIONAL to their primary goal, not a replacement for it.
 - Explicitly requests using kilometers/km/metric (e.g. "I prefer km", "use km", "switch to km", "in kilometers") → preferred_units: "metric"
@@ -6332,7 +6357,7 @@ Extract ONLY explicitly stated NEW information:
 - A STANDING instruction about HOW the coach should communicate — tone, word choice, or a behavior to stop/start that should persist across ALL future messages (NOT a one-off question or a training-plan preference) → coaching_directives as an array of short imperative strings written as a rule the coach must follow every time. Capture things like: "stop telling me not to overtrain / risk injury" → ["Do not warn about overtraining or injury risk unless I bring it up"]; "say pelvis instead of groin" → ["Refer to the injury as the pelvis, not the groin"]; "stop calling my easy runs moderate" → ["Do not label my easy efforts as moderate"]; "quit asking how I feel after every run" → ["Do not end messages by asking how I feel"]; "stop being so wordy" → ["Keep responses short"]. Only set when the athlete is clearly telling the coach to change its communication going forward. Do NOT capture one-time requests, training questions, or plan changes here (those go to other_notes).
 - A self-reported pain level in response to an injury check-in or when describing injury severity (e.g. "pain is a 3", "about a 4 out of 10", "maybe 2/10", "it's a 6") → pain_level as integer 0–10. Only extract when they give an explicit number; do not infer from "mild" or "bad".
 
-Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "race_name": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null, "coaching_directives": string[]|null, "pain_level": integer|null}
+Output: {"injury_notes": string | null, "injury_resolved": boolean | null, "injury_body_part": string | null, "injury_severity": "mild"|"moderate"|"severe"|null, "new_crosstraining": string[] | null, "other_notes": string | null, "recent_race_distance_km": number | null, "recent_race_time_minutes": number | null, "easy_pace": string | null, "tempo_pace": string | null, "interval_pace": string | null, "timezone": string | null, "race_date": string | null, "race_name": string | null, "goal_time_minutes": number | null, "updated_training_days": string[] | null, "updated_crosstraining_days": string[] | null, "goal_race_type": string | null, "new_b_races": [{"date": string, "name": string | null, "priority": "B"|"C", "goal_race_type": string | null, "goal_distance_miles": number | null}] | null, "workout": {"activity_type": string, "distance_meters": number | null, "moving_time_seconds": number | null, "average_pace": string | null, "elevation_gain": number | null, "date_offset": number} | null, "manual_pr_updates": [{"distance": string, "time_seconds": number}] | null, "preferred_units": "imperial"|"metric"|null, "strava_write_enabled": boolean|null, "coaching_focus": string|null, "coaching_mode_request": "analyst"|"full_coach"|null, "avg_sleep_hours": number|null, "coaching_directives": string[]|null, "pain_level": integer|null}
 
 Return {} if nothing new is present.`,
       messages: [{ role: "user", content: message }],
@@ -6375,6 +6400,7 @@ async function persistProfileUpdates(
 
     const hasInjuryBodyPart = !!extracted.injury_body_part;
     const hasTrainingDays = Array.isArray(extracted.updated_training_days) && (extracted.updated_training_days as string[]).length > 0;
+    const hasCrosstrainingDays = Array.isArray(extracted.updated_crosstraining_days) && (extracted.updated_crosstraining_days as string[]).length > 0;
     const hasGoalRaceType = !!(extracted.goal_race_type);
     const hasNewBRaces = Array.isArray(extracted.new_b_races) && (extracted.new_b_races as unknown[]).length > 0;
     const hasManualPRs = Array.isArray(extracted.manual_pr_updates) && (extracted.manual_pr_updates as unknown[]).length > 0;
@@ -6385,7 +6411,7 @@ async function persistProfileUpdates(
     const hasCoachingFocus = !!(extracted.coaching_focus);
     const hasCoachingModeRequest = !!(extracted.coaching_mode_request);
     const hasCoachingDirectives = Array.isArray(extracted.coaching_directives) && (extracted.coaching_directives as string[]).filter(d => typeof d === "string" && d.trim()).length > 0;
-    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasRaceName && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasStravaWriteDisable && !hasCoachingFocus && !hasCoachingModeRequest && !hasCoachingDirectives) return;
+    if (!hasInjury && !hasInjuryResolved && !hasInjuryBodyPart && !hasCrosstraining && !hasOtherNotes && !hasRaceData && !hasEasyPace && !hasDirectTempoPace && !hasDirectIntervalPace && !hasTimezone && !hasRaceDate && !hasRaceName && !hasGoalTime && !hasWorkout && !hasTrainingDays && !hasCrosstrainingDays && !hasGoalRaceType && !hasNewBRaces && !hasManualPRs && !hasPreferredUnits && !hasStravaWriteDisable && !hasCoachingFocus && !hasCoachingModeRequest && !hasCoachingDirectives) return;
 
     console.log("[coach/respond] persisting profile updates from user message:", extracted);
 
@@ -6509,6 +6535,9 @@ async function persistProfileUpdates(
       // Clear any active week override — the standing schedule takes precedence
       profileUpdate.this_week_override_days = null;
       profileUpdate.this_week_override_expires = null;
+    }
+    if (hasCrosstrainingDays) {
+      profileUpdate.crosstraining_days = (extracted.updated_crosstraining_days as string[]).map(d => d.toLowerCase());
     }
     if (hasGoalRaceType) {
       profileUpdate.goal = extracted.goal_race_type;
@@ -6847,6 +6876,7 @@ function buildUserMessage(
   recentPostRunQuestions: string[] = [],
   isPositiveOnlyStyle = false,
   arcWeekSkeleton: ArcWeekSlot[] | null = null,
+  recoveryWeekSkeleton: RecoveryWeekSlot[] | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -7451,13 +7481,24 @@ Keep the whole thing under 480 characters.`;
         : `<rule>THIS WEEK'S MILEAGE (authoritative, do not recompute): ${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}. Use this exact figure when recapping the week — never sum individual runs yourself. IMPORTANT: distance phrases in the athlete's messages (e.g. "the first 9 miles were on trails") describe portions of already-tracked Strava activities — do NOT count them as additional runs or add them to the total.</rule>\n\nFIRST TEXT — open with the standout signal from this week, not a templated phrase. The exact figure "${weekVolumeStr} across ${weekRunCount} run${weekRunCount !== 1 ? "s" : ""}" must appear somewhere in the first text (athletes need to see it), but it does NOT have to be the first sentence. Vary the opener across weeks: lead with a milestone, a trend, a key workout result, a milestone crossing, or a felt observation — whatever was most notable about this week. The numeric figure can land mid-sentence or in a follow-up clause. Examples of varied openers (do NOT copy verbatim — these illustrate the range):\n- "Big block — ${weekVolumeStr} across ${weekRunCount}, and the tempo dropped 8 sec/mi from last month."\n- "Recovery week dialed in: ${weekVolumeStr}, exactly the pullback we wanted."\n- "Three quality sessions in the bag this week — ${weekVolumeStr} across ${weekRunCount}, and your easy pace at the same HR is the fastest it's been all build."\n- "Quieter week (${weekVolumeStr}, ${weekRunCount} runs) — you mentioned the calf, and the lower volume reflects that."\n\n`;
       // Injury hold overrides normal progression entirely — applies regardless of plan type.
       const injuryHoldInstruction = injuryHoldSince
+        ? (recoveryWeekSkeleton
         ? `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
+THIS WEEK'S RECOVERY SCHEDULE IS ALREADY DECIDED — DO NOT INVENT OR REORDER WHICH DAYS GET WHICH ACTIVITY:
+${recoveryWeekSkeleton.filter(s => s.type !== "rest").map(s => `${s.day} ${s.date} · ${s.type === "strength" ? "strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "cross-training")}`).join("\n")}
+Describe these slots across your two texts in prose (not a day-by-day list) — the day/modality assignment above is fixed and already validated against the athlete's injury-safe options; you only add purpose and pain-threshold framing.
+Do NOT prescribe running sessions this week.
+First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery.
+Second text: narrate the fixed cross-training/strength schedule above. Judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored (e.g. "Thu: Easy 15–20 min jog — run at easy effort and stop immediately if any pain. Think of it as a check-in, not a workout."). Only add a probe if it's warranted; don't force one every week.
+If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
+Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST].
+Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
+        : `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
 Do NOT prescribe running sessions this week. The athlete is on an injury hold.
 First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery.
 Second text: prescribe cross-training and rest only. Include 1–2 gentle test-run probes toward the end of the week — short, easy, pain-monitored (e.g. "Thu: Easy 15–20 min jog — run at easy effort and stop immediately if any pain. Think of it as a check-in, not a workout.").
 If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST] with running sessions — only cross-training and test-run probe sessions.
-Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
+Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`)
         // Complement mode: athlete follows an external plan — don't prescribe Dean's next-week sessions.
         : isComplementMode
         ? "\n<rule>COMPLEMENT MODE: This athlete follows their own external training plan. For the second text — DO NOT prescribe specific sessions, a mileage target, or a Dean-generated schedule. Give 1 training observation from this week (e.g. pacing quality, volume trend, aerobic efficiency), then tell them to follow their plan for next week. One sentence pointing them to their plan is enough — no session prescriptions from Dean.</rule>\n"
@@ -7581,9 +7622,12 @@ TOTAL LINE FORMAT: The upcoming week starts at zero — do NOT add the ${recapIs
 <rule>CROSS-TRAINING FORMAT: For bike, swim, strength, and mobility sessions use 'min' for duration — NEVER '${recapIsMetric ? "km" : "mi"}'. Example: "Thu 4/3 · Easy bike 60min" not "Easy bike 60${recapIsMetric ? "km" : "mi"}". Writing distance on a cross-training session causes it to be counted as running volume and will inflate your stated total.</rule>
 `;
       // The [SESSION_LIST] text tag is only needed on the legacy prose path — skeleton mode
-      // reports the same information back structurally via slot_annotations (see
-      // buildDeliverMessageTool), so there's nothing left for this tag to do.
-      const sessionTagsBlock = arcWeekSkeleton
+      // (running or recovery) reports the same information back structurally via
+      // slot_annotations (see buildDeliverMessageTool), so there's nothing left for this
+      // tag to do. Its consumers, extractAndStorePlanSessions/maybeUpdatePlanSessions, have
+      // zero call sites in this file already — this just stops asking Claude for a tag
+      // nothing reads.
+      const sessionTagsBlock = (arcWeekSkeleton || recoveryWeekSkeleton)
         ? ""
         : `
 SESSION TAGS: At the very end of your response (after all human-readable text), append a machine-readable tag listing every session in the upcoming week's plan. Format exactly:

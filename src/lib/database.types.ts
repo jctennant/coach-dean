@@ -416,6 +416,7 @@ export type Database = {
           coaching_threads: string | null
           coaching_threads_updated_at: string | null
           constraints: string | null
+          crosstraining_days: string[] | null
           crosstraining_tools: string[] | null
           current_easy_pace: string | null
           current_interval_pace: string | null
@@ -471,6 +472,7 @@ export type Database = {
           coaching_threads?: string | null
           coaching_threads_updated_at?: string | null
           constraints?: string | null
+          crosstraining_days?: string[] | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null
           current_interval_pace?: string | null
@@ -526,6 +528,7 @@ export type Database = {
           coaching_threads?: string | null
           coaching_threads_updated_at?: string | null
           constraints?: string | null
+          crosstraining_days?: string[] | null
           crosstraining_tools?: string[] | null
           current_easy_pace?: string | null
           current_interval_pace?: string | null

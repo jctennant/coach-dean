@@ -1539,3 +1539,57 @@ describe("coach/respond — deliver_message tool (structural reasoning-leak fix)
     expect(sent).toContain("Easy 5mi today");
   });
 });
+
+describe("coach/respond — morning_plan quality-session derivation excludes cross-train/strength slots", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Tempo day — let's get after it!" }],
+    });
+  });
+
+  it("does not misread a cross-train slot's display name (e.g. 'Bike') as the week's quality session", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Mon", date: sessionDateOffset(0), label: "Bike", type: "cross_train" },
+          { day: "Wed", date: sessionDateOffset(2), label: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)", type: "run" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "morning_plan" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const systemPrompt = systemText(calls[0][0].system);
+
+    expect(systemPrompt).toContain("Quality session this week: YES — Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)");
+    expect(systemPrompt).not.toContain("Quality session this week: YES — Bike");
+  });
+
+  it("does not misread a strength slot's label as the week's quality session", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Thu", date: sessionDateOffset(0), label: "Strength + mobility", type: "strength" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "morning_plan" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const systemPrompt = systemText(calls[0][0].system);
+    expect(systemPrompt).not.toContain("Quality session this week: YES — Strength");
+  });
+});

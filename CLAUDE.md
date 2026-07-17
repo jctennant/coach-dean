@@ -119,7 +119,7 @@ Crons → POST /api/coach/respond (various triggers)
 | Table | Key columns |
 |---|---|
 | `users` | `phone_number`, `name`, `strava_athlete_id`, `strava_*_token`, `onboarding_step`, `onboarding_data` (JSON), `timezone`, `linq_chat_id` |
-| `training_profiles` | `race_date`, `goal`, `current_easy_pace`, `current_tempo_pace`, `current_interval_pace`, `preferred_units`, `injury_notes`, `proactive_cadence`, `training_days` |
+| `training_profiles` | `race_date`, `goal`, `current_easy_pace`, `current_tempo_pace`, `current_interval_pace`, `preferred_units`, `injury_notes`, `proactive_cadence`, `training_days`, `crosstraining_tools`, `crosstraining_days` (optional CT day preference, distinct from `training_days`) |
 | `training_state` | `current_week`, `current_phase`, `weekly_mileage_target`, `weekly_plan_sessions` (JSON), `last_activity_date`, `taper_peak_miles` |
 | `training_plans` | `weeks` (JSON array of week objects), `total_weeks` — the full multi-week arc |
 | `activities` | `strava_activity_id`, `activity_type`, `distance_meters`, `average_pace`, `average_heartrate`, `workout_type` (1=race), `start_date`, `summary` (splits/laps JSON) |

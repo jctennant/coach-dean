@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, formatWeeklyPlanDigest, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
+import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -437,6 +437,66 @@ describe("computeArcWeekSkeleton", () => {
     });
     expect(slots.find(s => s.type === "quality")?.distanceMiles).toBe(4);
   });
+
+  // trainingDays: Mon/Wed/Fri, strengthDay: Thu -> remaining candidate rest days: Tue, Sat, Sun (3)
+  const threeDayTraining = ["monday", "wednesday", "friday"];
+
+  it("places cross-train slots on rest days when crosstrainingTools is set", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: threeDayTraining,
+      weeklyTotalMiles: 20,
+      longRunMiles: 8,
+      keyWorkoutText: null,
+      strengthDay: "Thu",
+      crosstrainingTools: ["bike"],
+      timezone: "UTC",
+    });
+    const ctSlots = slots.filter(s => s.type === "cross_train");
+    expect(ctSlots.length).toBeGreaterThan(0);
+    expect(ctSlots.every(s => s.modality === "bike")).toBe(true);
+  });
+
+  it("caps cross-train slots at 2 even with more available rest days", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: threeDayTraining,
+      weeklyTotalMiles: 20,
+      longRunMiles: 8,
+      keyWorkoutText: null,
+      strengthDay: "Thu",
+      crosstrainingTools: ["bike", "pool"],
+      timezone: "UTC",
+    });
+    expect(slots.filter(s => s.type === "cross_train").length).toBe(2);
+  });
+
+  it("never places a cross-train slot on the strength day", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: threeDayTraining,
+      weeklyTotalMiles: 20,
+      longRunMiles: 8,
+      keyWorkoutText: null,
+      strengthDay: "Thu",
+      crosstrainingTools: ["bike", "pool"],
+      timezone: "UTC",
+    });
+    expect(slots.find(s => s.day === "Thu")?.type).toBe("strength");
+  });
+
+  it("places no cross-train slots when crosstrainingTools is empty (existing behavior unchanged)", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: threeDayTraining,
+      weeklyTotalMiles: 20,
+      longRunMiles: 8,
+      keyWorkoutText: null,
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    expect(slots.filter(s => s.type === "cross_train").length).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -503,5 +563,149 @@ describe("formatWeeklyPlanDigest", () => {
   it("converts the quality fallback label to km for metric users when keyWorkoutText is absent", () => {
     const noText: ArcWeekSlot[] = [{ day: "Wed", date: "7/22", type: "quality", distanceMiles: 4 }];
     expect(formatWeeklyPlanDigest(noText, null, true)).toContain("Wed 7/22 — Quality 6.4km"); // 4mi * 1.60934 = 6.437 -> 6.4
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeRecoveryWeekSkeleton / formatRecoveryWeekDigest — deterministic injury-hold
+// cross-training schedule, no LLM call
+// ---------------------------------------------------------------------------
+describe("computeRecoveryWeekSkeleton", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function pinToWednesday() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00Z"));
+  }
+
+  it("mirrors training_days pattern for CT day placement when no crosstrainingDays override", () => {
+    pinToWednesday();
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: ["monday", "wednesday", "friday"],
+      crosstrainingTools: ["bike"],
+      bodyPart: "shin",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    const ctDays = slots.filter(s => s.type === "cross_train").map(s => s.day);
+    expect(ctDays.sort()).toEqual(["Fri", "Mon", "Wed"]);
+  });
+
+  it("prefers crosstrainingDays override over the training_days pattern", () => {
+    pinToWednesday();
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: ["monday", "wednesday", "friday"],
+      crosstrainingDays: ["tuesday", "thursday"],
+      crosstrainingTools: ["bike"],
+      bodyPart: "shin",
+      strengthDay: null,
+      timezone: "UTC",
+    });
+    const ctDays = slots.filter(s => s.type === "cross_train").map(s => s.day);
+    expect(ctDays.sort()).toEqual(["Thu", "Tue"]);
+  });
+
+  it("falls back to a fixed 4x/week default when both training_days and crosstrainingDays are empty", () => {
+    pinToWednesday();
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: [],
+      crosstrainingTools: ["bike"],
+      bodyPart: "shin",
+      strengthDay: null,
+      timezone: "UTC",
+    });
+    const ctDays = slots.filter(s => s.type === "cross_train").map(s => s.day);
+    expect(ctDays.sort()).toEqual(["Fri", "Mon", "Sat", "Wed"]);
+  });
+
+  it("prioritizes the athlete's tools first in the rotation, other safe options after", () => {
+    pinToWednesday();
+    // shin's safe list (Avoid rowing excluded, unmatched "uphill treadmill" text dropped) is
+    // [pool_running, bike, elliptical] — with tools ["bike","pool"], the tool matches sort
+    // first: [pool_running, bike, elliptical].
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: ["monday", "wednesday"],
+      crosstrainingTools: ["bike", "pool"],
+      bodyPart: "shin",
+      strengthDay: null,
+      timezone: "UTC",
+    });
+    const modalities = slots.filter(s => s.type === "cross_train").map(s => s.modality);
+    expect(modalities).toEqual(["pool_running", "bike"]);
+  });
+
+  it("never selects a modality CROSS_TRAINING_ALTERNATIVES marks 'Avoid' for the injury", () => {
+    pinToWednesday();
+    // shin: "Avoid rowing" — even if the athlete lists rowing as a tool, it must not be scheduled.
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: ["monday", "wednesday", "friday"],
+      crosstrainingTools: ["rowing machine"],
+      bodyPart: "shin",
+      strengthDay: null,
+      timezone: "UTC",
+    });
+    const modalities = slots.filter(s => s.type === "cross_train").map(s => s.modality);
+    expect(modalities).not.toContain("rowing");
+  });
+
+  it("falls back to DEFAULT_SAFE_MODALITIES for an unknown body part", () => {
+    pinToWednesday();
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: ["monday", "wednesday"],
+      crosstrainingTools: [],
+      bodyPart: "elbow", // not in CROSS_TRAINING_ALTERNATIVES
+      strengthDay: null,
+      timezone: "UTC",
+    });
+    const modalities = slots.filter(s => s.type === "cross_train").map(s => s.modality);
+    expect(modalities.length).toBeGreaterThan(0);
+    expect(modalities.every(m => ["bike", "swimming", "elliptical"].includes(m ?? ""))).toBe(true);
+  });
+
+  it("still schedules something for an injured athlete with zero tools on file", () => {
+    pinToWednesday();
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: ["monday", "wednesday"],
+      crosstrainingTools: [],
+      bodyPart: "knee",
+      strengthDay: null,
+      timezone: "UTC",
+    });
+    expect(slots.filter(s => s.type === "cross_train").length).toBeGreaterThan(0);
+  });
+
+  it("places the strength day from computeWeeklyStrength's output, not as a cross-train slot", () => {
+    pinToWednesday();
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: ["monday", "wednesday", "friday"],
+      crosstrainingTools: ["bike"],
+      bodyPart: "shin",
+      strengthDay: "Sat",
+      timezone: "UTC",
+    });
+    expect(slots.find(s => s.day === "Sat")?.type).toBe("strength");
+  });
+});
+
+describe("formatRecoveryWeekDigest", () => {
+  it("lists cross-train and strength slots, omits rest", () => {
+    const skeleton = [
+      { day: "Mon" as const, date: "7/20", type: "cross_train" as const, modality: "bike" },
+      { day: "Tue" as const, date: "7/21", type: "rest" as const },
+      { day: "Wed" as const, date: "7/22", type: "cross_train" as const, modality: "pool_running" },
+      { day: "Thu" as const, date: "7/23", type: "strength" as const },
+    ];
+    const digest = formatRecoveryWeekDigest(skeleton);
+    expect(digest).toContain("This week's recovery plan:");
+    expect(digest).toContain("Mon 7/20 — Bike");
+    expect(digest).toContain("Wed 7/22 — Pool running");
+    expect(digest).toContain("Thu 7/23 — Strength + mobility");
+    expect(digest).not.toContain("Tue 7/21");
+  });
+
+  it("returns just the header when the skeleton is empty or all-rest", () => {
+    expect(formatRecoveryWeekDigest([])).toBe("This week's recovery plan:\n");
   });
 });

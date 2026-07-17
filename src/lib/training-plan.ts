@@ -2,8 +2,8 @@ import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import type { Json } from "@/lib/database.types";
-import { prescribeCrossTrainingForPhase } from "@/lib/cross-training";
 import { composeStrengthRoutine } from "@/lib/strength-library";
+import { CROSS_TRAINING_ALTERNATIVES, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, DEFAULT_SAFE_MODALITIES } from "@/lib/exercise-library";
 
 /**
  * Compute training phase for a pre-generated plan arc, based on position
@@ -604,8 +604,12 @@ No other text.`,
         w.key_workout_2 = e.key_workout_2 ? fixKeyWorkoutMath(e.key_workout_2, unitLabel) : null;
         w.notes = e.notes ?? "";
         if (crosstrainingTools.length > 0) {
-          // Use Haiku's cross_training if provided, otherwise fall back to the phase-based default
-          w.cross_training = e.cross_training?.trim() || prescribeCrossTrainingForPhase(w.phase, crosstrainingTools);
+          // Use Haiku's cross_training if provided, otherwise fall back to the same
+          // deterministic modality selection the weekly skeletons use — a short label
+          // (e.g. "Bike"), not the full CROSS_TRAINING_WORKOUTS session text, to match this
+          // field's existing one-line-per-week dashboard contract.
+          const fallbackModality = safeModalitiesFor(null, crosstrainingTools)[0];
+          w.cross_training = e.cross_training?.trim() || (fallbackModality ? MODALITY_DISPLAY_NAMES[fallbackModality] : null) || null;
         }
       }
     }
@@ -895,6 +899,8 @@ export interface ArcWeekSlot {
   distanceMiles: number | null;
   /** Full key_workout text (with WU/CD breakdown) — set only on quality slots. */
   keyWorkoutText?: string;
+  /** Canonical modality key (e.g. "bike", "swimming") — cross_train slots only. */
+  modality?: string;
 }
 
 /**
@@ -922,6 +928,55 @@ function parseLeadingDistanceMiles(text: string): number | null {
  * descriptive content (pace, purpose, terrain cues) for the slots this
  * function has already placed.
  */
+/**
+ * Deterministically resolve the ordered list of canonical cross-training modality keys to
+ * rotate an athlete through — shared by computeArcWeekSkeleton (non-injured, supplementary),
+ * computeRecoveryWeekSkeleton (injured, full weekly takeover), and generateAndSaveFullPlan's
+ * fallback cross-training label. One source of truth so an injured athlete's safe-modality
+ * list and a healthy athlete's tool-based list can't drift into different logic.
+ *
+ * bodyPart set (injury context): starts from CROSS_TRAINING_ALTERNATIVES[bodyPart] (excluding
+ * "Avoid ..." entries), falling back to DEFAULT_SAFE_MODALITIES for an unlisted body part —
+ * an injured athlete always gets something concrete, even with zero tools on file.
+ * bodyPart null (non-injured): modalities come only from crosstrainingTools — no tools means
+ * no cross-training slot gets placed at all (matches the prior prescribeCrossTrainingForPhase
+ * behavior for healthy athletes).
+ */
+function safeModalitiesFor(bodyPart: string | null, crosstrainingTools: string[]): string[] {
+  const toKey = (text: string) => MODALITY_PATTERNS.find(([re]) => re.test(text.toLowerCase()))?.[1];
+
+  let candidates: string[] = [];
+  if (bodyPart) {
+    const alternatives = CROSS_TRAINING_ALTERNATIVES[bodyPart];
+    const safeText = alternatives
+      ? alternatives.filter(o => !o.toLowerCase().startsWith("avoid"))
+      : null;
+    const mapped = safeText ? safeText.map(toKey).filter((k): k is string => !!k) : [];
+    candidates = mapped.length > 0 ? Array.from(new Set(mapped)) : DEFAULT_SAFE_MODALITIES;
+  }
+
+  if (crosstrainingTools.length > 0) {
+    const toolKeys = Array.from(new Set(crosstrainingTools.map(toKey).filter((k): k is string => !!k)));
+    if (candidates.length > 0) {
+      // Injury context: prioritize tool matches within the safe list, keep other safe options too.
+      const matched = candidates.filter(k => toolKeys.includes(k));
+      const rest = candidates.filter(k => !toolKeys.includes(k));
+      return [...matched, ...rest];
+    }
+    // No injury: use exactly the athlete's tools.
+    return toolKeys;
+  }
+
+  // No tools specified: injured athletes still get the safe list; healthy athletes get none.
+  return candidates;
+}
+
+/** Round-robin assign modalities across the given days. Empty modalities -> no slots. */
+function assignCrossTrainSlots(days: string[], modalities: string[]): Array<{ day: string; modality: string }> {
+  if (modalities.length === 0) return [];
+  return days.map((day, i) => ({ day, modality: modalities[i % modalities.length]! }));
+}
+
 export function computeArcWeekSkeleton(params: {
   trainingDays: string[]; // lowercase day names, training_profiles.training_days
   weeklyTotalMiles: number; // pre-clamped by the caller
@@ -929,9 +984,10 @@ export function computeArcWeekSkeleton(params: {
   keyWorkoutText: string | null;
   keyWorkoutText2?: string | null;
   strengthDay: string | null; // "Mon".."Sun", from computeWeeklyStrength()
+  crosstrainingTools?: string[]; // training_profiles.crosstraining_tools — up to 2 supplementary cross-train slots on rest days
   timezone: string;
 }): ArcWeekSlot[] {
-  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, timezone } = params;
+  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone } = params;
 
   const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const tz = timezone || "America/New_York";
@@ -1023,14 +1079,23 @@ export function computeArcWeekSkeleton(params: {
     });
   }
 
-  // Non-training days -> rest, except the pre-computed strength day.
+  // Non-training, non-strength days -> up to 2 supplementary cross-train slots (when the
+  // athlete has tools on file), remainder -> rest.
+  const restCandidates = ORDERED_DAYS.filter(d => !trainDayAbbrevs.includes(d) && d !== strengthDay);
+  const ctModalities = safeModalitiesFor(null, crosstrainingTools);
+  const ctDays = restCandidates.slice(0, 2);
+  const ctAssignments = assignCrossTrainSlots(ctDays, ctModalities);
+  const ctByDay = new Map(ctAssignments.map(a => [a.day, a.modality]));
+
   ORDERED_DAYS.forEach(d => {
     if (trainDayAbbrevs.includes(d)) return;
+    const modality = ctByDay.get(d);
     slots.push({
       day: d,
       date: dateFor(d),
-      type: strengthDay === d ? "strength" : "rest",
+      type: strengthDay === d ? "strength" : modality ? "cross_train" : "rest",
       distanceMiles: null,
+      ...(modality ? { modality } : {}),
     });
   });
 
@@ -1086,11 +1151,12 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
 
   const { data: profile } = await supabase
     .from("training_profiles")
-    .select("training_days, injury_notes, injury_body_part, injury_body_parts, preferred_units")
+    .select("training_days, injury_notes, injury_body_part, injury_body_parts, preferred_units, crosstraining_tools")
     .eq("user_id", userId)
     .single();
   const strength = computeWeeklyStrength(profile as Record<string, unknown> | null);
   const isMetric = (profile?.preferred_units as string | null) === "metric";
+  const crosstrainingTools = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
 
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
@@ -1130,6 +1196,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
       keyWorkoutText: week.key_workout || null,
       keyWorkoutText2: week.key_workout_2 ?? null,
       strengthDay: strength.day,
+      crosstrainingTools,
       timezone,
     });
     const planSessions: PlanSession[] = skeleton
@@ -1138,7 +1205,9 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
         day: s.day,
         date: s.date,
         label: arcWeekSlotLabel(s, isMetric),
-        type: s.type === "long_run" || s.type === "quality" || s.type === "easy" ? "run" : "strength",
+        type: s.type === "long_run" || s.type === "quality" || s.type === "easy"
+          ? "run"
+          : s.type === "cross_train" ? "cross_train" : "strength",
         routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
       }));
     await supabase.from("training_state").update({
@@ -1170,6 +1239,8 @@ function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
     ? (slot.keyWorkoutText ?? `Quality ${fmtDist(slot.distanceMiles ?? 0)}`)
     : slot.type === "easy"
     ? `Easy ${fmtDist(slot.distanceMiles ?? 0)}`
+    : slot.type === "cross_train"
+    ? (MODALITY_DISPLAY_NAMES[slot.modality ?? ""] ?? "Cross-training")
     : "Strength + mobility";
 }
 
@@ -1197,4 +1268,95 @@ export function formatWeeklyPlanDigest(
       return `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}`;
     });
   return `This week's plan:\n${lines.join("\n")}`;
+}
+
+export interface RecoveryWeekSlot {
+  day: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+  date: string; // "M/D"
+  type: "cross_train" | "strength" | "rest";
+  modality?: string; // canonical key, cross_train slots only
+}
+
+/**
+ * Deterministically compute a full week's cross-training/strength skeleton for an athlete
+ * on an injury hold — the same "compute it in code, don't trust LLM free text" pattern as
+ * computeArcWeekSkeleton, extended to recovery weeks (which previously had no day/modality
+ * placement logic at all; Claude free-handed both via the injuryHoldInstruction prompt
+ * block). Day/modality here are ground truth — an LLM only supplies purpose/pain-threshold
+ * framing and judges whether a test-run probe fits this week.
+ */
+export function computeRecoveryWeekSkeleton(params: {
+  trainingDays: string[]; // lowercase day names, training_profiles.training_days
+  crosstrainingDays?: string[] | null; // lowercase day names, training_profiles.crosstraining_days override
+  crosstrainingTools: string[];
+  bodyPart: string | null; // training_profiles.injury_body_part
+  strengthDay: string | null; // "Mon".."Sun", from computeWeeklyStrength()
+  timezone: string;
+}): RecoveryWeekSlot[] {
+  const { trainingDays, crosstrainingDays, crosstrainingTools, bodyPart, strengthDay, timezone } = params;
+
+  const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  const tz = timezone || "America/New_York";
+  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  const [ty, tm, td] = localStr.split("-").map(Number);
+  const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
+  const daysFromMonday = todayDow === 0 ? 6 : todayDow - 1;
+  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday));
+  const dateFor = (abbrev: string) => {
+    const offset = dayOffset[abbrev]!;
+    const d = new Date(Date.UTC(
+      mondayUTC.getUTCFullYear(),
+      mondayUTC.getUTCMonth(),
+      mondayUTC.getUTCDate() + offset
+    ));
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  };
+
+  const abbrevsFromLowerDays = (days: string[]) => {
+    const normalized = new Set(days.map(d => d.toLowerCase().trim()));
+    return WEEK_DAYS
+      .map((full, i) => (normalized.has(full) ? WEEK_DAY_ABBREV[i] : null))
+      .filter((d): d is string => d !== null);
+  };
+
+  // CT days: explicit crosstraining_days override, else mirror the athlete's normal
+  // training_days pattern, else a fixed default cadence so an athlete with no data on file
+  // still gets a real week instead of an empty one.
+  const ctDays = crosstrainingDays && crosstrainingDays.length > 0
+    ? abbrevsFromLowerDays(crosstrainingDays)
+    : trainingDays.length > 0
+    ? abbrevsFromLowerDays(trainingDays)
+    : ["Mon", "Wed", "Fri", "Sat"];
+
+  const modalities = safeModalitiesFor(bodyPart, crosstrainingTools);
+  const assignments = assignCrossTrainSlots(ctDays, modalities);
+  const ctByDay = new Map(assignments.map(a => [a.day, a.modality]));
+
+  const slots: RecoveryWeekSlot[] = ORDERED_DAYS.map(d => {
+    const modality = ctByDay.get(d);
+    return {
+      day: d,
+      date: dateFor(d),
+      type: strengthDay === d ? "strength" : modality ? "cross_train" : "rest",
+      ...(modality && strengthDay !== d ? { modality } : {}),
+    };
+  });
+
+  return slots;
+}
+
+/**
+ * Deterministically format a recovery week skeleton into a plain-text SMS bubble — no LLM
+ * call, same reliability guarantee as formatWeeklyPlanDigest. No unit conversion needed:
+ * there are no distances here, only modality names — durations/effort live in the fixed
+ * CROSS_TRAINING_WORKOUTS text Claude references in its own prose, not in this compact list.
+ */
+export function formatRecoveryWeekDigest(skeleton: RecoveryWeekSlot[]): string {
+  const lines = skeleton
+    .filter(s => s.type !== "rest")
+    .map(s => {
+      const label = s.type === "strength" ? "Strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "Cross-training");
+      return `${s.day} ${s.date} — ${label}`;
+    });
+  return `This week's recovery plan:\n${lines.join("\n")}`;
 }
