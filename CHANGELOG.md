@@ -4,6 +4,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-16 — Fixed pelvis exercises sent as text instead of illustrated images
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant — "Gwyneth recently texted for exercises for her pelvis but didn't get visuals - do you know why?"
+**Root cause:** Two compounding issues. (1) No routine in `strength-library.ts` matched "pelvis"/"pelvic" at all — pelvis pain has no single anatomical match (SI joint, pubic symphysis, and general hip-girdle instability can all present as "pelvis" pain to an athlete), so it fell through every keyword match with nothing to route to. (2) Even for recognized body parts, `strengthPosterRoutineKey` (which gates whether Dean's `[STRENGTH_POSTER]` MMS loop can fire) is computed from the *stored* `training_profiles.injury_body_part`/`injury_notes` early in the request — but for `user_message`, the Haiku extraction that writes a newly-stated injury into those columns (`persistProfileUpdates`) doesn't run until after the SMS/MMS send. So on the very message where an athlete first names a body part, the routine lookup was working off stale (often null) data, `strengthPosterRoutineKey` stayed null, the poster loop never fired, and Dean fell back to the text-only `get_rehab_protocol` tool.
+**Fix / Change:** Added a dedicated `pelvis` routine (key `pelvis`, matches `"pelvis"`/`"pelvic"`) rather than folding it into the existing `hip` routine — pelvis pain isn't the same mechanism as hip flexor/lateral hip pain, so a distinct broad pelvic-girdle-stability set (cat-cow, dead bug, bird-dog, glute bridge, hip thrust, planks) is more clinically appropriate, with a note flagging sharp/one-sided pubic pain to a physio rather than pushing through. All exercises reuse the existing illustrated catalog, so no new art was needed. Separately, changed the `composeStrengthRoutine()` call in `buildSystemPrompt` to prefer this turn's freshly-extracted `pendingExtracted.injury_body_part`/`injury_notes` over the stale stored profile value, falling back to the stored value only if nothing was extracted this turn. No change needed to the "send what we have" behavior — `hasExerciseImage()` already silently skips any routine exercise without committed art, so the poster loop already sends only the illustrations that exist.
+**Files changed:** `src/lib/strength-library.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-07-16 — Illustrated images now follow Dean's adapted/substituted exercises too
+
+**Type:** Feature
+**Reported by:** Jake Tennant — follow-up to the pelvis-visuals fix above: "is there a way for us to, if Gwyneth can't do these exercises and Dean prescribes some other ones that are lighter, for us to send visuals too and kind of match the visuals to what is sent?"
+**Root cause:** The `[STRENGTH_POSTER]` MMS mechanism only ever sent images for the athlete's fixed, stored routine (`strengthPosterRoutineKey` → `ROUTINES[key].exerciseIds`). It had no way to know which specific exercises Dean actually named in a given reply — so if an athlete said an exercise hurt or was too hard and Dean swapped in something lighter mid-conversation, the token either couldn't fire (no full "routine" was listed) or, worse, would have sent images for the *original* routine, mismatched to what Dean's text actually said.
+**Fix / Change:** Added an optional `exercise_ids` argument to the `deliver_message` tool call, enum-constrained to `illustratedExerciseIds()` (new export in `strength-library.ts` — only catalog IDs with committed art) so Claude can structurally never reference an exercise we can't illustrate. Added one line to the existing strength-routine prompt block: when Dean adapts/substitutes away from the canned routine, pass `exercise_ids` with just the exercise(s) actually named, instead of the `[STRENGTH_POSTER]` token. The send loop (`route.ts` ~3503-3550) now prefers explicit `exercise_ids` when present, falling back to the stored routine's full list otherwise — same per-exercise MMS loop, same `hasExerciseImage()` art-availability gating, just a different source list. Checked current art coverage: all 53 catalog exercises already have committed images (`public/strength-exercises/*.png`), including every exercise in the new `pelvis` routine, so no new posters are needed right now — but any *new* exercise added to the catalog going forward needs matching art before Dean can ever surface it via `exercise_ids` or a routine (`illustratedExerciseIds()` silently excludes anything without one).
+**Files changed:** `src/lib/strength-library.ts` (`illustratedExerciseIds`), `src/app/api/coach/respond/route.ts` (`deliver_message` schema, `deliverExerciseIds` extraction, send-loop branching), `src/__tests__/lib/strength-library.test.ts`
+
+---
+
 ## 2026-07-17 — Deterministic injury-state reliability layer
 
 **Type:** Feature / Bug Fix

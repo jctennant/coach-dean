@@ -9,6 +9,7 @@ import {
   posterUrl,
   exercisePosterUrl,
   hasExerciseImage,
+  illustratedExerciseIds,
 } from "@/lib/strength-library";
 
 describe("strength-library — catalog integrity", () => {
@@ -46,6 +47,16 @@ describe("strength-library — catalog integrity", () => {
   });
 });
 
+describe("illustratedExerciseIds — art-gated catalog subset", () => {
+  it("only returns ids that have a committed image and every id is a real catalog entry", () => {
+    const ids = illustratedExerciseIds();
+    for (const id of ids) {
+      expect(EXERCISES[id], `illustrated id "${id}" is not in the catalog`).toBeDefined();
+      expect(hasExerciseImage(id)).toBe(true);
+    }
+  });
+});
+
 describe("routineKeyForInjuryText — mapping", () => {
   it.each([
     ["my left achilles is sore", "calf"],
@@ -60,6 +71,8 @@ describe("routineKeyForInjuryText — mapping", () => {
     ["lower back tightness", "back"],
     ["weak glutes", "glute"],
     ["hip flexor tightness", "hip"],
+    ["pelvis has been sore after long runs", "pelvis"],
+    ["pelvic pain on the left side", "pelvis"],
   ])("maps %q → %q", (text, expected) => {
     expect(routineKeyForInjuryText(text)).toBe(expected);
   });

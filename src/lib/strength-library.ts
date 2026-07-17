@@ -90,6 +90,15 @@ export function hasExerciseImage(exerciseId: string): boolean {
   }
 }
 
+/**
+ * Catalog exercise IDs that currently have committed art. Used to enum-constrain the
+ * `exercise_ids` argument on the coaching tool call, so Claude can only ever name an
+ * exercise we can actually illustrate — never a hallucinated or not-yet-drawn one.
+ */
+export function illustratedExerciseIds(): string[] {
+  return Object.keys(EXERCISES).filter(hasExerciseImage);
+}
+
 /* ── Exercise catalog ───────────────────────────────────────────────────────── */
 
 export const EXERCISES: Record<string, Exercise> = {
@@ -186,6 +195,9 @@ export const ROUTINES: Routine[] = [
   { key: "hip", label: "Hip", matches: ["hip flexor", "hip"], frequency: REHAB_FREQ,
     note: "Mobilizes tight hip flexors and strengthens the glutes that share the load.",
     exerciseIds: ["worlds_greatest_stretch", "hip_flexor_stretch", "glute_bridge", "lateral_band_walks", "pigeon_pose", "clamshells", "single_leg_glute_bridge", "hip_thrust", "single_leg_balance"] },
+  { key: "pelvis", label: "Pelvic girdle", matches: ["pelvis", "pelvic"], frequency: REHAB_FREQ,
+    note: "Pelvis pain can come from the SI joint, pubic symphysis, or general girdle instability — this builds the deep core and glute stabilizers that support the whole pelvic girdle regardless of the exact source. If pain is sharp, one-sided at the pubic bone, or worsens with single-leg hopping, flag it for a sports physio rather than pushing through.",
+    exerciseIds: ["cat_cow", "dead_bug", "bird_dog", "glute_bridge", "single_leg_glute_bridge", "clamshells", "hip_thrust", "front_plank", "side_plank"] },
   { key: "ankle", label: "Ankle", matches: ["ankle", "sprain", "rolled"], frequency: REHAB_FREQ,
     note: "Rebuilds ankle strength, range, and the balance that prevents re-spraining.",
     exerciseIds: ["ankle_circles", "ecc_calf_raise_straight", "single_leg_balance", "band_dorsiflexion", "ankle_alphabet", "single_leg_calf_raise", "toe_taps", "soleus_stretch", "calf_stretch"] },
