@@ -98,7 +98,9 @@ export async function POST(request: Request) {
       break;
     case "awaiting_cadence":
       // Legacy state — graduate these users to fully onboarded with default cadence.
-      // awaiting_cadence was removed; new users are defaulted to nightly_reminders at plan generation.
+      // awaiting_cadence was removed; new users are now defaulted to weekly_only at plan
+      // generation (see completeOnboarding()). Any pre-existing user still stuck in this
+      // state gets nightly_reminders instead, matching this cron's original behavior.
       await Promise.all([
         supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
         supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", user.id),

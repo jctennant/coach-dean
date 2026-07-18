@@ -3233,6 +3233,9 @@ OUTPUT CONTRACT:
   const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   const wantsPositiveOnly = /\[POSITIVE_ONLY\]/i.test(rawText);
   const wantsStandardCoaching = /\[STANDARD_COACHING\]/i.test(rawText);
+  // CADENCE: athlete asked to change how often Dean proactively texts them.
+  const cadenceMatch = rawText.match(/\[CADENCE:\s*(morning_reminders|nightly_reminders|weekly_only)\]/i);
+  const tagCadence = cadenceMatch ? cadenceMatch[1].toLowerCase() : null;
   // RTR_ADVANCE: advance the return-to-run phase when athlete clears the gate.
   const wantsRtrAdvance = /\[RTR_ADVANCE\]/i.test(rawText);
   // SESSION_SWAP: swap one or more sessions in the current week plan.
@@ -3278,6 +3281,7 @@ OUTPUT CONTRACT:
       .replace(/\[SESSION_SWAP[^\]]*\]/gi, "")
       .replace(/\[PHYSIO_REFERRAL\]/gi, "")
       .replace(/\[RTR_ADVANCE\]/gi, "")
+      .replace(/\[CADENCE:[^\]]+\]/gi, "")
       .replace(/\[STRENGTH_POSTER\]/gi, (() => {
         if (!strengthPosterRoutineKey) return "";
         const token = signPlanToken(userId);
@@ -3877,6 +3881,17 @@ OUTPUT CONTRACT:
             .eq("user_id", userId);
           if (error) console.error(`[coach/respond] coaching_style update failed:`, error);
           else void trackEvent(userId, "coaching_style_changed", { coaching_style: newStyle });
+        });
+      }
+      // Persist proactive cadence changes ([CADENCE:...] tag)
+      if (tagCadence) {
+        after(async () => {
+          const { error } = await supabase
+            .from("training_profiles")
+            .update({ proactive_cadence: tagCadence })
+            .eq("user_id", userId);
+          if (error) console.error(`[coach/respond] proactive_cadence update failed:`, error);
+          else void trackEvent(userId, "cadence_changed", { proactive_cadence: tagCadence });
         });
       }
       // Persist race course data if Dean emitted a [RACE_COURSE_UPDATE] tag
@@ -7398,6 +7413,8 @@ When signaling [INJURY_HOLD], your response MUST do two things:
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
 
 COACHING STYLE PREFERENCES: When an athlete asks for more positive/affirming feedback — e.g. "just tell me good job", "stop telling me to run easier", "I don't need the corrections, just what went well", "less criticism" — acknowledge it warmly and append [POSITIVE_ONLY] at the end of your response. This updates their preference permanently. Example response: "Got it — I'll keep the feedback focused on what's going well. Your data and observations will still be there, just without the effort corrections." If they're already in positive-only mode and want the full analysis back — e.g. "go back to normal", "give me the full feedback" — append [STANDARD_COACHING] instead.
+
+PROACTIVE MESSAGE CADENCE: When an athlete explicitly asks to change how often you text them proactively — e.g. "can you text me every morning with the plan", "stop texting me at night", "just send the weekly recap, nothing daily" — confirm the change in one sentence and append the matching tag at the end of your response: [CADENCE: morning_reminders] for a daily morning plan text, [CADENCE: nightly_reminders] for the night-before reminder, or [CADENCE: weekly_only] for no daily texts (just the Sunday recap and reactive post-run feedback, which is the default). Example: "Got it — I'll text you each morning on your training days with the plan." [CADENCE: morning_reminders] Only use this for an explicit, unambiguous cadence request — not general chat about mornings or scheduling.
 
 LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and for any days they'd otherwise skip, give 2-3 specific cross-training alternatives using the injury-safe options from the ACTIVE INJURY block if one is active — or if no active injury, use their available tools from the profile (bike, pool, elliptical). Never just say "rest" or "take it easy" — always give them something concrete and active they can do instead. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
 

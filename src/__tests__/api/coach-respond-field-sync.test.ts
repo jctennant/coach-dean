@@ -21,8 +21,13 @@ import { mockRequest } from "../helpers/supabase-mock";
 // ---------- Capture after() callbacks ----------
 const afterQueue: Array<() => Promise<void>> = [];
 async function flush() {
-  const cbs = afterQueue.splice(0);
-  for (const fn of cbs) await fn();
+  // Some code paths call after() from inside an already-running after() callback
+  // (e.g. the [CADENCE:] tag handler nested inside the main user_message after()).
+  // Drain the queue in waves until nothing new gets pushed, not just one pass.
+  while (afterQueue.length > 0) {
+    const cbs = afterQueue.splice(0);
+    for (const fn of cbs) await fn();
+  }
 }
 
 // ---------- module mocks ----------
@@ -422,6 +427,48 @@ describe("tag-based this-week schedule override ([WEEK_OVERRIDE:] tag)", () => {
     const anyUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.training_days != null);
     // training_days must NOT be touched by a week override
     expect(anyUpdate).toBeUndefined();
+  });
+});
+
+describe("tag-based proactive cadence change ([CADENCE:] tag)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("saves proactive_cadence when Dean emits [CADENCE: morning_reminders]", async () => {
+    mockExtractionThenCoach({}, "Got it — I'll text you each morning on your training days. [CADENCE: morning_reminders]");
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: baseConversations("can you text me every morning with the plan?"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const cadenceUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.proactive_cadence != null);
+    expect(cadenceUpdate).toBeDefined();
+    expect(cadenceUpdate?.[0].proactive_cadence).toBe("morning_reminders");
+  });
+
+  it("does not touch proactive_cadence when no [CADENCE:] tag is present", async () => {
+    mockExtractionThenCoach({}, "Nice work on today's run!");
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: baseConversations("just finished my run"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const cadenceUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.proactive_cadence != null);
+    expect(cadenceUpdate).toBeUndefined();
   });
 });
 

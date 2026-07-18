@@ -4,6 +4,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Conversational cadence preference: [CADENCE:] tag lets athletes opt into morning/nightly reminders
+
+**Type:** Feature
+**Reported by:** Jake Tennant — follow-up to the morning-reminder cron fix (same day). `proactive_cadence: "morning_reminders"` had become a dead enum value: nothing in onboarding or anywhere else ever set it, so re-enabling the cron alone wouldn't help any other user get daily texts — it required a manual DB edit each time.
+**Root cause:** Onboarding was simplified in the v2.0 pivot (2026-04-14) to drop the cadence question entirely — every new user is hardcoded to `proactive_cadence: "weekly_only"` at plan completion (`onboarding/handle/route.ts`, `completeOnboarding()`). That's an intentional simplification we don't want to reverse (confirmed with Jake — no cadence question re-added to onboarding, and no UI settings page either; the dashboard was already cut on 2026-05-02 in favor of pure SMS).
+**Fix / Change:** Added a `[CADENCE: morning_reminders|nightly_reminders|weekly_only]` tag to `coach/respond/route.ts`, following the same established pattern as `[WEEK_OVERRIDE:]`, `[SKIP_DAY:]`, and `[POSITIVE_ONLY:]`/`[STANDARD_COACHING:]` (coaching_style). Dean recognizes an explicit, unambiguous request to change proactive-text cadence (e.g. "text me every morning", "stop texting me at night"), confirms it in one sentence, and appends the tag; code parses it, writes `training_profiles.proactive_cadence`, strips the tag before SMS send, and fires a `cadence_changed` track event. Scoped to explicit requests only — not general chat about mornings/scheduling — to avoid false-positive cadence changes (a low-stakes but visible mistake if it happened, since the athlete would notice an unexpected text the next day).
+**Also fixed:** a stale comment in `onboarding/handle/route.ts` (`awaiting_cadence` legacy branch) that claimed new users default to `nightly_reminders` — the actual current default is `weekly_only`; the `nightly_reminders` default only applies to the legacy graduation path for pre-v2.0 users still stuck in `awaiting_cadence`.
+**Test note:** Uncovered and fixed a latent gap in `coach-respond-field-sync.test.ts`'s `flush()` helper — it only drained one wave of the mocked `after()` queue, so a nested `after()` call (this tag's DB write runs inside the outer per-request `after()`, same as the pre-existing `coaching_style` tag) never executed in tests. `flush()` now drains recursively until the queue is empty. This was a pre-existing untested code path (`coaching_style`/`[POSITIVE_ONLY]` had no test coverage either) — no production behavior changed, only test correctness.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/coach-respond-field-sync.test.ts`
+
+---
+
 ## 2026-07-18 — Re-enabled morning-reminder cron for users on morning_reminders cadence
 
 **Type:** Bug Fix
