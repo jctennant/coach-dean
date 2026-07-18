@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Phase B: facts-required deliver_message schema + equality check with one corrective retry
+
+**Type:** Feature / Reliability
+**Reported by:** Internal observation — Phase B was scoped on 2026-07-12 ("a facts-required deliver_message schema + equality check") when Phase A of the CoachContext extraction started; this ships it.
+**User feedback:** N/A
+**Root cause:** The recurring "Dean states a wrong/stale fact" bug family (week number "This week is 10", stale pre-injury mileage, wrong days-to-race) was only addressable after the fact — evals, regex correctors, prompt rules — because the facts Dean asserts lived buried in free prose. Nothing forced them into a form code could compare against ground truth at generation time.
+**Fix / Change:** For `post_run`, `user_message`, `morning_plan`, `weekly_recap`, and `initial_plan`, the `deliver_message` tool now REQUIRES a `stated_facts` echo: `{week_number, weekly_target, week_distance_completed, days_until_race}` — each the value the message TEXT asserts, or null when the message doesn't mention it (athlete's display unit). New `src/lib/fact-check.ts` equality-checks non-null fields against system ground truth (week from `training_state`/periodization; mileage from computed `weekMileageSoFar`; race countdown from the athlete's timezone-local calendar) with sane tolerances (week exact, race days ±1, distances ±10% or ±1). On mismatch, the delivery is rejected once via an `is_error` tool_result naming each wrong number and its actual value, and Claude re-delivers; the retry is re-checked and sent either way (fail-open, with `stated_facts_*` track events). Ground truth is suppressed (null → skip) where it's unreliable: weekly target during an injury hold (stale by definition) and week/target on `initial_plan` (being created by that very message). No system-prompt changes — the contract lives entirely in the tool schema, and the eval runner's prompt mirror is unaffected.
+**Files changed:** `src/lib/fact-check.ts` (new), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/fact-check.test.ts` (new), `src/__tests__/api/coach-respond.test.ts`
+
 ## 2026-07-18 — Repetition + date-consistency validators now gate proactive sends (repair-and-recheck)
 
 **Type:** Improvement / Reliability

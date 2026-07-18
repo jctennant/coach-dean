@@ -20,6 +20,7 @@ import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/timezone";
 import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
+import { checkStatedFacts, buildFactCorrection, type FactGroundTruth } from "@/lib/fact-check";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
@@ -103,7 +104,7 @@ const REHAB_TOOL = {
 //   that diverges from what the skeleton already decided.
 type DeliverMessageMode = "none" | "plan_facts" | "skeleton_annotations";
 
-function buildDeliverMessageTool(mode: DeliverMessageMode) {
+function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = false) {
   const illustratedIds = illustratedExerciseIds();
   return {
     name: "deliver_message" as const,
@@ -183,6 +184,36 @@ function buildDeliverMessageTool(mode: DeliverMessageMode) {
               },
             }
           : {}),
+        ...(includeStatedFacts
+          ? {
+              stated_facts: {
+                type: "object" as const,
+                description:
+                  "Fact echo for system verification. For each field: the value your message TEXT asserts, or null " +
+                  "if your message doesn't mention that fact. Same unit as your message text (the athlete's display " +
+                  "unit). Never report a value your message doesn't actually state.",
+                properties: {
+                  week_number: {
+                    type: ["number", "null"],
+                    description: "The training-week number your message states (e.g. 'week 5 of 12' → 5), else null.",
+                  },
+                  weekly_target: {
+                    type: ["number", "null"],
+                    description: "This week's total planned mileage/km target as stated in your message, else null.",
+                  },
+                  week_distance_completed: {
+                    type: ["number", "null"],
+                    description: "Distance already completed this week as stated in your message (e.g. '12 of 25 mi done' → 12), else null.",
+                  },
+                  days_until_race: {
+                    type: ["number", "null"],
+                    description: "Days until the athlete's race as stated in your message (e.g. '10 days out' → 10), else null.",
+                  },
+                },
+                required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race"],
+              },
+            }
+          : {}),
         ...(mode === "skeleton_annotations"
           ? {
               slot_annotations: {
@@ -216,7 +247,10 @@ function buildDeliverMessageTool(mode: DeliverMessageMode) {
             }
           : {}),
       },
-      required: mode === "plan_facts" ? ["message", "plan"] : mode === "skeleton_annotations" ? ["message", "slot_annotations"] : ["message"],
+      required: [
+        ...(mode === "plan_facts" ? ["message", "plan"] : mode === "skeleton_annotations" ? ["message", "slot_annotations"] : ["message"]),
+        ...(includeStatedFacts ? ["stated_facts"] : []),
+      ],
     },
   };
 }
@@ -2906,7 +2940,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const deliverMessageMode: DeliverMessageMode =
     trigger === "weekly_recap" && arcWeekSkeleton ? "skeleton_annotations" :
     isPlanTrigger ? "plan_facts" : "none";
-  const coachTools: Anthropic.Messages.ToolUnion[] = [buildDeliverMessageTool(deliverMessageMode)];
+  // Phase B (facts-required deliver_message): triggers with reliable week/mileage/race
+  // context must echo the facts their message asserts (`stated_facts`) so the system can
+  // equality-check them against ground truth — see fact-check.ts and the retry leg below.
+  const includeStatedFacts =
+    trigger === "post_run" || trigger === "user_message" || trigger === "morning_plan" ||
+    trigger === "weekly_recap" || trigger === "initial_plan";
+  const coachTools: Anthropic.Messages.ToolUnion[] = [buildDeliverMessageTool(deliverMessageMode, includeStatedFacts)];
   if (shouldUseWebSearch) coachTools.push({ type: "web_search_20250305", name: "web_search" });
   if (offerRehabTool) coachTools.push(REHAB_TOOL);
 
@@ -3057,6 +3097,78 @@ OUTPUT CONTRACT:
     rehabRounds++;
     response = await callCoach();
     deliverBlock = findDeliverBlock(response);
+  }
+
+  // ─── Phase B fact gate ────────────────────────────────────────────────────────
+  // Equality-check the `stated_facts` echo on deliver_message against system ground
+  // truth (fact-check.ts). On mismatch: reject the delivery once via tool_result and
+  // let Claude re-deliver with corrected facts. Fail-open — a second mismatch (or any
+  // error) sends the latest message anyway, with telemetry.
+  if (deliverBlock && includeStatedFacts) {
+    // Ground truth in the athlete's DISPLAY unit. null = no reliable truth, skip check:
+    // - weekly_target during an injury hold (stored target is stale by definition) or on
+    //   initial_plan (the target is being created by this very message).
+    // - week_number on initial_plan (state may not reflect the new arc yet).
+    const toDisplay = (miles: number | null): number | null =>
+      miles == null ? null : isMetricUser ? miles * 1.60934 : miles;
+    const injuryHoldActiveForFacts = !!(state?.injury_hold_since);
+    const primaryRaceForFacts = upcomingRaces[0] ?? null;
+    const daysUntilRaceTruth = (() => {
+      if (!primaryRaceForFacts?.race_date) return null;
+      const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
+      const raceMs = new Date(`${String(primaryRaceForFacts.race_date).slice(0, 10)}T12:00:00Z`).getTime();
+      const todayMs = new Date(`${todayStr}T12:00:00Z`).getTime();
+      return Math.round((raceMs - todayMs) / (24 * 60 * 60 * 1000));
+    })();
+    const factTruth: FactGroundTruth = {
+      week_number: trigger === "initial_plan" ? null : ((state?.current_week as number | null) ?? periodization.effectiveWeek ?? null),
+      weekly_target: injuryHoldActiveForFacts || trigger === "initial_plan"
+        ? null
+        : toDisplay((state?.weekly_mileage_target as number | null) ?? null),
+      week_distance_completed: toDisplay(weekMileageSoFar),
+      days_until_race: daysUntilRaceTruth,
+      unit: isMetricUser ? "km" : "mi",
+    };
+    const mismatches = checkStatedFacts((deliverBlock.input as { stated_facts?: unknown }).stated_facts, factTruth);
+    if (mismatches.length > 0) {
+      log.warn("stated_facts mismatch — rejecting delivery for one retry", { trigger, mismatches });
+      void trackEvent(userId, "stated_facts_mismatch", { trigger, facts: mismatches.map(m => m.fact), retried: true });
+      // tool_choice:"any" means the API requires a result for every tool_use block in the
+      // turn — answer deliver_message with the correction and any stray others with a stub.
+      const allToolUses = response.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
+      );
+      convo.push({ role: "assistant", content: response.content });
+      convo.push({
+        role: "user",
+        content: allToolUses.map((tu) => ({
+          type: "tool_result" as const,
+          tool_use_id: tu.id,
+          content: tu.id === deliverBlock!.id ? buildFactCorrection(mismatches, factTruth) : "(not evaluated)",
+          ...(tu.id === deliverBlock!.id ? { is_error: true as const } : {}),
+        })),
+      });
+      try {
+        const retryResponse = await callCoach();
+        const retryBlock = findDeliverBlock(retryResponse);
+        if (retryBlock && String((retryBlock.input as { message?: unknown }).message ?? "").trim()) {
+          response = retryResponse;
+          deliverBlock = retryBlock;
+          const stillWrong = checkStatedFacts((retryBlock.input as { stated_facts?: unknown }).stated_facts, factTruth);
+          if (stillWrong.length > 0) {
+            log.warn("stated_facts still mismatched after retry — sending anyway (fail-open)", { trigger, mismatches: stillWrong });
+            void trackEvent(userId, "stated_facts_mismatch_after_retry", { trigger, facts: stillWrong.map(m => m.fact) });
+          } else {
+            log.info("stated_facts corrected on retry", { trigger });
+            void trackEvent(userId, "stated_facts_corrected", { trigger });
+          }
+        } else {
+          log.warn("fact-gate retry did not re-deliver — keeping original message", { trigger });
+        }
+      } catch (err) {
+        log.error("fact-gate retry call failed — keeping original message", { trigger, error: String(err) });
+      }
+    }
   }
 
   // Stop the typing refresh loop — generation is done, message is about to send.

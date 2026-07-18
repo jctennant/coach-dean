@@ -1631,3 +1631,117 @@ describe("coach/respond — morning_plan quality-session derivation excludes cro
     expect(systemPrompt).not.toContain("Quality session this week: YES — Strength");
   });
 });
+
+describe("coach/respond — Phase B fact gate (stated_facts equality check)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  // Routes non-coach calls (Haiku extraction/classification) to a harmless text
+  // response and serves coach (deliver_message-bearing) calls from the given queue.
+  function mockCoachCalls(queue: Array<Record<string, unknown>>) {
+    let coachCall = 0;
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockImplementation(
+      (args: { tools?: Array<{ name?: string }> }) => {
+        const isCoach = Array.isArray(args?.tools) && args.tools.some((t) => t.name === "deliver_message");
+        if (!isCoach) return Promise.resolve({ content: [{ type: "text", text: "{}" }] });
+        const resp = queue[Math.min(coachCall, queue.length - 1)];
+        coachCall++;
+        return Promise.resolve(resp);
+      }
+    );
+  }
+
+  function deliverWithFacts(id: string, message: string, facts: Record<string, unknown>) {
+    return {
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id, name: "deliver_message", input: {
+        message,
+        stated_facts: { week_number: null, weekly_target: null, week_distance_completed: null, days_until_race: null, ...facts },
+      } }],
+    };
+  }
+
+  it("requires stated_facts on the deliver_message tool for user_message", async () => {
+    mockCoachCalls([deliverWithFacts("tu-1", "Nice and steady this week.", {})]);
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const coachCall = calls.find((c: unknown[]) => {
+      const args = c[0] as { tools?: Array<{ name?: string }> };
+      return Array.isArray(args?.tools) && args.tools.some((t) => t.name === "deliver_message");
+    });
+    expect(coachCall).toBeDefined();
+    const tools = (coachCall![0] as { tools: Array<{ name?: string; input_schema?: { required?: string[] } }> }).tools;
+    const deliverTool = tools.find((t) => t.name === "deliver_message");
+    expect(deliverTool?.input_schema?.required).toContain("stated_facts");
+  });
+
+  it("rejects a wrong week number via tool_result and sends the corrected retry", async () => {
+    mockCoachCalls([
+      deliverWithFacts("tu-1", "You're in week 10 of the plan — solid spot.", { week_number: 10 }),
+      deliverWithFacts("tu-2", "You're in week 8 of the plan — solid spot.", { week_number: 8 }),
+    ]);
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState({ current_week: 8 }) });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("week 8");
+    expect(sent).not.toContain("week 10");
+
+    // The retry call must carry the rejection tool_result back to the model.
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const retryCall = calls.find((c: unknown[]) => {
+      const args = c[0] as { messages?: Array<{ role: string; content: unknown }> };
+      return (args.messages ?? []).some(
+        (m) => m.role === "user" && JSON.stringify(m.content).includes("DELIVERY REJECTED")
+      );
+    });
+    expect(retryCall).toBeDefined();
+  });
+
+  it("does not retry when stated facts match ground truth", async () => {
+    mockCoachCalls([
+      deliverWithFacts("tu-1", "Week 8, right on plan. Target is 30 for the week.", { week_number: 8, weekly_target: 30 }),
+    ]);
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState({ current_week: 8, weekly_mileage_target: 30 }) });
+    const { sendSMS } = await import("@/lib/linq");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const coachCalls = calls.filter((c: unknown[]) => {
+      const args = c[0] as { tools?: Array<{ name?: string }> };
+      return Array.isArray(args?.tools) && args.tools.some((t) => t.name === "deliver_message");
+    });
+    expect(coachCalls.length).toBe(1);
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Week 8");
+  });
+
+  it("fails open when the retry still mismatches — sends the retry text anyway", async () => {
+    mockCoachCalls([
+      deliverWithFacts("tu-1", "You're in week 10 now.", { week_number: 10 }),
+      deliverWithFacts("tu-2", "You're in week 11 now.", { week_number: 11 }),
+    ]);
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState({ current_week: 8 }) });
+    const { sendSMS } = await import("@/lib/linq");
+    const { trackEvent } = await import("@/lib/track");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("week 11");
+    const events = (trackEvent as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+    expect(events).toContain("stated_facts_mismatch_after_retry");
+  });
+});
