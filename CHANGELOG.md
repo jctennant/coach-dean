@@ -4,6 +4,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Re-enabled morning-reminder cron for users on morning_reminders cadence
+
+**Type:** Bug Fix
+**Reported by:** Jake Tennant (phone 5107084020) — "I'd like to get a daily morning text that says the plan for the day - but I'm currently not getting one"
+**Root cause:** Two compounding issues. (1) `morning-reminder/route.ts` had a hard `if (true as boolean) return { disabled: true }` short-circuit added 2026-04-14 during the "v2.0" reactive-coaching pivot (see 2026-04-14 "v2.0 migration" entry), which no longer matched the product direction — Jake is running the cron externally via cron-job.org and expects it to actually fire. (2) Separately, the route only selects `training_profiles.proactive_cadence = 'morning_reminders'`, but nothing in the current onboarding flow ever sets that value (onboarding only ever writes `nightly_reminders` or `weekly_only`), so this user's profile was `weekly_only` and would have been skipped even with the guard removed.
+**Fix / Change:** Removed the disabled short-circuit in `morning-reminder/route.ts`, restoring the original cadence/timezone/training-day/dedup logic. Manually set `proactive_cadence = 'morning_reminders'` for this user's `training_profiles` row via direct Supabase update (explicitly authorized by Jake after a read-only confirmation query). No change made to `nightly-reminder`, which has the same disabled pattern and was left as-is since it wasn't reported broken.
+**Note:** `proactive_cadence: 'morning_reminders'` is otherwise a dead value nowhere in the codebase sets it — worth deciding whether to expose it as an onboarding/settings choice again or remove the branch if morning reminders stay a one-off admin toggle.
+**Files changed:** `src/app/api/cron/morning-reminder/route.ts`
+
+---
+
 ## 2026-07-18 — Fixed Dean quoting stale pre-injury mileage on "what's the plan" questions during injury hold
 
 **Type:** Bug Fix
