@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Untracked sidecar/node_modules (13,042 files) and stripe.tar.gz from git
+
+**Type:** Infra
+**Reported by:** Internal observation (codebase review)
+**User feedback:** N/A
+**Root cause:** Root `.gitignore` had `/node_modules` (anchored to repo root only), so when the Photon iMessage sidecar was added on 2026-07-05, its entire `node_modules` tree (13,042 files) was committed along with it — ~99% of all tracked files in the repo. An 8.1MB `stripe.tar.gz` archive was also tracked at the repo root.
+**Fix / Change:** Changed the ignore pattern to unanchored `node_modules/` (covers any depth), ran `git rm -r --cached` on both. Files remain on disk; `sidecar/` still runs locally via its own `npm install`. Added `stripe.tar.gz` to `.gitignore` so neither can be re-added accidentally. History still contains the blobs — a history rewrite was deliberately not done.
+**Files changed:** `.gitignore` (plus 13,043 index removals)
+
 ## 2026-07-18 — Conversational cadence preference: [CADENCE:] tag lets athletes opt into morning/nightly reminders
 
 **Type:** Feature
