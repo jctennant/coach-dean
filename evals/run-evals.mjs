@@ -162,6 +162,50 @@ function getBodyPartExercisesEval(bodyPart) {
 }
 
 // ─────────────────────────────────────────────
+// Return-to-run ramp math (mirrors src/lib/injury-return.ts)
+// ─────────────────────────────────────────────
+
+function computeReturnToRunRampEval(holdSince, preInjuryMileageTarget, now = new Date()) {
+  if (!holdSince) return null;
+  const weeksInjured = Math.max(1, Math.ceil((now.getTime() - new Date(holdSince).getTime()) / (7 * 24 * 60 * 60 * 1000)));
+  const rampFactor = weeksInjured >= 3 ? 0.50 : weeksInjured >= 2 ? 0.60 : 0.70;
+  const returnBaseMiles = preInjuryMileageTarget && preInjuryMileageTarget > 0
+    ? Math.round(preInjuryMileageTarget * rampFactor * 2) / 2
+    : null;
+  return { weeksInjured, rampFactor, returnBaseMiles };
+}
+
+// Return-to-run timelines (mirrors INJURY_TIMELINES in src/lib/exercise-library.ts)
+const INJURY_TIMELINES_EVAL = {
+  it_band:    { mild: "2–3 weeks",  moderate: "3–5 weeks",  severe: "6–8 weeks" },
+  shin:       { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "8–12 weeks" },
+  knee:       { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–10 weeks" },
+  hamstring:  { mild: "1–2 weeks",  moderate: "3–6 weeks",  severe: "8–12 weeks" },
+  calf:       { mild: "1–2 weeks",  moderate: "3–4 weeks",  severe: "6–8 weeks" },
+  foot:       { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "8–12 weeks" },
+  hip:        { mild: "1–2 weeks",  moderate: "3–4 weeks",  severe: "6–8 weeks" },
+  glute:      { mild: "1–2 weeks",  moderate: "2–4 weeks",  severe: "4–6 weeks" },
+  piriformis: { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "6–10 weeks" },
+  back:       { mild: "3–5 days",   moderate: "2–3 weeks",  severe: "4–6 weeks" },
+  ankle:      { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–10 weeks" },
+  groin:      { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–8 weeks" },
+};
+
+function getRecoveryEstimateEval(bodyPart, severity) {
+  if (!bodyPart) return null;
+  const key = bodyPart.toLowerCase().replace(/[^a-z_]/g, "_");
+  const sev = severity ?? "moderate";
+  const timeline = INJURY_TIMELINES_EVAL[key]?.[sev];
+  if (!timeline) return null;
+  const match = timeline.match(/(\d+)[–-](\d+)\s*(days?|weeks?)/i);
+  if (!match) return null;
+  const min = parseInt(match[1]);
+  const max = parseInt(match[2]);
+  const isDays = /^days?$/i.test(match[3]);
+  return { minWeeks: isDays ? min / 7 : min, maxWeeks: isDays ? max / 7 : max };
+}
+
+// ─────────────────────────────────────────────
 // System prompt construction (mirrors route.ts key sections)
 // ─────────────────────────────────────────────
 
@@ -171,6 +215,15 @@ function buildEvalSystemPrompt(fixture) {
   const raceDate = user.goal_race_date;
   const todayDateStr = fixture.today ?? "2026-03-30";
   const today = new Date(todayDateStr + "T12:00:00Z");
+
+  // Return-to-run predictive facts (mirrors the RETURN-TO-RUN CONTEXT block in route.ts,
+  // built from computeReturnToRunRamp — see src/lib/injury-return.ts)
+  const rtrRampEval = user.injury_hold_since
+    ? computeReturnToRunRampEval(user.injury_hold_since, user.pre_injury_mileage_target ?? user.weekly_mileage_target ?? null, today)
+    : null;
+  const rtrRecoveryEstimateEval = user.injury_hold_since && user.injury_body_part
+    ? getRecoveryEstimateEval(user.injury_body_part, user.injury_severity)
+    : null;
 
   // Date context
   const dateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -690,6 +743,14 @@ STRENGTH & CROSS-TRAINING SCHEDULING:
 INJURY HOLD: When an athlete cannot or should not run — append [INJURY_HOLD] at the end of your response. Use for: (a) explicit "can't run" statements ("doctor said no running", "complete rest", "can't put any weight on it"); (b) stopping a run mid-session due to pain (6/10 or higher); (c) pain at 7/10+ worsening for 2+ weeks; (d) when the MANDATORY PROFESSIONAL REFERRAL rule fires. Do NOT use for: minor soreness manageable with easy running, general fatigue, or voluntary lighter weeks.
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. Only use after a confirmed injury hold.
+${trigger === "user_message" && user.injury_hold_since ? `
+FULL PLAN REQUESTS (ON injury hold): If the athlete asks for the plan, schedule, arc, or "what's next" while on injury hold, use the RETURN-TO-RUN CONTEXT block below instead of any pre-injury arc numbers. Give a real, concrete answer — not "we'll figure it out" — built from these pieces: (1) current phase — cross-training/monitoring and the pain threshold that clears a test run, (2) the actual return-to-run ramp figure and window from RETURN-TO-RUN CONTEXT (state the real percentage and mileage, not a vague "we'll ease back in"), (3) how the pre-injury arc shape (peak/taper) is what you're rebuilding back toward once running resumes, not what's scheduled next week, (4) tie it to the race goal — with the known days-to-race, name what has to be true (e.g. a pain-free long run of a given distance) to stay on track. Do not invent specific mileage figures for weeks beyond the immediate return week — only the return-base figure is grounded; describe the weeks after that qualitatively (e.g. "building back toward your ~Xmi peak over the following weeks") rather than a numbered week-by-week table, so the answer doesn't vary between conversations. Do not quote a specific mileage number for a specific future week from the pre-injury arc as if it's still the plan — that arc is stale and gets rebuilt once cleared.
+
+RETURN-TO-RUN CONTEXT:
+- Weeks injured so far: ${rtrRampEval?.weeksInjured ?? "unknown"}
+- Once cleared, first week back: ${rtrRampEval?.returnBaseMiles != null ? `~${rtrRampEval.returnBaseMiles} mi (${Math.round(rtrRampEval.rampFactor * 100)}% of pre-injury ${user.pre_injury_mileage_target ?? user.weekly_mileage_target ?? "?"} mi/wk), then ramping back up week over week` : "will be calculated as a percentage of pre-injury volume once cleared — do not state a number yet"}
+${rtrRecoveryEstimateEval ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimateEval.minWeeks}-${rtrRecoveryEstimateEval.maxWeeks} weeks from when the hold started` : ""}
+${daysUntilRace != null ? `- Days until race: ${daysUntilRace}` : ""}` : ""}
 
 LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25%. In your response: acknowledge the setback, suggest shorter easy runs (drop quality sessions), and offer cross-training (easy bike, elliptical, swim) for any days they'd otherwise skip. Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead).${(trigger === "post_run" || trigger === "user_message") ? `
 

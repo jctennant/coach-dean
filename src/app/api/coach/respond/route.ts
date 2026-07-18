@@ -31,11 +31,12 @@ import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasEx
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
-import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, getRehabData, buildTimelinePromptText } from "@/lib/exercise-library";
+import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, getRehabData, buildTimelinePromptText, getRecoveryEstimate } from "@/lib/exercise-library";
 import { classifyIntent } from "@/lib/intent-classifier";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
 import { signPlanToken } from "@/lib/session-token";
+import { computeReturnToRunRamp } from "@/lib/injury-return";
 
 export const maxDuration = 120;
 
@@ -743,15 +744,12 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
 
   // Graduation path: phase 2 → full plan rebuild.
   // Compute return-to-running base from weeks injured and pre-injury mileage.
-  let returnBase: number | undefined;
-  let weeksInjured = 1;
-  if (holdSince) {
-    weeksInjured = Math.max(1, Math.ceil((Date.now() - new Date(holdSince).getTime()) / (7 * 24 * 60 * 60 * 1000)));
-  }
-  if (preInjuryTarget && preInjuryTarget > 0) {
-    const rampFactor = weeksInjured >= 3 ? 0.50 : weeksInjured >= 2 ? 0.60 : 0.70;
-    returnBase = Math.round(preInjuryTarget * rampFactor * 2) / 2;
-    console.log(`[handleInjuryClear] userId=${userId} — ${weeksInjured}w injured, return base=${returnBase} (${Math.round(rampFactor * 100)}% of ${preInjuryTarget})`);
+  // Shared with the predictive ramp quoted while still on hold (buildUserMessage) — see injury-return.ts.
+  const ramp = computeReturnToRunRamp(holdSince, preInjuryTarget);
+  const weeksInjured = ramp?.weeksInjured ?? 1;
+  const returnBase = ramp?.returnBaseMiles ?? undefined;
+  if (ramp) {
+    console.log(`[handleInjuryClear] userId=${userId} — ${weeksInjured}w injured, return base=${returnBase} (${Math.round(ramp.rampFactor * 100)}% of ${preInjuryTarget})`);
   }
 
   // Clear the hold and RTR phase so next trigger doesn't see stale state.
@@ -2674,7 +2672,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return questions;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null);
 
   // Re-anchor today/tomorrow right next to the generation instructions. The full
   // DATE CONTEXT block lives early in the (much longer) system prompt — by the time
@@ -6929,6 +6927,9 @@ function buildUserMessage(
   isPositiveOnlyStyle = false,
   arcWeekSkeleton: ArcWeekSlot[] | null = null,
   recoveryWeekSkeleton: RecoveryWeekSlot[] | null = null,
+  preInjuryMileageTarget: number | null = null,
+  injuryBodyPart: string | null = null,
+  injurySeverity: "mild" | "moderate" | "severe" | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -7298,9 +7299,22 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
         : null;
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
-      const fullArcContext = storedPlanAllWeeks && storedPlanAllWeeks.length > 0
-        ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}${w.key_workout_2 ? ` | 2nd quality: ${w.key_workout_2}` : ''}`).join('\n')}`
-        : '';
+      // On injury hold, that stored arc was baked in pre-injury and is stale — it gets
+      // rebuilt from a reduced base at [INJURY_CLEAR] (see injury-return.ts), so it's
+      // relabeled as reference-only and paired with the actual predictive return-to-run
+      // facts instead of being handed over as next week's number.
+      const rtrRamp = injuryHoldSince ? computeReturnToRunRamp(injuryHoldSince, preInjuryMileageTarget) : null;
+      const rtrRecoveryEstimate = injuryHoldSince && injuryBodyPart ? getRecoveryEstimate(injuryBodyPart, injurySeverity) : null;
+      const daysToRaceForArc = raceDate ? Math.ceil((new Date(raceDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)) : null;
+      const hasStoredArc = !!(storedPlanAllWeeks && storedPlanAllWeeks.length > 0);
+      const fullArcContext = injuryHoldSince
+        ? `\n\nRETURN-TO-RUN CONTEXT (athlete is on injury hold since ${injuryHoldSince} — use this, NOT any pre-injury arc numbers, to answer "what's the plan" questions):
+- Weeks injured so far: ${rtrRamp?.weeksInjured ?? "unknown"}
+- Once cleared, first week back: ${rtrRamp?.returnBaseMiles != null ? `~${umMi(rtrRamp.returnBaseMiles)} (${Math.round(rtrRamp.rampFactor * 100)}% of pre-injury ${umMi(preInjuryMileageTarget ?? 0)}/wk), then ramping back up week over week` : "will be calculated as a percentage of pre-injury volume once cleared — do not state a number yet"}
+${rtrRecoveryEstimate ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimate.minWeeks}-${rtrRecoveryEstimate.maxWeeks} weeks from when the hold started\n` : ""}${daysToRaceForArc != null ? `- Days until race: ${daysToRaceForArc}\n` : ""}${hasStoredArc ? `- PRE-INJURY ARC (reference only — shows what full training looked like before the injury, i.e. the shape the plan ramps back toward; these are NOT next week's numbers): ${storedPlanAllWeeks!.length} weeks total: ${storedPlanAllWeeks!.map(w => `Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}`).join(', ')}` : "- No pre-injury arc on file."}`
+        : hasStoredArc
+          ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks!.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks!.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}${w.key_workout_2 ? ` | 2nd quality: ${w.key_workout_2}` : ''}`).join('\n')}`
+          : '';
       return `The athlete just sent you a message. If you see multiple consecutive messages from them at the bottom of RECENT CONVERSATION, treat them as one thought — SMS sometimes splits long messages into segments.
 
 Before writing your response, silently check: what has this conversation been about? Have you already given relevant advice? Is this a follow-up to your last message? Use that to shape your reply — but do NOT output this reasoning. The first thing you write is the coaching message itself.
@@ -7348,7 +7362,7 @@ PROJECTED vs TARGET DIRECTION: When comparing a projected total to the weekly ta
 
 MANUALLY-REPORTED ACTIVITY: If earlier in RECENT CONVERSATION you told the athlete you could NOT see a specific activity in Strava, and they then provided the details manually (distance, pace, time, etc.) in a follow-up message — those numbers are athlete-reported, NOT Strava-confirmed. Do NOT say "that matches what I saw from the sync" or any phrasing that implies Strava confirmed the data. Acknowledge it as manually noted: e.g. "Got it — I've noted that manually. If it eventually syncs from Strava, I'll reconcile it then." Falsely attributing athlete-provided data to a Strava sync that never happened damages trust.
 
-FULL PLAN REQUESTS: If the athlete asks to see their full plan, training schedule, full training arc, or all upcoming weeks — give a compact arc summary using the FULL TRAINING PLAN ARC data below. Use this exact format (adapt phase names and weeks to what the data shows):
+FULL PLAN REQUESTS (NOT on injury hold): If the athlete asks to see their full plan, training schedule, full training arc, or all upcoming weeks — give a compact arc summary using the FULL TRAINING PLAN ARC data below. Use this exact format (adapt phase names and weeks to what the data shows):
 
 "Week X of Y — [phase]. Here's the arc:
 [Phase 1 name] (wks N–N): XY–ZZmi, [purpose in 3-5 words]
@@ -7358,6 +7372,8 @@ FULL PLAN REQUESTS: If the athlete asks to see their full plan, training schedul
 Race week [N] 🏁"
 
 Group weeks by phase — do NOT list every week. Pull actual mileage ranges from the FULL TRAINING PLAN ARC data. 2–3 bubbles max. Do NOT use web search to build a plan inline.
+
+FULL PLAN REQUESTS (ON injury hold): If the athlete asks for the plan, schedule, arc, or "what's next" while on injury hold, use the RETURN-TO-RUN CONTEXT block instead of the pre-injury arc numbers. Give a real, concrete answer — not "we'll figure it out" — built from these pieces: (1) current phase — cross-training/monitoring and the pain threshold that clears a test run, (2) the actual return-to-run ramp figure and window from RETURN-TO-RUN CONTEXT (state the real percentage and mileage, not a vague "we'll ease back in"), (3) how the pre-injury arc shape (peak/taper) is what you're rebuilding back toward once running resumes, not what's scheduled next week, (4) tie it to the race goal — with the known days-to-race, name what has to be true (e.g. a pain-free long run of a given distance) to stay on track, and flag it plainly if the timeline is getting tight. Do not quote a specific mileage number for a specific future week from the pre-injury arc as if it's still the plan — that arc is stale and gets rebuilt once cleared.
 
 EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Handle it using the THIS WEEK SESSION SWAP rules below.
 
