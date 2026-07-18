@@ -19,6 +19,7 @@ import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/timezone";
 import { checkDateConsistency } from "@/lib/date-consistency-check";
+import { gateProactiveResponse } from "@/lib/response-gate";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
@@ -3374,7 +3375,8 @@ OUTPUT CONTRACT:
   const dayAbbrevFixed = fixSessionDayAbbreviations(volumeChecked, Number(refYearStr), Number(refMonthStr));
 
   // Day-level session postprocessing removed — coach no longer assigns sessions to specific days.
-  const coachMessage = stripBoilerplateSignoffs(dayAbbrevFixed);
+  // let (not const): the proactive validator gate below may replace it with a repaired version.
+  let coachMessage = stripBoilerplateSignoffs(dayAbbrevFixed);
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage, strength_poster: (wantsStrengthPoster && strengthPosterRoutineKey) ? strengthPosterRoutineKey : null });
 
@@ -3386,16 +3388,41 @@ OUTPUT CONTRACT:
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  // Advisory-only semantic repetition check (see repetition-check.ts) — fired without
-  // awaiting so it never delays the SMS send. Only post_run and weekly_recap have prior
-  // messages of the same type worth comparing against.
-  if (trigger === "post_run" || trigger === "weekly_recap") {
-    const priorSameTypeTexts = recentMessages
-      .filter((m) => m.role === "assistant" && m.message_type === trigger)
-      .slice(-3)
-      .map((m) => (m.content as string) || "")
-      .filter(Boolean);
-    if (priorSameTypeTexts.length > 0) {
+  // Prior assistant messages of the same message_type (most recent first) for the
+  // repetition check — recentMessages is chronological, so slice then reverse.
+  const priorSameTypeTexts = recentMessages
+    .filter((m) => m.role === "assistant" && m.message_type === trigger)
+    .slice(-3)
+    .reverse()
+    .map((m) => (m.content as string) || "")
+    .filter(Boolean);
+
+  // Proactive (cron-driven) triggers: the repetition + date-consistency validators
+  // BLOCK the send, with a one-shot repair-and-recheck (see response-gate.ts). Nobody
+  // is waiting on these messages, so the added latency is free, and any gate/repair
+  // failure fails open to the original text.
+  const isGatedProactive =
+    trigger === "morning_plan" || trigger === "weekly_recap" || trigger === "nightly_reminder";
+  if (isGatedProactive) {
+    try {
+      const gate = await gateProactiveResponse({
+        message: coachMessage,
+        dateFacts: getDateFacts(userTimezone),
+        priorSameTypeMessages: priorSameTypeTexts,
+      });
+      for (const e of gate.events) {
+        log.warn("proactive validator gate event", { trigger, event: e.event, detail: e.detail ?? null });
+        void trackEvent(userId, e.event, { trigger, detail: e.detail ?? null });
+      }
+      coachMessage = gate.message;
+    } catch (err) {
+      log.error("proactive validator gate errored — sending original", { error: String(err) });
+    }
+  } else {
+    // Latency-sensitive triggers (inbound SMS, post_run webhook): advisory-only, fired
+    // without awaiting so the checks never delay the send. checkDateConsistency no-ops
+    // (no API call) when the message mentions no relative-day language.
+    if (trigger === "post_run" && priorSameTypeTexts.length > 0) {
       void checkSemanticRepetition(coachMessage, priorSameTypeTexts)
         .then((result) => {
           if (result.repeats) {
@@ -3405,21 +3432,15 @@ OUTPUT CONTRACT:
         })
         .catch((err) => log.error("semantic repetition check errored", { error: String(err) }));
     }
+    void checkDateConsistency(coachMessage, getDateFacts(userTimezone))
+      .then((result) => {
+        if (result.inconsistent) {
+          log.warn("date consistency issue detected", { trigger, issue: result.issue });
+          void trackEvent(userId, "date_consistency_issue_detected", { trigger, issue: result.issue });
+        }
+      })
+      .catch((err) => log.error("date consistency check errored", { error: String(err) }));
   }
-
-  // Advisory-only date consistency check (see date-consistency-check.ts) — fired without
-  // awaiting so it never delays the SMS send. Runs for every trigger (not gated to specific
-  // ones, unlike repetition) since a message from any trigger can reference relative days.
-  // checkDateConsistency itself no-ops (no API call) when the message doesn't mention any
-  // relative day language, so this is cheap for the common case.
-  void checkDateConsistency(coachMessage, getDateFacts(userTimezone))
-    .then((result) => {
-      if (result.inconsistent) {
-        log.warn("date consistency issue detected", { trigger, issue: result.issue });
-        void trackEvent(userId, "date_consistency_issue_detected", { trigger, issue: result.issue });
-      }
-    })
-    .catch((err) => log.error("date consistency check errored", { error: String(err) }));
 
   // Split into iMessage-sized chunks. Each part is sent as a separate text
   // with its own typing indicator so it feels like a real person composing

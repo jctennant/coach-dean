@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Repetition + date-consistency validators now gate proactive sends (repair-and-recheck)
+
+**Type:** Improvement / Reliability
+**Reported by:** Internal observation (codebase review) — both validators shipped advisory-only "until telemetry says it's worth it," but their own docs note blocking is fine outside the live inbound-SMS path. Proactive cron sends are exactly that path.
+**User feedback:** N/A
+**Root cause:** `repetition-check.ts` and `date-consistency-check.ts` were fired without awaiting on every trigger, so a weekly recap with a day/date contradiction, or a nightly reminder repeating last night's angle, was logged — and sent anyway.
+**Fix / Change:** New `src/lib/response-gate.ts`: for `morning_plan`, `weekly_recap`, and `nightly_reminder` (cron-driven, nobody waiting), the checks now run BEFORE the send. On failure, a one-shot focused repair call (Sonnet, forced through a `deliver_repaired_message` tool, instructed to change only the flagged aspect and keep every number/date/pace as-is) rewrites the message; the repaired text is re-validated and only used if it now passes — otherwise the original (which carries all deterministic corrections) is sent and the outcome logged (`gate_*` track events). Fail-open everywhere: any validator or repair error sends the original. Latency-sensitive triggers (`post_run`, `user_message`, etc.) keep the advisory fire-and-forget behavior unchanged. Also fixed the prior-messages ordering passed to the repetition check (was oldest-first, contract says most-recent-first).
+**Files changed:** `src/lib/response-gate.ts` (new), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/response-gate.test.ts` (new)
+
 ## 2026-07-18 — insertConversation() helper: all conversations inserts now typed + error-logged; fixed 4 silently-failing message_types (incl. weekly re-sending "goodbye" nudge)
 
 **Type:** Bug Fix / Infra
