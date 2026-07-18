@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation, type MessageType } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
@@ -197,10 +198,10 @@ export async function GET(request: Request) {
   return NextResponse.json({ ok: true, nudged });
 }
 
-async function sendNudge(userId: string, phone: string, message: string, messageType: string) {
+async function sendNudge(userId: string, phone: string, message: string, messageType: MessageType) {
   await Promise.all([
     sendSMS(phone, message),
-    supabase.from("conversations").insert({
+    insertConversation({
       user_id: userId,
       role: "assistant",
       content: message,

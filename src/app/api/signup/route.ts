@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
   // first inbound webhook, which misses the first exchange.
   const [{ chatId }] = await Promise.all([
     sendSMS(phone, welcomeMessage),
-    supabase.from("conversations").insert({
+    insertConversation({
       user_id: user.id,
       role: "assistant",
       content: welcomeMessage,

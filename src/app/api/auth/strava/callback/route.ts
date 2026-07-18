@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
 import { getAllActivities, getAthleteStats, fetchAndStoreBestEfforts } from "@/lib/strava";
 import { trackEvent } from "@/lib/track";
@@ -489,7 +490,7 @@ export async function GET(request: Request) {
   if (!stravaWasAlreadyConnected) {
     await Promise.all([
       sendSMS(user.phone_number, smsMsg),
-      supabase.from("conversations").insert({
+      insertConversation({
         user_id: user.id,
         role: "assistant",
         content: smsMsg,
@@ -507,7 +508,7 @@ export async function GET(request: Request) {
     const noReadMsg = `One thing — it looks like you unchecked "View activity data" when authorizing. Without that, I can't see your runs or calibrate your training zones. To fix it, reconnect here and make sure that box is checked:\n\n${reconnectUrl}`;
     await Promise.all([
       sendSMS(user.phone_number, noReadMsg),
-      supabase.from("conversations").insert({
+      insertConversation({
         user_id: user.id,
         role: "assistant",
         content: noReadMsg,

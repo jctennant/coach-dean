@@ -4,6 +4,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — insertConversation() helper: all conversations inserts now typed + error-logged; fixed 4 silently-failing message_types (incl. weekly re-sending "goodbye" nudge)
+
+**Type:** Bug Fix / Infra
+**Reported by:** Internal observation (codebase review) — CLAUDE.md documents the "message_type missing from CHECK constraint → insert fails silently" incident class; auditing for it found four live instances.
+**User feedback:** N/A
+**Root cause:** All 38 `conversations` insert sites called `supabase.from("conversations").insert()` directly, almost none checking the returned error. Four message_types used by code were missing from the `conversations_message_type_check` constraint, so those inserts had been failing silently in production:
+1. `reengagement_final` (cron/reengagement) — the "never message again" marker row never persisted, so `alreadyFinalIds` was always empty and the final "I'll stop sending messages" goodbye nudge re-sent to every silent user **every 7 days, forever**.
+2. `awaiting_payment` (cron/trial-expiry) — trial-expiry messages never recorded in conversation history.
+3. `awaiting_timezone` (onboarding/handle) — timezone-ask messages never recorded (caught by the new compile-time check, not the manual audit).
+4. `v2_migration` (admin/v2-migration) — migration announcements never recorded.
+**Fix / Change:** New `src/lib/conversations.ts`: `insertConversation()` / `insertConversationReturningId()` — the single insert path for the conversations table. Failures are console-logged (structured) + captured to Sentry. `message_type` is typed against a `VALID_MESSAGE_TYPES` const union, so a new type that isn't added to both the list and the DB constraint now fails `npm run typecheck` instead of failing silently in production (this is how #3 was found). Migrated all 38 call sites across 14 files. Migration `058` adds the four missing values to the constraint — applied to the live DB (migration `057_crosstraining_days`, which had been applied manually but never recorded, was also reconciled in the same push).
+**Files changed:** `src/lib/conversations.ts` (new), `supabase/migrations/058_reengagement_final_v2_migration_types.sql` (new), `coach/respond/route.ts`, `onboarding/handle/route.ts`, `webhooks/linq/route.ts`, `webhooks/photon/route.ts`, `auth/strava/callback/route.ts`, `signup/route.ts`, `admin/{changelog,send,v2-migration}/route.ts`, `cron/{trial-expiry,welcome-tips,reengagement}/route.ts`, `src/lib/training-plan.ts`
+
 ## 2026-07-18 — Untracked sidecar/node_modules (13,042 files) and stripe.tar.gz from git
 
 **Type:** Infra

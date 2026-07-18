@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
 
 /**
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   const sentParts: string[] = [];
   for (const part of parts) {
     await sendSMS(user.phone_number, part);
-    await supabase.from("conversations").insert({
+    await insertConversation({
       user_id: userId,
       role: "assistant",
       content: part,

@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation } from "@/lib/conversations";
 import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { buildHRZoneContext, deriveZones, type LTHRConfidence } from "@/lib/hr-zones";
@@ -731,7 +732,7 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
       await sendSMS(phoneNumber, bubble1);
       await new Promise(r => setTimeout(r, 1500));
       await sendSMS(phoneNumber, bubble2);
-      await supabase.from("conversations").insert([
+      await insertConversation([
         { user_id: userId, role: "assistant", content: bubble1, message_type: "coach_response" },
         { user_id: userId, role: "assistant", content: bubble2, message_type: "coach_response" },
       ]);
@@ -964,7 +965,7 @@ async function handlePostRunOnboarding(
   if (chatId) await startTyping(chatId);
 
   await sendSMS(user.phone_number as string, coachMessage);
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: userId,
     role: "assistant",
     content: coachMessage,
@@ -1082,7 +1083,7 @@ async function handleSymptomCheckin(userId: string, dryRun: boolean, requestChat
     const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
     if (chatId) await startTyping(chatId);
     await sendSMS(user.phone_number as string, message);
-    await supabase.from("conversations").insert({
+    await insertConversation({
       user_id: userId,
       role: "assistant",
       content: message,
@@ -1140,7 +1141,7 @@ async function handleInjuryCheckin(userId: string, dryRun: boolean, requestChatI
       await sendSMS(user.phone_number as string, messages[i]);
       if (i < messages.length - 1) await new Promise(r => setTimeout(r, 1200));
     }
-    await supabase.from("conversations").insert(
+    await insertConversation(
       messages.map(content => ({
         user_id: userId,
         role: "assistant",
@@ -1353,7 +1354,7 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
               : "Your Coach Dean subscription isn't active. Subscribe here to continue: " + checkoutUrl);
         if (!dry_run) {
           await sendSMS(user.phone_number as string, msg);
-          await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: msg, message_type: "user_message" });
+          await insertConversation({ user_id: userId, role: "assistant", content: msg, message_type: "user_message" });
         }
       }
       // Silently skip all proactive triggers (reminders, post_run, weekly_recap, etc.)
@@ -1572,7 +1573,7 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
         : `To manage your subscription (cancel, update payment, view invoices), tap here:\n\n${cancelUrl}`;
       if (!dry_run) {
         await sendSMS(user.phone_number as string, cancelMsg);
-        await supabase.from("conversations").insert({ user_id: userId, role: "assistant", content: cancelMsg, message_type: "user_message" });
+        await insertConversation({ user_id: userId, role: "assistant", content: cancelMsg, message_type: "user_message" });
       }
       return NextResponse.json({ ok: true, message: cancelMsg });
     }
@@ -3484,7 +3485,7 @@ OUTPUT CONTRACT:
     const { chatId: returnedChatId } = await sendSMS(user.phone_number, part);
     if (returnedChatId && !learnedChatId) learnedChatId = returnedChatId;
 
-    const { error: convInsertErr } = await supabase.from("conversations").insert({
+    const { error: convInsertErr } = await insertConversation({
       user_id: userId,
       role: "assistant",
       content: part,
@@ -3542,7 +3543,7 @@ OUTPUT CONTRACT:
     }
     if (sentCount > 0) {
       const routineLabel = deliverExerciseIds.length > 0 ? "adapted" : (strengthPosterRoutineKey ?? "adapted");
-      await supabase.from("conversations").insert({
+      await insertConversation({
         user_id: userId,
         role: "assistant",
         content: `[Sent strength routine images: ${routineLabel} (${sentCount}/${exerciseIdsToSend.length} exercises)]`,
@@ -3599,7 +3600,7 @@ OUTPUT CONTRACT:
       await new Promise((r) => setTimeout(r, 1500));
       await sendSMS(user.phone_number, closingMsg);
     }
-    await supabase.from("conversations").insert({
+    await insertConversation({
       user_id: userId,
       role: "assistant",
       content: closingMsg,

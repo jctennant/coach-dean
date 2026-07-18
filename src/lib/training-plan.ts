@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { insertConversation } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import type { Json } from "@/lib/database.types";
@@ -764,7 +765,7 @@ No other text.`,
       await sendSMS(phoneNumber, lines.join("\n"));
 
       // Log the artifact so dedup/recap logic sees the plan was actually delivered.
-      await supabase.from("conversations").insert({
+      await insertConversation({
         user_id: userId,
         role: "assistant",
         content: lines.join("\n"),

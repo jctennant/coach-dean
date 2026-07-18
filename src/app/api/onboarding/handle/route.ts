@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation, type MessageType } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
@@ -31,7 +32,7 @@ async function sendAndStore(
   userId: string,
   phone: string,
   message: string,
-  messageType?: string
+  messageType?: MessageType
 ): Promise<{ chatId: string | null }> {
   const isDryRun = dryRunUsers.has(userId);
   let chatId: string | null = null;
@@ -39,7 +40,7 @@ async function sendAndStore(
     const result = await sendSMS(phone, message);
     chatId = result?.chatId ?? null;
   }
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: userId,
     role: "assistant",
     content: message,
@@ -257,7 +258,7 @@ Rules:
     .join("")
     .trim() || `${redirectLine}`;
 
-  await supabase.from("conversations").insert([
+  await insertConversation([
     { user_id: user.id, role: "user", content: message, message_type: "user_message" },
     { user_id: user.id, role: "assistant", content: text, message_type: "onboarding" },
   ]);
@@ -875,7 +876,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   // history.
 
   // Store user's inbound message
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: user.id,
     role: "user",
     content: message,
@@ -1311,7 +1312,7 @@ ${injuryAlreadyCollected ? `- HR ZONES: Do not lead with or headline HR zone ana
     ...(injuryAlreadyCollected ? { injury_follow_up_sent: true } : {}),
   };
 
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: user.id,
     role: "user",
     content: "(strava connected)",
@@ -1352,7 +1353,7 @@ async function handleInjuryIntake(
   }
 
   // Store user message
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: user.id,
     role: "user",
     content: message,
@@ -2345,7 +2346,7 @@ async function completeOnboarding(
       const { message } = (await res.json()) as { message?: string };
       if (message) {
         for (const part of message.split(/\n\n+/).filter(Boolean)) {
-          await supabase.from("conversations").insert({
+          await insertConversation({
             user_id: user.id,
             role: "assistant",
             content: part,

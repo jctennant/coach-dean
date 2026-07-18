@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation, insertConversationReturningId } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
@@ -304,7 +305,7 @@ async function handleInboundMessage(
     // For new users, images before onboarding are unusual — treat as no message
     // and let onboarding start normally.
     const messageBody = cleanBody || (imageUrl ? "[Workout image received]" : "");
-    await supabase.from("conversations").insert({
+    await insertConversation({
       user_id: newUser.id,
       role: "user",
       content: messageBody,
@@ -389,17 +390,14 @@ async function handleInboundMessage(
     }
   }
 
-  const { data: storedMsg } = await supabase
-    .from("conversations")
-    .insert({
-      user_id: user.id,
-      role: "user",
-      content: messageBody,
-      message_type: "user_message",
-      external_message_id: messageId,
-    })
-    .select("id")
-    .single();
+  const { id: storedMsgId } = await insertConversationReturningId({
+    user_id: user.id,
+    role: "user",
+    content: messageBody,
+    message_type: "user_message",
+    external_message_id: messageId,
+  });
+  const storedMsg = storedMsgId ? { id: storedMsgId } : null;
 
   // Feedback / refund commands — intercept before onboarding and coaching
   const isFeedback = /^FEEDBACK\b/i.test(body);
@@ -609,7 +607,7 @@ async function handlePDFPlan(
   console.log("[linq-webhook] processing PDF plan for user:", userId, "filename:", filename);
   void chatId;
 
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: userId,
     role: "user",
     content: caption
@@ -677,7 +675,7 @@ async function handlePDFDuringOnboarding(
 ) {
   console.log("[linq-webhook] onboarding PDF plan for user:", userId, "filename:", filename);
 
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: userId,
     role: "user",
     content: caption
@@ -777,7 +775,7 @@ async function handleImageWorkout(
     // Not a workout screenshot — store message and route to standard coaching
     console.log("[linq-webhook] image is not a workout screenshot, routing to coach");
     const content = caption || "[Image]";
-    await supabase.from("conversations").insert({
+    await insertConversation({
       user_id: userId,
       role: "user",
       content,
@@ -794,7 +792,7 @@ async function handleImageWorkout(
 
   // 3. Build a human-readable summary of the extracted workout to store in the conversation
   const workoutSummary = formatWorkoutSummary(extracted, caption);
-  await supabase.from("conversations").insert({
+  await insertConversation({
     user_id: userId,
     role: "user",
     content: workoutSummary,
@@ -1004,7 +1002,7 @@ function formatWorkoutSummary(w: WorkoutExtracted, caption: string | null): stri
 async function sendAndStore(userId: string, phone: string, message: string, messageId: string | null) {
   await Promise.all([
     sendSMS(phone, message),
-    supabase.from("conversations").insert({
+    insertConversation({
       user_id: userId,
       role: "assistant",
       content: message,

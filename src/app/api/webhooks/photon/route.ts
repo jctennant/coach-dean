@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation, insertConversationReturningId } from "@/lib/conversations";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
@@ -192,7 +193,7 @@ async function handleInboundMessage(
   // Notify the user and skip processing.
   if (hasAttachment && attachmentMimeType?.startsWith("image/")) {
     if (user && !user.onboarding_step) {
-      await supabase.from("conversations").insert({
+      await insertConversation({
         user_id: user.id,
         role: "user",
         content: "[Image received via iMessage — no download URL available]",
@@ -234,7 +235,7 @@ async function handleInboundMessage(
     ).eq("id", newUser.id);
 
     const messageBody = cleanBody || "";
-    await supabase.from("conversations").insert({
+    await insertConversation({
       user_id: newUser.id,
       role: "user",
       content: messageBody,
@@ -278,17 +279,14 @@ async function handleInboundMessage(
     }
   }
 
-  const { data: storedMsg } = await supabase
-    .from("conversations")
-    .insert({
-      user_id: user.id,
-      role: "user",
-      content: messageBody,
-      message_type: "user_message",
-      external_message_id: messageId,
-    })
-    .select("id")
-    .single();
+  const { id: storedMsgId } = await insertConversationReturningId({
+    user_id: user.id,
+    role: "user",
+    content: messageBody,
+    message_type: "user_message",
+    external_message_id: messageId,
+  });
+  const storedMsg = storedMsgId ? { id: storedMsgId } : null;
 
   // FEEDBACK / REFUND intercept
   const isFeedback = /^FEEDBACK\b/i.test(body);
@@ -301,7 +299,7 @@ async function handleInboundMessage(
         : "Thanks for that — I'll pass it along!";
       await Promise.all([
         sendSMS(senderPhone, ack),
-        supabase.from("conversations").insert({ user_id: user.id, role: "assistant", content: ack, message_type: "coach_response" }),
+        insertConversation({ user_id: user.id, role: "assistant", content: ack, message_type: "coach_response" }),
       ]);
       return;
     }
@@ -341,7 +339,7 @@ async function handleInboundMessage(
     const msg = `Here's a link to update your Strava connection:\n${writeUrl}\n\nOn the Strava screen, the "Upload activities" checkbox controls whether I add a coaching note to each run.`;
     await Promise.all([
       sendSMS(senderPhone, msg),
-      supabase.from("conversations").insert({ user_id: user.id, role: "assistant", content: msg, message_type: "coach_response" }),
+      insertConversation({ user_id: user.id, role: "assistant", content: msg, message_type: "coach_response" }),
     ]);
     return;
   }
@@ -355,7 +353,7 @@ async function handleInboundMessage(
       : `Here's your Strava link:\n${stravaUrl}\n\nFor coaching notes on activities:\n${notesUrl}`;
     await Promise.all([
       sendSMS(senderPhone, msg),
-      supabase.from("conversations").insert({ user_id: user.id, role: "assistant", content: msg, message_type: "coach_response" }),
+      insertConversation({ user_id: user.id, role: "assistant", content: msg, message_type: "coach_response" }),
     ]);
     return;
   }

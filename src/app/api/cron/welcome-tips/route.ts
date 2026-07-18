@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 
@@ -78,7 +79,7 @@ export async function GET(request: Request) {
     toSend.map(async (user) => {
       try {
         await sendSMS(user.phone_number as string, TIPS_MESSAGE);
-        await supabase.from("conversations").insert({
+        await insertConversation({
           user_id: user.id,
           role: "assistant",
           content: TIPS_MESSAGE,

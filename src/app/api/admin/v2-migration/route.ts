@@ -22,6 +22,7 @@
 
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { insertConversation } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
 
 export const maxDuration = 120;
@@ -97,7 +98,7 @@ export async function POST(request: Request) {
       await sendSMS(phone, MIGRATION_MESSAGE);
 
       // Store in conversations for history
-      await supabase.from("conversations").insert({
+      await insertConversation({
         user_id: user.id,
         role: "assistant",
         content: MIGRATION_MESSAGE,
