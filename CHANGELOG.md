@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Give Dean a real projected return-to-run mileage ramp instead of letting it invent one
+
+**Type:** Bug Fix
+**Reported by:** Internal investigation, follow-up to the same-day pre-injury-arc fix
+**User feedback:** N/A — continuation of the earlier test conversation. After the first fix, Dean's third reply (once told the athlete wasn't running at all that week) invented a completely different, ungrounded week-by-week mileage progression (wk5 ~18mi, wk6-7 25→32mi, wk8 22mi) with no data source backing it.
+**Root cause:** The only real number available to Dean for a "what's the plan" question while on injury hold was the single first-week-back figure from `computeReturnToRunRamp` (`src/lib/injury-return.ts`). Everything past that had zero computation behind it, so when asked about "the next 2-3 weeks" Dean had no choice but to freehand a progression — which is exactly the kind of fabrication that's inconsistent across turns. The real multi-week ramp math already existed, just locked inside `generateAndSaveFullPlan` (`src/lib/training-plan.ts`), only ever run at actual `[INJURY_CLEAR]` time — never available to preview beforehand.
+**Fix / Change:** Extracted the pure, side-effect-free mileage/phase/long-run arc loop out of `generateAndSaveFullPlan` into a new standalone `computeMileageArc()` function (same output, `generateAndSaveFullPlan` now just calls it — behavior-preserving refactor, confirmed by the full existing test suite passing unchanged). Added an optional `targetPeakOverride` param so a preview can build back toward an athlete's *actual* established peak instead of re-deriving a smaller one from the temporarily reduced return-base mileage. `route.ts`'s injury-hold predictive context now calls `computeMileageArc()` with the return-base mileage and the athlete's real pre-injury peak, and hands Dean the first 3 weeks of a genuine projected ramp (`PROJECTED RETURN RAMP`) to quote — framed as "roughly," since it's recalculated exactly at clearance. Weeks beyond that still fall back to the qualitative phase-shape description from the earlier fix, with an explicit instruction never to invent a number for a week it wasn't given data for. Mirrored the same math and prompt changes into `evals/run-evals.mjs` and updated `injury-shin-return-to-run-plan-question.json`'s `ground_truth` to reflect that quoting the projected ramp numbers is now correct behavior, not a red flag (an intentional-behavior change, not a loosened test).
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-plan.test.ts`, `evals/run-evals.mjs`, `evals/fixtures/injury-shin-return-to-run-plan-question.json`
+
 ## 2026-07-18 — Fix Dean quoting stale pre-injury arc as a live plan on multi-week plan questions
 
 **Type:** Bug Fix

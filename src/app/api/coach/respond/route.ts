@@ -11,7 +11,7 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc } from "@/lib/training-plan";
 import type { ArcWeekSlot, RecoveryWeekSlot } from "@/lib/training-plan";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
@@ -7476,11 +7476,41 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
       const preInjuryPhaseSequence = hasStoredArc
         ? Array.from(new Set(storedPlanAllWeeks!.map(w => w.phase)))
         : [];
+      // Real projected mileage for the first few weeks back — computed with the SAME
+      // mileage-arc math the plan is actually rebuilt with at [INJURY_CLEAR] (computeMileageArc,
+      // shared with generateAndSaveFullPlan), just previewed from the current return-base
+      // estimate instead of persisted. This gives Dean genuine numbers to quote for the near-term
+      // "what's the plan" question instead of having to invent a progression past the return week
+      // (see 2026-07-18 changelog — Dean fabricated an ungrounded wk6-8 ramp when asked for one).
+      // It WILL shift slightly once actually rebuilt (weeksInjured/returnBase change day to day),
+      // so it's framed as a projection, not a locked-in schedule.
+      const projectedReturnArc = injuryHoldSince && rtrRamp?.returnBaseMiles != null
+        ? (() => {
+            const nowForArc = new Date();
+            const mondayForArc = new Date(nowForArc);
+            mondayForArc.setUTCDate(nowForArc.getUTCDate() - ((nowForArc.getUTCDay() + 6) % 7));
+            mondayForArc.setUTCHours(0, 0, 0, 0);
+            const hasRaceForArc = !!raceDate;
+            let totalWeeksForArc = 8;
+            if (raceDate) {
+              const raceForArc = new Date(raceDate + "T12:00:00Z");
+              const weeksUntilForArc = Math.ceil((raceForArc.getTime() - mondayForArc.getTime()) / (7 * 24 * 60 * 60 * 1000));
+              totalWeeksForArc = Math.max(4, Math.min(52, weeksUntilForArc));
+            }
+            return computeMileageArc({
+              baseMileage: rtrRamp.returnBaseMiles!,
+              totalWeeks: totalWeeksForArc,
+              goal: null,
+              hasRace: hasRaceForArc,
+              targetPeakOverride: preInjuryPeakMileage,
+            }).slice(0, 3);
+          })()
+        : null;
       const fullArcContext = injuryHoldSince
         ? `\n\nRETURN-TO-RUN CONTEXT (athlete is on injury hold since ${injuryHoldSince} — use this, NOT any pre-injury arc numbers, to answer "what's the plan" questions):
 - Weeks injured so far: ${rtrRamp?.weeksInjured ?? "unknown"}
 - Once cleared, first week back: ${rtrRamp?.returnBaseMiles != null ? `~${umMi(rtrRamp.returnBaseMiles)} (${Math.round(rtrRamp.rampFactor * 100)}% of pre-injury ${umMi(preInjuryMileageTarget ?? 0)}/wk), then ramping back up week over week` : "will be calculated as a percentage of pre-injury volume once cleared — do not state a number yet"}
-${rtrRecoveryEstimate ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimate.minWeeks}-${rtrRecoveryEstimate.maxWeeks} weeks from when the hold started\n` : ""}${daysToRaceForArc != null ? `- Days until race: ${daysToRaceForArc}\n` : ""}${hasStoredArc ? `- PRE-INJURY ARC SHAPE (reference only, phases NOT numbers — the shape training ramps back toward once cleared; peak volume was ~${umMi(preInjuryPeakMileage ?? 0)}/wk during the ${preInjuryPhaseSequence[preInjuryPhaseSequence.length - 1] ?? "peak"} phase; this is NOT a week-by-week schedule and there is no specific mileage number to quote for any individual future week): ${preInjuryPhaseSequence.join(' → ')}` : "- No pre-injury arc on file."}`
+${projectedReturnArc && projectedReturnArc.length > 0 ? `- PROJECTED RETURN RAMP (real projection, safe to quote for these specific weeks — recalculated exactly once actually cleared, so frame as "roughly" not locked-in): ${projectedReturnArc.map(w => `week ${w.week_number} back: ~${umMi(w.mileage_target)}`).join(', ')}\n` : ""}${rtrRecoveryEstimate ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimate.minWeeks}-${rtrRecoveryEstimate.maxWeeks} weeks from when the hold started\n` : ""}${daysToRaceForArc != null ? `- Days until race: ${daysToRaceForArc}\n` : ""}${hasStoredArc ? `- PRE-INJURY ARC SHAPE (reference only, phases NOT numbers — the shape training ramps back toward once cleared; peak volume was ~${umMi(preInjuryPeakMileage ?? 0)}/wk during the ${preInjuryPhaseSequence[preInjuryPhaseSequence.length - 1] ?? "peak"} phase; this is NOT a week-by-week schedule and there is no specific mileage number to quote for any individual future week beyond the PROJECTED RETURN RAMP above): ${preInjuryPhaseSequence.join(' → ')}` : "- No pre-injury arc on file."}`
         : hasStoredArc
           ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks!.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks!.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}${w.key_workout_2 ? ` | 2nd quality: ${w.key_workout_2}` : ''}`).join('\n')}`
           : '';
@@ -7542,7 +7572,7 @@ Race week [N] 🏁"
 
 Group weeks by phase — do NOT list every week. Pull actual mileage ranges from the FULL TRAINING PLAN ARC data. 2–3 bubbles max. Do NOT use web search to build a plan inline.
 
-FULL PLAN REQUESTS (ON injury hold): If the athlete asks for the plan, schedule, arc, or "what's next" while on injury hold, use the RETURN-TO-RUN CONTEXT block instead of the pre-injury arc numbers. Give a real, concrete answer — not "we'll figure it out" — built from these pieces: (1) current phase — cross-training/monitoring and the pain threshold that clears a test run, (2) the actual return-to-run ramp figure and window from RETURN-TO-RUN CONTEXT (state the real percentage and mileage, not a vague "we'll ease back in"), (3) how the pre-injury arc shape (peak/taper) is what you're rebuilding back toward once running resumes, not what's scheduled next week, (4) tie it to the race goal — with the known days-to-race, name what has to be true (e.g. a pain-free long run of a given distance) to stay on track, and flag it plainly if the timeline is getting tight. Do not quote a specific mileage number for a specific future week from the pre-injury arc as if it's still the plan — that arc is stale and gets rebuilt once cleared.
+FULL PLAN REQUESTS (ON injury hold): If the athlete asks for the plan, schedule, arc, or "what's next" while on injury hold, use the RETURN-TO-RUN CONTEXT block instead of the pre-injury arc numbers. Give a real, concrete answer — not "we'll figure it out" — built from these pieces: (1) current phase — cross-training/monitoring and the pain threshold that clears a test run, (2) the actual return-to-run ramp figure and window from RETURN-TO-RUN CONTEXT (state the real percentage and mileage, not a vague "we'll ease back in"), (3) if the athlete asks about more than just the first week back, quote the PROJECTED RETURN RAMP figures when present — those are real computed numbers, safe to state (framed as "roughly," since they're recalculated exactly at clearance), (4) beyond the weeks covered by PROJECTED RETURN RAMP, describe the pre-injury arc shape (peak/taper) qualitatively — phases and the peak-volume figure only, no invented mileage for individual weeks that far out, (5) tie it to the race goal — with the known days-to-race, name what has to be true (e.g. a pain-free long run of a given distance) to stay on track, and flag it plainly if the timeline is getting tight. Never invent a mileage number for a future week that isn't given to you in RETURN-TO-RUN CONTEXT — if you don't have a number for it, describe the shape in words instead.
 
 EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Handle it using the THIS WEEK SESSION SWAP rules below.
 

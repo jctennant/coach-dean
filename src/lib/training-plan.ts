@@ -213,6 +213,174 @@ export function fixKeyWorkoutMath(kw: string, unitLabel: "mi" | "km"): string {
   return `${label} ${sum}${unitLabel} (${inside})${trailer}`;
 }
 
+export interface MileageArcWeek {
+  week_number: number;
+  phase: string;
+  mileage_target: number;
+  long_run_target: number;
+  key_workout: string;
+  key_workout_2?: string | null;
+  notes: string;
+  cross_training?: string | null;
+}
+
+export interface MileageArcParams {
+  /** Week 1 mileage — the arc's starting point (prescribed, or Strava-derived). */
+  baseMileage: number;
+  totalWeeks: number;
+  goal: string | null;
+  hasRace: boolean;
+  /** A-race week number, if the plan extends past the A-race to cover a later B/C race. */
+  aRaceWeekNum?: number | null;
+  /** True when there are plan weeks after the A-race (B-race coverage). */
+  planExtendsPostA?: boolean;
+  /**
+   * Override the computed target peak mileage (skips getTargetPeakMileage(goal, baseMileage)).
+   * Use when a real peak is already known and shouldn't be re-derived from a temporarily
+   * reduced baseMileage — e.g. projecting a return-to-run ramp from a low post-injury base
+   * should still build back toward the athlete's actual established pre-injury peak, not a
+   * smaller peak re-computed from the reduced starting point.
+   */
+  targetPeakOverride?: number | null;
+}
+
+/**
+ * Pure week-by-week mileage/long-run/phase arc computation — no Haiku enrichment, no DB
+ * writes, no side effects. This is the single source of truth for the mileage progression,
+ * shared by generateAndSaveFullPlan (the real, persisted plan) and any predictive/preview
+ * use (e.g. the "what's the plan" answer Dean gives an athlete still on injury hold, before
+ * the arc is actually rebuilt at clearance) — so a projected number can't drift from what
+ * the plan is actually built with once it's generated for real.
+ */
+export function computeMileageArc(params: MileageArcParams): MileageArcWeek[] {
+  const { baseMileage, totalWeeks, goal, hasRace, aRaceWeekNum = null, planExtendsPostA = false, targetPeakOverride = null } = params;
+
+  // Compute a race-type-aware peak with both a floor (low-mileage runners still get
+  // a plan sufficient for the target distance) and a hard cap (no 100+ mpw marathon
+  // plans on 7-month arcs). The build factor is then derived dynamically so the arc
+  // reaches targetPeak at exactly the right rate regardless of plan length.
+  const targetPeak = targetPeakOverride ?? getTargetPeakMileage(goal, baseMileage);
+
+  // Count real build weeks (non-deload, non-taper, non-peak, after week 1) so we can
+  // derive a build factor that reaches targetPeak by the START of peak phase — peak
+  // weeks then plateau at targetPeak rather than continuing to ramp through peak.
+  let realBuildWeeks = 0;
+  for (let w = 2; w <= totalWeeks; w++) {
+    const ph = computePhaseForPlan(w, totalWeeks, hasRace);
+    const isD = w % 4 === 0 && ph !== "taper" && ph !== "peak";
+    if (!isD && ph !== "taper" && ph !== "peak") realBuildWeeks++;
+  }
+  // Derived factor: (targetPeak / baseMileage) ^ (1 / realBuildWeeks)
+  // Clamped to 2%–10%/week: never slower than a plateau, never faster than convention allows.
+  const rawFactor = realBuildWeeks > 0 ? Math.pow(targetPeak / baseMileage, 1 / realBuildWeeks) : 1.07;
+  const weeklyBuildFactor = Math.max(1.02, Math.min(1.10, rawFactor));
+
+  // Build the arc week by week.
+  // `buildMileage` tracks the real progression level (deloads and tapers branch off it).
+  // Race-type-aware race week factor — represents pre-race training miles only.
+  // Lowered significantly from a flat 0.50 to account for the race distance itself
+  // being a major effort in that week (marathon adds 26.2mi on top of training).
+  const isUltraGoal = ["50k","100k","50mi","100mi"].includes(goal ?? "");
+  const isMarathonGoal = goal === "marathon" || goal === "30k";
+  const isHalfGoal = goal === "half_marathon";
+  const raceWeekFactor = isUltraGoal ? 0.25 : isMarathonGoal ? 0.25 : isHalfGoal ? 0.28 : 0.35;
+
+  let buildMileage = baseMileage;
+  let peakMileage = baseMileage;
+
+  const planWeeks: MileageArcWeek[] = [];
+
+  for (let week = 1; week <= totalWeeks; week++) {
+    const phase = computePhaseForPlan(week, totalWeeks, hasRace);
+    const weeksFromEnd = totalWeeks - week;
+
+    // A-race taper/recovery: override mileage when the plan extends past the A-race.
+    // Weeks immediately before/at the A-race get a 2-week taper; the week after gets
+    // a recovery. This prevents the A-race week from showing as "build" (e.g. 48mi).
+    const isATaperWeek = planExtendsPostA && aRaceWeekNum !== null &&
+      week >= Math.max(1, aRaceWeekNum - 1) && week <= aRaceWeekNum;
+    const isARecoveryWeek = planExtendsPostA && aRaceWeekNum !== null &&
+      week === aRaceWeekNum + 1;
+
+    const isDeload = week % 4 === 0 && phase !== "taper" && phase !== "peak" && !isATaperWeek && !isARecoveryWeek;
+
+    let weekMileage: number;
+    if (isATaperWeek) {
+      // Use buildMileage as the peak reference — we may not have hit "peak" phase yet when
+      // the A-race taper starts (e.g. a 10-week A-race in a 14-week plan has no peak phase
+      // before the taper). effectivePeak persists so the post-A-race build tapers correctly.
+      const effectivePeak = Math.max(peakMileage, buildMileage);
+      peakMileage = effectivePeak;
+      const taperFactor = week === aRaceWeekNum ? raceWeekFactor : 0.70;
+      weekMileage = Math.round(effectivePeak * taperFactor * 2) / 2;
+      // buildMileage NOT updated — resumes from pre-taper level after recovery week
+    } else if (isARecoveryWeek) {
+      // Recovery week after racing: ~50% of peak lets the athlete absorb the race effort
+      // before rebuilding toward the B-race.
+      weekMileage = Math.round(Math.max(peakMileage, buildMileage) * 0.50 * 2) / 2;
+      // buildMileage NOT updated — resumes from pre-taper level in the next build week
+    } else if (phase === "taper") {
+      // 2-week taper: 70% → raceWeekFactor of peak.
+      // Race week factor is intentionally low (0.25–0.35) because it represents
+      // pre-race training miles only — the race distance itself is an additional
+      // major effort in that week.
+      const taperWeek = 2 - weeksFromEnd; // 1, 2
+      const taperFactor = taperWeek >= 2 ? raceWeekFactor : 0.70;
+      weekMileage = Math.round(peakMileage * taperFactor * 2) / 2;
+    } else if (isDeload) {
+      weekMileage = Math.round(buildMileage * 0.70 * 2) / 2;
+      // buildMileage stays unchanged — resumes from pre-deload level next week
+    } else {
+      // Week 1 IS the base — don't apply buildFactor so the arc starts at exactly
+      // prescribedWeek1Miles (or baseMileage). Build begins from week 2 onward.
+      if (week > 1) {
+        // Build toward targetPeak each week, capped at targetPeak.
+        // In peak phase this naturally plateaus once targetPeak is reached — the min() prevents
+        // exceeding it. We no longer force `buildMileage = targetPeak` because that created a
+        // hard jump for low-mileage runners whose floor (e.g. 45mi marathon) is unreachable
+        // in the available weeks (e.g. 5mi/week × 10% growth only reaches ~12mi in 15 weeks).
+        buildMileage = Math.min(
+          Math.round(buildMileage * weeklyBuildFactor * 2) / 2,
+          targetPeak,
+        );
+      }
+      weekMileage = buildMileage;
+      if (phase === "peak") peakMileage = buildMileage;
+    }
+
+    // Peak long run takes a larger fraction of weekly volume for race-distance goals.
+    // 0.42 is especially important for 3-day/week athletes where the long run is the primary
+    // quality session — at 30mi/week that gives an 12.6mi long run (appropriate for HM prep).
+    const effectivePhaseForLongRun = isATaperWeek ? "taper" : isARecoveryWeek ? "base" : phase;
+    const longRunFactor = effectivePhaseForLongRun === "taper" ? 0.30 : effectivePhaseForLongRun === "peak" ? 0.42 : 0.33;
+    // Goal-specific long run caps: short-race training doesn't need marathon-style long runs.
+    const g2 = (goal ?? "").toLowerCase();
+    const longRunCap = (g2.includes("5k") || g2.includes("5 k")) ? 7
+      : (g2.includes("10k") || g2.includes("10 k")) ? 10
+      : (g2.includes("half") || g2.includes("13.1")) ? 14
+      : null;
+    const rawLongRun = Math.round(weekMileage * longRunFactor * 2) / 2;
+    const longRunTarget = longRunCap !== null ? Math.min(rawLongRun, longRunCap) : rawLongRun;
+
+    // Display phase for dashboard: A-race taper weeks show "taper", recovery shows "base".
+    let displayPhase: string;
+    if (isATaperWeek) displayPhase = "taper";
+    else if (isARecoveryWeek) displayPhase = "base";
+    else displayPhase = isDeload ? "deload" : phase;
+
+    planWeeks.push({
+      week_number: week,
+      phase: displayPhase,
+      mileage_target: weekMileage,
+      long_run_target: longRunTarget,
+      key_workout: "",
+      notes: "",
+    });
+  }
+
+  return planWeeks;
+}
+
 /**
  * Compute the full multi-week training arc and save it to training_plans.
  * Generates a dashboard_token (used for billing checkout/cancel links) and sets trial_started_at.
@@ -364,139 +532,16 @@ export async function generateAndSaveFullPlan(
     ? Math.max(5, prescribedWeek1Miles)
     : Math.max(5, Math.round((effectiveAvgMileage ?? noHistoryDefault) * 2) / 2);
 
-  // Compute a race-type-aware peak with both a floor (low-mileage runners still get
-  // a plan sufficient for the target distance) and a hard cap (no 100+ mpw marathon
-  // plans on 7-month arcs). The build factor is then derived dynamically so the arc
-  // reaches targetPeak at exactly the right rate regardless of plan length.
-  const targetPeak = getTargetPeakMileage(goal, baseMileage);
-
-  // Count real build weeks (non-deload, non-taper, non-peak, after week 1) so we can
-  // derive a build factor that reaches targetPeak by the START of peak phase — peak
-  // weeks then plateau at targetPeak rather than continuing to ramp through peak.
-  let realBuildWeeks = 0;
-  for (let w = 2; w <= totalWeeks; w++) {
-    const ph = computePhaseForPlan(w, totalWeeks, hasRace);
-    const isD = w % 4 === 0 && ph !== "taper" && ph !== "peak";
-    if (!isD && ph !== "taper" && ph !== "peak") realBuildWeeks++;
-  }
-  // Derived factor: (targetPeak / baseMileage) ^ (1 / realBuildWeeks)
-  // Clamped to 2%–10%/week: never slower than a plateau, never faster than convention allows.
-  const rawFactor = realBuildWeeks > 0 ? Math.pow(targetPeak / baseMileage, 1 / realBuildWeeks) : 1.07;
-  const weeklyBuildFactor = Math.max(1.02, Math.min(1.10, rawFactor));
-
-  // Build the arc week by week.
-  // `buildMileage` tracks the real progression level (deloads and tapers branch off it).
-  // Race-type-aware race week factor — represents pre-race training miles only.
-  // Lowered significantly from a flat 0.50 to account for the race distance itself
-  // being a major effort in that week (marathon adds 26.2mi on top of training).
-  const isUltraGoal = ["50k","100k","50mi","100mi"].includes(goal ?? "");
-  const isMarathonGoal = goal === "marathon" || goal === "30k";
-  const isHalfGoal = goal === "half_marathon";
-  const raceWeekFactor = isUltraGoal ? 0.25 : isMarathonGoal ? 0.25 : isHalfGoal ? 0.28 : 0.35;
-
-  let buildMileage = baseMileage;
-  let peakMileage = baseMileage;
-
   const crosstrainingTools = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
 
-  const planWeeks: Array<{
-    week_number: number;
-    phase: string;
-    mileage_target: number;
-    long_run_target: number;
-    key_workout: string;
-    key_workout_2?: string | null;
-    notes: string;
-    cross_training?: string | null;
-  }> = [];
-
-  for (let week = 1; week <= totalWeeks; week++) {
-    const phase = computePhaseForPlan(week, totalWeeks, hasRace);
-    const weeksFromEnd = totalWeeks - week;
-
-    // A-race taper/recovery: override mileage when the plan extends past the A-race.
-    // Weeks immediately before/at the A-race get a 2-week taper; the week after gets
-    // a recovery. This prevents the A-race week from showing as "build" (e.g. 48mi).
-    const isATaperWeek = planExtendsPostA && aRaceWeekNum !== null &&
-      week >= Math.max(1, aRaceWeekNum - 1) && week <= aRaceWeekNum;
-    const isARecoveryWeek = planExtendsPostA && aRaceWeekNum !== null &&
-      week === aRaceWeekNum + 1;
-
-    const isDeload = week % 4 === 0 && phase !== "taper" && phase !== "peak" && !isATaperWeek && !isARecoveryWeek;
-
-    let weekMileage: number;
-    if (isATaperWeek) {
-      // Use buildMileage as the peak reference — we may not have hit "peak" phase yet when
-      // the A-race taper starts (e.g. a 10-week A-race in a 14-week plan has no peak phase
-      // before the taper). effectivePeak persists so the post-A-race build tapers correctly.
-      const effectivePeak = Math.max(peakMileage, buildMileage);
-      peakMileage = effectivePeak;
-      const taperFactor = week === aRaceWeekNum ? raceWeekFactor : 0.70;
-      weekMileage = Math.round(effectivePeak * taperFactor * 2) / 2;
-      // buildMileage NOT updated — resumes from pre-taper level after recovery week
-    } else if (isARecoveryWeek) {
-      // Recovery week after racing: ~50% of peak lets the athlete absorb the race effort
-      // before rebuilding toward the B-race.
-      weekMileage = Math.round(Math.max(peakMileage, buildMileage) * 0.50 * 2) / 2;
-      // buildMileage NOT updated — resumes from pre-taper level in the next build week
-    } else if (phase === "taper") {
-      // 2-week taper: 70% → raceWeekFactor of peak.
-      // Race week factor is intentionally low (0.25–0.35) because it represents
-      // pre-race training miles only — the race distance itself is an additional
-      // major effort in that week.
-      const taperWeek = 2 - weeksFromEnd; // 1, 2
-      const taperFactor = taperWeek >= 2 ? raceWeekFactor : 0.70;
-      weekMileage = Math.round(peakMileage * taperFactor * 2) / 2;
-    } else if (isDeload) {
-      weekMileage = Math.round(buildMileage * 0.70 * 2) / 2;
-      // buildMileage stays unchanged — resumes from pre-deload level next week
-    } else {
-      // Week 1 IS the base — don't apply buildFactor so the arc starts at exactly
-      // prescribedWeek1Miles (or baseMileage). Build begins from week 2 onward.
-      if (week > 1) {
-        // Build toward targetPeak each week, capped at targetPeak.
-        // In peak phase this naturally plateaus once targetPeak is reached — the min() prevents
-        // exceeding it. We no longer force `buildMileage = targetPeak` because that created a
-        // hard jump for low-mileage runners whose floor (e.g. 45mi marathon) is unreachable
-        // in the available weeks (e.g. 5mi/week × 10% growth only reaches ~12mi in 15 weeks).
-        buildMileage = Math.min(
-          Math.round(buildMileage * weeklyBuildFactor * 2) / 2,
-          targetPeak,
-        );
-      }
-      weekMileage = buildMileage;
-      if (phase === "peak") peakMileage = buildMileage;
-    }
-
-    // Peak long run takes a larger fraction of weekly volume for race-distance goals.
-    // 0.42 is especially important for 3-day/week athletes where the long run is the primary
-    // quality session — at 30mi/week that gives an 12.6mi long run (appropriate for HM prep).
-    const effectivePhaseForLongRun = isATaperWeek ? "taper" : isARecoveryWeek ? "base" : phase;
-    const longRunFactor = effectivePhaseForLongRun === "taper" ? 0.30 : effectivePhaseForLongRun === "peak" ? 0.42 : 0.33;
-    // Goal-specific long run caps: short-race training doesn't need marathon-style long runs.
-    const g2 = (goal ?? "").toLowerCase();
-    const longRunCap = (g2.includes("5k") || g2.includes("5 k")) ? 7
-      : (g2.includes("10k") || g2.includes("10 k")) ? 10
-      : (g2.includes("half") || g2.includes("13.1")) ? 14
-      : null;
-    const rawLongRun = Math.round(weekMileage * longRunFactor * 2) / 2;
-    const longRunTarget = longRunCap !== null ? Math.min(rawLongRun, longRunCap) : rawLongRun;
-
-    // Display phase for dashboard: A-race taper weeks show "taper", recovery shows "base".
-    let displayPhase: string;
-    if (isATaperWeek) displayPhase = "taper";
-    else if (isARecoveryWeek) displayPhase = "base";
-    else displayPhase = isDeload ? "deload" : phase;
-
-    planWeeks.push({
-      week_number: week,
-      phase: displayPhase,
-      mileage_target: weekMileage,
-      long_run_target: longRunTarget,
-      key_workout: "",
-      notes: "",
-    });
-  }
+  const planWeeks: MileageArcWeek[] = computeMileageArc({
+    baseMileage,
+    totalWeeks,
+    goal,
+    hasRace,
+    aRaceWeekNum,
+    planExtendsPostA,
+  });
 
   // Enrich each week with key_workout and notes via Claude Haiku (single call).
   // Include B/C race dates so Haiku can flag those weeks appropriately.

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
+import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -113,6 +113,65 @@ describe("computePhaseForPlan — taper is always 2 weeks", () => {
       expect(phase).not.toBe("taper");
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// computeMileageArc — the pure mileage-progression math shared by
+// generateAndSaveFullPlan (the real, persisted plan) and the predictive
+// injury-hold "what's the plan" preview in coach/respond/route.ts.
+// ---------------------------------------------------------------------------
+describe("computeMileageArc", () => {
+  it("starts week 1 at exactly baseMileage — no build factor applied to week 1", () => {
+    const arc = computeMileageArc({ baseMileage: 20, totalWeeks: 12, goal: "half_marathon", hasRace: true });
+    expect(arc[0].week_number).toBe(1);
+    expect(arc[0].mileage_target).toBe(20);
+  });
+
+  it("returns one entry per week, monotonically numbered", () => {
+    const arc = computeMileageArc({ baseMileage: 15, totalWeeks: 10, goal: "marathon", hasRace: true });
+    expect(arc).toHaveLength(10);
+    expect(arc.map(w => w.week_number)).toEqual([1,2,3,4,5,6,7,8,9,10]);
+  });
+
+  it("the last 2 weeks of a race plan are tapered down from peak", () => {
+    const arc = computeMileageArc({ baseMileage: 20, totalWeeks: 12, goal: "half_marathon", hasRace: true });
+    const peak = Math.max(...arc.map(w => w.mileage_target));
+    expect(arc[10].mileage_target).toBeLessThan(peak);
+    expect(arc[11].mileage_target).toBeLessThan(arc[10].mileage_target);
+    expect(arc[11].phase).toBe("taper");
+  });
+
+  it("every 4th non-taper/peak week is a deload at ~70% of the pre-deload build level", () => {
+    const arc = computeMileageArc({ baseMileage: 20, totalWeeks: 16, goal: "marathon", hasRace: true });
+    const week4 = arc.find(w => w.week_number === 4)!;
+    const week3 = arc.find(w => w.week_number === 3)!;
+    expect(week4.phase).toBe("deload");
+    expect(week4.mileage_target).toBeCloseTo(Math.round(week3.mileage_target * 0.70 * 2) / 2, 5);
+  });
+
+  it("targetPeakOverride builds back toward the given peak instead of re-deriving one from baseMileage", () => {
+    // A low post-injury return base (8mi) would normally derive a targetPeak of 25mi
+    // (getTargetPeakMileage("half_marathon", 8)). Overriding with the athlete's real
+    // pre-injury peak (40mi) means the ramp should build toward 40 instead. Use enough
+    // weeks that the weekly build factor isn't clamped by the 10%/week ceiling before
+    // reaching either target, so the plateau value reflects the actual targetPeak.
+    const withOverride = computeMileageArc({
+      baseMileage: 8, totalWeeks: 30, goal: "half_marathon", hasRace: true, targetPeakOverride: 40,
+    });
+    const withoutOverride = computeMileageArc({
+      baseMileage: 8, totalWeeks: 30, goal: "half_marathon", hasRace: true,
+    });
+    const peakWith = Math.max(...withOverride.map(w => w.mileage_target));
+    const peakWithout = Math.max(...withoutOverride.map(w => w.mileage_target));
+    expect(peakWithout).toBeCloseTo(25, 0);
+    expect(peakWith).toBeCloseTo(40, 0);
+    expect(peakWith).toBeGreaterThan(peakWithout);
+  });
+
+  it("is a pure function — repeated calls with the same params return the same result", () => {
+    const params = { baseMileage: 18, totalWeeks: 8, goal: null, hasRace: false } as const;
+    expect(computeMileageArc(params)).toEqual(computeMileageArc(params));
+  });
 });
 
 // ---------------------------------------------------------------------------

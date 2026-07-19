@@ -175,6 +175,103 @@ function computeReturnToRunRampEval(holdSince, preInjuryMileageTarget, now = new
   return { weeksInjured, rampFactor, returnBaseMiles };
 }
 
+// ─────────────────────────────────────────────
+// Mileage arc math (mirrors computeMileageArc in src/lib/training-plan.ts) — the
+// projected return-to-run ramp Dean can quote for the first few weeks back while
+// still on injury hold, per the 2026-07-18 fix. Ported here (not imported) because
+// training-plan.ts pulls in supabase/anthropic clients this standalone eval runner
+// doesn't want to initialize — see the module-level parity note at the top of this file.
+// ─────────────────────────────────────────────
+
+function computePhaseForPlanEval(weekNumber, totalWeeks, hasRace) {
+  if (!hasRace) {
+    const cyclePos = (weekNumber - 1) % 12;
+    return cyclePos < 6 ? "base" : "build";
+  }
+  const weeksFromEnd = totalWeeks - weekNumber;
+  if (weeksFromEnd < 2) return "taper";
+  const scale = Math.min(1, totalWeeks / 24);
+  const peakThreshold = Math.max(4, Math.round(7 * scale));
+  const buildThreshold = Math.max(peakThreshold + 2, Math.round(14 * scale));
+  if (weeksFromEnd < peakThreshold) return "peak";
+  if (weeksFromEnd < buildThreshold) return "build";
+  return "base";
+}
+
+function getTargetPeakMileageEval(goal, baseMileage) {
+  const g = (goal ?? "").toLowerCase();
+  let hardCap, floor;
+  if (g.includes("100mi") || g.includes("100 m")) { hardCap = 95; floor = 70; }
+  else if (g.includes("100k")) { hardCap = 85; floor = 65; }
+  else if (g.includes("50mi") || g.includes("50 mi")) { hardCap = 80; floor = 55; }
+  else if (g.includes("50k") || g.includes("50 k")) { hardCap = 90; floor = 50; }
+  else if (g.includes("30k") || g.includes("30 k")) { hardCap = 80; floor = 35; }
+  else if ((g.includes("marathon") || g.includes("26.2")) && !g.includes("half")) { hardCap = 75; floor = 45; }
+  else if (g.includes("half") || g.includes("13.1")) { hardCap = 55; floor = 25; }
+  else if (g.includes("10k") || g.includes("10 k")) { hardCap = 50; floor = 18; }
+  else if (g.includes("5k") || g.includes("5 k")) { hardCap = 45; floor = 12; }
+  else if (g === "mile" || g.includes("1 mile") || g.includes("1mi") || g.includes("sub-5") || g.includes("sub 5")) { hardCap = 40; floor = 15; }
+  else if (g === "ironman") { hardCap = 55; floor = 30; }
+  else if (g === "70.3") { hardCap = 45; floor = 20; }
+  else if (g === "olympic_tri") { hardCap = 40; floor = 15; }
+  else if (g === "sprint_tri") { hardCap = 30; floor = 10; }
+  else { hardCap = 60; floor = 20; }
+  const isUltra = g.includes("100k") || g.includes("100mi") || g.includes("100 m")
+    || g.includes("50mi") || g.includes("50 mi") || g.includes("50k") || g.includes("50 k");
+  const growthMultiplier = isUltra ? 1.6 : 2.0;
+  return Math.round(Math.max(Math.min(baseMileage * growthMultiplier, hardCap), floor) * 2) / 2;
+}
+
+function computeMileageArcEval({ baseMileage, totalWeeks, goal, hasRace, aRaceWeekNum = null, planExtendsPostA = false, targetPeakOverride = null }) {
+  const targetPeak = targetPeakOverride ?? getTargetPeakMileageEval(goal, baseMileage);
+  let realBuildWeeks = 0;
+  for (let w = 2; w <= totalWeeks; w++) {
+    const ph = computePhaseForPlanEval(w, totalWeeks, hasRace);
+    const isD = w % 4 === 0 && ph !== "taper" && ph !== "peak";
+    if (!isD && ph !== "taper" && ph !== "peak") realBuildWeeks++;
+  }
+  const rawFactor = realBuildWeeks > 0 ? Math.pow(targetPeak / baseMileage, 1 / realBuildWeeks) : 1.07;
+  const weeklyBuildFactor = Math.max(1.02, Math.min(1.10, rawFactor));
+  const isUltraGoal = ["50k", "100k", "50mi", "100mi"].includes(goal ?? "");
+  const isMarathonGoal = goal === "marathon" || goal === "30k";
+  const isHalfGoal = goal === "half_marathon";
+  const raceWeekFactor = isUltraGoal ? 0.25 : isMarathonGoal ? 0.25 : isHalfGoal ? 0.28 : 0.35;
+  let buildMileage = baseMileage;
+  let peakMileage = baseMileage;
+  const planWeeks = [];
+  for (let week = 1; week <= totalWeeks; week++) {
+    const phase = computePhaseForPlanEval(week, totalWeeks, hasRace);
+    const weeksFromEnd = totalWeeks - week;
+    const isATaperWeek = planExtendsPostA && aRaceWeekNum !== null && week >= Math.max(1, aRaceWeekNum - 1) && week <= aRaceWeekNum;
+    const isARecoveryWeek = planExtendsPostA && aRaceWeekNum !== null && week === aRaceWeekNum + 1;
+    const isDeload = week % 4 === 0 && phase !== "taper" && phase !== "peak" && !isATaperWeek && !isARecoveryWeek;
+    let weekMileage;
+    if (isATaperWeek) {
+      const effectivePeak = Math.max(peakMileage, buildMileage);
+      peakMileage = effectivePeak;
+      const taperFactor = week === aRaceWeekNum ? raceWeekFactor : 0.70;
+      weekMileage = Math.round(effectivePeak * taperFactor * 2) / 2;
+    } else if (isARecoveryWeek) {
+      weekMileage = Math.round(Math.max(peakMileage, buildMileage) * 0.50 * 2) / 2;
+    } else if (phase === "taper") {
+      const taperWeek = 2 - weeksFromEnd;
+      const taperFactor = taperWeek >= 2 ? raceWeekFactor : 0.70;
+      weekMileage = Math.round(peakMileage * taperFactor * 2) / 2;
+    } else if (isDeload) {
+      weekMileage = Math.round(buildMileage * 0.70 * 2) / 2;
+    } else {
+      if (week > 1) {
+        buildMileage = Math.min(Math.round(buildMileage * weeklyBuildFactor * 2) / 2, targetPeak);
+      }
+      weekMileage = buildMileage;
+      if (phase === "peak") peakMileage = buildMileage;
+    }
+    const displayPhase = isATaperWeek ? "taper" : isARecoveryWeek ? "base" : isDeload ? "deload" : phase;
+    planWeeks.push({ week_number: week, phase: displayPhase, mileage_target: weekMileage });
+  }
+  return planWeeks;
+}
+
 // Return-to-run timelines (mirrors INJURY_TIMELINES in src/lib/exercise-library.ts)
 const INJURY_TIMELINES_EVAL = {
   it_band:    { mild: "2–3 weeks",  moderate: "3–5 weeks",  severe: "6–8 weeks" },
@@ -223,6 +320,30 @@ function buildEvalSystemPrompt(fixture) {
     : null;
   const rtrRecoveryEstimateEval = user.injury_hold_since && user.injury_body_part
     ? getRecoveryEstimateEval(user.injury_body_part, user.injury_severity)
+    : null;
+  // Real projected mileage for the first few weeks back (mirrors projectedReturnArc in
+  // route.ts, built from computeMileageArcEval above) — gives Dean genuine numbers to
+  // quote instead of having to invent a progression past the return week.
+  const projectedReturnArcEval = user.injury_hold_since && rtrRampEval?.returnBaseMiles != null
+    ? (() => {
+        const mondayForArc = new Date(today);
+        mondayForArc.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
+        mondayForArc.setUTCHours(0, 0, 0, 0);
+        const hasRaceForArc = !!raceDate;
+        let totalWeeksForArc = 8;
+        if (raceDate) {
+          const raceForArc = new Date(raceDate + "T12:00:00Z");
+          const weeksUntilForArc = Math.ceil((raceForArc.getTime() - mondayForArc.getTime()) / (7 * 24 * 60 * 60 * 1000));
+          totalWeeksForArc = Math.max(4, Math.min(52, weeksUntilForArc));
+        }
+        return computeMileageArcEval({
+          baseMileage: rtrRampEval.returnBaseMiles,
+          totalWeeks: totalWeeksForArc,
+          goal: null,
+          hasRace: hasRaceForArc,
+          targetPeakOverride: user.pre_injury_mileage_target ?? null,
+        }).slice(0, 3);
+      })()
     : null;
 
   // Date context
@@ -744,11 +865,12 @@ INJURY HOLD: When an athlete cannot or should not run — append [INJURY_HOLD] a
 
 INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. Only use after a confirmed injury hold.
 ${trigger === "user_message" && user.injury_hold_since ? `
-FULL PLAN REQUESTS (ON injury hold): If the athlete asks for the plan, schedule, arc, or "what's next" while on injury hold, use the RETURN-TO-RUN CONTEXT block below instead of any pre-injury arc numbers. Give a real, concrete answer — not "we'll figure it out" — built from these pieces: (1) current phase — cross-training/monitoring and the pain threshold that clears a test run, (2) the actual return-to-run ramp figure and window from RETURN-TO-RUN CONTEXT (state the real percentage and mileage, not a vague "we'll ease back in"), (3) how the pre-injury arc shape (peak/taper) is what you're rebuilding back toward once running resumes, not what's scheduled next week, (4) tie it to the race goal — with the known days-to-race, name what has to be true (e.g. a pain-free long run of a given distance) to stay on track. Do not invent specific mileage figures for weeks beyond the immediate return week — only the return-base figure is grounded; describe the weeks after that qualitatively (e.g. "building back toward your ~Xmi peak over the following weeks") rather than a numbered week-by-week table, so the answer doesn't vary between conversations. Do not quote a specific mileage number for a specific future week from the pre-injury arc as if it's still the plan — that arc is stale and gets rebuilt once cleared.
+FULL PLAN REQUESTS (ON injury hold): If the athlete asks for the plan, schedule, arc, or "what's next" while on injury hold, use the RETURN-TO-RUN CONTEXT block below instead of any pre-injury arc numbers. Give a real, concrete answer — not "we'll figure it out" — built from these pieces: (1) current phase — cross-training/monitoring and the pain threshold that clears a test run, (2) the actual return-to-run ramp figure and window from RETURN-TO-RUN CONTEXT (state the real percentage and mileage, not a vague "we'll ease back in"), (3) if the athlete asks about more than just the first week back, quote the PROJECTED RETURN RAMP figures when present — those are real computed numbers, safe to state (framed as "roughly," since they're recalculated exactly at clearance), (4) beyond the weeks covered by PROJECTED RETURN RAMP, describe the pre-injury arc shape (peak/taper) qualitatively — phases and the peak-volume figure only, no invented mileage for individual weeks that far out, (5) tie it to the race goal — with the known days-to-race, name what has to be true (e.g. a pain-free long run of a given distance) to stay on track. Never invent a mileage number for a future week that isn't given to you in RETURN-TO-RUN CONTEXT — if you don't have a number for it, describe the shape in words instead.
 
 RETURN-TO-RUN CONTEXT:
 - Weeks injured so far: ${rtrRampEval?.weeksInjured ?? "unknown"}
 - Once cleared, first week back: ${rtrRampEval?.returnBaseMiles != null ? `~${rtrRampEval.returnBaseMiles} mi (${Math.round(rtrRampEval.rampFactor * 100)}% of pre-injury ${user.pre_injury_mileage_target ?? user.weekly_mileage_target ?? "?"} mi/wk), then ramping back up week over week` : "will be calculated as a percentage of pre-injury volume once cleared — do not state a number yet"}
+${projectedReturnArcEval && projectedReturnArcEval.length > 0 ? `- PROJECTED RETURN RAMP (real projection, safe to quote for these specific weeks — recalculated exactly once actually cleared, so frame as "roughly" not locked-in): ${projectedReturnArcEval.map(w => `week ${w.week_number} back: ~${w.mileage_target} mi`).join(", ")}` : ""}
 ${rtrRecoveryEstimateEval ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimateEval.minWeeks}-${rtrRecoveryEstimateEval.maxWeeks} weeks from when the hold started` : ""}
 ${daysUntilRace != null ? `- Days until race: ${daysUntilRace}` : ""}` : ""}
 
