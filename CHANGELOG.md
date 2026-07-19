@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Eval runner imports production coach-context modules instead of mirroring them
+
+**Type:** Refactor
+**Reported by:** Internal observation (repo audit)
+**User feedback:** N/A
+**Root cause:** `evals/run-evals.mjs` hand-mirrored the prompt-building logic in `route.ts` (VDOT paces, date context, taper math, fitness tier, session-mileage regex, injury ramp/timelines/exercises), and CLAUDE.md maintained a growing "parity points" list that had already drifted: the eval taper derived peak as `target/0.45` and ignored `taper_peak_miles`, the fitness tier was a stale simplified copy without the hard volume-cap rules, and the metric FACTS easy-range used a `/mi` suffix on km paces.
+**Fix / Change:** The runner now executes via `tsx` (`npm run eval`) and imports the extracted Phase A modules directly: `coach-date-context`, `coach-race-context`, `coach-fitness-tier`, `coach-pace-context`, `session-mileage`, `injury-return`, and `exercise-library` (with `normalizeBodyPart` mirroring the classification pipeline for raw fixture body parts like "achilles"). The local mirrors (~140 lines) are deleted; `paceAtVDOTPct` remains only as fixture-fallback tooling. `date-race-week.json` gains `taper_peak_miles: 40` since the production taper module uses the locked-in stored peak. CLAUDE.md's parity list shrinks to the three blocks still inline in route.ts (DATA GUARD, RECOVERY WEEK, mileage rules), with the standing instruction that each future Phase A slice gets imported rather than re-mirrored. Smoke-tested: `date-race-week` scores 9/10 under the converted runner.
+**Files changed:** `evals/run-evals.mjs`, `evals/fixtures/date-race-week.json`, `package.json` (eval script → tsx, tsx devDependency), `CLAUDE.md`
+
 ## 2026-07-18 — Guaranteed error boundary for all after() background work (runAfter)
 
 **Type:** Improvement

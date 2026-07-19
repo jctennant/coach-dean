@@ -276,13 +276,13 @@ Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound
 
 ### How the runner works (architecture note)
 
-The runner builds the system prompt directly from fixture JSON — it does **not** call the live Next.js route or Supabase. This makes it a standalone tool with no running-server dependency. The tradeoff: it mirrors the prompt-building logic in `route.ts` rather than importing it. If you add a major new section to `buildSystemPrompt` (e.g. a new guard block that changes model behavior for a category), add the equivalent injection to `buildEvalSystemPrompt` in `evals/run-evals.mjs` so the evals stay realistic.
+The runner builds the system prompt directly from fixture JSON — it does **not** call the live Next.js route or Supabase. This makes it a standalone tool with no running-server dependency.
 
-Key parity points to maintain between `route.ts` and `run-evals.mjs`:
-- VDOT pace formula and easy-pace display range (`paceAtVDOTPct`, `easyPaceRange`)
-- Next-7-days date mapping (weekday ↔ calendar date)
+Since 2026-07-18 the runner executes via `tsx` and **imports the extracted `src/lib` coach-context modules directly** instead of mirroring them: `coach-date-context` (DATE CONTEXT header + gap alert), `coach-race-context` (race countdown/taper/secondary races/post-race), `coach-fitness-tier`, `coach-pace-context`, `paces`, `session-mileage`, `injury-return`, and `exercise-library` (injury exercises + recovery timelines). **Every future Phase A slice extracted from `buildSystemPrompt` should be imported into the runner the same way — each extraction shrinks the parity list below instead of growing it.** Fixture notes: in-taper fixtures must set `user.taper_peak_miles` (mirrors the locked-in peak production persists at taper entry).
+
+Remaining hand-mirrored parity points between `route.ts` and `run-evals.mjs` (still inline in route.ts — extract, then import):
 - The km-split DATA GUARD injection (`splitCount > ceil(miles) + 1`)
-- ⚠️ RECOVERY WEEK block (injected when `current_week % 4 === 0 && phase !== taper/peak`)
+- RECOVERY WEEK block (injected when `current_week % 4 === 0 && phase !== taper/peak`)
 - Mileage accuracy rules block (no additive totals)
 
 ### Score report / diff
