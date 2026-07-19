@@ -1,4 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation } from "@/lib/conversations";
 import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
@@ -377,7 +378,7 @@ export async function POST(request: Request) {
   // For non-dry_run requests, return 200 immediately and do all the work in
   // after() so the caller (webhook) isn't left waiting on Claude + SMS time.
   if (!body.dry_run) {
-    after(async () => {
+    runAfter("coach/respond", async () => {
       const correlationId = crypto.randomUUID();
       const log = createLogger({ agentName: "coach/respond", correlationId, userId: body.userId, trigger: body.trigger });
       try {
@@ -395,16 +396,6 @@ export async function POST(request: Request) {
   // dry_run: process inline so the caller gets the generated message back
   return await processCoachRequest(body, crypto.randomUUID());
 }
-
-// Step-to-question map for mid-onboarding post_run nudges.
-const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
-  awaiting_schedule: "Which days of the week work best for your training? (e.g. Mon, Wed, Fri, Sun)",
-  awaiting_race_date: "When's your race? A rough month and year works fine.",
-  awaiting_goal_time: "Do you have a time goal in mind?",
-  awaiting_anything_else: "Anything else I should know before I put your plan together?",
-  awaiting_ultra_background: "Have you run any ultras or very long trail races before?",
-  awaiting_injury_background: "Any injuries or physical limitations I should keep in mind?",
-};
 
 /**
  * Full plan rebuild triggered by a [REBUILD_PLAN] signal from Dean.
@@ -639,7 +630,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
     // The caller (linq webhook's after() or the wantsRebuild after()) only needs to
     // wait for the fast DB reads above, not the 30-60s Haiku enrichment. This keeps
     // both callers within the Hobby plan's 60s function budget.
-    after(async () => {
+    runAfter("rebuild_plan", async () => {
       try {
         await generateAndSaveFullPlan(
           userId,
@@ -944,16 +935,13 @@ async function handlePostRunOnboarding(
   }
 
   const activity = activityResult.data as Record<string, unknown> | null;
-  const onboardingStep = user.onboarding_step as string | null;
-  const pendingQuestion = onboardingStep ? (ONBOARDING_STEP_QUESTIONS[onboardingStep] ?? null) : null;
   const collectedData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
   const collectedSummary = Object.keys(collectedData).length > 0
     ? `\n\nALREADY COLLECTED (do NOT re-ask for any of these — the athlete has told you already):\n${JSON.stringify(collectedData, null, 2)}`
     : "";
 
-  const closingInstruction = pendingQuestion
-    ? `After your brief reaction, ask: "${pendingQuestion}"`
-    : "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
+  const closingInstruction =
+    "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
 
   const onbIsMetric = (collectedData.preferred_units as string | undefined) === "metric";
   const unitsLine = onbIsMetric ? ` Use km and min/km for all distances and paces.` : " Use miles and min/mile for all distances and paces.";
@@ -3773,7 +3761,7 @@ OUTPUT CONTRACT:
       } : {}),
       updated_at: new Date().toISOString(),
     }).eq("user_id", userId);
-    after(async () => {
+    runAfter("weekly_recap", async () => {
       try {
         // Sync B/C races from onboarding_data.other_races → races table.
         // Every weekly_recap is a safe checkpoint: if a race was captured during onboarding
@@ -3859,7 +3847,7 @@ OUTPUT CONTRACT:
       // If Dean committed to a full plan rebuild, fire it now that profile is persisted.
       // Skip the per-week patch — the full rebuild supersedes it.
       if (wantsRebuild) {
-        after(async () => {
+        runAfter("rebuild_plan_trigger", async () => {
           try {
             const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
             await fetch(`${appUrl}/api/coach/respond`, {
@@ -3877,7 +3865,7 @@ OUTPUT CONTRACT:
       }
       // Injury hold/clear tags fire independently of rebuild (they don't conflict).
       if (wantsInjuryHold) {
-        after(async () => {
+        runAfter("injury_hold_trigger", async () => {
           try {
             const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
             await fetch(`${appUrl}/api/coach/respond`, {
@@ -3894,7 +3882,7 @@ OUTPUT CONTRACT:
         });
       }
       if (wantsInjuryClear) {
-        after(async () => {
+        runAfter("injury_clear_trigger", async () => {
           try {
             const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
             await fetch(`${appUrl}/api/coach/respond`, {
@@ -3911,7 +3899,7 @@ OUTPUT CONTRACT:
         });
       }
       if (wantsLighterWeek) {
-        after(async () => {
+        runAfter("lighter_week_trigger", async () => {
           try {
             const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
             await fetch(`${appUrl}/api/coach/respond`, {
@@ -3929,7 +3917,7 @@ OUTPUT CONTRACT:
       }
       // SESSION_SWAP: modify one or more sessions in the current week's plan.
       if (tagSessionSwaps.length > 0) {
-        after(async () => {
+        runAfter("session_swap", async () => {
           try {
             const { data: currentState } = await supabase
               .from("training_state")
@@ -3969,7 +3957,7 @@ OUTPUT CONTRACT:
 
       // RTR_ADVANCE: advance the return-to-run phase when athlete clears the gate.
       if (wantsRtrAdvance) {
-        after(async () => {
+        runAfter("rtr_advance", async () => {
           try {
             const { data: currentState } = await supabase
               .from("training_state")
@@ -4004,7 +3992,7 @@ OUTPUT CONTRACT:
 
       // PHYSIO_REFERRAL: record when Dean refers the athlete to a professional.
       if (wantsPhysioReferral) {
-        after(async () => {
+        runAfter("physio_referral", async () => {
           const { error } = await supabase
             .from("training_state")
             .update({ physio_referral_sent_at: new Date().toISOString() })
@@ -4017,7 +4005,7 @@ OUTPUT CONTRACT:
       // Persist coaching style preference changes
       if (wantsPositiveOnly || wantsStandardCoaching) {
         const newStyle = wantsPositiveOnly ? "positive_only" : "standard";
-        after(async () => {
+        runAfter("coaching_style", async () => {
           const { error } = await supabase
             .from("training_profiles")
             .update({ coaching_style: newStyle })
@@ -4028,7 +4016,7 @@ OUTPUT CONTRACT:
       }
       // Persist proactive cadence changes ([CADENCE:...] tag)
       if (tagCadence) {
-        after(async () => {
+        runAfter("cadence_change", async () => {
           const { error } = await supabase
             .from("training_profiles")
             .update({ proactive_cadence: tagCadence })

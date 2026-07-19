@@ -164,8 +164,9 @@ The old discrete step flow is gone. Onboarding is now a **unified conversation**
 | `"awaiting_strava"` | Pause state — conversation halts while user connects Strava or replies "skip" |
 | `"awaiting_timezone"` | Post-plan — non-Strava users asked for city/state so reminders fire at correct local time |
 | `"awaiting_payment"` | Billing gate — user receives trial checkout link; plan accessible after signup |
-| `"awaiting_cadence"` | **Legacy** — immediately graduates user to `null` with `nightly_reminders` default |
 | `null` | Onboarding complete |
+
+(The legacy discrete-step states — `awaiting_cadence`, `awaiting_schedule`, `awaiting_goal_time`, etc. — were fully removed 2026-07-18 after a DB check confirmed no users held them.)
 
 **What Dean collects in the unified conversation (rough order):**
 1. Name + goal (combined in first message)
@@ -252,19 +253,21 @@ The GH Actions workflow runs `npm test` on every push. A commit that breaks test
 
 Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound SMS. The runner (`evals/run-evals.mjs`) builds a realistic coaching system prompt from the fixture data, calls Claude Sonnet for the response, then calls Claude Opus as the judge. Results go to `evals/results/` (gitignored).
 
-**23 fixtures across 7 categories:**
+**73 fixtures across 9 categories:**
 
 | Category | What it catches | Fixture count |
 |---|---|---|
-| `mileage_accuracy` | Wrong weekly total, hallucinated mileage, deload week target errors | 4 |
-| `pace_accuracy` | Wrong VDOT-derived pace, unit errors (min/km vs min/mile), tempo slower than easy | 4 |
+| `mileage_accuracy` | Wrong weekly total, hallucinated mileage, deload week target errors | 6 |
+| `pace_accuracy` | Wrong VDOT-derived pace, unit errors (min/km vs min/mile), tempo slower than easy | 6 |
 | `split_distance_accuracy` | Coach says "mile 5" on a 3.1mi run — km splits misread as mile splits | 3 |
-| `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 3 |
+| `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 8 |
 | `mileage_format` | Additive total format ("Total: 25mi + your 15mi already") | 2 |
-| `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed, morning plan attributes activity to wrong day; post-run opener praise; numbers cited without interpretation; strength block fires when it shouldn't; strength block absent when injury is active | 7 |
-| `plan_quality` | Plan structure: volume ramp, long run, quality sessions, safe progression — and for metric users, correct km units throughout | 1 |
+| `response_quality` | Internal labels echoed verbatim, injury handling (hold/clear/threshold), reminder correctness, post-run opener praise, numbers without interpretation, strength-block firing rules | 28 |
+| `plan_quality` | Plan structure: volume ramp, long run, quality sessions, safe progression, metric units, cross-training integration | 12 |
+| `plan_update` | Plan-change requests: lighter week, quality work, day-structure changes, long-run reschedules | 5 |
+| `uploaded_plan_accuracy` | User-uploaded plan: range sessions, week sync, recap math | 3 |
 
-**Current baseline (2026-04-02):** 22/22 passing, avg 9.5/10. No known failures. (Baseline pre-dates `plan-half-marathon-metric` and 4 post-run quality fixtures added 2026-05-24 — run evals to establish new baseline.)
+**Current baseline (2026-07-18, first run under the imported-modules runner):** 62/73 passing, avg 8.4/10. Weakest categories: `mileage_accuracy` 7.3 (3/6) and `plan_quality` 7.5 (10/12). Notable known failures worth their own follow-ups: `quality-morning-reminder-run` scores 0/10 (Dean outputs meta-commentary about whether to send a message instead of the message), `injury-shin-splints-mileage-spike` 0/10 ([INJURY_HOLD] fires on mild bilateral shin splints where ground truth calls it an overreaction), and `plan-100k-crosstraining` 4/10 (cycling days treated as additive to, not replacing, running days). The pre-2026-07-18 baseline (22/22, 9.5 on 2026-04-02) covered only the original 23 fixtures under the hand-mirrored prompt and is not comparable.
 
 ### When to update evals
 
@@ -276,13 +279,13 @@ Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound
 
 ### How the runner works (architecture note)
 
-The runner builds the system prompt directly from fixture JSON — it does **not** call the live Next.js route or Supabase. This makes it a standalone tool with no running-server dependency. The tradeoff: it mirrors the prompt-building logic in `route.ts` rather than importing it. If you add a major new section to `buildSystemPrompt` (e.g. a new guard block that changes model behavior for a category), add the equivalent injection to `buildEvalSystemPrompt` in `evals/run-evals.mjs` so the evals stay realistic.
+The runner builds the system prompt directly from fixture JSON — it does **not** call the live Next.js route or Supabase. This makes it a standalone tool with no running-server dependency.
 
-Key parity points to maintain between `route.ts` and `run-evals.mjs`:
-- VDOT pace formula and easy-pace display range (`paceAtVDOTPct`, `easyPaceRange`)
-- Next-7-days date mapping (weekday ↔ calendar date)
+Since 2026-07-18 the runner executes via `tsx` and **imports the extracted `src/lib` coach-context modules directly** instead of mirroring them: `coach-date-context` (DATE CONTEXT header + gap alert), `coach-race-context` (race countdown/taper/secondary races/post-race), `coach-fitness-tier`, `coach-pace-context`, `paces`, `session-mileage`, `injury-return`, and `exercise-library` (injury exercises + recovery timelines). **Every future Phase A slice extracted from `buildSystemPrompt` should be imported into the runner the same way — each extraction shrinks the parity list below instead of growing it.** Fixture notes: in-taper fixtures must set `user.taper_peak_miles` (mirrors the locked-in peak production persists at taper entry).
+
+Remaining hand-mirrored parity points between `route.ts` and `run-evals.mjs` (still inline in route.ts — extract, then import):
 - The km-split DATA GUARD injection (`splitCount > ceil(miles) + 1`)
-- ⚠️ RECOVERY WEEK block (injected when `current_week % 4 === 0 && phase !== taper/peak`)
+- RECOVERY WEEK block (injected when `current_week % 4 === 0 && phase !== taper/peak`)
 - Mileage accuracy rules block (no additive totals)
 
 ### Score report / diff
@@ -393,7 +396,7 @@ Before shipping anything that fires automatically at users (crons, triggers, new
 2. Use today's date in `YYYY-MM-DD` format
 3. If the change was driven by user feedback, **always paste it verbatim** — this is the most valuable part
 4. Be specific in Root Cause and Fix — future you will thank present you
-5. Never delete old entries
+5. Never delete old entries. Closed quarters are archived verbatim into `CHANGELOG-<year>Q<n>.md` files (linked from the top of `CHANGELOG.md`) so the working file stays scannable — archive the previous quarter when a new one starts.
 
 ### Example entry:
 

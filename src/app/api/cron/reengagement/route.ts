@@ -12,19 +12,11 @@ const PRE_PLAN_NUDGE_DAYS = 2; // days stuck mid-onboarding before sending a res
 
 // All onboarding steps that exist before the initial plan is sent.
 // Users stuck here get a single "looks like we got cut off" nudge.
+// (awaiting_payment is deliberately excluded — the payment-reminder cron owns it.)
 const PRE_PLAN_STEPS = new Set([
   "onboarding",
-  "awaiting_goal",
-  "awaiting_race_date",
-  "awaiting_goal_time",
   "awaiting_strava",
-  "awaiting_schedule",
-  "awaiting_mileage_baseline",
-  "awaiting_ultra_background",
-  "awaiting_injury_background",
   "awaiting_timezone",
-  "awaiting_anything_else",
-  "awaiting_name",
 ]);
 
 const NUDGE_1_MESSAGE =
@@ -118,16 +110,6 @@ export async function GET(request: Request) {
             nudged++;
           }
         }
-        continue;
-      }
-
-      // --- awaiting_cadence: legacy state — silently complete onboarding, no message ---
-      if (user.onboarding_step === "awaiting_cadence") {
-        await Promise.all([
-          supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", user.id),
-          supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
-        ]);
-        console.log(`[reengagement] silently graduated legacy awaiting_cadence user ${user.id}`);
         continue;
       }
 

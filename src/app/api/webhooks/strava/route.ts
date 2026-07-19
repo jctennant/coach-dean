@@ -1,4 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getActivity } from "@/lib/strava";
 import { fetchActivityWeatherByCoords } from "@/lib/weather";
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const body = await request.json();
 
-  after(async () => {
+  runAfter("strava-webhook", async () => {
     try {
       await processStravaEvent(body);
     } catch (err) {

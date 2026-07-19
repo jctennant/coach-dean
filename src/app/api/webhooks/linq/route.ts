@@ -1,4 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation, insertConversationReturningId } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
@@ -163,7 +164,7 @@ export async function POST(request: Request) {
   }
 
   // Return 200 immediately, process in background
-  after(async () => {
+  runAfter("linq-webhook", async () => {
     try {
       await handleInboundMessage(senderPhone, body, imageUrl, pdfUrl, pdfFilename, messageId, payloadChatId);
     } catch (err) {

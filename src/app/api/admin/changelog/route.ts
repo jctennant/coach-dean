@@ -28,7 +28,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { after } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     });
   }
 
-  after(async () => {
+  runAfter("admin/changelog", async () => {
     let sent = 0;
     for (const user of users) {
       const phone = user.phone_number as string | null;

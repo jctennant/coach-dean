@@ -24,6 +24,17 @@ import { buildJudgePrompt } from "./judges/factual-accuracy.mjs";
 import { buildPlanJudgePrompt } from "./judges/plan-quality.mjs";
 import { buildPlanUpdateJudgePrompt } from "./judges/plan-update.mjs";
 
+// Production coach-context modules — imported directly (runner executes via tsx)
+// instead of hand-mirrored, so the eval prompt can't drift from route.ts. Each
+// import here retires an entry from CLAUDE.md's "parity points to maintain" list.
+import { buildDateContext } from "../src/lib/coach-date-context.ts";
+import { buildRaceContext } from "../src/lib/coach-race-context.ts";
+import { buildFitnessTierBlock } from "../src/lib/coach-fitness-tier.ts";
+import { computePaceContext } from "../src/lib/coach-pace-context.ts";
+import { parseSessionMiles as parseSessionMilesLabel } from "../src/lib/session-mileage.ts";
+import { computeReturnToRunRamp } from "../src/lib/injury-return.ts";
+import { BODY_PART_EXERCISES, getRecoveryEstimate, normalizeBodyPart } from "../src/lib/exercise-library.ts";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
 const RESULTS_DIR = path.join(__dirname, "results");
@@ -70,7 +81,10 @@ const client = PROVIDER === "anthropic"
     })();
 
 // ─────────────────────────────────────────────
-// VDOT pace calculations (mirrors src/lib/paces.ts)
+// VDOT pace fallback — fixture tooling only. Production no longer derives paces
+// from VDOT at respond time (it uses stored paces + estimatePacesFromEasyPace);
+// this exists solely so a fixture without explicit stored paces still gets
+// plausible ones. Every current fixture stores paces explicitly.
 // ─────────────────────────────────────────────
 
 function paceAtVDOTPct(vdot, pct) {
@@ -84,95 +98,34 @@ function paceAtVDOTPct(vdot, pct) {
   return `${min}:${String(sec).padStart(2, "0")}/mi`;
 }
 
-function easyPaceRange(paceStr, useMetric = false) {
-  if (!paceStr) return "TBD";
-  const match = paceStr.match(/(\d+):(\d+)/);
-  if (!match) return paceStr;
-  const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
-  if (useMetric) {
-    const kmSec = Math.round(totalSec / 1.60934);
-    const rounded = Math.round(kmSec / 5) * 5;
-    const upper = rounded + 30;
-    const fmt = (s) => {
-      const min = Math.floor(s / 60);
-      const sec = s % 60;
-      return `${min}:${String(sec).padStart(2, "0")}`;
-    };
-    return `${fmt(rounded)}–${fmt(upper)}/km`;
-  }
-  const rounded = Math.round(totalSec / 5) * 5;
-  const upper = rounded + 30;
-  const fmt = (s) => {
-    const min = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${min}:${String(sec).padStart(2, "0")}`;
-  };
-  return `${fmt(rounded)}–${fmt(upper)}/mi`;
-}
-
-function miPaceToKm(paceStr) {
-  if (!paceStr) return "TBD";
-  const match = paceStr.match(/(\d+):(\d+)/);
-  if (!match) return paceStr;
-  const totalSec = parseInt(match[1]) * 60 + parseInt(match[2]);
-  const kmSec = Math.round(totalSec / 1.60934);
-  const min = Math.floor(kmSec / 60);
-  const sec = kmSec % 60;
-  return `${min}:${String(sec).padStart(2, "0")}/km`;
-}
-
 function getVDOTPaces(fixture) {
   const { user } = fixture;
   const useMetric = user.preferred_units === "metric";
-  // Use stored paces if available in fixture; compute from VDOT as fallback
-  const easyMi = user.easy_pace || paceAtVDOTPct(user.vdot, 0.65);
-  const tempoMi = user.tempo_pace || paceAtVDOTPct(user.vdot, 0.86);
-  const intervalMi = user.interval_pace || paceAtVDOTPct(user.vdot, 0.98);
-  const easy = useMetric ? miPaceToKm(easyMi) : easyMi;
-  const tempo = useMetric ? miPaceToKm(tempoMi) : tempoMi;
-  const interval = useMetric ? miPaceToKm(intervalMi) : intervalMi;
-  const easyRange = easyPaceRange(easyMi, useMetric);
-  return { easy, tempo, interval, easyRange };
+  // Stored fixture paces feed the production pace-context module verbatim; the
+  // VDOT fallback only fires for a fixture with no stored paces (none today).
+  const paceCtx = computePaceContext({
+    easyPaceRaw: user.easy_pace || paceAtVDOTPct(user.vdot, 0.65),
+    tempoPaceRaw: user.tempo_pace || paceAtVDOTPct(user.vdot, 0.86),
+    intervalPaceRaw: user.interval_pace || paceAtVDOTPct(user.vdot, 0.98),
+    useMetric,
+  });
+  return {
+    easy: paceCtx.easyGuard ?? "TBD",
+    tempo: paceCtx.tempoPace,
+    interval: paceCtx.intervalPace,
+    easyRange: paceCtx.easyRange ?? "TBD",
+  };
 }
 
-// ─────────────────────────────────────────────
-// Injury body-part exercises (mirrors BODY_PART_EXERCISES in route.ts)
-// ─────────────────────────────────────────────
-
-const BODY_PART_EXERCISES = {
-  it_band:      ["Hip abductor clamshells 3×15", "Lateral band walks 2×20 steps each way", "Foam roll TFL and outer glute — NOT the IT band itself (rolling the IT band directly irritates it)", "Hip flexor stretch in lunge position 3×30s each side"],
-  hamstring:    ["Eccentric Nordic hamstring curls 3×8 (use a towel under knees)", "Romanian single-leg deadlifts 3×10 each", "Prone hamstring raises 3×12", "Glute bridges with 2-second hold 3×15"],
-  knee:         ["VMO quad sets 3×15 (sit, tighten quad isometrically, hold 5sec)", "Terminal knee extensions (TKEs) with band 3×15", "Step-downs from 6-inch step, slow 3-second descent 3×10 each", "Straight-leg raises 3×15"],
-  shin:         ["Eccentric calf raises off a step (straight knee) 3×15", "Tibialis anterior raises: stand with back to wall, lift toes 3×15", "Calf stretching bent + straight knee 3×30s each", "Slow toe taps on a stair 2×20"],
-  achilles:     ["Eccentric heel drops off step — straight knee 3×15, bent knee 3×15", "Standing single-leg calf raises 3×20", "Soleus stretch (bent knee, heel on step) 3×30s hold", "Ankle alphabet 2×10 each direction"],
-  calf:         ["Eccentric heel drops off step — straight knee 3×15, bent knee 3×15", "Standing calf raises (single-leg) 3×20", "Soleus stretch (bent knee) 3×30s hold", "Ankle circles 2×10 each direction"],
-  foot:         ["Frozen water bottle rolling under arch 2 min each foot", "Towel toe curls 3×15", "Eccentric calf raises 3×15", "Short-foot arch activation 3×10"],
-  plantar:      ["Frozen water bottle rolling under arch 2 min each foot (morning, before first step)", "Calf stretches — gastrocnemius (straight knee) + soleus (bent knee) 3×30s each, lying in bed before getting up", "Towel toe curls 3×15", "Short-foot arch activation 3×10"],
-  hip:          ["Hip flexor stretch in lunge position 3×30s each", "Glute bridges 3×15", "Lateral band walks 2×20 steps", "Pigeon pose 2×60s each side"],
-  back:         ["Cat-cow 10 slow reps", "Bird-dog 3×10 each side", "Child's pose 2×60s", "Dead bug 3×8 each side"],
-  ankle:        ["Eccentric calf raises off step 3×15", "Single-leg balance on unstable surface 3×30s", "Resistance band dorsiflexion 3×15", "Ankle alphabet (draw A–Z slowly with foot)"],
-};
-
+// Injury lookups use the production exercise library. Fixtures store raw body-part
+// strings ("achilles", "plantar"); production normalizes at classification time
+// before storing, so normalize here to mirror the full pipeline.
 function getBodyPartExercisesEval(bodyPart) {
   if (!bodyPart) return "";
-  const key = bodyPart.toLowerCase().replace(/\s+/g, "_").replace("it band", "it_band").replace("patellofemoral", "knee");
-  const exercises = BODY_PART_EXERCISES[key];
+  const key = normalizeBodyPart(bodyPart);
+  const exercises = key ? BODY_PART_EXERCISES[key] : null;
   if (!exercises) return "";
   return `\n  Targeted exercises for ${bodyPart.replace(/_/g, " ")}: ${exercises.join(" | ")}`;
-}
-
-// ─────────────────────────────────────────────
-// Return-to-run ramp math (mirrors src/lib/injury-return.ts)
-// ─────────────────────────────────────────────
-
-function computeReturnToRunRampEval(holdSince, preInjuryMileageTarget, now = new Date()) {
-  if (!holdSince) return null;
-  const weeksInjured = Math.max(1, Math.ceil((now.getTime() - new Date(holdSince).getTime()) / (7 * 24 * 60 * 60 * 1000)));
-  const rampFactor = weeksInjured >= 3 ? 0.50 : weeksInjured >= 2 ? 0.60 : 0.70;
-  const returnBaseMiles = preInjuryMileageTarget && preInjuryMileageTarget > 0
-    ? Math.round(preInjuryMileageTarget * rampFactor * 2) / 2
-    : null;
-  return { weeksInjured, rampFactor, returnBaseMiles };
 }
 
 // ─────────────────────────────────────────────
@@ -180,7 +133,8 @@ function computeReturnToRunRampEval(holdSince, preInjuryMileageTarget, now = new
 // projected return-to-run ramp Dean can quote for the first few weeks back while
 // still on injury hold, per the 2026-07-18 fix. Ported here (not imported) because
 // training-plan.ts pulls in supabase/anthropic clients this standalone eval runner
-// doesn't want to initialize — see the module-level parity note at the top of this file.
+// doesn't want to initialize — see the import block note at the top of this file. Extract the arc math into a
+// pure src/lib module and import it here when it next changes.
 // ─────────────────────────────────────────────
 
 function computePhaseForPlanEval(weekNumber, totalWeeks, hasRace) {
@@ -272,34 +226,9 @@ function computeMileageArcEval({ baseMileage, totalWeeks, goal, hasRace, aRaceWe
   return planWeeks;
 }
 
-// Return-to-run timelines (mirrors INJURY_TIMELINES in src/lib/exercise-library.ts)
-const INJURY_TIMELINES_EVAL = {
-  it_band:    { mild: "2–3 weeks",  moderate: "3–5 weeks",  severe: "6–8 weeks" },
-  shin:       { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "8–12 weeks" },
-  knee:       { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–10 weeks" },
-  hamstring:  { mild: "1–2 weeks",  moderate: "3–6 weeks",  severe: "8–12 weeks" },
-  calf:       { mild: "1–2 weeks",  moderate: "3–4 weeks",  severe: "6–8 weeks" },
-  foot:       { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "8–12 weeks" },
-  hip:        { mild: "1–2 weeks",  moderate: "3–4 weeks",  severe: "6–8 weeks" },
-  glute:      { mild: "1–2 weeks",  moderate: "2–4 weeks",  severe: "4–6 weeks" },
-  piriformis: { mild: "2–3 weeks",  moderate: "4–6 weeks",  severe: "6–10 weeks" },
-  back:       { mild: "3–5 days",   moderate: "2–3 weeks",  severe: "4–6 weeks" },
-  ankle:      { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–10 weeks" },
-  groin:      { mild: "1–2 weeks",  moderate: "3–5 weeks",  severe: "6–8 weeks" },
-};
-
 function getRecoveryEstimateEval(bodyPart, severity) {
   if (!bodyPart) return null;
-  const key = bodyPart.toLowerCase().replace(/[^a-z_]/g, "_");
-  const sev = severity ?? "moderate";
-  const timeline = INJURY_TIMELINES_EVAL[key]?.[sev];
-  if (!timeline) return null;
-  const match = timeline.match(/(\d+)[–-](\d+)\s*(days?|weeks?)/i);
-  if (!match) return null;
-  const min = parseInt(match[1]);
-  const max = parseInt(match[2]);
-  const isDays = /^days?$/i.test(match[3]);
-  return { minWeeks: isDays ? min / 7 : min, maxWeeks: isDays ? max / 7 : max };
+  return getRecoveryEstimate(normalizeBodyPart(bodyPart) ?? bodyPart, severity ?? null);
 }
 
 // ─────────────────────────────────────────────
@@ -316,7 +245,7 @@ function buildEvalSystemPrompt(fixture) {
   // Return-to-run predictive facts (mirrors the RETURN-TO-RUN CONTEXT block in route.ts,
   // built from computeReturnToRunRamp — see src/lib/injury-return.ts)
   const rtrRampEval = user.injury_hold_since
-    ? computeReturnToRunRampEval(user.injury_hold_since, user.pre_injury_mileage_target ?? user.weekly_mileage_target ?? null, today)
+    ? computeReturnToRunRamp(user.injury_hold_since, user.pre_injury_mileage_target ?? user.weekly_mileage_target ?? null, today)
     : null;
   const rtrRecoveryEstimateEval = user.injury_hold_since && user.injury_body_part
     ? getRecoveryEstimateEval(user.injury_body_part, user.injury_severity)
@@ -346,56 +275,44 @@ function buildEvalSystemPrompt(fixture) {
       })()
     : null;
 
-  // Date context
-  const dateFormatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
+  // Date context — production module (coach-date-context.ts). recent_conversation
+  // dates map to created_at timestamps so the production gap-alert logic applies.
+  const { header: dateContextHeader, todayStr } = buildDateContext({
+    tz,
+    now: today,
+    trainingDays: user.training_days ?? null,
+    overrideDays: null,
+    overrideExpires: null,
+    recentMessages: (user.recent_conversation ?? []).map((m) => ({
+      created_at: m.date ? m.date + "T12:00:00Z" : null,
+    })),
   });
-  const todayStr = dateFormatter.format(today);
 
-  // Pre-compute next 7 days (mirrors route.ts date injection so coach gets correct weekday↔date mapping)
-  const todayLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(today);
-  const [ty, tm, td] = todayLocal.split("-").map(Number);
-  // timeZone: "UTC" here, not tz — ty/tm/td are already the correct local calendar
-  // date; reformatting the Date.UTC-reconstructed values through tz again would
-  // re-apply the offset a second time and roll the result back a day for any
-  // timezone behind UTC (mirrors the route.ts fix — see CHANGELOG 2026-07-12).
-  const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" });
-  const upcomingDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(Date.UTC(ty, tm - 1, td + i + 1));
-    return dayFmt.format(d);
-  });
-  const yesterdayStr = dayFmt.format(new Date(Date.UTC(ty, tm - 1, td - 1)));
-
-  let dateContext = `DATE CONTEXT:\n- Today: ${todayStr}\n- Yesterday: ${yesterdayStr}\n- Tomorrow: ${upcomingDays[0]}\n- Next 7 days: ${upcomingDays.join(" | ")}\n- Timezone: ${tz}\n- For future scheduled sessions, use specific calendar dates (e.g. "Tuesday, Mar 31") rather than vague relative terms like "tomorrow" or "next Monday" — messages may be read after the day they're sent.\n- For recent past activities, you may use natural relative terms: "yesterday", "this morning", "Wednesday's run" — these are clearer than repeating calendar dates.\n`;
   let daysUntilRace = null;
   let weeksUntilRace = null;
   if (raceDate) {
     const race = new Date(raceDate + "T12:00:00Z");
     daysUntilRace = Math.ceil((race.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
     weeksUntilRace = Math.round(daysUntilRace / 7);
-    dateContext += `- Race date: ${raceDate} (${daysUntilRace} days / ~${weeksUntilRace} weeks away)\n`;
-    dateContext += `- Always use specific calendar dates rather than relative terms like "tomorrow" or "next Monday"\n`;
   }
 
-  // Taper block for race week
-  if (daysUntilRace !== null && daysUntilRace > 0 && daysUntilRace <= 21) {
-    const peakMiles = user.weekly_mileage_target ? Math.round(user.weekly_mileage_target / 0.45) : 40;
-    if (daysUntilRace <= 7) {
-      const raceWeekMiles = Math.round(peakMiles * 0.45);
-      dateContext += `- RACE WEEK (${daysUntilRace} days out). Keep volume light: ~${raceWeekMiles}mi this week. No hard workouts — easy miles only. Final tune-up (15-30 min shakeout) is optional the day before — place it ONLY on a confirmed running day, NOT on a gym-only or cross-training day.\n`;
-      dateContext += `- Proactively address: gear check (nothing new race day), race morning routine, pacing strategy, mental preparation.\n`;
-    } else if (daysUntilRace <= 14) {
-      const w2Miles = Math.round(peakMiles * 0.72);
-      dateContext += `- TAPER (2 weeks out, ${daysUntilRace} days). Target ~${w2Miles}mi this week. One short race-pace tune-up (2-3mi) is acceptable. Race week after this is easy miles only.\n`;
-    } else {
-      const w3Miles = Math.round(peakMiles * 0.88);
-      dateContext += `- TAPER (3 weeks out, ${daysUntilRace} days). Target ~${w3Miles}mi this week.\n`;
-    }
-  }
+  const weeklyTarget = user.weekly_mileage_target || 0;
+  const avgWeekly = weeklyTarget || 30;
+
+  // Race countdown / taper protocol / secondary races / post-race — production
+  // module (coach-race-context.ts). Fixtures for in-taper users must set
+  // taper_peak_miles, matching the locked-in peak production persists at taper entry.
+  const dateContext = dateContextHeader + buildRaceContext({
+    now: today,
+    raceDate: raceDate ?? null,
+    goal: user.goal ?? null,
+    profileRaceDaysUntil: daysUntilRace,
+    avgWeeklyMileage: avgWeekly,
+    storedTaperPeakMiles: user.taper_peak_miles ?? null,
+    upcomingRaces: user.upcoming_races ?? null,
+    onboardingRaceName: user.race_name ?? null,
+    isMetric: user.preferred_units === "metric",
+  });
 
   const paces = getVDOTPaces(fixture);
   const phase = user.current_phase || "build";
@@ -403,8 +320,6 @@ function buildEvalSystemPrompt(fixture) {
   // since fixtures are the authoritative source for what week type it is.
   const isDeload = user.is_deload_week === true;
   const weekMileageSoFar = user.miles_logged_this_week || 0;
-  const weeklyTarget = user.weekly_mileage_target || 0;
-  const avgWeekly = weeklyTarget || 30;
 
   // Activity summary
   let activitySummary = "";
@@ -450,12 +365,7 @@ function buildEvalSystemPrompt(fixture) {
     const daysToSunday = dayOfWeekToday === 0 ? 0 : 7 - dayOfWeekToday;
     const endOfWeekMs = Date.UTC(todayY, todayM - 1, todayD + daysToSunday);
 
-    const parseSessionMiles = (s) => {
-      const explicitTotal = s.label.match(/[≈~=]\s*(\d+(?:\.\d+)?)\s*mi(?!n)/i) || s.label.match(/\((\d+(?:\.\d+)?)\s*mi(?!n)(?:\s+total)?\)/i);
-      const firstMi = s.label.match(/(\d+(?:\.\d+)?)\s*mi(?!n)/i);
-      const mMatch = explicitTotal || firstMi;
-      return mMatch ? parseFloat(mMatch[1]) : 0;
-    };
+    const parseSessionMiles = (s) => parseSessionMilesLabel(s.label);
 
     const sessions = user.plan_sessions_remaining;
     const todaySessions = sessions.filter(s => {
@@ -618,19 +528,14 @@ ${hrVal ? `- Avg HR: ${hrVal} bpm\n` : ""}${a.elevation_gain_ft ? `- Elevation g
     }
   }
 
-  // Fitness tier
-  let fitnessTier = "";
-  if (avgWeekly < 10) {
-    fitnessTier = `FITNESS TIER: LOW VOLUME (~${avgWeekly} mi/week). Prioritize easy aerobic volume and consistency.`;
-  } else if (avgWeekly < 30) {
-    fitnessTier = `FITNESS TIER: MODERATE VOLUME (~${avgWeekly} mi/week). 1-2 quality sessions per week appropriate alongside easy volume.
-<rule>WEEK 1 VOLUME CAP — GUIDELINE: Current avg is ${avgWeekly} mi/week. Week 1 should not jump more than 15% above that — target ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.15)} mi. A first-week spike above ${Math.round(avgWeekly * 1.2)} mi risks overuse injury at the start of the plan.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${Math.round(avgWeekly * 0.90)} mi. Starting below current base has no training rationale — the athlete is already adapted to their current volume.</rule>`;
-  } else {
-    fitnessTier = `FITNESS TIER: HIGH VOLUME (~${avgWeekly} mi/week). Experienced runner. Skip base-building preamble.
-<rule>WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${avgWeekly} mi/week → Week 1 target: ${Math.round(avgWeekly * 1.05)}–${Math.round(avgWeekly * 1.12)} mi. Don't jump to peak volume on Day 1.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${Math.round(avgWeekly * 0.90)} mi. Even for masters athletes or first-timers, starting significantly below current base wastes existing fitness. 90% of current average is the floor.</rule>`;
-  }
+  // Fitness tier — production module (coach-fitness-tier.ts)
+  const fitnessTier = buildFitnessTierBlock({
+    avgWeeklyMileage: avgWeekly,
+    forceBeginnerTier: false,
+    fitnessLevel: user.experience_level ?? null,
+    daysPerWeek: (user.training_days ?? []).length || null,
+    isMetric: user.preferred_units === "metric",
+  });
 
   // Goal discrepancy injection (for quality fixture)
   const goalDiscrepancyBlock = user.inject_goal_discrepancy_warning
@@ -669,7 +574,7 @@ ${hrVal ? `- Avg HR: ${hrVal} bpm\n` : ""}${a.elevation_gain_ft ? `- Elevation g
     const milogged = hasStrava || weekMileageSoFar > 0
       ? `${weekMileageSoFar.toFixed(1)} mi logged (${user.runs_this_week || 0} run${(user.runs_this_week || 0) !== 1 ? "s" : ""})${weeklyTarget && (weekMileageSoFar + (user.plan_sessions_remaining ? 5 : 0)) > weekMileageSoFar ? "" : ""}`
       : "not tracked (no Strava)";
-    const easyRange = easyPaceRange(paces.easy);
+    const easyRange = paces.easyRange;
     const raceLine = raceDate && daysUntilRace !== null && daysUntilRace > 0
       ? `Race: ${user.goal_race || user.goal} on ${raceDate} · ${daysUntilRace} day${daysUntilRace !== 1 ? "s" : ""} / ~${weeksUntilRace} week${weeksUntilRace !== 1 ? "s" : ""} out`
       : "";

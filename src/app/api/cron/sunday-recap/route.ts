@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { after } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { getValidAccessToken, getAthleteStats } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
   // The loop below does a Strava API call + awaited fetch per user, which blows
   // the budget once we have more than a handful of Strava-connected users.
   // Vercel keeps the function alive to finish `after()` work post-response.
-  after(async () => {
+  runAfter("sunday-recap", async () => {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
     const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
     const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

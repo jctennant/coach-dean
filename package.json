@@ -12,7 +12,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "gen:types": "supabase gen types typescript --project-id irlhhvhmrzwcygctxrbe > src/lib/database.types.ts",
-    "eval": "node evals/run-evals.mjs",
+    "eval": "tsx evals/run-evals.mjs",
     "eval:onboarding": "node evals/run-onboarding-evals.mjs",
     "eval:simulation": "node evals/run-simulation-evals.mjs",
     "eval:extraction": "node evals/run-extraction-evals.mjs",
@@ -52,6 +52,7 @@
     "shadcn": "^3.8.4",
     "supabase": "^2.77.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5",
     "vitest": "^4.1.1"

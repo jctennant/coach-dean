@@ -1,4 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation, type MessageType } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
@@ -53,10 +54,10 @@ async function sendAndStore(
  * POST /api/onboarding/handle
  *
  * Simplified routing:
- *   "onboarding"       → unified Claude conversation handler
- *   "awaiting_strava"  → Strava connect / skip handler
- *   "awaiting_cadence" → reminder preference handler (post-plan)
- *   "awaiting_payment" → payment link re-send
+ *   "onboarding"        → unified Claude conversation handler
+ *   "awaiting_strava"   → Strava connect / skip handler
+ *   "awaiting_timezone" → post-plan city/state collection for reminder timing
+ *   "awaiting_payment"  → payment link re-send
  */
 export async function POST(request: Request) {
   const { userId, message, chatId, dry_run = false }: OnboardingRequest = await request.json();
@@ -96,17 +97,6 @@ export async function POST(request: Request) {
       break;
     case "awaiting_strava":
       result = await handleStrava(user, message, onboardingData, chatId);
-      break;
-    case "awaiting_cadence":
-      // Legacy state — graduate these users to fully onboarded with default cadence.
-      // awaiting_cadence was removed; new users are now defaulted to weekly_only at plan
-      // generation (see completeOnboarding()). Any pre-existing user still stuck in this
-      // state gets nightly_reminders instead, matching this cron's original behavior.
-      await Promise.all([
-        supabase.from("users").update({ onboarding_step: null }).eq("id", user.id),
-        supabase.from("training_profiles").update({ proactive_cadence: "nightly_reminders" }).eq("user_id", user.id),
-      ]);
-      result = NextResponse.json({ ok: true });
       break;
     case "awaiting_timezone":
       result = await handleTimezone({ ...user, onboarding_data: onboardingData }, message);
@@ -2358,7 +2348,7 @@ async function completeOnboarding(
       console.error("[onboarding] dry_run coach trigger failed:", err);
     }
   } else {
-    after(async () => {
+    runAfter("onboarding/initial-plan", async () => {
       try {
         await trackEvent(user.id, "onboarding_completed", { goal });
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
