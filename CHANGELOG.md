@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Check cron schedules into the repo (docs/crons.md)
+
+**Type:** Infra
+**Reported by:** Internal observation (repo audit)
+**User feedback:** N/A
+**Root cause:** All recurring jobs run on cron-job.org, so schedules existed only in that dashboard with no repo trace. This is how the morning-reminder cron sat effectively disabled until 2026-07-18 with nothing in the codebase to flag it — there was no declared record of what *should* be firing.
+**Fix / Change:** New `docs/crons.md` documents every cron endpoint, its UTC schedule, purpose, dedup mechanism, and which jobs the `RESTRICT_TO_PHONES` kill-switch gates. Schedules were recovered from the last `vercel.json` crons block (removed 2026-04-09, commit `010c2a41`) plus code comments; `trial-expiry`'s exact time is marked unverified pending a dashboard check. The file states the maintenance rule: any cron-job.org change must update this file in the same sitting. Also records that `/api/cron/morning-workout` is a legacy stub that must never be re-scheduled.
+**Files changed:** `docs/crons.md` (new)
+
 ## 2026-07-18 — Fix Dean quoting stale pre-injury arc as a live plan on multi-week plan questions
 
 **Type:** Bug Fix
