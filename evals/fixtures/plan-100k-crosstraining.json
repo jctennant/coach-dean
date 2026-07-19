@@ -26,6 +26,8 @@
     "runs_this_week": 0,
     "injury_notes": "History of IT band issues — proactively wants to use cycling as cross-training to reduce running volume without losing aerobic fitness",
     "notes": "Wants 2 cycling sessions per week (Monday and Wednesday), replacing 2 of the 6 training days with bike. Comfortable with high volume and back-to-back efforts.",
+    "crosstraining_tools": ["cycling"],
+    "crosstraining_days": ["monday", "wednesday"],
     "recent_activities": [
       { "date": "2026-03-30", "type": "Long Run", "distance_miles": 20.0, "pace": "8:45/mi" },
       { "date": "2026-03-29", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:35/mi" },

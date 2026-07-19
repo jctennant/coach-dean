@@ -900,7 +900,15 @@ function buildUserMessage(fixture) {
       ? `\nULTRA-SPECIFIC REQUIREMENTS:\n- Introduce back-to-back long runs (${bbDay1} long + ${bbDay2} medium-long) by Week ${backToBackWeek} at the latest — this is the central ultra training stimulus, not a late-plan addition. Use the athlete's actual training days — do NOT hardcode Saturday/Sunday.\n- Include trail-specific guidance from Week 1: hiking steep uphills (power-hiking is faster than running them in ultras), running by time-on-feet rather than strict pace, elevation management`
       : "";
 
-    baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Race is exactly ${weeksUntilRace} weeks away — build a ${weeksUntilRace}-week plan, no more, no fewer.${injuryNote}${ultraNote}
+    // Mirrors the crosstrainingTools rule in src/lib/training-plan.ts's buildPlanPrompt:
+    // cross-training REPLACES a training day, it does not add to running volume/session count.
+    const crosstrainingToolsForPlan = (user.crosstraining_tools || []).filter(Boolean);
+    const crosstrainingDaysForPlan = (user.crosstraining_days || []).map(d => d.toLowerCase());
+    const crosstrainingNote = crosstrainingToolsForPlan.length > 0
+      ? `\n<rule>CROSS-TRAINING — REPLACES RUNNING DAYS, DOES NOT ADD TO THEM: The athlete uses [${crosstrainingToolsForPlan.join(", ")}] as cross-training on ${crosstrainingDaysForPlan.length > 0 ? crosstrainingDaysForPlan.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join(" and ") : "designated days"}. Those days are cross-training sessions INSTEAD OF a running session — they are NOT an extra session on top of a full running week. Week 1's running-only mileage total and running session count must reflect running on the remaining ${trainingDaysForUltra.length - crosstrainingDaysForPlan.length} days only. Every week in the arc must name the cross-training day(s) and modality explicitly — do not silently drop them or revert to an all-running schedule.</rule>`
+      : "";
+
+    baseMsg = `Initial plan trigger. Athlete has already logged ${weekMiles.toFixed(1)} mi this week. Race is exactly ${weeksUntilRace} weeks away — build a ${weeksUntilRace}-week plan, no more, no fewer.${injuryNote}${ultraNote}${crosstrainingNote}
 
 Build a complete training plan overview with:
 1. Week 1 — every session listed (day, type, distance, any pace targets), then the week total
