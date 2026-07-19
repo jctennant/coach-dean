@@ -26,15 +26,6 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 **Fix / Change:** Added `crosstraining_tools`/`crosstraining_days` to the fixture and ported the same non-additive rule (verbatim logic) into `run-evals.mjs`'s `initial_plan`+`plan_quality` prompt branch. Now scores 10/10 — cycling correctly lands on Monday/Wednesday, 4 running days, back-to-back long runs by Week 7.
 **Files changed:** `evals/run-evals.mjs`, `evals/fixtures/plan-100k-crosstraining.json`, `CLAUDE.md`
 
-## 2026-07-19 — Tighten LENGTH and FOLLOW-UP rules for multi-question replies
-
-**Type:** Improvement
-**Reported by:** User feedback
-**User feedback:** "Feels like Dean should be more succinct generally, and kind of repeated himself maybe? But main fix is just being more succinct" — pasted transcript where the athlete asked two things in one message ("Also should I do any different shin exercises as the pain gets lighter?" alongside a readiness question). Dean's first reply answered only the readiness part and dropped the shin-exercise question entirely, so the athlete had to re-ask verbatim. Dean's second reply then reopened with almost the same lead sentence as the first ("1/10 and holding steady — yes, you're ready for a test jog.") before finally answering the shin-exercise question with a much longer paragraph than the rest of the message.
-**Root cause:** The LENGTH rule already existed but had no guidance for messages containing multiple asks, so Dean gave full paragraph treatment to each part instead of staying brief across all of them. Separately, the FOLLOW-UP-IN-AN-ACTIVE-THREAD rule guarded against repeating *advice content* but not against reopening consecutive replies with the same lead/summary sentence, and had no explicit instruction to go back and answer a question skipped in the prior reply.
-**Fix / Change:** Tightened two existing prompt rules in place (no new rule blocks, per this repo's prompt-engineering philosophy): (1) LENGTH now says multi-part questions should get a sentence or two each, not full-depth answers on every part; (2) FOLLOW-UP IN AN ACTIVE THREAD now explicitly says not to reopen with the same lead sentence/summary as the immediately preceding message, and to answer any part of the athlete's previous message that got skipped.
-**Files changed:** src/app/api/coach/respond/route.ts
-
 ## 2026-07-18 — Give Dean a real projected return-to-run mileage ramp instead of letting it invent one
 
 **Type:** Bug Fix
