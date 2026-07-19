@@ -20,8 +20,8 @@
     "training_days": ["monday", "wednesday", "friday", "sunday"],
     "preferred_units": "imperial",
     "weekly_mileage_target": 38,
-    "miles_logged_this_week": 11.5,
-    "runs_this_week": 2,
+    "miles_logged_this_week": 23.0,
+    "runs_this_week": 3,
     "injury_notes": "None",
     "recent_activities": [
       { "date": "2026-05-24", "type": "Long Run", "distance_miles": 11.5, "pace": "8:52/mi", "average_heartrate": 148 },

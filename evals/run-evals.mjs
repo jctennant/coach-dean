@@ -34,6 +34,7 @@ import { computePaceContext } from "../src/lib/coach-pace-context.ts";
 import { parseSessionMiles as parseSessionMilesLabel } from "../src/lib/session-mileage.ts";
 import { computeReturnToRunRamp } from "../src/lib/injury-return.ts";
 import { BODY_PART_EXERCISES, getRecoveryEstimate, normalizeBodyPart } from "../src/lib/exercise-library.ts";
+import { checkStatedFacts, buildFactCorrection } from "../src/lib/fact-check.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
@@ -1057,6 +1058,63 @@ function stripReasoningPreamble(text) {
   return text;
 }
 
+// Phase B fact gate — mirrors the includeStatedFacts/factTruth/checkStatedFacts flow in
+// coach/respond/route.ts (see fact-check.ts). Without this, the eval never exercises the
+// same safety net an athlete's real message goes through, so a mileage/date fixture failure
+// here doesn't tell you whether production would have caught and retried it.
+const FACT_GATE_TRIGGERS = new Set(["post_run", "user_message", "morning_plan", "weekly_recap", "initial_plan"]);
+
+function computeFactTruth(fixture) {
+  const { trigger, user } = fixture;
+  const isMetric = user.preferred_units === "metric";
+  const toDisplay = (mi) => (mi == null ? null : isMetric ? mi * 1.60934 : mi);
+  const injuryHoldActive = !!user.injury_hold_since;
+  const todayDateStr = fixture.today ?? "2026-03-30";
+  const today = new Date(todayDateStr + "T12:00:00Z");
+  let daysUntilRace = null;
+  if (user.goal_race_date) {
+    const race = new Date(user.goal_race_date + "T12:00:00Z");
+    daysUntilRace = Math.round((race.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+  }
+  return {
+    week_number: trigger === "initial_plan" ? null : (user.current_week ?? null),
+    weekly_target: injuryHoldActive || trigger === "initial_plan" ? null : toDisplay(user.weekly_mileage_target ?? null),
+    week_distance_completed: toDisplay(user.miles_logged_this_week ?? 0),
+    days_until_race: daysUntilRace,
+    injuryHoldActive,
+    unit: isMetric ? "km" : "mi",
+  };
+}
+
+function buildFactGateTool() {
+  return {
+    name: "deliver_message",
+    description:
+      "Deliver your final athlete-facing text for this turn, plus a `stated_facts` echo of the " +
+      "numbers your message text asserts (or null per-field if your message doesn't mention it) " +
+      "so the system can verify them against ground truth.",
+    input_schema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "The exact text to send the athlete." },
+        stated_facts: {
+          type: "object",
+          description: "Fact echo for system verification. Same unit as your message text. Null if not stated.",
+          properties: {
+            week_number: { type: ["number", "null"], description: "The training-week number your message states, else null." },
+            weekly_target: { type: ["number", "null"], description: "This week's total planned mileage/km target as stated, else null." },
+            week_distance_completed: { type: ["number", "null"], description: "Distance already completed this week as stated, else null." },
+            days_until_race: { type: ["number", "null"], description: "Days until the athlete's race as stated, else null." },
+            plan_source: { type: ["string", "null"], enum: ["return_to_run", "full_arc", null] },
+          },
+          required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source"],
+        },
+      },
+      required: ["message", "stated_facts"],
+    },
+  };
+}
+
 // ─────────────────────────────────────────────
 // Main eval runner
 // ─────────────────────────────────────────────
@@ -1067,24 +1125,72 @@ async function runEval(fixture) {
 
   const isPlanQuality = fixture.category === "plan_quality";
   const isPlanUpdate = fixture.category === "plan_update";
+  // plan_quality uses its own free-hand full-overview prompt (different shape/length) —
+  // everything else that production would gate through stated_facts gets gated here too.
+  const useFactGate = !isPlanQuality && FACT_GATE_TRIGGERS.has(fixture.trigger);
 
   // Step 1: Get coaching response
   let coachResponse = null;
   let coachError = null;
+  let factGateMismatches = null;
   try {
-    const coachMsg = await client.messages.create({
-      model: COACHING_MODEL,
-      max_tokens: isPlanQuality ? 1500 : 1000,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    });
-    coachResponse = stripReasoningPreamble(
-      coachMsg.content
-        .filter((b) => b.type === "text")
-        .map((b) => b.text.trim())
-        .join("\n\n")
-        .trim()
-    );
+    if (useFactGate) {
+      const factTruth = computeFactTruth(fixture);
+      const tools = [buildFactGateTool()];
+      const messages = [{ role: "user", content: userMessage }];
+      let coachMsg = await client.messages.create({
+        model: COACHING_MODEL,
+        max_tokens: isPlanQuality ? 1500 : 1000,
+        system: systemPrompt,
+        messages,
+        tools,
+        tool_choice: { type: "any" },
+      });
+      let deliverBlock = coachMsg.content.find((b) => b.type === "tool_use" && b.name === "deliver_message");
+      let mismatches = deliverBlock ? checkStatedFacts(deliverBlock.input?.stated_facts, factTruth) : [];
+      if (deliverBlock && mismatches.length > 0) {
+        messages.push({ role: "assistant", content: coachMsg.content });
+        messages.push({
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: deliverBlock.id, content: buildFactCorrection(mismatches, factTruth), is_error: true }],
+        });
+        const retryMsg = await client.messages.create({
+          model: COACHING_MODEL,
+          max_tokens: isPlanQuality ? 1500 : 1000,
+          system: systemPrompt,
+          messages,
+          tools,
+          tool_choice: { type: "any" },
+        });
+        const retryBlock = retryMsg.content.find((b) => b.type === "tool_use" && b.name === "deliver_message");
+        if (retryBlock && String(retryBlock.input?.message ?? "").trim()) {
+          coachMsg = retryMsg;
+          deliverBlock = retryBlock;
+          mismatches = checkStatedFacts(retryBlock.input?.stated_facts, factTruth);
+        }
+      }
+      factGateMismatches = mismatches.length > 0 ? mismatches : null;
+      const deliveredText = deliverBlock ? String(deliverBlock.input?.message ?? "").trim() : "";
+      coachResponse = deliveredText
+        ? stripReasoningPreamble(deliveredText)
+        : stripReasoningPreamble(
+            coachMsg.content.filter((b) => b.type === "text").map((b) => b.text.trim()).join("\n\n").trim()
+          );
+    } else {
+      const coachMsg = await client.messages.create({
+        model: COACHING_MODEL,
+        max_tokens: isPlanQuality ? 1500 : 1000,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+      });
+      coachResponse = stripReasoningPreamble(
+        coachMsg.content
+          .filter((b) => b.type === "text")
+          .map((b) => b.text.trim())
+          .join("\n\n")
+          .trim()
+      );
+    }
   } catch (err) {
     coachError = err.message;
   }
@@ -1144,6 +1250,7 @@ async function runEval(fixture) {
     score: judgment?.score ?? -1,
     flags: judgment?.flags ?? [],
     error: judgeError || null,
+    fact_gate_mismatches: factGateMismatches,
   };
 }
 

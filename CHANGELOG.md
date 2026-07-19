@@ -8,6 +8,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-19 — Wire Phase B fact gate into the eval runner; fix a bad fixture ground-truth value
+
+**Type:** Bug Fix
+**Reported by:** Internal investigation, following up on the 62/73 baseline
+**User feedback:** "for the ones failing, do you know how to solve? I thought we did Phase B already"
+**Root cause:** Phase B (the `stated_facts` equality check in `coach/respond/route.ts` + `src/lib/fact-check.ts`) only ever ran in production. `evals/run-evals.mjs` called Claude with a plain text completion — no `deliver_message` tool, no `stated_facts`, no retry-on-mismatch — so mileage/date fixture failures never indicated whether the real athlete-facing gate would have caught and corrected them. Separately, `post-run-stat-interpretation` had a fixture data bug: `miles_logged_this_week` was set to 11.5 (only the day's run) while `recent_activities` showed two more runs earlier in the same Mon–Sun week, for a true total of 23mi — the fixture's own "authoritative" week-to-date figure was wrong, so Dean was correctly repeating bad input, not hallucinating.
+**Fix / Change:** Added `computeFactTruth()` and a minimal `stated_facts`-only `deliver_message` tool to `run-evals.mjs`, wired for the same triggers production gates (`post_run`, `user_message`, `morning_plan`, `weekly_recap`, `initial_plan`, excluding the `plan_quality` free-hand overview path), importing the real `checkStatedFacts`/`buildFactCorrection` from `src/lib/fact-check.ts` and retrying once on mismatch exactly like `route.ts`. Confirmed this fixes `date-race-week`, `date-taper-messaging`, `pace-vdot52-post-run-easy`, and `uploaded-plan-week-sync`. Fixed `post-run-stat-interpretation`'s fixture data directly (23.0mi / 3 runs, not a loosened judge criterion). Also flagged (not yet fixed): most other `plan_quality` failures are because that path is a fully separate hand-written prompt disconnected from `training-plan.ts`/`plan-validation.ts` — production's actual plan-generation caps and rules don't apply there at all, which is the same root cause as the crosstraining bug below but not yet extended to peak-week volume, session count, or day-of-week checks.
+**Files changed:** `evals/run-evals.mjs`, `evals/fixtures/post-run-stat-interpretation.json`, `CLAUDE.md`
+
+## 2026-07-19 — Fix eval harness cross-training parity gap (not a Dean bug)
+
+**Type:** Bug Fix
+**Reported by:** Internal investigation, following up on the 62/73 baseline
+**User feedback:** N/A
+**Root cause:** `plan-100k-crosstraining` scored 4/10 because the `initial_plan`+`plan_quality` eval prompt free-hands a whole plan instead of going through `training-plan.ts`'s real generator, so it never picked up the "cross-training replaces a running day, it does not add to volume" rule that generator already enforces (`src/lib/training-plan.ts:631`). The fixture also had no structured `crosstraining_tools`/`crosstraining_days` fields, only a freeform notes string.
+**Fix / Change:** Added `crosstraining_tools`/`crosstraining_days` to the fixture and ported the same non-additive rule (verbatim logic) into `run-evals.mjs`'s `initial_plan`+`plan_quality` prompt branch. Now scores 10/10 — cycling correctly lands on Monday/Wednesday, 4 running days, back-to-back long runs by Week 7.
+**Files changed:** `evals/run-evals.mjs`, `evals/fixtures/plan-100k-crosstraining.json`, `CLAUDE.md`
+
 ## 2026-07-19 — Tighten LENGTH and FOLLOW-UP rules for multi-question replies
 
 **Type:** Improvement
