@@ -1,4 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation } from "@/lib/conversations";
 import { sendSMS } from "@/lib/linq";
@@ -427,7 +428,7 @@ export async function GET(request: Request) {
   // the redirect response is sent. Plain fire-and-forget gets killed on response.
   // Skip if the user didn't grant activity:read_all — API calls would fail.
   if (hasReadScope) {
-    after(async () => {
+    runAfter("strava-callback/import", async () => {
       try {
         // ~6 months of general activity history (1 page × 200) — enough for weekly
         // analytics (8-week lookback is the deepest we use).
@@ -523,7 +524,7 @@ export async function GET(request: Request) {
   if (!alreadyOnboarded) {
     const chatId = currentUser?.linq_chat_id as string | null;
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-    after(async () => {
+    runAfter("strava-callback/onboarding-continue", async () => {
       // Short delay so the Strava confirmation lands in the conversation first
       await new Promise((r) => setTimeout(r, 2000));
       try {

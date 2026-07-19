@@ -1,4 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation, insertConversationReturningId } from "@/lib/conversations";
 import { sendSMS, startTyping } from "@/lib/linq";
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
     }
   }
 
-  after(async () => {
+  runAfter("photon-webhook", async () => {
     try {
       await handleInboundMessage(senderPhone, body, hasAttachment, attachmentMimeType, messageId, chatId);
     } catch (err) {

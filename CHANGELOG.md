@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Guaranteed error boundary for all after() background work (runAfter)
+
+**Type:** Improvement
+**Reported by:** Internal observation (repo audit)
+**User feedback:** N/A
+**Root cause:** `after()` swallows anything thrown inside it — the route has already returned `{ ok: true }`, so a crash produces no failed response and, unless the body caught its own error, no log line and no Sentry event. This silent-failure class is documented in CLAUDE.md (the `reengagement_sent_at` incident, the userId-vs-user_id no-ops) but the protection was hand-rolled per call site: some sites had full try/catch + Sentry, two had console-only catches, and several (admin/changelog, sunday-recap batch loop, SESSION_SWAP, RTR_ADVANCE, the supabase-error-only sites) could still let a throw vanish.
+**Fix / Change:** New `src/lib/safe-after.ts` exports `runAfter(label, fn, tags?)`: wraps `after()` with a guaranteed catch that logs `[label] unhandled error in after()` and reports to Sentry tagged `after_label` (+ any extra tags). All 20 `after()` call sites across coach/respond (12), webhooks (strava/linq/photon), strava OAuth callback (2), onboarding/handle, sunday-recap, and admin/changelog now go through it; site-specific catch blocks (fallback SMS, correlation logging, trackEvent) are kept — the wrapper is the outer net. A new ESLint `no-restricted-imports` rule blocks importing `after` from `next/server` anywhere except safe-after.ts, so the class can't silently reappear.
+**Files changed:** `src/lib/safe-after.ts` (new), `src/__tests__/lib/safe-after.test.ts` (new), `eslint.config.mjs`, `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/webhooks/{strava,linq,photon}/route.ts`, `src/app/api/auth/strava/callback/route.ts`, `src/app/api/cron/sunday-recap/route.ts`, `src/app/api/admin/changelog/route.ts`
+
 ## 2026-07-18 — Check cron schedules into the repo (docs/crons.md)
 
 **Type:** Infra

@@ -1,4 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
+import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation, type MessageType } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
@@ -2358,7 +2359,7 @@ async function completeOnboarding(
       console.error("[onboarding] dry_run coach trigger failed:", err);
     }
   } else {
-    after(async () => {
+    runAfter("onboarding/initial-plan", async () => {
       try {
         await trackEvent(user.id, "onboarding_completed", { goal });
         await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
