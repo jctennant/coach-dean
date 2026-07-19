@@ -6,6 +6,7 @@ const truth: FactGroundTruth = {
   weekly_target: 25,
   week_distance_completed: 12.4,
   days_until_race: 38,
+  injuryHoldActive: false,
   unit: "mi",
 };
 
@@ -70,6 +71,22 @@ describe("checkStatedFacts", () => {
     const result = checkStatedFacts({ week_number: 10, weekly_target: 40 }, truth);
     expect(result.map((m) => m.fact).sort()).toEqual(["week_number", "weekly_target"]);
   });
+
+  it("flags plan_source: full_arc while an injury hold is active", () => {
+    const holdTruth: FactGroundTruth = { ...truth, injuryHoldActive: true };
+    expect(checkStatedFacts({ plan_source: "full_arc" }, holdTruth)).toEqual([
+      { fact: "plan_source", stated: "full_arc", actual: "return_to_run" },
+    ]);
+  });
+
+  it("allows plan_source: return_to_run while an injury hold is active", () => {
+    const holdTruth: FactGroundTruth = { ...truth, injuryHoldActive: true };
+    expect(checkStatedFacts({ plan_source: "return_to_run" }, holdTruth)).toEqual([]);
+  });
+
+  it("allows plan_source: full_arc when there is no active injury hold", () => {
+    expect(checkStatedFacts({ plan_source: "full_arc" }, truth)).toEqual([]);
+  });
 });
 
 describe("buildFactCorrection", () => {
@@ -92,5 +109,15 @@ describe("buildFactCorrection", () => {
     const kmTruth: FactGroundTruth = { ...truth, unit: "km" };
     const text = buildFactCorrection([{ fact: "weekly_target", stated: 60, actual: 40 }], kmTruth);
     expect(text).toContain("(km)");
+  });
+
+  it("gives a custom instruction for a plan_source mismatch instead of generic stated/actual wording", () => {
+    const text = buildFactCorrection(
+      [{ fact: "plan_source", stated: "full_arc", actual: "return_to_run" }],
+      { ...truth, injuryHoldActive: true }
+    );
+    expect(text).toContain("RETURN-TO-RUN CONTEXT");
+    expect(text).toContain("injury hold");
+    expect(text).not.toContain("your message says full_arc");
   });
 });

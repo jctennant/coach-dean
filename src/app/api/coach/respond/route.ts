@@ -209,8 +209,16 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                     type: ["number", "null"],
                     description: "Days until the athlete's race as stated in your message (e.g. '10 days out' → 10), else null.",
                   },
+                  plan_source: {
+                    type: ["string", "null"],
+                    enum: ["return_to_run", "full_arc", null],
+                    description:
+                      "If your message states a mileage figure for a specific FUTURE week (not this week), which context block that number came from: " +
+                      "\"return_to_run\" if it came from RETURN-TO-RUN CONTEXT (the only valid source while the athlete is on injury hold), " +
+                      "\"full_arc\" if it came from FULL TRAINING PLAN ARC data. Null if your message doesn't state a future week's mileage.",
+                  },
                 },
-                required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race"],
+                required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source"],
               },
             }
           : {}),
@@ -3127,6 +3135,7 @@ OUTPUT CONTRACT:
         : toDisplay((state?.weekly_mileage_target as number | null) ?? null),
       week_distance_completed: toDisplay(weekMileageSoFar),
       days_until_race: daysUntilRaceTruth,
+      injuryHoldActive: injuryHoldActiveForFacts,
       unit: isMetricUser ? "km" : "mi",
     };
     const mismatches = checkStatedFacts((deliverBlock.input as { stated_facts?: unknown }).stated_facts, factTruth);
@@ -7456,11 +7465,22 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
       const rtrRecoveryEstimate = injuryHoldSince && injuryBodyPart ? getRecoveryEstimate(injuryBodyPart, injurySeverity) : null;
       const daysToRaceForArc = raceDate ? Math.ceil((new Date(raceDate).getTime() - Date.now()) / (24 * 60 * 60 * 1000)) : null;
       const hasStoredArc = !!(storedPlanAllWeeks && storedPlanAllWeeks.length > 0);
+      // Deliberately NOT a per-week mileage table here: when the raw week-by-week numbers
+      // are present in the prompt, Claude has repeatedly quoted them as if they were the
+      // live plan despite the "reference only" label (see 2026-07-18 changelog). Collapsing
+      // to phase-sequence + single peak figure removes the raw material for that mistake
+      // instead of relying on Claude to self-censor data it can see.
+      const preInjuryPeakMileage = hasStoredArc
+        ? Math.max(...storedPlanAllWeeks!.map(w => w.mileage_target))
+        : null;
+      const preInjuryPhaseSequence = hasStoredArc
+        ? Array.from(new Set(storedPlanAllWeeks!.map(w => w.phase)))
+        : [];
       const fullArcContext = injuryHoldSince
         ? `\n\nRETURN-TO-RUN CONTEXT (athlete is on injury hold since ${injuryHoldSince} — use this, NOT any pre-injury arc numbers, to answer "what's the plan" questions):
 - Weeks injured so far: ${rtrRamp?.weeksInjured ?? "unknown"}
 - Once cleared, first week back: ${rtrRamp?.returnBaseMiles != null ? `~${umMi(rtrRamp.returnBaseMiles)} (${Math.round(rtrRamp.rampFactor * 100)}% of pre-injury ${umMi(preInjuryMileageTarget ?? 0)}/wk), then ramping back up week over week` : "will be calculated as a percentage of pre-injury volume once cleared — do not state a number yet"}
-${rtrRecoveryEstimate ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimate.minWeeks}-${rtrRecoveryEstimate.maxWeeks} weeks from when the hold started\n` : ""}${daysToRaceForArc != null ? `- Days until race: ${daysToRaceForArc}\n` : ""}${hasStoredArc ? `- PRE-INJURY ARC (reference only — shows what full training looked like before the injury, i.e. the shape the plan ramps back toward; these are NOT next week's numbers): ${storedPlanAllWeeks!.length} weeks total: ${storedPlanAllWeeks!.map(w => `Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}`).join(', ')}` : "- No pre-injury arc on file."}`
+${rtrRecoveryEstimate ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimate.minWeeks}-${rtrRecoveryEstimate.maxWeeks} weeks from when the hold started\n` : ""}${daysToRaceForArc != null ? `- Days until race: ${daysToRaceForArc}\n` : ""}${hasStoredArc ? `- PRE-INJURY ARC SHAPE (reference only, phases NOT numbers — the shape training ramps back toward once cleared; peak volume was ~${umMi(preInjuryPeakMileage ?? 0)}/wk during the ${preInjuryPhaseSequence[preInjuryPhaseSequence.length - 1] ?? "peak"} phase; this is NOT a week-by-week schedule and there is no specific mileage number to quote for any individual future week): ${preInjuryPhaseSequence.join(' → ')}` : "- No pre-injury arc on file."}`
         : hasStoredArc
           ? `\n\nFULL TRAINING PLAN ARC — ${storedPlanAllWeeks!.length} weeks total (use this to answer questions about specific weeks, key workouts, or overall plan structure; do NOT reproduce the full list in your response; when asked about a specific week like "what's week 2's speed workout", answer directly from this data — NEVER say you don't have access to the training plan):\n${storedPlanAllWeeks!.map(w => `  Week ${w.week_number} (${w.phase}): ${umMi(w.mileage_target)}, long run ~${umMi(w.long_run_target)}${w.key_workout ? ` — ${w.key_workout}` : ''}${w.key_workout_2 ? ` | 2nd quality: ${w.key_workout_2}` : ''}`).join('\n')}`
           : '';

@@ -22,6 +22,7 @@ export interface StatedFacts {
   weekly_target?: number | null;
   week_distance_completed?: number | null;
   days_until_race?: number | null;
+  plan_source?: "return_to_run" | "full_arc" | null;
 }
 
 export interface FactGroundTruth {
@@ -29,14 +30,16 @@ export interface FactGroundTruth {
   weekly_target: number | null;
   week_distance_completed: number | null;
   days_until_race: number | null;
+  /** true when the athlete is on an active injury hold — the only valid plan_source is "return_to_run". */
+  injuryHoldActive: boolean;
   /** "mi" or "km" — display unit, used only for correction-message wording. */
   unit: "mi" | "km";
 }
 
 export interface FactMismatch {
   fact: keyof StatedFacts;
-  stated: number;
-  actual: number;
+  stated: number | string;
+  actual: number | string;
 }
 
 function isNum(v: unknown): v is number {
@@ -78,6 +81,9 @@ export function checkStatedFacts(
       }
     }
   }
+  if (truth.injuryHoldActive && s.plan_source === "full_arc") {
+    mismatches.push({ fact: "plan_source", stated: "full_arc", actual: "return_to_run" });
+  }
   return mismatches;
 }
 
@@ -86,6 +92,7 @@ const FACT_LABELS: Record<keyof StatedFacts, (unit: string) => string> = {
   weekly_target: (unit) => `this week's mileage target (${unit})`,
   week_distance_completed: (unit) => `distance completed so far this week (${unit})`,
   days_until_race: () => "days until the race",
+  plan_source: () => "which context block a future-week mileage figure came from",
 };
 
 /**
@@ -94,8 +101,10 @@ const FACT_LABELS: Record<keyof StatedFacts, (unit: string) => string> = {
  * single corrected re-delivery.
  */
 export function buildFactCorrection(mismatches: FactMismatch[], truth: FactGroundTruth): string {
-  const lines = mismatches.map(
-    (m) => `- ${FACT_LABELS[m.fact](truth.unit)}: your message says ${m.stated}, but the actual value is ${m.actual}`
+  const lines = mismatches.map((m) =>
+    m.fact === "plan_source"
+      ? "- plan source: your message quotes a specific future week's mileage from the pre-injury FULL TRAINING PLAN ARC data, but the athlete is on an active injury hold — that arc is stale. Rebuild the plan-question answer using ONLY the RETURN-TO-RUN CONTEXT block (phase, return ramp %/mileage, recovery window). Do not quote any individual future week's mileage number."
+      : `- ${FACT_LABELS[m.fact](truth.unit)}: your message says ${m.stated}, but the actual value is ${m.actual}`
   );
   return (
     "DELIVERY REJECTED — fact check failed. Your message states facts that contradict the system's records:\n" +

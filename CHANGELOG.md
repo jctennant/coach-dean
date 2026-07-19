@@ -4,6 +4,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-18 — Fix Dean quoting stale pre-injury arc as a live plan on multi-week plan questions
+
+**Type:** Bug Fix
+**Reported by:** Internal investigation, requested by Jake after a test conversation
+**User feedback:** In a test conversation ("What is our high level plan for the next 2-3 weeks?"), Dean twice answered with a specific week-by-week mileage arc (wk4 deload ~26mi, wk5-6 peak 40→44mi, wk7-8 taper 31→11mi) pulled straight from the stale pre-injury `training_plans.weeks` data, even though the athlete was on an active injury hold and not running at all that week. Only after the athlete pushed back twice did Dean self-correct — and its third answer invented a completely different, ungrounded week-by-week progression not backed by any stored data.
+**Root cause:** Two gaps. (1) Neither of the two validators shipped earlier today (`response-gate.ts`'s date/repetition gate, `fact-check.ts`'s `stated_facts` equality check) covers this failure mode: `response-gate.ts` only gates proactive triggers (`morning_plan`/`weekly_recap`/`nightly_reminder`), not `user_message`; `fact-check.ts` only checks four current-state scalars (week number, weekly target, distance so far, days to race) — nothing about which context block a *future*-week mileage figure came from. (2) The underlying prompt correctly told Dean to use `RETURN-TO-RUN CONTEXT` (not the pre-injury arc) while on hold, but the pre-injury arc's raw per-week mileage table was still embedded inline in that very context block, just labeled "reference only" — Dean had the data in front of it and quoted it anyway.
+**Fix / Change:** Two changes, structural fix first per CLAUDE.md's decision order. (1) `RETURN-TO-RUN CONTEXT` no longer includes a per-week mileage table at all — it now collapses the pre-injury arc to a phase-name sequence + single peak-mileage figure, removing the raw material Dean could misquote as a live schedule. (2) As a backstop, `deliver_message`'s `stated_facts` gained a `plan_source: "return_to_run" | "full_arc" | null` field — Dean must self-report which context block a stated future-week mileage figure came from. `fact-check.ts` now rejects (with one corrective retry) any delivery where `plan_source: "full_arc"` is echoed while an injury hold is active, with a custom correction message directing Dean to rebuild the answer from `RETURN-TO-RUN CONTEXT` only.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/fact-check.ts`, `src/__tests__/lib/fact-check.test.ts`
+
 ## 2026-07-18 — Phase B: facts-required deliver_message schema + equality check with one corrective retry
 
 **Type:** Feature / Reliability
