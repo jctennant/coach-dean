@@ -164,8 +164,9 @@ The old discrete step flow is gone. Onboarding is now a **unified conversation**
 | `"awaiting_strava"` | Pause state — conversation halts while user connects Strava or replies "skip" |
 | `"awaiting_timezone"` | Post-plan — non-Strava users asked for city/state so reminders fire at correct local time |
 | `"awaiting_payment"` | Billing gate — user receives trial checkout link; plan accessible after signup |
-| `"awaiting_cadence"` | **Legacy** — immediately graduates user to `null` with `nightly_reminders` default |
 | `null` | Onboarding complete |
+
+(The legacy discrete-step states — `awaiting_cadence`, `awaiting_schedule`, `awaiting_goal_time`, etc. — were fully removed 2026-07-18 after a DB check confirmed no users held them.)
 
 **What Dean collects in the unified conversation (rough order):**
 1. Name + goal (combined in first message)
@@ -393,7 +394,7 @@ Before shipping anything that fires automatically at users (crons, triggers, new
 2. Use today's date in `YYYY-MM-DD` format
 3. If the change was driven by user feedback, **always paste it verbatim** — this is the most valuable part
 4. Be specific in Root Cause and Fix — future you will thank present you
-5. Never delete old entries
+5. Never delete old entries. Closed quarters are archived verbatim into `CHANGELOG-<year>Q<n>.md` files (linked from the top of `CHANGELOG.md`) so the working file stays scannable — archive the previous quarter when a new one starts.
 
 ### Example entry:
 

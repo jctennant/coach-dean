@@ -397,16 +397,6 @@ export async function POST(request: Request) {
   return await processCoachRequest(body, crypto.randomUUID());
 }
 
-// Step-to-question map for mid-onboarding post_run nudges.
-const ONBOARDING_STEP_QUESTIONS: Record<string, string> = {
-  awaiting_schedule: "Which days of the week work best for your training? (e.g. Mon, Wed, Fri, Sun)",
-  awaiting_race_date: "When's your race? A rough month and year works fine.",
-  awaiting_goal_time: "Do you have a time goal in mind?",
-  awaiting_anything_else: "Anything else I should know before I put your plan together?",
-  awaiting_ultra_background: "Have you run any ultras or very long trail races before?",
-  awaiting_injury_background: "Any injuries or physical limitations I should keep in mind?",
-};
-
 /**
  * Full plan rebuild triggered by a [REBUILD_PLAN] signal from Dean.
  *
@@ -945,16 +935,13 @@ async function handlePostRunOnboarding(
   }
 
   const activity = activityResult.data as Record<string, unknown> | null;
-  const onboardingStep = user.onboarding_step as string | null;
-  const pendingQuestion = onboardingStep ? (ONBOARDING_STEP_QUESTIONS[onboardingStep] ?? null) : null;
   const collectedData = (user.onboarding_data as Record<string, unknown> | null) ?? {};
   const collectedSummary = Object.keys(collectedData).length > 0
     ? `\n\nALREADY COLLECTED (do NOT re-ask for any of these — the athlete has told you already):\n${JSON.stringify(collectedData, null, 2)}`
     : "";
 
-  const closingInstruction = pendingQuestion
-    ? `After your brief reaction, ask: "${pendingQuestion}"`
-    : "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
+  const closingInstruction =
+    "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
 
   const onbIsMetric = (collectedData.preferred_units as string | undefined) === "metric";
   const unitsLine = onbIsMetric ? ` Use km and min/km for all distances and paces.` : " Use miles and min/mile for all distances and paces.";

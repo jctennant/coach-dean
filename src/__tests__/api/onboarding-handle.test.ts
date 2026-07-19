@@ -466,28 +466,6 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
   });
 });
 
-describe("POST /api/onboarding/handle — awaiting_cadence step (legacy transition)", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  // awaiting_cadence is a legacy state — new users never enter it (cadence is defaulted to
-  // nightly_reminders at plan generation time). Users stuck in this state are silently
-  // graduated: onboarding_step cleared, proactive_cadence set to nightly_reminders, no SMS.
-  it("silently graduates legacy awaiting_cadence users — clears state, no SMS sent", async () => {
-    mockTables({
-      users: {
-        data: onboardingUser({ onboarding_step: "awaiting_cadence", onboarding_data: { timezone_confirmed: true } }),
-        error: null,
-      },
-      training_profiles: { data: null, error: null },
-    });
-
-    await POST(makeRequest({ userId: "user-001", message: "morning works for me" }));
-
-    // No SMS should be sent — user is silently transitioned
-    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    expect(smsCalls).toHaveLength(0);
-  });
-});
 
 describe("POST /api/onboarding/handle — awaiting_payment step", () => {
   beforeEach(() => vi.clearAllMocks());
