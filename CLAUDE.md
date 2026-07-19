@@ -253,19 +253,21 @@ The GH Actions workflow runs `npm test` on every push. A commit that breaks test
 
 Each fixture in `evals/fixtures/*.json` represents a frozen user state + inbound SMS. The runner (`evals/run-evals.mjs`) builds a realistic coaching system prompt from the fixture data, calls Claude Sonnet for the response, then calls Claude Opus as the judge. Results go to `evals/results/` (gitignored).
 
-**23 fixtures across 7 categories:**
+**73 fixtures across 9 categories:**
 
 | Category | What it catches | Fixture count |
 |---|---|---|
-| `mileage_accuracy` | Wrong weekly total, hallucinated mileage, deload week target errors | 4 |
-| `pace_accuracy` | Wrong VDOT-derived pace, unit errors (min/km vs min/mile), tempo slower than easy | 4 |
+| `mileage_accuracy` | Wrong weekly total, hallucinated mileage, deload week target errors | 6 |
+| `pace_accuracy` | Wrong VDOT-derived pace, unit errors (min/km vs min/mile), tempo slower than easy | 6 |
 | `split_distance_accuracy` | Coach says "mile 5" on a 3.1mi run — km splits misread as mile splits | 3 |
-| `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 3 |
+| `date_week_correctness` | Wrong week number after plan regen, wrong phase name, race-week messaging missed | 8 |
 | `mileage_format` | Additive total format ("Total: 25mi + your 15mi already") | 2 |
-| `response_quality` | ⚠️ internal labels echoed verbatim, morning reminder says rest day when run was confirmed, morning plan attributes activity to wrong day; post-run opener praise; numbers cited without interpretation; strength block fires when it shouldn't; strength block absent when injury is active | 7 |
-| `plan_quality` | Plan structure: volume ramp, long run, quality sessions, safe progression — and for metric users, correct km units throughout | 1 |
+| `response_quality` | Internal labels echoed verbatim, injury handling (hold/clear/threshold), reminder correctness, post-run opener praise, numbers without interpretation, strength-block firing rules | 28 |
+| `plan_quality` | Plan structure: volume ramp, long run, quality sessions, safe progression, metric units, cross-training integration | 12 |
+| `plan_update` | Plan-change requests: lighter week, quality work, day-structure changes, long-run reschedules | 5 |
+| `uploaded_plan_accuracy` | User-uploaded plan: range sessions, week sync, recap math | 3 |
 
-**Current baseline (2026-04-02):** 22/22 passing, avg 9.5/10. No known failures. (Baseline pre-dates `plan-half-marathon-metric` and 4 post-run quality fixtures added 2026-05-24 — run evals to establish new baseline.)
+**Current baseline (2026-07-18, first run under the imported-modules runner):** 62/73 passing, avg 8.4/10. Weakest categories: `mileage_accuracy` 7.3 (3/6) and `plan_quality` 7.5 (10/12). Notable known failures worth their own follow-ups: `quality-morning-reminder-run` scores 0/10 (Dean outputs meta-commentary about whether to send a message instead of the message), `injury-shin-splints-mileage-spike` 0/10 ([INJURY_HOLD] fires on mild bilateral shin splints where ground truth calls it an overreaction), and `plan-100k-crosstraining` 4/10 (cycling days treated as additive to, not replacing, running days). The pre-2026-07-18 baseline (22/22, 9.5 on 2026-04-02) covered only the original 23 fixtures under the hand-mirrored prompt and is not comparable.
 
 ### When to update evals
 
