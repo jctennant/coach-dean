@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Recovery-week message text still restated the schedule despite instruction — remove the option entirely
+
+**Type:** Bug Fix
+**Reported by:** Internal testing, immediately after the "Structurally eliminate redundant/drifting recovery-week schedule text" fix below
+**User feedback:** N/A (caught in a live dry_run test right after deploying that fix)
+**Root cause:** That fix moved schedule *specifics* into schema-validated `slot_annotations`/`probe`, but the prompt still asked Claude for a prose "second text" describing the week and only told it *not* to restate the day list — a phrasing-shaped instruction, exactly what this file warns about. Claude ignored it: a live test produced a message that walked through every single day by name and activity, AND separately suggested Sunday as a test-probe day in the same sentence where it had already stated Sunday's fixed activity was pool running — a self-contradiction inside Claude's own free text, not even a mismatch with the separate digest bubble.
+**Fix / Change:** Removed the "second text" option and the schedule-description ask entirely. `message` is now specified as exactly one short text, explicitly forbidden from containing any day name, activity name, or duration — all of that must go through `slot_annotations`/`probe` instead, which are schema-validated and can't drift. This doesn't rely on Claude choosing to comply with a stylistic preference; it removes the reason for schedule content to appear in free text at all.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-07-20 — Structurally eliminate redundant/drifting recovery-week schedule text
 
 **Type:** Bug Fix

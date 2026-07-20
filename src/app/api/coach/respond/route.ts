@@ -7840,16 +7840,14 @@ Keep the whole thing under 480 characters.`;
               return `${s.day} ${s.date} · ${label}${detail ? `\n  Reference detail for ${label} (put the specifics in that slot's slot_annotations.description, don't just say "${label}"): ${detail}` : ""}`;
             }).join("\n");
             const probeRule = restDaySlots.length > 0
-              ? `Judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored. If warranted, report it via the tool's \`probe\` field (day + note), with day set to one of these open day(s), which have no fixed activity assigned: ${restDaySlots.map(s => `${s.day} ${s.date}`).join(", ")}. Only include \`probe\` if it's warranted; don't force one every week.`
-              : `Every day this week already has a fixed cross-training or strength assignment (no open day) — do NOT include a \`probe\` this week regardless of how check-ins have gone; note in your message instead that you'll reassess for a probe next week.`;
+              ? `Separately (not in your message text — via the tool's \`probe\` field only), judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored. If warranted, set \`probe\` to { day, note }, with day set to one of these open day(s), which have no fixed activity assigned: ${restDaySlots.map(s => `${s.day} ${s.date}`).join(", ")}. Only include \`probe\` if it's warranted; don't force one every week.`
+              : `Every day this week already has a fixed cross-training or strength assignment (no open day) — do NOT include a \`probe\` this week regardless of how check-ins have gone.`;
             return `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
 THIS WEEK'S RECOVERY SCHEDULE IS ALREADY DECIDED — DO NOT INVENT OR REORDER WHICH DAYS GET WHICH ACTIVITY:
 ${slotLines}
-The full day-by-day schedule above (plus your slot_annotations detail and any probe) is sent to the athlete automatically as ONE separate text right after yours — that is the athlete's single view of the week's schedule. Your own message text must NOT repeat it: no day-by-day walkthrough, not even a single sentence like "Mon is X, then Tue is Y, Wed is Z." Your message is for framing only — acknowledgment, why this week looks the way it does, encouragement.
-Do NOT prescribe running sessions this week.
-First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery. Keep the shin/injury routine mention to one sentence, no day list.
-Second text (only if you have something beyond framing to add — e.g. the probe rationale, or general encouragement; it's fine to skip and send one text if there's nothing more to say): ${probeRule}
-If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
+The schedule above, with your slot_annotations duration/effort detail and any probe, is sent to the athlete automatically as ONE separate text right after yours — it is the athlete's ONLY view of the week's schedule. Your \`message\` argument is not for schedule content at all: it must contain ZERO day names (no "Mon", "Tuesday", "Sat", etc.), ZERO activity names (no "bike", "pool running", "elliptical", "strength"), and ZERO durations. If you catch yourself about to name a day or activity in \`message\`, stop — that content belongs only in \`slot_annotations\`/\`probe\`, never in the text you write.
+\`message\` is exactly ONE short text (not two): acknowledge the week, name why this week looks the way it does (healing, recovery), and close with brief encouragement. Nothing about specific days or activities. ${probeRule}
+If a probe is included and completed pain-free, next Sunday's recap will rebuild the full plan from a gradual return-to-running ramp — you don't need to state that this week.
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST].
 Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`;
           })()
