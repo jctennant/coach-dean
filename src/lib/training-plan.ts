@@ -1423,15 +1423,21 @@ export function formatRecoveryWeekDigest(
   probe?: { day: string; note: string } | null,
 ): string {
   const annotationByDay = new Map((annotations ?? []).map(a => [a.day, a]));
+  // Two-line-per-entry layout (day/activity, then a marked detail line) scans far easier
+  // on a phone than one long line with nested parentheses — annotation text is athlete-
+  // facing shorthand (e.g. "40-50 min Z2"), not the full CROSS_TRAINING_WORKOUTS reference
+  // paragraph, so it stays short enough for this to read as one visual unit. Using a
+  // leading "›" (not just indentation) keeps the sub-line visually distinct even on SMS
+  // clients that collapse leading whitespace.
   const lines = skeleton
     .filter(s => s.type !== "rest" || (probe && s.day === probe.day))
-    .map(s => {
+    .flatMap(s => {
       if (s.type === "rest") {
-        return `${s.day} ${s.date} — Test jog${probe!.note ? ` (${probe!.note})` : ""}`;
+        return probe!.note ? [`${s.day} ${s.date} — Test jog`, `   › ${probe!.note}`] : [`${s.day} ${s.date} — Test jog`];
       }
       const label = s.type === "strength" ? "Strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "Cross-training");
       const detail = annotationByDay.get(s.day)?.description;
-      return `${s.day} ${s.date} — ${label}${detail ? ` (${detail})` : ""}`;
+      return detail ? [`${s.day} ${s.date} — ${label}`, `   › ${detail}`] : [`${s.day} ${s.date} — ${label}`];
     });
   return `This week's recovery plan:\n${lines.join("\n")}`;
 }

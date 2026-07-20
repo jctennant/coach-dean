@@ -262,7 +262,7 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                     description: {
                       type: "string",
                       description: mode === "recovery_annotations"
-                        ? "The duration/effort specifics for this cross-training or strength day (e.g. \"40-50 min Z2, cadence 85-95 rpm\"), pulled from the reference detail given in this prompt. No day/modality restatement."
+                        ? "A SHORT athlete-facing cue for this cross-training or strength day, distilled from the reference detail given in this prompt — duration + one effort cue is enough, e.g. \"40-50 min, easy conversational effort\" or \"35-45 min moderate\". Under 50 characters. Do not paste the full reference paragraph verbatim, do not nest parentheses, do not restate the day/modality name."
                         : "A short athlete-facing cue (terrain, effort, recovery framing) — no distance number, that's already fixed by the skeleton.",
                     },
                   },
@@ -7903,7 +7903,7 @@ Keep the whole thing under 480 characters.`;
             const slotLines = activeSlots.map(s => {
               const label = s.type === "strength" ? "strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "cross-training");
               const detail = s.type === "cross_train" && s.modality ? CROSS_TRAINING_WORKOUTS[s.modality] : null;
-              return `${s.day} ${s.date} · ${label}${detail ? `\n  Reference detail for ${label} (put the specifics in that slot's slot_annotations.description, don't just say "${label}"): ${detail}` : ""}`;
+              return `${s.day} ${s.date} · ${label}${detail ? `\n  Reference detail for ${label} — distill this into a SHORT (<50 char) slot_annotations.description, don't paste it verbatim or nest parentheses: ${detail}` : ""}`;
             }).join("\n");
             const probeRule = restDaySlots.length > 0
               ? `Separately (not in your message text — via the tool's \`probe\` field only), judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored. If warranted, set \`probe\` to { day, note }, with day set to one of these open day(s), which have no fixed activity assigned: ${restDaySlots.map(s => `${s.day} ${s.date}`).join(", ")}. Only include \`probe\` if it's warranted; don't force one every week.`

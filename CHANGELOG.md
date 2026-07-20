@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Make the recovery-week digest more scannable; fix current_week getting inflated by repeated manual test triggers
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback
+**User feedback:** "think it looks a bit better. Is there a way to structure cleaner so that it is more easily scannable? noting that it keeps incrementing the week...not sure if that is intended."
+**Root cause:** (1) `slot_annotations.description` was asking Claude for "duration/effort specifics" with no length or format guidance, so it was pasting large chunks of the `CROSS_TRAINING_WORKOUTS` reference paragraph (meant for prose, not a table cell) straight into the digest — producing lines like "Tue 7/21 — Bike (40-50 min Z2 (HR 139-153 bpm, conversational effort), cadence 85-95 rpm)" with nested parentheses. (2) The week-number increase the user noticed was real, not cosmetic: `weekly_recap` is designed to fire once per real week (normally via the Sunday cron) and permanently writes `current_week + 1` back to `training_state` every time it runs. My own repeated manual test sends earlier in this session advanced this athlete's actual `current_week` from 3 to 9 — past their 8-week plan's arc entirely — which is a real account-state bug I introduced through testing, not a code defect.
+**Fix / Change:** `formatRecoveryWeekDigest` now renders each entry as two lines (day/activity, then a "›"-prefixed detail line) instead of one line with parenthetical nesting. The `slot_annotations.description` schema and prompt now explicitly ask for a distilled cue under 50 characters ("40-50 min, easy conversational effort") instead of the full reference paragraph, with an explicit "no nested parentheses" instruction. Separately, reset this athlete's `training_state.current_week` back to 3 (its correct pre-testing value) after confirming with the user — a one-off data fix, not a code change, since the underlying "recap advances the week counter" behavior is correct for its actual once-per-week production usage.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-07-20 — Add a retry gate for recovery-week schedule-leak (instruction alone still wasn't reliable)
 
 **Type:** Bug Fix
