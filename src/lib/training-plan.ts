@@ -1408,16 +1408,30 @@ export function computeRecoveryWeekSkeleton(params: {
 
 /**
  * Deterministically format a recovery week skeleton into a plain-text SMS bubble — no LLM
- * call, same reliability guarantee as formatWeeklyPlanDigest. No unit conversion needed:
- * there are no distances here, only modality names — durations/effort live in the fixed
- * CROSS_TRAINING_WORKOUTS text Claude references in its own prose, not in this compact list.
+ * call, same reliability guarantee as formatWeeklyPlanDigest. This is now the SINGLE view of
+ * the week's schedule the athlete sees: Claude's own prose is constrained (see
+ * injuryHoldInstruction in route.ts) to framing/purpose only, not a day-by-day restatement,
+ * so this bubble doesn't get a second, potentially-divergent copy of the same schedule.
+ * `annotations` (Claude's schema-validated `slot_annotations`, day-matched) supply the
+ * duration/effort specifics per day in place of a bare modality name. `probe`, when present,
+ * is Claude's test-run-probe choice — already validated in route.ts to fall on one of the
+ * skeleton's actual rest days, so it can only ever add a row, never contradict an existing one.
  */
-export function formatRecoveryWeekDigest(skeleton: RecoveryWeekSlot[]): string {
+export function formatRecoveryWeekDigest(
+  skeleton: RecoveryWeekSlot[],
+  annotations?: Array<{ day: string; description?: string }> | null,
+  probe?: { day: string; note: string } | null,
+): string {
+  const annotationByDay = new Map((annotations ?? []).map(a => [a.day, a]));
   const lines = skeleton
-    .filter(s => s.type !== "rest")
+    .filter(s => s.type !== "rest" || (probe && s.day === probe.day))
     .map(s => {
+      if (s.type === "rest") {
+        return `${s.day} ${s.date} — Test jog${probe!.note ? ` (${probe!.note})` : ""}`;
+      }
       const label = s.type === "strength" ? "Strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "Cross-training");
-      return `${s.day} ${s.date} — ${label}`;
+      const detail = annotationByDay.get(s.day)?.description;
+      return `${s.day} ${s.date} — ${label}${detail ? ` (${detail})` : ""}`;
     });
   return `This week's recovery plan:\n${lines.join("\n")}`;
 }

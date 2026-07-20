@@ -103,7 +103,12 @@ const REHAB_TOOL = {
 //   are already fixed by that skeleton — Claude only supplies descriptive content
 //   (`slot_annotations`) per slot, so it can no longer invent days, dates, or a mileage total
 //   that diverges from what the skeleton already decided.
-type DeliverMessageMode = "none" | "plan_facts" | "skeleton_annotations";
+// - "recovery_annotations": weekly_recap when the athlete is on an injury hold and
+//   computeRecoveryWeekSkeleton() built the week's cross-training/strength skeleton. Same
+//   pattern as skeleton_annotations (day/date/modality fixed, Claude only adds description
+//   content) plus an optional `probe`, so a test-run-probe day can only ever land on one of
+//   the skeleton's actual open days — never one already assigned a fixed activity.
+type DeliverMessageMode = "none" | "plan_facts" | "skeleton_annotations" | "recovery_annotations";
 
 function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = false) {
   const illustratedIds = illustratedExerciseIds();
@@ -124,6 +129,15 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
         ? " You must also report `slot_annotations`: one entry per non-rest slot in the fixed week skeleton given " +
           "to you in this prompt. The skeleton already decided every slot's day, date, type, and distance — do not " +
           "restate or alter those. `slot_annotations` is only where you add pace, purpose, and framing content."
+        : mode === "recovery_annotations"
+        ? " You must also report `slot_annotations`: one entry per non-rest slot in the fixed recovery skeleton given " +
+          "to you in this prompt, with `description` giving the duration/effort specifics for that day (pulled from " +
+          "the reference detail given) — day/date/modality are already fixed, do not restate or alter those. Your " +
+          "`message` text should NOT walk through the schedule day by day — that full schedule (including your " +
+          "`slot_annotations` detail) is sent to the athlete automatically as a separate text; your message is only " +
+          "for framing/acknowledgment/purpose. If, and only if, a test-run probe is warranted this week, also report " +
+          "`probe`: { day, note } with day set to one of the skeleton's open (no fixed activity) day(s) listed in " +
+          "this prompt — omit `probe` entirely if no probe is warranted or no open day exists."
         : ""),
     input_schema: {
       type: "object" as const,
@@ -223,13 +237,13 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
               },
             }
           : {}),
-        ...(mode === "skeleton_annotations"
+        ...(mode === "skeleton_annotations" || mode === "recovery_annotations"
           ? {
               slot_annotations: {
                 type: "array" as const,
                 description:
                   "One entry per non-rest slot in the pre-built week skeleton given to you above, in any order. " +
-                  "Day/date/type/distance are already fixed — do not restate or alter them here.",
+                  "Day/date/type/distance (or modality) are already fixed — do not restate or alter them here.",
                 items: {
                   type: "object" as const,
                   properties: {
@@ -247,17 +261,44 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                     },
                     description: {
                       type: "string",
-                      description: "A short athlete-facing cue (terrain, effort, recovery framing) — no distance number, that's already fixed by the skeleton.",
+                      description: mode === "recovery_annotations"
+                        ? "The duration/effort specifics for this cross-training or strength day (e.g. \"40-50 min Z2, cadence 85-95 rpm\"), pulled from the reference detail given in this prompt. No day/modality restatement."
+                        : "A short athlete-facing cue (terrain, effort, recovery framing) — no distance number, that's already fixed by the skeleton.",
                     },
                   },
                   required: ["day"],
                 },
               },
+              ...(mode === "recovery_annotations"
+                ? {
+                    probe: {
+                      type: "object" as const,
+                      description:
+                        "Only include if a test-run probe is warranted this week. `day` MUST be one of the skeleton's " +
+                        "open (rest) day(s) listed in this prompt — never a day already assigned a fixed activity.",
+                      properties: {
+                        day: {
+                          type: "string",
+                          description: "Must exactly match one of the skeleton's open (rest) days.",
+                        },
+                        note: {
+                          type: "string",
+                          description: "Short athlete-facing detail, e.g. \"15-20 min easy jog, stop at any pain\".",
+                        },
+                      },
+                      required: ["day", "note"],
+                    },
+                  }
+                : {}),
             }
           : {}),
       },
       required: [
-        ...(mode === "plan_facts" ? ["message", "plan"] : mode === "skeleton_annotations" ? ["message", "slot_annotations"] : ["message"]),
+        ...(mode === "plan_facts"
+          ? ["message", "plan"]
+          : mode === "skeleton_annotations" || mode === "recovery_annotations"
+          ? ["message", "slot_annotations"]
+          : ["message"]),
         ...(includeStatedFacts ? ["stated_facts"] : []),
       ],
     },
@@ -2092,6 +2133,12 @@ Apply this to bias which metric lens you pick and what advice you give proactive
   // not). Replaces having Claude free-hand which days get cross-training during hold (see
   // computeRecoveryWeekSkeleton in training-plan.ts).
   let recoveryWeekSkeleton: RecoveryWeekSlot[] | null = null;
+  // Claude's per-slot duration/effort narration for recoveryWeekSkeleton, plus its optional
+  // test-run-probe choice — captured below once the recovery_annotations tool call comes
+  // back, read by the weekly_recap after() block to build the single deterministic recovery
+  // digest bubble (see formatRecoveryWeekDigest).
+  let recoverySlotAnnotations: Array<{ day: string; description?: string }> | null = null;
+  let recoveryProbe: { day: string; note: string } | null = null;
   if (
     trigger === "weekly_recap" &&
     !!(state?.injury_hold_since as string | null) &&
@@ -2935,6 +2982,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const isPlanTrigger = trigger === "initial_plan" || trigger === "weekly_recap";
   const deliverMessageMode: DeliverMessageMode =
     trigger === "weekly_recap" && arcWeekSkeleton ? "skeleton_annotations" :
+    trigger === "weekly_recap" && recoveryWeekSkeleton ? "recovery_annotations" :
     isPlanTrigger ? "plan_facts" : "none";
   // Phase B (facts-required deliver_message): triggers with reliable week/mileage/race
   // context must echo the facts their message asserts (`stated_facts`) so the system can
@@ -3331,6 +3379,40 @@ OUTPUT CONTRACT:
     }
   }
 
+  // Same validation for the recovery-week path: confirm slot_annotations only reference
+  // real skeleton days, and that any probe day is actually one of the skeleton's open (rest)
+  // days — this is what structurally prevents the probe from landing on a day already
+  // assigned a fixed cross-training/strength activity (the exact contradiction this
+  // mechanism replaced free-text prose to fix).
+  if (deliverBlock && rawText && deliverMessageMode === "recovery_annotations" && recoveryWeekSkeleton) {
+    const input = deliverBlock.input as { slot_annotations?: unknown; probe?: unknown };
+    const activeDays = new Set(recoveryWeekSkeleton.filter(s => s.type !== "rest").map(s => s.day));
+    const restDays = new Set(recoveryWeekSkeleton.filter(s => s.type === "rest").map(s => s.day));
+    if (Array.isArray(input.slot_annotations)) {
+      const invalidDays = (input.slot_annotations as Array<{ day?: unknown }>)
+        .map(a => (typeof a?.day === "string" ? a.day : null))
+        .filter((d): d is string => d !== null && !activeDays.has(d as RecoveryWeekSlot["day"]));
+      if (invalidDays.length > 0) {
+        log.warn("recovery slot_annotations referenced a day not in the fixed skeleton", { trigger, invalidDays });
+        void trackEvent(userId, "recovery_week_slot_annotation_day_mismatch", { invalidDays });
+      }
+      recoverySlotAnnotations = (input.slot_annotations as Array<{ day?: unknown; description?: unknown }>)
+        .filter((a): a is { day: string; description?: string } => typeof a?.day === "string" && activeDays.has(a.day as RecoveryWeekSlot["day"]))
+        .map(a => ({ day: a.day, ...(typeof a.description === "string" ? { description: a.description } : {}) }));
+    } else {
+      log.warn("weekly_recap recovery mode delivered without usable slot_annotations", { trigger });
+    }
+    const probe = input.probe as { day?: unknown; note?: unknown } | undefined;
+    if (probe && typeof probe.day === "string" && typeof probe.note === "string") {
+      if (restDays.has(probe.day as RecoveryWeekSlot["day"])) {
+        recoveryProbe = { day: probe.day, note: probe.note };
+      } else {
+        log.warn("recovery probe day was not an open skeleton day — dropping", { trigger, probeDay: probe.day });
+        void trackEvent(userId, "recovery_week_probe_day_invalid", { probeDay: probe.day });
+      }
+    }
+  }
+
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
@@ -3565,7 +3647,7 @@ OUTPUT CONTRACT:
   if (trigger === "weekly_recap" && arcWeekSkeleton) {
     parts.push(formatWeeklyPlanDigest(arcWeekSkeleton, arcSlotAnnotations, isMetricUser));
   } else if (trigger === "weekly_recap" && recoveryWeekSkeleton) {
-    parts.push(formatRecoveryWeekDigest(recoveryWeekSkeleton));
+    parts.push(formatRecoveryWeekDigest(recoveryWeekSkeleton, recoverySlotAnnotations, recoveryProbe));
   }
 
   // For initial_plan, hard-cap at 2 SMS bubbles regardless of how many blank-line
@@ -7755,18 +7837,18 @@ Keep the whole thing under 480 characters.`;
             const slotLines = activeSlots.map(s => {
               const label = s.type === "strength" ? "strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "cross-training");
               const detail = s.type === "cross_train" && s.modality ? CROSS_TRAINING_WORKOUTS[s.modality] : null;
-              return `${s.day} ${s.date} · ${label}${detail ? `\n  Reference detail for ${label} (pull specifics from this, don't just say "${label}"): ${detail}` : ""}`;
+              return `${s.day} ${s.date} · ${label}${detail ? `\n  Reference detail for ${label} (put the specifics in that slot's slot_annotations.description, don't just say "${label}"): ${detail}` : ""}`;
             }).join("\n");
             const probeRule = restDaySlots.length > 0
-              ? `Judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored (e.g. "${restDaySlots[restDaySlots.length - 1]!.day}: Easy 15–20 min jog — run at easy effort and stop immediately if any pain. Think of it as a check-in, not a workout."). It MUST land on one of these open day(s), which have no fixed activity assigned: ${restDaySlots.map(s => `${s.day} ${s.date}`).join(", ")}. Do NOT place it on a day already assigned a cross-training or strength activity above — that contradicts the schedule the athlete receives separately. Only add a probe if it's warranted; don't force one every week.`
-              : `Every day this week already has a fixed cross-training or strength assignment (no open day) — do NOT add a test-run probe this week regardless of how check-ins have gone; note instead that you'll reassess for a probe next week.`;
+              ? `Judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored. If warranted, report it via the tool's \`probe\` field (day + note), with day set to one of these open day(s), which have no fixed activity assigned: ${restDaySlots.map(s => `${s.day} ${s.date}`).join(", ")}. Only include \`probe\` if it's warranted; don't force one every week.`
+              : `Every day this week already has a fixed cross-training or strength assignment (no open day) — do NOT include a \`probe\` this week regardless of how check-ins have gone; note in your message instead that you'll reassess for a probe next week.`;
             return `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
 THIS WEEK'S RECOVERY SCHEDULE IS ALREADY DECIDED — DO NOT INVENT OR REORDER WHICH DAYS GET WHICH ACTIVITY:
 ${slotLines}
-A compact day-by-day list of the above is sent automatically as a separate text after yours — do NOT restate the full day/date/activity list yourself, not even as a sentence like "Mon is X, Wed is Y, Thu is Z." In your own two texts, describe the week's shape in prose using the reference details above for specificity (duration/effort, not just the activity name), without repeating every single day.
+The full day-by-day schedule above (plus your slot_annotations detail and any probe) is sent to the athlete automatically as ONE separate text right after yours — that is the athlete's single view of the week's schedule. Your own message text must NOT repeat it: no day-by-day walkthrough, not even a single sentence like "Mon is X, then Tue is Y, Wed is Z." Your message is for framing only — acknowledgment, why this week looks the way it does, encouragement.
 Do NOT prescribe running sessions this week.
-First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery.
-Second text: give the specifics of the week's cross-training/strength load (using the reference detail above) without listing every day. ${probeRule}
+First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery. Keep the shin/injury routine mention to one sentence, no day list.
+Second text (only if you have something beyond framing to add — e.g. the probe rationale, or general encouragement; it's fine to skip and send one text if there's nothing more to say): ${probeRule}
 If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST].
 Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`;
