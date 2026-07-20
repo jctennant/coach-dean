@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-19 — Fix injury-hold weekly recap: schedule/prose contradiction, "deload" mislabel, generic cross-training descriptions
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "It seems contradictory. Schedule doesn't have any running in it but description/prose does. Also don't think I'm necessarily in a deload phase - I'm just recovering from shin splits. Finally, I think it would be nice to give actually descriptions of what the schedule is vs just saying Bike."
+**Root cause:** Three separate gaps in the `weekly_recap` injury-hold path in `coach/respond/route.ts`: (1) The deterministic recovery schedule bubble (`formatRecoveryWeekDigest`, built from `computeRecoveryWeekSkeleton`) is the only accurate schedule, but the `injuryHoldInstruction` prompt let Claude freely judge whether to add a "test-run probe" day in its own prose without knowing which days were already fixed to a cross-training/strength activity — with 6 of 7 days assigned, Claude picked an already-occupied day (Tue = Bike in the digest, but "test jog" in prose), producing a direct contradiction between the two SMS bubbles. (2) `macroPositionContext` unconditionally surfaces the underlying plan's arc phase ("Week 3 of 8, deload phase") with no awareness of `injuryHoldSince` — a scheduled deload and an unplanned injury pause are different things, and stating both together reads as contradictory. (3) The injury-hold prompt block never referenced `CROSS_TRAINING_WORKOUTS` (which already has detailed duration/effort prescriptions per modality, e.g. pool running, elliptical) — it only told Claude to "narrate the fixed cross-training/strength schedule," so Claude fell back to just repeating the bare modality name.
+**Fix / Change:** In `buildUserMessage`'s `weekly_recap` case: `macroPositionContext` now checks `injuryHoldSince` and, when set, drops all plan-phase language ("deload phase" etc.) in favor of injury-recovery framing. `injuryHoldInstruction`'s skeleton branch now computes `restDaySlots` (days with no fixed activity) and constrains any test-run probe to land only on one of those days — if none exist, Claude is told explicitly not to add a probe that week. The same block now injects each assigned slot's `CROSS_TRAINING_WORKOUTS[modality]` text as "reference detail" so Claude's prose can give real duration/effort specifics per activity instead of a bare label, and prose is barred from restating the full day-by-day list at all (that's the digest bubble's job).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-07-19 — Wire Phase B fact gate into the eval runner; fix a bad fixture ground-truth value
 
 **Type:** Bug Fix

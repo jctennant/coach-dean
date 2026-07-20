@@ -7719,6 +7719,15 @@ Keep the whole thing under 480 characters.`;
           daysToRace = Math.round((race.getTime() - today.getTime()) / 86400000);
         }
         const raceClause = daysToRace !== null && daysToRace >= 0 ? ` — ${daysToRace} days to race day` : "";
+        // Injury hold overrides the plan's phase label entirely: the underlying arc phase
+        // (e.g. "deload") describes the scheduled progression, not why this week has 0
+        // running miles. Stating both together reads as contradictory to the athlete (a
+        // deload is a planned pullback; this is an unplanned injury pause). Report the week
+        // position without the phase word, and skip the phase-transition rule — it's not
+        // happening this week regardless of what the underlying arc says.
+        if (injuryHoldSince) {
+          return `TRAINING ARC POSITION: Week ${currentWeekNum} of ${totalWeeks}${raceClause}. The underlying plan phase is "${currentPhase}", but do NOT call this a "deload" or name any plan phase this week — the athlete is on an injury hold, not a scheduled pullback. Reference the week position framed as injury recovery instead (e.g. "Week ${currentWeekNum} of ${totalWeeks}, still working back from the ${injuryBodyPart ?? "injury"}${raceClause}").\n\n`;
+        }
         const phaseEndLine = phaseEnding
           ? `\n<rule>PHASE TRANSITION: Last week was the FINAL week of the ${justCompletedPhase} phase — this week begins the ${currentPhase} phase. Name the transition explicitly in your first text (e.g. "this wraps the base phase — build phase starts next week"). Don't bury it.</rule>`
           : "";
@@ -7740,16 +7749,28 @@ Keep the whole thing under 480 characters.`;
       // Injury hold overrides normal progression entirely — applies regardless of plan type.
       const injuryHoldInstruction = injuryHoldSince
         ? (recoveryWeekSkeleton
-        ? `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
+        ? (() => {
+            const activeSlots = recoveryWeekSkeleton.filter(s => s.type !== "rest");
+            const restDaySlots = recoveryWeekSkeleton.filter(s => s.type === "rest");
+            const slotLines = activeSlots.map(s => {
+              const label = s.type === "strength" ? "strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "cross-training");
+              const detail = s.type === "cross_train" && s.modality ? CROSS_TRAINING_WORKOUTS[s.modality] : null;
+              return `${s.day} ${s.date} · ${label}${detail ? `\n  Reference detail for ${label} (pull specifics from this, don't just say "${label}"): ${detail}` : ""}`;
+            }).join("\n");
+            const probeRule = restDaySlots.length > 0
+              ? `Judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored (e.g. "${restDaySlots[restDaySlots.length - 1]!.day}: Easy 15–20 min jog — run at easy effort and stop immediately if any pain. Think of it as a check-in, not a workout."). It MUST land on one of these open day(s), which have no fixed activity assigned: ${restDaySlots.map(s => `${s.day} ${s.date}`).join(", ")}. Do NOT place it on a day already assigned a cross-training or strength activity above — that contradicts the schedule the athlete receives separately. Only add a probe if it's warranted; don't force one every week.`
+              : `Every day this week already has a fixed cross-training or strength assignment (no open day) — do NOT add a test-run probe this week regardless of how check-ins have gone; note instead that you'll reassess for a probe next week.`;
+            return `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
 THIS WEEK'S RECOVERY SCHEDULE IS ALREADY DECIDED — DO NOT INVENT OR REORDER WHICH DAYS GET WHICH ACTIVITY:
-${recoveryWeekSkeleton.filter(s => s.type !== "rest").map(s => `${s.day} ${s.date} · ${s.type === "strength" ? "strength + mobility" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "cross-training")}`).join("\n")}
-Describe these slots across your two texts in prose (not a day-by-day list) — the day/modality assignment above is fixed and already validated against the athlete's injury-safe options; you only add purpose and pain-threshold framing.
+${slotLines}
+A compact day-by-day list of the above is sent automatically as a separate text after yours — do NOT restate the full day/date/activity list yourself, not even as a sentence like "Mon is X, Wed is Y, Thu is Z." In your own two texts, describe the week's shape in prose using the reference details above for specificity (duration/effort, not just the activity name), without repeating every single day.
 Do NOT prescribe running sessions this week.
 First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery.
-Second text: narrate the fixed cross-training/strength schedule above. Judge based on how the week's check-ins have gone whether a gentle test-run probe fits toward the end of the week — short, easy, pain-monitored (e.g. "Thu: Easy 15–20 min jog — run at easy effort and stop immediately if any pain. Think of it as a check-in, not a workout."). Only add a probe if it's warranted; don't force one every week.
+Second text: give the specifics of the week's cross-training/strength load (using the reference detail above) without listing every day. ${probeRule}
 If they complete test runs pain-free, note that next Sunday you'll rebuild the full plan from a gradual return-to-running ramp.
 Do NOT prescribe a weekly mileage total. Do NOT output [SESSION_LIST].
-Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`
+Tone: supportive, not alarmed. Injuries are part of training. Focus on what they CAN do.</rule>\n`;
+          })()
         : `\n<rule>INJURY HOLD ACTIVE (since ${injuryHoldSince}) — THIS OVERRIDES ALL NORMAL PROGRESSION:
 Do NOT prescribe running sessions this week. The athlete is on an injury hold.
 First text: briefly acknowledge the week while staying positive — mention cross-training they did or any progress (even "holding steady"), then frame this week as continued recovery.
