@@ -3216,6 +3216,72 @@ OUTPUT CONTRACT:
     }
   }
 
+  // ─── Recovery-week schedule-leak gate ──────────────────────────────────────────
+  // recovery_annotations mode instructs Claude to keep `message` free of day/activity
+  // names (all specifics go through schema-validated slot_annotations/probe instead) —
+  // but that instruction alone proved unreliable in testing (Claude sometimes narrated
+  // the full day-by-day schedule in `message` anyway, occasionally even contradicting its
+  // own `probe` choice within that same free text). Reject and retry once on a leak,
+  // mirroring the Phase B fact gate's shape above. Fail-open on a second leak.
+  if (deliverBlock && deliverMessageMode === "recovery_annotations" && recoveryWeekSkeleton) {
+    const activeSlots = recoveryWeekSkeleton.filter(s => s.type !== "rest");
+    const labelTerms = Array.from(new Set(
+      activeSlots
+        .map(s => (s.type === "strength" ? "strength" : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? null)))
+        .filter((t): t is string => !!t)
+    ));
+    const dayTerms = ["Mon", "Monday", "Tue", "Tues", "Tuesday", "Wed", "Wednesday", "Thu", "Thur", "Thurs", "Thursday", "Fri", "Friday", "Sat", "Saturday", "Sun", "Sunday"];
+    const leakPattern = new RegExp(`\\b(${[...labelTerms, ...dayTerms].map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`, "i");
+    // The general week-recap paragraph (governed by the standard FIRST TEXT instructions,
+    // not injuryHoldInstruction) legitimately mentions last week's actual cross-training —
+    // e.g. "You logged 2h on the bike Sunday." Only scan paragraphs after the first blank
+    // line, which is where injuryHoldInstruction's framing-only content lives.
+    const leaksSchedule = (msg: string) => {
+      const paragraphs = msg.split(/\n\n+/);
+      const scanText = paragraphs.length > 1 ? paragraphs.slice(1).join("\n\n") : msg;
+      return leakPattern.test(scanText);
+    };
+    const initialMsg = String((deliverBlock.input as { message?: unknown }).message ?? "");
+    if (leaksSchedule(initialMsg)) {
+      log.warn("recovery message leaked schedule content — rejecting for one retry", { trigger });
+      void trackEvent(userId, "recovery_message_schedule_leak", { trigger, retried: true });
+      const allToolUses = response.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
+      );
+      convo.push({ role: "assistant", content: response.content });
+      convo.push({
+        role: "user",
+        content: allToolUses.map((tu) => ({
+          type: "tool_result" as const,
+          tool_use_id: tu.id,
+          content: tu.id === deliverBlock!.id
+            ? "Your `message` named a specific weekday or activity (e.g. a day name, \"bike\", \"pool running\", \"elliptical\", \"strength\") after the first paragraph. That content is not allowed there — it belongs only in `slot_annotations`/`probe`. Rewrite `message` as pure framing after the first paragraph: acknowledge the week and encourage, with zero day names and zero activity names. Keep your `slot_annotations` and `probe` values as they were."
+            : "(not evaluated)",
+          ...(tu.id === deliverBlock!.id ? { is_error: true as const } : {}),
+        })),
+      });
+      try {
+        const retryResponse = await callCoach();
+        const retryBlock = findDeliverBlock(retryResponse);
+        if (retryBlock && String((retryBlock.input as { message?: unknown }).message ?? "").trim()) {
+          response = retryResponse;
+          deliverBlock = retryBlock;
+          if (leaksSchedule(String((retryBlock.input as { message?: unknown }).message ?? ""))) {
+            log.warn("recovery message still leaked schedule content after retry — sending anyway (fail-open)", { trigger });
+            void trackEvent(userId, "recovery_message_schedule_leak_after_retry", { trigger });
+          } else {
+            log.info("recovery message schedule leak corrected on retry", { trigger });
+            void trackEvent(userId, "recovery_message_schedule_leak_corrected", { trigger });
+          }
+        } else {
+          log.warn("recovery leak-gate retry did not re-deliver — keeping original message", { trigger });
+        }
+      } catch (err) {
+        log.error("recovery leak-gate retry call failed — keeping original message", { trigger, error: String(err) });
+      }
+    }
+  }
+
   // Stop the typing refresh loop — generation is done, message is about to send.
   keepTypingAlive = false;
 

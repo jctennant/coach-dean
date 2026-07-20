@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Add a retry gate for recovery-week schedule-leak (instruction alone still wasn't reliable)
+
+**Type:** Bug Fix
+**Reported by:** Internal testing, immediately after the previous "remove the option entirely" fix
+**User feedback:** N/A (caught by comparing a dry-run right after the prior deploy against a real send moments later — same code, different outcome)
+**Root cause:** Even after removing the "second text" option and telling Claude `message` must contain zero day/activity names, a live send still leaked the full schedule (and the same self-contradiction: calling Sunday a possible test day in the same message where Sunday was already stated as pool running). A dry-run against the identical deployed code, moments earlier, had been clean — confirming this isn't a stale-deploy issue but plain model non-determinism: an instruction-only constraint is complied with probabilistically, not guaranteed, exactly the risk this file's decision order is meant to steer away from.
+**Fix / Change:** Added a "recovery-week schedule-leak gate" mirroring the existing Phase B fact-check retry shape (reject via `is_error` tool_result, retry once, fail-open on a second miss). It scans `message` (skipping the first paragraph, which legitimately recaps last week's actual cross-training under the normal FIRST TEXT instructions) for any of the current skeleton's day names or active-slot modality/strength terms, as whole words. On a hit, it rejects the delivery with a corrective tool_result and retries once; if the retry still leaks, it sends anyway with telemetry (`recovery_message_schedule_leak_after_retry`) rather than blocking the athlete's recap. This is the validator layer this file's decision order calls for when a hard structural constraint on free text isn't available — judging the actual output against ground truth instead of trusting the model to follow a written rule.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-07-20 — Recovery-week message text still restated the schedule despite instruction — remove the option entirely
 
 **Type:** Bug Fix
