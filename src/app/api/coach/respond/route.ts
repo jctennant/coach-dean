@@ -1703,6 +1703,35 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
       pendingExtracted = extracted;
       classifiedIntent = classified;
 
+      // CADENCE short-circuit: handle deterministically instead of letting the main
+      // coaching prompt decide. A heavily injury-focused conversation was observed
+      // reliably burying this request under the FULL PLAN REQUESTS framing whenever
+      // the athlete's phrasing contained the word "plan" (e.g. "opt me into daily
+      // morning reminders of my workout plan") — prompt-tuning that rule didn't fix
+      // it because the injury context kept winning the model's attention. Routing
+      // high-confidence classifications here, before the giant system prompt is even
+      // built, makes the bug structurally impossible rather than relying on the
+      // model to prioritize correctly.
+      if (classifiedIntent.intent === "cadence_request" && classifiedIntent.confidence === "high" && classifiedIntent.cadence) {
+        const cadence = classifiedIntent.cadence;
+        const cadenceConfirmation: Record<typeof cadence, string> = {
+          morning_reminders: "Got it — I'll text you each morning on your training days with the plan.",
+          nightly_reminders: "Got it — I'll text you the night before with what's coming up.",
+          weekly_only: "Got it — I'll keep it to the Sunday recap and reactive feedback after your runs, no daily texts.",
+        };
+        const confirmMsg = cadenceConfirmation[cadence];
+        const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+        if (chatId) await startTyping(chatId);
+        if (!dry_run) {
+          await sendSMS(user.phone_number as string, confirmMsg);
+          await insertConversation({ user_id: userId, role: "assistant", content: confirmMsg, message_type: "coach_response" });
+          const { error } = await supabase.from("training_profiles").update({ proactive_cadence: cadence }).eq("user_id", userId);
+          if (error) console.error("[coach/respond] proactive_cadence update failed:", error);
+          else void trackEvent(userId, "cadence_changed", { proactive_cadence: cadence, source: "intent_classifier_shortcircuit" });
+        }
+        return NextResponse.json({ ok: true, message: confirmMsg, dry_run: !!dry_run });
+      }
+
       const hasRaceData = !!(pendingExtracted?.recent_race_distance_km && pendingExtracted?.recent_race_time_minutes);
       const hasEasyPace = !!pendingExtracted?.easy_pace;
       if (hasRaceData) {

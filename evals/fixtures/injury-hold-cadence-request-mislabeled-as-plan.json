@@ -1,6 +1,6 @@
 {
   "id": "injury-hold-cadence-request-mislabeled-as-plan",
-  "description": "Athlete on injury hold asks to opt into daily morning reminders — the message contains the word 'plan' ('my workout plan'), which was observed in production hijacking this into the FULL PLAN REQUESTS (ON injury hold) rule instead of PROACTIVE MESSAGE CADENCE, causing Dean to ignore the request entirely and re-answer an earlier, unrelated shin-splint question.",
+  "description": "Athlete on injury hold asks to opt into daily morning reminders — the message contains the word 'plan' ('my workout plan'), which was observed in production hijacking this into the FULL PLAN REQUESTS (ON injury hold) rule instead of PROACTIVE MESSAGE CADENCE, causing Dean to ignore the request entirely and re-answer an earlier, unrelated shin-splint question — reproduced 3 times in a row with byte-identical output, which is why the real fix (2026-07-21) is a deterministic code-level short-circuit in route.ts keyed off intent-classifier's new cadence_request intent, bypassing the main coaching prompt entirely for high-confidence classifications rather than trying to out-prioritize the injury framing with more prompt text. This fixture exercises the free-hand coaching prompt directly (the runner does not call the classifier or the short-circuit), so it's a defense-in-depth check of the FULL PLAN REQUESTS/CADENCE prompt text for the low-confidence-classification fallback path, not a test of the actual fix.",
   "category": "response_quality",
   "trigger": "user_message",
   "today": "2026-07-21",

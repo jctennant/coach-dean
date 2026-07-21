@@ -61,6 +61,33 @@ describe("classifyIntent — happy paths", () => {
     expect(result.intent).toBe("plan_question");
     expect(result.confidence).toBe("high");
   });
+
+  it("returns cadence_request with cadence for a morning-reminders request", async () => {
+    mockCreate.mockResolvedValueOnce(makeResponse('{"intent":"cadence_request","body_part":null,"cadence":"morning_reminders","confidence":"high"}') as never);
+    const result = await classifyIntent("Can you opt me into daily morning reminders of my workout plan?", { activeInjury: true, bodyPart: "shin" });
+    expect(result.intent).toBe("cadence_request");
+    expect(result.cadence).toBe("morning_reminders");
+    expect(result.confidence).toBe("high");
+  });
+
+  it("returns cadence_request with weekly_only cadence", async () => {
+    mockCreate.mockResolvedValueOnce(makeResponse('{"intent":"cadence_request","body_part":null,"cadence":"weekly_only","confidence":"high"}') as never);
+    const result = await classifyIntent("just send the weekly recap, nothing daily", { activeInjury: false });
+    expect(result.cadence).toBe("weekly_only");
+  });
+
+  it("does not set cadence for non-cadence intents", async () => {
+    mockCreate.mockResolvedValueOnce(makeResponse('{"intent":"plan_question","body_part":null,"cadence":null,"confidence":"high"}') as never);
+    const result = await classifyIntent("what's my long run this week?", { activeInjury: false });
+    expect(result.cadence).toBeUndefined();
+  });
+
+  it("leaves cadence undefined when cadence_request but the value is unrecognized", async () => {
+    mockCreate.mockResolvedValueOnce(makeResponse('{"intent":"cadence_request","body_part":null,"cadence":"something_weird","confidence":"low"}') as never);
+    const result = await classifyIntent("can you text me differently", { activeInjury: false });
+    expect(result.intent).toBe("cadence_request");
+    expect(result.cadence).toBeUndefined();
+  });
 });
 
 describe("classifyIntent — injury context fallback", () => {
