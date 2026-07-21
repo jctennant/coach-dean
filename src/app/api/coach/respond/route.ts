@@ -2044,7 +2044,11 @@ Do NOT surface this every message. Once is enough — reinforce only 4+ weeks la
     upcomingRaces,
     lthrData,
     recentActivities,
-    activitiesQueryFailed
+    activitiesQueryFailed,
+    // classifiedIntent is only computed for user_message (see above) — for every
+    // other trigger, keep the unconditional recurring-injury framing since there's
+    // no per-message intent signal to gate on there.
+    trigger !== "user_message" || classifiedIntent.intent === "injury_query"
   );
   // Cacheable, athlete-independent coaching framework (identity, principles, comms style,
   // tone, formatting, behavior rules) sits in builtPrompt.static — sent as a cached system
@@ -3076,8 +3080,8 @@ ${conversationBlock}
 
 OUTPUT CONTRACT:
 1. Lead with the specific injury insight — not a greeting.
-2. Give 3–4 concrete exercises (from the list above) with their sets×reps. Do not invent exercises from memory.
-3. Recommend at least one cross-training alternative that fits what they can actually do.
+2. Answer exactly what the athlete asked first. Only then give 3–4 concrete exercises (from the list above, with their sets×reps — never invent exercises from memory) if: they're asking what to do for the injury, they report it got worse, or RECENT CONVERSATION shows this routine hasn't been given recently. If they're reporting it's the same or improving, or asking about something narrower (e.g. their opinion on a specific self-treatment they already tried), don't restate the full routine — a brief reference to "the routine I gave you" is enough.
+3. Recommend a cross-training alternative only when it's relevant to what they asked (e.g. they're deciding what to do instead of running) — don't tack it on by default.
 4. No sign-offs. Message ends on the coaching point.`;
     } else {
       log.info("injury routing: body part not in library, using full prompt", { bodyPart: classifiedIntent.bodyPart });
@@ -5727,7 +5731,14 @@ function buildSystemPrompt(
   upcomingRaces?: Array<Record<string, unknown>>,
   lthrData?: { lthr: number; source: string; confidence: LTHRConfidence } | null,
   recentActivities: ActivityRow[] = [],
-  activitiesQueryFailed = false
+  activitiesQueryFailed = false,
+  // True when the intent classifier (run on every user_message turn) judged this
+  // specific message as actually asking about pain/soreness/injury/exercises —
+  // not just true whenever a flagged body part is mentioned in passing (e.g. a
+  // status update, or a question about something unrelated that happens to name
+  // the body part). Only meaningful for user_message; other triggers pass false
+  // and keep the unconditional recurring-injury framing below.
+  askedAboutInjury = false
 ): { static: string; dynamic: string } {
   // Which trigger-conditional sections to include.
   const isReminder = trigger === "morning_reminder" || trigger === "nightly_reminder";
@@ -6441,7 +6452,7 @@ Coaching adjustments:
 - If the athlete reports the area feeling better/healed, ask one clarifying question (pain-free for how many days?) before clearing the active state.${(severity === "moderate" || severity === "severe") && isFirstTimeInjury ? `\n- PT REFERRAL — FIRST OCCURRENCE: This is the athlete's first time flagging ${bodyPart} at ${severity} severity. In the next response after they report the injury, include ONE gentle sentence: "If this doesn't settle down within a week, a sports physio can rule out anything structural — worth a quick check." Frame it as proactive, not alarming. Say it once and do not repeat it in subsequent messages.` : ""}${pregnancyBlock}
 - PREGNANCY-SPECIFIC RULES (apply if pregnant): (1) Primary cross-training recommendation is swimming or aqua jogging — near-perfect running substitute, safe all trimesters; stationary bike also good. (2) Tighten the pain threshold: stay at 0–1/10 max while pregnant, any worsening = rest that day. (3) All prescribed exercises must be pregnancy-safe: no lying flat on back after ~16 weeks, avoid heavy core compression. The groin exercises from get_rehab_protocol are pregnancy-safe (pass pregnant: true). (4) Referral order: OB/midwife first for any new musculoskeletal symptom, then a women's health physio (pelvic floor specialist) — not just "a physio who specializes in pregnancy." (5) Relaxin-related laxity: groin/pelvic girdle pain in pregnancy is often round ligament pain or pubic symphysis dysfunction — acknowledge this context, don't default to framing it as a training-load error. (6) If the athlete worries about losing fitness during pregnancy: reassure them directly — aerobic fitness is well-maintained through low-impact cross-training, and aqua jogging preserves running-specific conditioning. The goal during pregnancy is "maintain, not gain."
 </rule>\n`;
-})()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; return parts.length > 0 ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. In post-run or conversational messages, if the athlete mentions any of these areas again, you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) call get_rehab_protocol for that body part and give specific targeted exercises rather than just telling them to "strengthen it". (4) suggest they consult a physical therapist or sports medicine doctor if it keeps recurring — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.` : ""; })()}
+})()}- Injury / constraints: ${profile?.injury_notes || "None reported"}${(() => { const parts = (profile?.injury_body_parts as string[] | null) || []; if (parts.length === 0) return ""; return askedAboutInjury ? `\n- RECURRING INJURY ALERT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. The athlete is asking about one of these areas right now — you MUST: (1) acknowledge it as a recurring concern, (2) recommend taking a rest day or reducing intensity, (3) call get_rehab_protocol for that body part and give specific targeted exercises rather than just telling them to "strengthen it". (4) suggest they consult a physical therapist or sports medicine doctor if it keeps recurring — do not continue with normal coaching mode. EXCEPTION FOR WEEKLY PLAN GENERATION: Do NOT add extra rest days to the training schedule for a recurring issue. Instead, annotate the relevant sessions: add a note like "(softer surface preferred, stop if pain)" or "(easy effort only — monitor this area)". The volume reduction in the weekly plan is already the accommodation; canceling scheduled runs for ongoing soreness makes the training week too short.` : `\n- RECURRING INJURY CONTEXT: The following body parts have been flagged across multiple sessions: ${parts.join(", ")}. The athlete just mentioned one of these areas but is NOT asking what to do about it (e.g. reporting a status update, or asking about something else that happens to reference it) — answer what they actually asked. Only volunteer a rehab exercise or cross-training swap if they report the area got WORSE, not better or unchanged. Do not force get_rehab_protocol or a full exercise list onto an unrelated question.`; })()}
 - Cross-training available: ${crosstrainingTools && crosstrainingTools.length > 0 ? crosstrainingTools.join(", ") : "None mentioned"}${(() => {
   const threads = (profile?.coaching_threads as string | null) || null;
   if (!threads || !threads.trim()) return "";
