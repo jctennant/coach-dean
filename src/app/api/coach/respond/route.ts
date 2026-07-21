@@ -24,6 +24,7 @@ function capitalizeBodyPartForCard(bodyPart: string): string {
 }
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
+import { normalizeEmDashes } from "@/lib/text-format";
 import { getValidAccessToken } from "@/lib/strava";
 import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/timezone";
@@ -669,10 +670,10 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
   // current week was affected or just the upcoming weeks.
   const planReadyNote = silent ? undefined
     : isWeek1Rebuild
-    ? "Done — I've rebuilt your plan starting this week. Here's how it looks:"
+    ? "Done. I've rebuilt your plan starting this week. Here's how it looks:"
     : wantsMileageChange
-    ? "Done — I've updated your plan with the adjusted mileage. Your current week is unchanged; here's the shape of it:"
-    : "Done — your upcoming weeks are updated. Your current week is unchanged; here's the shape of it:";
+    ? "Done. I've updated your plan with the adjusted mileage. Your current week is unchanged; here's the shape of it:"
+    : "Done. Your upcoming weeks are updated. Your current week is unchanged; here's the shape of it:";
 
   if (!dryRun) {
     // Run generateAndSaveFullPlan in after() so this function returns immediately.
@@ -706,7 +707,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
         captureException(err, { tags: { trigger: "rebuild_plan" } });
         // Send fallback SMS so the user isn't left waiting for a link that never arrives
         try {
-          await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again, or text \"dashboard\" to see your current version.");
+          await sendSMS(phoneNumber, "Something went wrong updating your plan. Try texting UPDATE PLAN again, or text \"dashboard\" to see your current version.");
         } catch (smsErr) {
           console.error("[handleRebuildPlan] fallback SMS also failed:", smsErr);
         }
@@ -798,8 +799,8 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
   if (!isGraduation) {
     // Direct INJURY_CLEAR or coming from phase 0 → enter RTR phase 1 (walk/run protocol).
     const bodyPart = (profile.injury_body_part as string | null) ?? "injury area";
-    const bubble1 = `Good news — here's how we bring you back safely. This week: walk/run intervals, 3 sessions. Run 2 min, walk 1 min, repeat 6×. About 20–25 min each, easy effort only. No watching pace — just time on feet.`;
-    const bubble2 = `After each session, let me know how the ${bodyPart} felt — whether you noticed anything during or after. I'll check in when your run comes through.`;
+    const bubble1 = `Good news. Here's how we bring you back safely. This week: walk/run intervals, 3 sessions. Run 2 min, walk 1 min, repeat 6×. About 20–25 min each, easy effort only. No watching pace, just time on feet.`;
+    const bubble2 = `After each session, let me know how the ${bodyPart} felt, whether you noticed anything during or after. I'll check in when your run comes through.`;
 
     if (!dryRun) {
       await supabase.from("training_state").update({
@@ -881,7 +882,7 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
 
   const returnMiStr = returnBase ? `~${returnBase} mi` : "a conservative base";
   const raceNote = profile?.race_date ? " Your race goal is still very much in reach." : "";
-  const planReadyNote = `I've rebuilt your plan with a gradual return-to-running ramp — starting at ${returnMiStr} this week and building back up carefully.${raceNote}`;
+  const planReadyNote = `I've rebuilt your plan with a gradual return-to-running ramp, starting at ${returnMiStr} this week and building back up carefully.${raceNote}`;
 
   if (!dryRun) {
     // handleInjuryClear is always invoked from within the outer after() wrapper in POST,
@@ -906,7 +907,7 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
       console.error("[handleInjuryClear] generateAndSaveFullPlan failed:", err);
       void trackEvent(userId, "after_error", { trigger: "injury_clear", error: String(err) });
       try {
-        await sendSMS(phoneNumber, "Something went wrong updating your plan — try texting UPDATE PLAN again.");
+        await sendSMS(phoneNumber, "Something went wrong updating your plan. Try texting UPDATE PLAN again.");
       } catch (smsErr) {
         console.error("[handleInjuryClear] fallback SMS also failed:", smsErr);
       }
@@ -1035,7 +1036,7 @@ async function handlePostRunOnboarding(
     .map((b) => (b as { type: "text"; text: string }).text.trim())
     .join(" ")
     .trim();
-  const coachMessage = stripReasoningPreamble(rawOnboardingMsg);
+  const coachMessage = normalizeEmDashes(stripReasoningPreamble(rawOnboardingMsg));
 
   if (dryRun) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -3671,7 +3672,10 @@ OUTPUT CONTRACT:
 
   // Day-level session postprocessing removed — coach no longer assigns sessions to specific days.
   // let (not const): the proactive validator gate below may replace it with a repaired version.
-  let coachMessage = stripBoilerplateSignoffs(dayAbbrevFixed);
+  // normalizeEmDashes here (rather than only at the sendSMS choke point) so dry_run
+  // responses — what the eval harness and admin tooling actually inspect — reflect
+  // the same text an athlete would receive.
+  let coachMessage = normalizeEmDashes(stripBoilerplateSignoffs(dayAbbrevFixed));
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage, strength_poster: (wantsStrengthPoster && strengthPosterRoutineKey) ? strengthPosterRoutineKey : null });
 
@@ -3736,6 +3740,10 @@ OUTPUT CONTRACT:
       })
       .catch((err) => log.error("date consistency check errored", { error: String(err) }));
   }
+
+  // Re-run in case the gate above replaced coachMessage with a repaired version
+  // that reintroduced an em dash.
+  coachMessage = normalizeEmDashes(coachMessage);
 
   // Split into iMessage-sized chunks. Each part is sent as a separate text
   // with its own typing indicator so it feels like a real person composing
@@ -6253,7 +6261,7 @@ TONE:
 - Sound like a knowledgeable friend, not a customer service bot.
 - Use specific numbers for paces and distances.
 - One emoji max per response. Often none is better.
-- PUNCTUATION: at most one em dash (—) per message. Default to a period or comma to connect ideas — several em dashes in one text reads as AI-generated, not as a person texting.
+- Prefer short sentences connected with a period, not a long clause stitched together with a dash.
 - Never use "postpartum" as a synonym for "post-run," "after the effort," or "after the activity." Postpartum refers specifically to the period after childbirth. Use "post-run," "after the effort," or "afterward" instead.
 
 FORMATTING:

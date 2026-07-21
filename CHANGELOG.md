@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-21 — Em dash overuse: replaced the PUNCTUATION prompt rule with a deterministic strip at the SMS send layer
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** Pasted Gwyneth's messages from today showing multiple em dashes per message (one reply had three: "You're close — the PT is working — we just need a few more days..."), despite the 2026-07-20 PUNCTUATION rule capping it at one per message and asking to make Dean structurally more consistent about it.
+**Root cause:** Same class of bug as the cadence-request and reasoning-leak fixes above — a prompt rule competing for attention in an already enormous system prompt, this time against the model's own strong training-data habit of the "clause — payoff" construction (reinforced by the TONE section's own few-shot examples, which used the pattern before the 2026-07-20 pass rewrote them). Tightening the wording twice (2026-07-19, 2026-07-20) didn't hold. Per this repo's fix-mechanism decision order, punctuation is a mechanical/deterministic property of the output text, not a meaning judgment, so it's a better fit for a code-level transform than either a prompt rule or a focused validator agent.
+**Fix / Change:** Added `normalizeEmDashes()` (`src/lib/text-format.ts`) — splits text on "—" and rejoins with ". " (recapitalizing the following word), which matches the dominant real-world pattern of a clause followed by its payoff as a separate sentence. Wired into `linq.ts`'s `sendSMS()`, the single choke point every outbound message passes through regardless of provider (Linq or Photon) or trigger — this guarantees zero em dashes reach an athlete structurally, the same way `deliver_message`'s `tool_choice: "any"` made reasoning leaks structurally impossible. Also applied in `coach/respond/route.ts` right after `stripBoilerplateSignoffs` (before the `dry_run` early return) so eval/admin tooling that inspects `dry_run` output sees the same text an athlete would get, and re-applied after the proactive validator gate in case a repair pass reintroduced a dash. Replaced the PUNCTUATION prompt rule (now redundant) with a single softer sentence encouraging short sentences over dash-stitched ones — kept as a light steer, not the enforcement mechanism. Also cleaned up the few remaining static canned SMS strings (`route.ts`: rebuild-plan confirmations, injury-hold return bubbles, plan-ready notes) that hardcoded em dashes independent of any Claude call.
+**Files changed:** `src/lib/text-format.ts` (new), `src/lib/linq.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
 ## 2026-07-21 — Cadence requests: prompt-text fix didn't hold, replaced with a deterministic short-circuit
 
 **Type:** Bug Fix

@@ -481,7 +481,8 @@ describe("coach/respond — reasoning preamble stripping", () => {
     await flush();
     const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
     // The real coaching message survives
-    expect(sentText).toContain("Got it — the lap button catch explains it");
+    // Em dash is now deterministically split into a period (normalizeEmDashes)
+    expect(sentText).toContain("Got it. The lap button catch explains it");
     expect(sentText).toContain("You knocked out the speed work");
     // No reasoning leaks through — including the glued final-paragraph prefix
     expect(sentText).not.toContain("the athlete");

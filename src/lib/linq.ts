@@ -1,4 +1,5 @@
 import * as photon from "@/lib/photon";
+import { normalizeEmDashes } from "@/lib/text-format";
 
 const isPhoton = () => process.env.SMS_PROVIDER === "photon";
 
@@ -33,6 +34,10 @@ export async function sendSMS(
   to: string,
   body: string
 ): Promise<{ chatId: string | null }> {
+  // Single choke point for every outbound message (both providers pass through
+  // here) — see normalizeEmDashes doc comment for why this lives here instead
+  // of as a prompt rule.
+  body = normalizeEmDashes(body);
   if (isPhoton()) return photon.sendSMS(to, body);
   const { apiKey, from } = getConfig();
 
