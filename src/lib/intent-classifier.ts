@@ -47,9 +47,14 @@ export async function classifyIntent(
     const raw = response.content[0]?.type === "text" ? response.content[0].text.trim() : "";
     const durationMs = Date.now() - start;
 
+    // Haiku sometimes wraps the JSON in a markdown code fence (```json ... ```)
+    // despite "Return JSON only" — strip it before parsing so a correctly
+    // classified intent doesn't get silently discarded to the "general" fallback.
+    const unfenced = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+
     let parsed: { intent?: string; body_part?: string | null; confidence?: string };
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(unfenced);
     } catch {
       log?.warn("intent-classifier: JSON parse failed", { raw, durationMs });
       return fallback;

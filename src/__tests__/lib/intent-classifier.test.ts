@@ -54,6 +54,13 @@ describe("classifyIntent — happy paths", () => {
     const result = await classifyIntent("IT band is flaring up", { activeInjury: false });
     expect(result.bodyPart).toBe("it_band");
   });
+
+  it("parses correctly when Haiku wraps the JSON in a markdown code fence", async () => {
+    mockCreate.mockResolvedValueOnce(makeResponse('```json\n{"intent":"plan_question","body_part":null,"confidence":"high"}\n```') as never);
+    const result = await classifyIntent("can you opt me into daily morning reminders?", { activeInjury: false });
+    expect(result.intent).toBe("plan_question");
+    expect(result.confidence).toBe("high");
+  });
 });
 
 describe("classifyIntent — injury context fallback", () => {

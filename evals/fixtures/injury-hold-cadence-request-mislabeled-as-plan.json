@@ -1,0 +1,53 @@
+{
+  "id": "injury-hold-cadence-request-mislabeled-as-plan",
+  "description": "Athlete on injury hold asks to opt into daily morning reminders — the message contains the word 'plan' ('my workout plan'), which was observed in production hijacking this into the FULL PLAN REQUESTS (ON injury hold) rule instead of PROACTIVE MESSAGE CADENCE, causing Dean to ignore the request entirely and re-answer an earlier, unrelated shin-splint question.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-07-21",
+  "user": {
+    "name": "Jake",
+    "timezone": "America/New_York",
+    "strava_connected": true,
+    "goal": "half_marathon",
+    "goal_race": "Fall Half Marathon",
+    "goal_race_date": "2026-08-29",
+    "current_week": 4,
+    "current_phase": "recovery",
+    "vdot": 45,
+    "easy_pace": "9:30/mi",
+    "tempo_pace": "8:00/mi",
+    "interval_pace": "7:10/mi",
+    "training_days": ["monday", "wednesday", "friday", "saturday", "sunday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 0,
+    "pre_injury_mileage_target": 32,
+    "miles_logged_this_week": 0,
+    "runs_this_week": 0,
+    "injury_hold_since": "2026-07-01",
+    "injury_notes": "Shin splints, both legs, moderate. Resting from running. Cross-training on bike, elliptical, and pool running.",
+    "injury_body_part": "shin",
+    "injury_severity": "moderate",
+    "recent_activities": [
+      { "date": "2026-07-19", "type": "Ride", "distance_miles": 14.0, "pace": null },
+      { "date": "2026-07-17", "type": "Swim", "distance_miles": 1.0, "pace": null }
+    ],
+    "recent_conversation": [
+      {
+        "role": "user",
+        "date": "2026-07-21",
+        "content": "So it is normal for shin splints to get worse or kind of go back and forth even though I didn't try to run again? Is it bad that I'm completely resting from running vs just lowering volume?"
+      },
+      {
+        "role": "assistant",
+        "date": "2026-07-21",
+        "content": "It's completely normal for shin symptoms to fluctuate day-to-day even when you're not running. Complete rest right now is the right call given the repeated flags — the tissue needs a full reset, not just lighter load. The cross-training keeps your aerobic engine sharp without any impact load while it heals."
+      }
+    ]
+  },
+  "inbound_sms": "Can you opt me into daily morning reminders of my workout plan?",
+  "ground_truth": {
+    "must_contain_tag": "[CADENCE: morning_reminders]",
+    "notes": "The athlete is asking to change proactive texting frequency (PROACTIVE MESSAGE CADENCE rule) — the word 'plan' here refers to their daily workout, not a request to view the training plan/arc, and it is NOT a FULL PLAN REQUESTS (ON injury hold) scenario even though the athlete is on injury hold. Dean must confirm the cadence change in one short sentence and append [CADENCE: morning_reminders]. Dean must NOT ignore the request and instead re-answer or continue the prior shin-splints/rest conversation (repeating 'complete rest', 'cross-training keeps your aerobic engine sharp', etc. from the immediately preceding assistant message) — that was the actual production failure this fixture reproduces. A response with zero acknowledgment of the reminders request, or that answers a different topic, scores 0.",
+    "forbidden_content": ["repeating the prior message's shin-splint/rest/cross-training content as if it were the answer to this message", "no mention of morning reminders or texting frequency at all"]
+  }
+}
