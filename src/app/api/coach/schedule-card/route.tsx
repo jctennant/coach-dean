@@ -61,26 +61,77 @@ async function getFonts() {
   return fontCache;
 }
 
-// A handful of hand-drawn, deliberate icon paths — not per-modality photorealism, just
-// enough visual distinction to scan quickly. Unlisted types fall back to a plain dot.
-const ICON_PATHS: Partial<Record<CardRowType, string>> = {
-  strength: "M8 3v10M4 5h8M3 8h10M4 11h8",
-  bike: "M4 12l3-6h4l2 3M7 6H5",
-  pool_running: "M2 12c1 1 2 1 3 0s2-1 3 0 2 1 3 0 2-1 3 0M2 9c1 1 2 1 3 0s2-1 3 0 2 1 3 0 2-1 3 0",
-  swimming: "M2 12c1 1 2 1 3 0s2-1 3 0 2 1 3 0 2-1 3 0M2 9c1 1 2 1 3 0s2-1 3 0 2 1 3 0 2-1 3 0",
-  elliptical: "M3 13l3-5 2 2 3-6 2 9",
-  probe: "M3 3c2 3 2 6 0 10M8 3c2 3 2 6 0 10M13 3c2 3 2 6 0 10",
-  easy: "M4 14l1.5-4.5L4 7l2-2 2 1.5 2.5-1M6 8.5 8 10l1.5 4",
-  quality: "M4 14l1.5-4.5L4 7l2-2 2 1.5 2.5-1M6 8.5 8 10l1.5 4",
-  long_run: "M4 14l1.5-4.5L4 7l2-2 2 1.5 2.5-1M6 8.5 8 10l1.5 4",
-};
+// Small, literal pictograms rather than single abstract paths — a dumbbell actually looks
+// like a dumbbell, a bike has two wheels. Multi-shape (not one <path>) per icon; deliberately
+// avoids the SVG `transform` attribute since satori's (next/og's renderer) support for it on
+// child elements is unreliable. Unlisted types fall back to a plain dot.
+//
+// This is a plain function called directly (`{iconShapeFor(...)}`), not a JSX component tag
+// (`<IconShape />`) — satori silently dropped everything a nested component returned when it
+// was invoked as a component in this route; calling it as a function and inlining the result
+// avoided that (root cause not fully isolated, but reproduced and fixed empirically).
+function iconShapeFor(type: CardRowType, color: string) {
+  switch (type) {
+    case "strength":
+      return (
+        <g>
+          <rect x="1" y="6.6" width="1.6" height="2.8" rx="0.5" fill={color} />
+          <rect x="13.4" y="6.6" width="1.6" height="2.8" rx="0.5" fill={color} />
+          <rect x="2.8" y="5.6" width="1.3" height="4.8" rx="0.5" fill={color} />
+          <rect x="11.9" y="5.6" width="1.3" height="4.8" rx="0.5" fill={color} />
+          <path d="M4.1 8h7.8" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+        </g>
+      );
+    case "bike":
+      return (
+        <g>
+          <circle cx="4" cy="12" r="2.3" stroke={color} strokeWidth="1.3" fill="none" />
+          <circle cx="13" cy="12" r="2.3" stroke={color} strokeWidth="1.3" fill="none" />
+          <path
+            d="M4 12 L7.5 5.5 L11 5.5 M7.5 5.5 L9.5 9 M9.5 9 L13 12 M9.5 9 L6.3 12"
+            stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"
+          />
+        </g>
+      );
+    case "pool_running":
+    case "swimming":
+      return (
+        <path
+          d="M2 12c1 1 2 1 3 0s2-1 3 0 2 1 3 0 2-1 3 0M2 9c1 1 2 1 3 0s2-1 3 0 2 1 3 0 2-1 3 0"
+          stroke={color} strokeWidth="1.3" strokeLinecap="round" fill="none"
+        />
+      );
+    case "elliptical":
+      return (
+        <g>
+          <ellipse cx="8" cy="8" rx="6" ry="3" stroke={color} strokeWidth="1.3" fill="none" />
+          <circle cx="8" cy="8" r="1" fill={color} />
+        </g>
+      );
+    case "probe":
+    case "easy":
+    case "quality":
+    case "long_run":
+      return (
+        <g>
+          <circle cx="9.4" cy="3.2" r="1.3" fill={color} />
+          <path
+            d="M9 4.5 L6.8 7.5 L4 9.2 M9 4.5 L11.3 6.5 L13.5 5.7 M6.8 7.5 L8.6 10 L6.5 14 M8.6 10 L11.5 12.5"
+            stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"
+          />
+        </g>
+      );
+    default:
+      return <circle cx="8" cy="8" r="1.4" fill={color} />;
+  }
+}
 
 function RowIcon({ type }: { type: CardRowType }) {
   if (type === "rest") {
     return <div style={{ width: 76, height: 76, borderRadius: 38, border: `3px dashed ${TOKENS.gridline}`, display: "flex" }} />;
   }
   const isFlag = type === "probe";
-  const d = ICON_PATHS[type] ?? "M6 6h4M6 6v4";
+  const color = isFlag ? TOKENS.flag : TOKENS.brand;
   return (
     <div
       style={{
@@ -90,7 +141,7 @@ function RowIcon({ type }: { type: CardRowType }) {
       }}
     >
       <svg width="38" height="38" viewBox="0 0 16 16" fill="none">
-        <path d={d} stroke={isFlag ? TOKENS.flag : TOKENS.brand} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        {iconShapeFor(type, color)}
       </svg>
     </div>
   );
@@ -157,9 +208,9 @@ export async function GET(req: NextRequest) {
   const heroH = 190;
   const rowH = 168;
   const watchH = payload.watch.length > 0
-    ? 44 + 30 + 24 + payload.watch.length * 44 + (payload.watch.length - 1) * 24
+    ? 44 + 30 + 24 + payload.watch.length * 44 + (payload.watch.length - 1) * 24 + 48
     : 0;
-  const footerH = 150;
+  const footerH = 145;
   const height = headerH + heroH + payload.rows.length * rowH + watchH + footerH;
 
   const fonts = await getFonts();
@@ -206,17 +257,20 @@ export async function GET(req: NextRequest) {
           </div>
 
           {payload.watch.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", padding: "44px 60px 0" }}>
+            <div style={{ display: "flex", flexDirection: "column", padding: "44px 60px 48px" }}>
               <span style={{ fontSize: 22, fontWeight: 600, color: TOKENS.textMuted, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 24 }}>
                 Watching
               </span>
               <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                {/* One consistent brand-green checkmark for every item — mixing in the amber
+                    "flag" color here (already used to mark the probe row above) read as two
+                    different signals stacked on top of each other, not one. */}
                 {payload.watch.map((w, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 20 }}>
                     <div
                       style={{
                         width: 40, height: 40, borderRadius: 20, marginTop: 2,
-                        background: w.flag ? TOKENS.flag : TOKENS.brand,
+                        background: TOKENS.brand,
                         display: "flex", alignItems: "center", justifyContent: "center",
                       }}
                     >
@@ -235,7 +289,7 @@ export async function GET(req: NextRequest) {
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
-            padding: "48px 60px 72px", borderTop: `2px solid ${TOKENS.gridline}`,
+            padding: "40px 60px 72px",
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}

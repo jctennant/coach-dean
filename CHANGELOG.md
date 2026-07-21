@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Fix invisible schedule-card icons, drop the now-redundant text digest, clean up Watching section
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback
+**User feedback:** "Why do we have an orange and green checkmark at the bottom? There's also this extra line at the bottom of the image... this looks weird. Think we should probably remove that. Also, the icons don't really look like the actual things." Followed by: "we probably don't need to send the full written-out plan alongside the image. I think just the image for the full written-out plan, and then maybe one other text, if you want, as commentary on it."
+**Root cause:** (1) Watching-section checkmarks mixed brand green and the amber "flag" color (already used to mark the probe row above), reading as two unrelated signals rather than one. The footer's top border sat directly against the last watch item with no breathing room, reading as a stray line. (2) The per-modality icons were single abstract `<path>` shapes (e.g. a vague loop for "bike") that didn't read as their real-world object. (3) Separate architectural bug found while redesigning icons: a nested JSX component (`<IconShape />`) rendered as empty/invisible when used as a component tag inside this route's `ImageResponse` tree — reproduced in isolation (a standalone test route with the same icon calls inlined directly rendered correctly; wrapped in a separate component tag, satori silently dropped its output). Root cause of that specific renderer behavior wasn't fully isolated, but the fix was empirically confirmed: call the icon logic as a plain function (`{iconShapeFor(type, color)}`) instead of a JSX component tag. (4) The text digest bubble was fully redundant now that the image carries the same schedule — sending both was the "two views of the same thing" problem all over again, just text+image instead of text+text.
+**Fix / Change:** All Watching checkmarks now render in one consistent brand green; removed the footer's top border and added bottom padding to the Watching block instead, so there's real spacing before the sign-off. Redesigned every row icon as a literal multi-shape pictogram (bicycle with two wheels, dumbbell with weighted ends, a runner silhouette, a wave for pool/swim) via the plain-function pattern described above. `coach/respond/route.ts` no longer pushes the text digest into the SMS `parts` array by default — the schedule-card image is now the athlete's only view of the schedule; the digest is still built (cheap, deterministic) and kept as a fallback that only sends via plain SMS if the image MMS send itself fails, so a schedule always reaches the athlete even if image rendering breaks.
+**Files changed:** `src/app/api/coach/schedule-card/route.tsx`, `src/app/api/coach/respond/route.ts`
+
 ## 2026-07-20 — Enlarge schedule-card rows toward a phone-screen shape
 
 **Type:** Bug Fix

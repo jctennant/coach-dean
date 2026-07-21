@@ -3706,17 +3706,20 @@ OUTPUT CONTRACT:
   // multiple follow-up messages.
   const parts = splitIntoMessages(coachMessage);
 
-  // Deterministic day-by-day schedule bubble for arc-generated weekly_recap weeks — code
+  // Deterministic day-by-day schedule text for arc-generated weekly_recap weeks — code
   // renders it from the same fixed skeleton/annotations Claude was constrained to (see the
   // "THIS WEEK'S SCHEDULE IS ALREADY DECIDED" prompt block below), which deliberately keeps
-  // Claude's own prose free of a day-by-day list. This bubble can't drift from what the
-  // schema-validated slot_annotations already committed to, since no model call produces it
-  // (see 2026-04-16 changelog on why day-by-day schedules generated freeform were unreliable).
-  if (trigger === "weekly_recap" && arcWeekSkeleton) {
-    parts.push(formatWeeklyPlanDigest(arcWeekSkeleton, arcSlotAnnotations, isMetricUser));
-  } else if (trigger === "weekly_recap" && recoveryWeekSkeleton) {
-    parts.push(formatRecoveryWeekDigest(recoveryWeekSkeleton, recoverySlotAnnotations, recoveryProbe));
-  }
+  // Claude's own prose free of a day-by-day list. This can't drift from what the schema-
+  // validated slot_annotations already committed to, since no model call produces it (see
+  // 2026-04-16 changelog on why day-by-day schedules generated freeform were unreliable).
+  // Not sent as a text bubble by default — the schedule-card MMS image below (built from
+  // this exact same data) is the athlete's primary view now. Kept only as the fallback text
+  // sent if that image send fails, so a schedule always reaches the athlete one way or another.
+  const scheduleDigestFallback = trigger === "weekly_recap" && arcWeekSkeleton
+    ? formatWeeklyPlanDigest(arcWeekSkeleton, arcSlotAnnotations, isMetricUser)
+    : trigger === "weekly_recap" && recoveryWeekSkeleton
+    ? formatRecoveryWeekDigest(recoveryWeekSkeleton, recoverySlotAnnotations, recoveryProbe)
+    : null;
 
   // For initial_plan, hard-cap at 2 SMS bubbles regardless of how many blank-line
   // separators Claude generated. A 3rd bubble (e.g. strength block detail) overloads
@@ -3835,12 +3838,12 @@ OUTPUT CONTRACT:
   }
 
   // Weekly schedule card (MMS): renders the same deterministic skeleton/annotations that
-  // built the text digest bubble above into a PNG via /api/coach/schedule-card and sends
-  // it as an additional image — same "compute once, render, can't drift" guarantee, just a
-  // second view of it. The text digest stays as the reliable fallback (some carriers/
-  // athletes render MMS poorly), this is a visual supplement, not a replacement. Best-effort,
-  // same pattern as the strength-poster images above — a failure here must never break the
-  // rest of the coaching flow.
+  // would have built the text digest bubble into a PNG via /api/coach/schedule-card and
+  // sends it as an image — this is now the athlete's primary view of the week's schedule,
+  // not a supplement to a text list (that was redundant: two views of the same thing).
+  // Best-effort, same pattern as the strength-poster images above — a failure here must
+  // never break the rest of the coaching flow, and falls back to the plain-text digest
+  // (built above but not sent by default) so the athlete isn't left with no schedule at all.
   if (trigger === "weekly_recap" && !dry_run && (arcWeekSkeleton || recoveryWeekSkeleton)) {
     try {
       const envUrl = process.env.NEXT_PUBLIC_APP_URL;
@@ -3880,6 +3883,21 @@ OUTPUT CONTRACT:
       void trackEvent(userId, "schedule_card_sent", { trigger, kind: arcWeekSkeleton ? "regular" : "recovery" });
     } catch (cardErr) {
       console.error(`[coach/respond] schedule card send failed userId=${userId}:`, cardErr);
+      void trackEvent(userId, "schedule_card_send_failed", { trigger, error: String(cardErr) });
+      if (scheduleDigestFallback) {
+        try {
+          await sendSMS(user.phone_number, scheduleDigestFallback);
+          await insertConversation({
+            user_id: userId,
+            role: "assistant",
+            content: scheduleDigestFallback,
+            message_type: msgType,
+            strava_activity_id: activityId || null,
+          });
+        } catch (fallbackErr) {
+          console.error(`[coach/respond] schedule digest fallback send failed userId=${userId}:`, fallbackErr);
+        }
+      }
     }
   }
 
