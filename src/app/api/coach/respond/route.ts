@@ -15,6 +15,13 @@ import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc } from "@/lib/training-plan";
 import type { ArcWeekSlot, RecoveryWeekSlot } from "@/lib/training-plan";
 import { buildRecoveryCardPayload, buildRegularCardPayload, encodeCardPayload } from "@/lib/schedule-card";
+
+/** "shin" -> "Shin", "it_band" -> "IT band" — injury_body_part is stored lowercase/snake_case, but this text opens a sentence on the schedule card. */
+function capitalizeBodyPartForCard(bodyPart: string): string {
+  const spaced = bodyPart.replace(/_/g, " ");
+  if (spaced === "it band") return "IT band";
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
@@ -3865,7 +3872,7 @@ OUTPUT CONTRACT:
             annotations: recoverySlotAnnotations,
             probe: recoveryProbe,
             shinRoutineNote: injuryBodyPartForCard
-              ? `${injuryBodyPartForCard.replace(/_/g, " ")} routine 3-5x this week — that's what rebuilds tolerance`
+              ? `${capitalizeBodyPartForCard(injuryBodyPartForCard)} routine 3-5x this week — that's what rebuilds tolerance`
               : undefined,
           });
       const cardUrl = `${appUrl}/api/coach/schedule-card?data=${encodeCardPayload(cardPayload)}`;

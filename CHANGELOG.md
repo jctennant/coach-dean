@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Fix uncapitalized body-part name on schedule card; audit real user data for edge cases
+
+**Type:** Bug Fix
+**Reported by:** Internal testing at user's request ("test creating some of these for other users like Gwyneth in the db")
+**User feedback:** N/A — proactive audit, not a specific complaint
+**Root cause:** Generated cards for 5 real athletes (read-only, using their actual stored `training_profiles`/`training_state`/`training_plans` data via the same deterministic skeleton builders production uses — never called the live `/api/coach/respond` endpoint or sent anything to a real athlete) to look for edge cases beyond the one test account used all session. Found: `shinRoutineNote` built the "Watching" line as `${injuryBodyPartForCard.replace(/_/g, " ")} routine...` with no capitalization — worked by coincidence in every test this session because the test account's injury was "shin" and every test payload had it hardcoded as "Shin routine" by hand; a real athlete with a groin injury got "groin routine..." lowercase at the start of a sentence.
+**Fix / Change:** Added `capitalizeBodyPartForCard()` — capitalizes the first letter, with a special case for "it_band" → "IT band" (would otherwise read "It band"). Separately (not fixed, flagged): found a real pre-existing production bug unrelated to this feature — one athlete's `training_state.current_week` (11) has run past their stored plan's `total_weeks` (9), so `storedPlanWeek` lookup fails for them in production today, meaning they're on the legacy freeform schedule prompt path, not the deterministic skeleton, and currently wouldn't get a schedule card at all. Needs a product decision (auto-extend plan? regenerate at completion?), not a silent code fix.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
 ## 2026-07-20 — Always show return-to-run status on the schedule card, even without a test jog
 
 **Type:** Bug Fix
