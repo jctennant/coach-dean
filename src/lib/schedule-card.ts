@@ -52,7 +52,17 @@ export function buildRecoveryCardPayload(params: {
     });
   const watch: CardPayload["watch"] = [];
   if (shinRoutineNote) watch.push({ text: shinRoutineNote });
-  if (probe) watch.push({ text: "Pain-free through the week → full plan rebuilds next Sunday", flag: true });
+  // Always show a return-to-run status line, not just when a probe is scheduled — whether
+  // there's a test jog this week is exactly the thing an athlete on injury hold is watching
+  // for, and it was silently disappearing from the card whenever Claude judged a probe
+  // wasn't warranted this particular week, with zero explanation. `probe` presence is a
+  // per-call judgment call (deliberately, since it should reflect that week's check-ins),
+  // so it's expected to vary — but the athlete should never see nothing about it.
+  watch.push(
+    probe
+      ? { text: "Pain-free through the week → full plan rebuilds next Sunday", flag: true }
+      : { text: "No test run yet this week — building tolerance, we'll reassess Sunday", flag: true }
+  );
   return { weekLabel, countLabel: "0 running mi", rows, watch };
 }
 

@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Always show return-to-run status on the schedule card, even without a test jog
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "I notice on this one that Dean actually removed the test run. You know what's happening there I test run to see if I can come back from my injury."
+**Root cause:** Whether to include a test-jog probe this week is deliberately a per-call judgment call (`recoveryProbe` in `coach/respond/route.ts`), meant to reflect that specific week's pain check-ins — that part is correct and shouldn't become unconditional. But `buildRecoveryCardPayload` only added a "Watching" line about return-to-run progress `if (probe)` — so on any week Claude judged a probe wasn't warranted, the card said nothing about return-to-run status at all. Combined with last round's change to drop the text digest and keep the message text framing-only, the athlete had zero channel left to learn where they stood on the thing they most wanted to track.
+**Fix / Change:** `buildRecoveryCardPayload` now always pushes a return-to-run status line to the "Watching" section — the existing "pain-free through the week → full plan rebuilds next Sunday" line when a probe is scheduled, or a new "No test run yet this week — building tolerance, we'll reassess Sunday" line when it isn't. The presence/absence of the actual test-jog row is still Claude's judgment call; what changed is that the athlete is never left without an explanation either way.
+**Files changed:** `src/lib/schedule-card.ts`
+
 ## 2026-07-20 — Fix invisible schedule-card icons, drop the now-redundant text digest, clean up Watching section
 
 **Type:** Bug Fix / Improvement
