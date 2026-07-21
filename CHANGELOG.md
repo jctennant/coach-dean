@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Add a visual weekly schedule card, sent as MMS alongside the text digest
+
+**Type:** Feature
+**Reported by:** User feedback
+**User feedback:** "do you think we could actually create a visual card - something like this, that has the schedule in a better visual format and is more readable? I think the text is still a lot of text, hard to parse." Followed by three rounds of design iteration on a mocked-up Artifact (remove page title, simplify the card header, fix a broken logo SVG fragment, swap in the real `bubble-64.png` brand mark), then: "Cool, this looks good. Can you give this a shot now?"
+**Root cause:** N/A — this is new functionality, not a bug fix. The text digest bubble (`formatRecoveryWeekDigest` / `formatWeeklyPlanDigest`) is accurate but reads as a dense text block; a scannable visual card was requested as a supplement.
+**Fix / Change:** Added `src/lib/schedule-card.ts` — pure builder functions (`buildRecoveryCardPayload`, `buildRegularCardPayload`) that turn the same deterministic skeleton + Claude-supplied `slot_annotations`/`probe` data already used for the text digest into a compact JSON payload, plus `encodeCardPayload`/`decodeCardPayload` (base64url) so the whole payload travels in the image URL itself — no new DB table/column, no render-time DB round-trip, and the image literally cannot say anything the text digest didn't already say since both are built from the same in-memory data in the same request. Added `src/app/api/coach/schedule-card/route.tsx`, a stateless GET route using `next/og`'s `ImageResponse` (Google Fonts "Inter" fetched and cached at module scope) to render the payload into a PNG matching the Artifact-approved design: brand header with the real `bubble-64.png` mark, a week pill, a day-by-day row list with per-modality icons and short duration/effort cues, the injury-hold test-jog probe row visually flagged in amber (reserved for that one "decision pending" semantic), and running weeks using a brand-filled tag for long-run/quality sessions instead. Wired into `coach/respond/route.ts`'s `weekly_recap` flow: after the existing text bubbles send, if `arcWeekSkeleton` or `recoveryWeekSkeleton` is present and this isn't a `dry_run`, the card is sent as an additional MMS via the same `sendMediaSMS` used for strength-poster images — best-effort, wrapped in try/catch, never blocking the rest of the send. Also fixed a latent gap while wiring this up: `arcSlotAnnotations`' extraction was silently discarding the `description` field the tool schema already asked Claude for (only `pace`/`why` were kept), so cross-training/strength days in a regular week's card (and any future consumer) had no duration/effort text to show — now captured alongside the others.
+**Files changed:** `src/lib/schedule-card.ts` (new), `src/app/api/coach/schedule-card/route.tsx` (new), `src/app/api/coach/respond/route.ts`
+
 ## 2026-07-20 — Make the recovery-week digest more scannable; fix current_week getting inflated by repeated manual test triggers
 
 **Type:** Bug Fix / Improvement

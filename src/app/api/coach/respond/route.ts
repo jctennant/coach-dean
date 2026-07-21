@@ -14,6 +14,7 @@ import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
 import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc } from "@/lib/training-plan";
 import type { ArcWeekSlot, RecoveryWeekSlot } from "@/lib/training-plan";
+import { buildRecoveryCardPayload, buildRegularCardPayload, encodeCardPayload } from "@/lib/schedule-card";
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { getValidAccessToken } from "@/lib/strava";
@@ -2102,7 +2103,7 @@ Apply this to bias which metric lens you pick and what advice you give proactive
   // Claude's per-slot pace/why narration for arcWeekSkeleton, captured below once the
   // skeleton_annotations tool call comes back — read by the weekly_recap after() block to
   // flavor the deterministic weekly_plan_digest without re-calling the model.
-  let arcSlotAnnotations: Array<{ day: string; pace?: string; why?: string }> | null = null;
+  let arcSlotAnnotations: Array<{ day: string; pace?: string; why?: string; description?: string }> | null = null;
   if (
     trigger === "weekly_recap" &&
     storedPlanWeek &&
@@ -3433,12 +3434,13 @@ OUTPUT CONTRACT:
         log.warn("slot_annotations referenced a day not in the fixed skeleton", { trigger, invalidDays });
         void trackEvent(userId, "arc_week_slot_annotation_day_mismatch", { invalidDays });
       }
-      arcSlotAnnotations = (slotAnnotations as Array<{ day?: unknown; pace?: unknown; why?: unknown }>)
-        .filter((a): a is { day: string; pace?: string; why?: string } => typeof a?.day === "string" && skeletonDays.has(a.day as ArcWeekSlot["day"]))
+      arcSlotAnnotations = (slotAnnotations as Array<{ day?: unknown; pace?: unknown; why?: unknown; description?: unknown }>)
+        .filter((a): a is { day: string; pace?: string; why?: string; description?: string } => typeof a?.day === "string" && skeletonDays.has(a.day as ArcWeekSlot["day"]))
         .map(a => ({
           day: a.day,
           ...(typeof a.pace === "string" ? { pace: a.pace } : {}),
           ...(typeof a.why === "string" ? { why: a.why } : {}),
+          ...(typeof a.description === "string" ? { description: a.description } : {}),
         }));
     } else {
       log.warn("weekly_recap skeleton mode delivered without usable slot_annotations", { trigger });
@@ -3829,6 +3831,55 @@ OUTPUT CONTRACT:
         strava_activity_id: activityId || null,
       });
       void trackEvent(userId, "strength_poster_sent", { routine_key: routineLabel, trigger, exercise_count: sentCount });
+    }
+  }
+
+  // Weekly schedule card (MMS): renders the same deterministic skeleton/annotations that
+  // built the text digest bubble above into a PNG via /api/coach/schedule-card and sends
+  // it as an additional image — same "compute once, render, can't drift" guarantee, just a
+  // second view of it. The text digest stays as the reliable fallback (some carriers/
+  // athletes render MMS poorly), this is a visual supplement, not a replacement. Best-effort,
+  // same pattern as the strength-poster images above — a failure here must never break the
+  // rest of the coaching flow.
+  if (trigger === "weekly_recap" && !dry_run && (arcWeekSkeleton || recoveryWeekSkeleton)) {
+    try {
+      const envUrl = process.env.NEXT_PUBLIC_APP_URL;
+      const appUrl = envUrl?.startsWith("https://") ? envUrl : "https://coachdean.ai";
+      const weekLabelText = storedPlanWeek && storedPlanAllWeeks.length > 0
+        ? `WEEK ${storedPlanWeek.week_number} OF ${storedPlanAllWeeks.length}`
+        : `WEEK ${(state?.current_week as number | null) ?? periodization.effectiveWeek ?? 1}`;
+      const injuryBodyPartForCard = (profile?.injury_body_part as string | null) ?? null;
+      const cardPayload = arcWeekSkeleton
+        ? buildRegularCardPayload({
+            weekLabel: weekLabelText,
+            skeleton: arcWeekSkeleton,
+            annotations: arcSlotAnnotations,
+            isMetric: isMetricUser,
+          })
+        : buildRecoveryCardPayload({
+            weekLabel: weekLabelText,
+            skeleton: recoveryWeekSkeleton!,
+            annotations: recoverySlotAnnotations,
+            probe: recoveryProbe,
+            shinRoutineNote: injuryBodyPartForCard
+              ? `${injuryBodyPartForCard.replace(/_/g, " ")} routine 3-5x this week — that's what rebuilds tolerance`
+              : undefined,
+          });
+      const cardUrl = `${appUrl}/api/coach/schedule-card?data=${encodeCardPayload(cardPayload)}`;
+      const activeChatIdForCard = chatId ?? learnedChatId;
+      if (activeChatIdForCard) await startTyping(activeChatIdForCard);
+      await new Promise((r) => setTimeout(r, 1200));
+      await sendMediaSMS(user.phone_number, "", cardUrl, "image/png");
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: "[Sent weekly schedule card image]",
+        message_type: msgType,
+        strava_activity_id: activityId || null,
+      });
+      void trackEvent(userId, "schedule_card_sent", { trigger, kind: arcWeekSkeleton ? "regular" : "recovery" });
+    } catch (cardErr) {
+      console.error(`[coach/respond] schedule card send failed userId=${userId}:`, cardErr);
     }
   }
 
