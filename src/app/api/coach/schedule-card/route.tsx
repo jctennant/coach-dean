@@ -11,16 +11,23 @@ import { decodeCardPayload, type CardRow, type CardRowType } from "@/lib/schedul
  *
  * Linq fetches this URL synchronously when relaying the MMS, so it must respond fast and
  * never throw — a broken image URL fails the whole attachment (see linq.ts sendMediaSMS).
+ *
+ * Canvas is 1080px wide (rendered at native retina pixel density, not a small canvas the
+ * client has to upscale — which is what made the first version look soft) with a content-
+ * driven height: a "hero" stat block (the week's big number) plus larger row/type sizing
+ * push the card notably more vertical/portrait than the original design without leaving a
+ * block of dead blank canvas below a light week's content (a fixed tall canvas was tried
+ * first and looked broken on weeks with fewer rows).
  */
+
+const WIDTH = 1080;
 
 const TOKENS = {
   surface: "#fcfcfb",
-  page: "#f9f9f7",
   textPrimary: "#0b0b0b",
   textSecondary: "#52514e",
   textMuted: "#898781",
   gridline: "#e1e0d9",
-  border: "rgba(11,11,11,0.10)",
   brand: "#005F2E",
   brandTrack: "#dcefe2",
   brandWash: "rgba(0,95,46,0.06)",
@@ -37,9 +44,9 @@ const BUBBLE_MARK =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><path fill="none" stroke="${TOKENS.brand}" stroke-width="7" d="M64 20c-24 0-42 16-42 36 0 12 6 22 16 29l-6 20 22-11c3 .5 6.6.8 10 .8 24 0 42-16 42-36S88 20 64 20z"/><circle cx="46" cy="56" r="6" fill="${TOKENS.brand}"/><circle cx="64" cy="56" r="6" fill="${TOKENS.brand}"/><circle cx="82" cy="56" r="6" fill="${TOKENS.brand}"/></svg>`
   ).toString("base64");
 
-let fontCache: { regular: ArrayBuffer; bold: ArrayBuffer } | null = null;
+let fontCache: { regular: ArrayBuffer; bold: ArrayBuffer; extrabold: ArrayBuffer } | null = null;
 
-async function loadGoogleFont(weight: 400 | 700): Promise<ArrayBuffer> {
+async function loadGoogleFont(weight: 400 | 700 | 800): Promise<ArrayBuffer> {
   const css = await fetch(`https://fonts.googleapis.com/css2?family=Inter:wght@${weight}`).then((r) => r.text());
   const match = css.match(/src: url\(([^)]+)\) format\('(?:opentype|truetype)'\)/);
   if (!match) throw new Error("font resource not found in Google Fonts CSS");
@@ -49,8 +56,8 @@ async function loadGoogleFont(weight: 400 | 700): Promise<ArrayBuffer> {
 
 async function getFonts() {
   if (fontCache) return fontCache;
-  const [regular, bold] = await Promise.all([loadGoogleFont(400), loadGoogleFont(700)]);
-  fontCache = { regular, bold };
+  const [regular, bold, extrabold] = await Promise.all([loadGoogleFont(400), loadGoogleFont(700), loadGoogleFont(800)]);
+  fontCache = { regular, bold, extrabold };
   return fontCache;
 }
 
@@ -70,21 +77,19 @@ const ICON_PATHS: Partial<Record<CardRowType, string>> = {
 
 function RowIcon({ type }: { type: CardRowType }) {
   if (type === "rest") {
-    return (
-      <div style={{ width: 26, height: 26, borderRadius: 13, border: `1px dashed ${TOKENS.gridline}`, display: "flex" }} />
-    );
+    return <div style={{ width: 56, height: 56, borderRadius: 28, border: `2px dashed ${TOKENS.gridline}`, display: "flex" }} />;
   }
   const isFlag = type === "probe";
   const d = ICON_PATHS[type] ?? "M6 6h4M6 6v4";
   return (
     <div
       style={{
-        width: 26, height: 26, borderRadius: 13,
+        width: 56, height: 56, borderRadius: 28,
         background: isFlag ? TOKENS.flagTrack : TOKENS.brandTrack,
         display: "flex", alignItems: "center", justifyContent: "center",
       }}
     >
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+      <svg width="28" height="28" viewBox="0 0 16 16" fill="none">
         <path d={d} stroke={isFlag ? TOKENS.flag : TOKENS.brand} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </div>
@@ -96,32 +101,32 @@ function Row({ row }: { row: CardRow }) {
   return (
     <div
       style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "8px 22px", opacity: row.type === "rest" ? 0.55 : 1,
+        display: "flex", alignItems: "center", gap: 24,
+        padding: "22px 60px", opacity: row.type === "rest" ? 0.5 : 1,
         background: isFlag ? TOKENS.flagWash : "transparent",
-        borderBottom: isFlag ? "none" : `1px solid ${TOKENS.gridline}`,
+        borderBottom: isFlag ? "none" : `2px solid ${TOKENS.gridline}`,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", width: 40 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.day}</span>
-        <span style={{ fontSize: 10, color: TOKENS.textMuted }}>{row.date}</span>
+      <div style={{ display: "flex", flexDirection: "column", width: 92 }}>
+        <span style={{ fontSize: 28, fontWeight: 700, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.day}</span>
+        <span style={{ fontSize: 20, color: TOKENS.textMuted }}>{row.date}</span>
       </div>
       <RowIcon type={row.type} />
       <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.label}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 30, fontWeight: 600, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.label}</span>
           {row.tag ? (
             <span
               style={{
-                fontSize: 9, fontWeight: 700, letterSpacing: 0.3, color: TOKENS.surface,
-                background: TOKENS.brand, borderRadius: 4, padding: "1.5px 5px", textTransform: "uppercase" as const,
+                fontSize: 17, fontWeight: 700, letterSpacing: 0.6, color: TOKENS.surface,
+                background: TOKENS.brand, borderRadius: 6, padding: "3px 11px", textTransform: "uppercase" as const,
               }}
             >
               {row.tag}
             </span>
           ) : null}
         </div>
-        {row.detail ? <span style={{ fontSize: 11.5, color: TOKENS.textSecondary, marginTop: 1 }}>{row.detail}</span> : null}
+        {row.detail ? <span style={{ fontSize: 23, color: TOKENS.textSecondary, marginTop: 4 }}>{row.detail}</span> : null}
       </div>
     </div>
   );
@@ -135,11 +140,26 @@ export async function GET(req: NextRequest) {
     return new Response("Invalid or missing card data", { status: 400 });
   }
 
-  const width = 560;
-  const headerH = 64;
-  const rowH = 54; // matches ~2-line row content incl. padding
-  const dividerBlockH = payload.watch.length > 0 ? 17 + payload.watch.length * 26 + 20 : 12;
-  const height = headerH + payload.rows.length * rowH + dividerBlockH;
+  // Split "0 running mi" / "34.0 mi" into a big hero number + unit — same data already in
+  // countLabel, just given visual weight so the card reads like a real share card instead
+  // of a dense list, and fills more of the canvas on light weeks.
+  const heroMatch = payload.countLabel.match(/^([\d.]+)\s*(.*)$/);
+  const heroNumber = heroMatch?.[1] ?? payload.countLabel;
+  const heroUnit = heroMatch?.[2] ?? "";
+
+  // Content-driven height, not a fixed canvas — a fixed 2280px height left ~1000px of dead
+  // blank canvas below a light week's content, which reads as broken, not "fills the screen."
+  // These constants mirror the actual padding/line-height budget of each block below; a
+  // fixed-canvas version could still be revisited later with more content designed to fill
+  // it (e.g. a trend chart), but empty space is worse than a slightly shorter card.
+  const headerH = 100;
+  const heroH = 270;
+  const rowH = 116;
+  const watchH = payload.watch.length > 0
+    ? 36 + 26 + 20 + payload.watch.length * 36 + (payload.watch.length - 1) * 18
+    : 0;
+  const footerH = 130;
+  const height = headerH + heroH + payload.rows.length * rowH + watchH + footerH;
 
   const fonts = await getFonts();
 
@@ -147,73 +167,89 @@ export async function GET(req: NextRequest) {
     (
       <div
         style={{
-          width, height, display: "flex", flexDirection: "column",
+          width: WIDTH, height, display: "flex", flexDirection: "column",
           background: TOKENS.surface, fontFamily: "Inter",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 22px 12px", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={BUBBLE_MARK} width={18} height={18} alt="" />
-            <span style={{ fontSize: 12, fontWeight: 700, color: TOKENS.textPrimary }}>Coach Dean</span>
-          </div>
-          <div
-            style={{
-              fontSize: 11, fontWeight: 700, letterSpacing: 0.3, color: TOKENS.brand,
-              background: TOKENS.brandWash, borderRadius: 100, padding: "5px 12px",
-            }}
-          >
-            {payload.weekLabel}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "0 22px", marginBottom: 4 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: TOKENS.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.4 }}>
-            This week
-          </span>
-          <span style={{ fontSize: 12.5, color: TOKENS.textMuted, fontVariantNumeric: "tabular-nums" as const }}>{payload.countLabel}</span>
-        </div>
-
         <div style={{ display: "flex", flexDirection: "column" }}>
-          {payload.rows.map((row, i) => (
-            <Row key={i} row={row} />
-          ))}
-        </div>
-
-        {payload.watch.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", padding: "14px 22px 20px" }}>
-            <div style={{ height: 1, background: TOKENS.gridline, marginBottom: 14 }} />
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: TOKENS.textSecondary, textTransform: "uppercase" as const, letterSpacing: 0.4, marginBottom: 10 }}>
-              Watching
-            </span>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {payload.watch.map((w, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
-                  <div
-                    style={{
-                      width: 15, height: 15, borderRadius: 8, marginTop: 1,
-                      background: w.flag ? TOKENS.flag : TOKENS.brand,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}
-                  >
-                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                      <path d="M1 4L3 6L7 1.5" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                  <span style={{ fontSize: 13, color: TOKENS.textSecondary, lineHeight: 1.35 }}>{w.text}</span>
-                </div>
-              ))}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "64px 60px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={BUBBLE_MARK} width={36} height={36} alt="" />
+              <span style={{ fontSize: 26, fontWeight: 700, color: TOKENS.textPrimary }}>Coach Dean</span>
+            </div>
+            <div
+              style={{
+                fontSize: 20, fontWeight: 700, letterSpacing: 0.6, color: TOKENS.brand,
+                background: TOKENS.brandWash, borderRadius: 100, padding: "9px 22px",
+              }}
+            >
+              {payload.weekLabel}
             </div>
           </div>
-        ) : null}
+
+          <div style={{ display: "flex", flexDirection: "column", padding: "48px 60px 40px" }}>
+            <span style={{ fontSize: 22, fontWeight: 600, color: TOKENS.textMuted, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 8 }}>
+              This week
+            </span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
+              <span style={{ fontSize: 148, fontWeight: 800, color: TOKENS.textPrimary, lineHeight: 1 }}>{heroNumber}</span>
+              {heroUnit ? <span style={{ fontSize: 30, fontWeight: 600, color: TOKENS.textSecondary }}>{heroUnit}</span> : null}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {payload.rows.map((row, i) => (
+              <Row key={i} row={row} />
+            ))}
+          </div>
+
+          {payload.watch.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", padding: "36px 60px 0" }}>
+              <span style={{ fontSize: 22, fontWeight: 600, color: TOKENS.textMuted, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 20 }}>
+                Watching
+              </span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                {payload.watch.map((w, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 18 }}>
+                    <div
+                      style={{
+                        width: 32, height: 32, borderRadius: 16, marginTop: 2,
+                        background: w.flag ? TOKENS.flag : TOKENS.brand,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 8 8" fill="none">
+                        <path d="M1 4L3 6L7 1.5" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 26, color: TOKENS.textSecondary, lineHeight: 1.4 }}>{w.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
+            padding: "40px 60px 64px", borderTop: `2px solid ${TOKENS.gridline}`,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={BUBBLE_MARK} width={22} height={22} alt="" />
+          <span style={{ fontSize: 20, color: TOKENS.textMuted }}>Text your coach anytime</span>
+        </div>
       </div>
     ),
     {
-      width,
+      width: WIDTH,
       height,
       fonts: [
         { name: "Inter", data: fonts.regular, weight: 400, style: "normal" },
         { name: "Inter", data: fonts.bold, weight: 700, style: "normal" },
+        { name: "Inter", data: fonts.extrabold, weight: 800, style: "normal" },
       ],
     }
   );

@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Fix schedule-card resolution and aspect ratio
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "It doesn't look amazing. Can we make it more vertical? When I click on it, it just fills up half the vertical screen. Ideally, it fills up the full phone screen. The resolution also doesn't look amazing. Should be super sharp, and it's not."
+**Root cause:** The card rendered at a small 560px-wide canvas; Messages upscales that to fill the phone's display width, which is what made it look soft — the fix isn't sharpening, it's rendering at a size that doesn't need upscaling. Separately, the layout was closer to square than portrait. First attempt used a fixed 1080x2280 canvas (~9:19, true phone-screen ratio) to directly address "fills the full phone screen," but a light week's actual content only filled about half of it, leaving a large dead blank gap above the footer — worse than the original, just taller.
+**Fix / Change:** Rendered at 1080px width (native retina density — no more client-side upscale) with roughly double the previous type/icon/spacing scale, and added a "hero" stat block (the week's total mileage, already in `countLabel`, given large typographic weight) plus a footer sign-off, both of which give the card real vertical presence without inventing new data. Height is content-driven (sum of each section's actual padding/line-height budget) rather than a fixed canvas, so there's no dead space regardless of how many rows a given week has — this trades literal edge-to-edge phone-screen coverage for a card that's still notably more vertical/portrait than the original (roughly 0.7:1 vs ~1:1) and never has an awkward empty gap.
+**Files changed:** `src/app/api/coach/schedule-card/route.tsx`
+
 ## 2026-07-20 — Add a visual weekly schedule card, sent as MMS alongside the text digest
 
 **Type:** Feature
