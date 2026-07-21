@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Tighten PUNCTUATION and multi-part-question LENGTH rules to cut em dash overuse and verbosity
+
+**Type:** Improvement
+**Reported by:** User feedback
+**User feedback:** Pasted a real injury Q&A exchange ("So it is normal for shin splints to get worse... Is it bad that I'm completely resting from running vs just lowering volume?") where Dean answered with three full paragraphs and roughly a dozen em dashes, asked to make responses "more succinct and have fewer em-dashes overall," and noted the 2026-07-19 succinctness fix "doesn't seem to be good enough."
+**Root cause:** Two gaps in the existing TONE/LENGTH rules. (1) No punctuation guidance existed at all, and the TONE section's own few-shot examples used em dashes in nearly every sentence ("Pace-at-HR dropped 38s/mi... — that's the aerobic base paying off"), so the model had a strong in-prompt pattern to imitate. (2) The 2026-07-19 LENGTH fix only covered messages with genuinely distinct multi-part questions ("keep each answer to a sentence or two") — it didn't cover the more common case of one topic asked two overlapping ways ("is X normal, and is Y also okay"), which the model was treating as two separate questions deserving two separate paragraphs.
+**Fix / Change:** Tightened the existing TONE and LENGTH rule blocks in place (no new rule blocks, per this repo's prompt-engineering philosophy). Rewrote the em-dash-heavy few-shot examples in TONE to use periods instead, added an explicit PUNCTUATION rule capping em dash usage at one per message, and added a LENGTH bullet instructing Dean to give one direct answer (not a paragraph per phrasing) when a message is really one topic asked two ways.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-07-20 — Fix uncapitalized body-part name on schedule card; audit real user data for edge cases
 
 **Type:** Bug Fix
