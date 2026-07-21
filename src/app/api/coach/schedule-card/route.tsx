@@ -77,19 +77,19 @@ const ICON_PATHS: Partial<Record<CardRowType, string>> = {
 
 function RowIcon({ type }: { type: CardRowType }) {
   if (type === "rest") {
-    return <div style={{ width: 56, height: 56, borderRadius: 28, border: `2px dashed ${TOKENS.gridline}`, display: "flex" }} />;
+    return <div style={{ width: 76, height: 76, borderRadius: 38, border: `3px dashed ${TOKENS.gridline}`, display: "flex" }} />;
   }
   const isFlag = type === "probe";
   const d = ICON_PATHS[type] ?? "M6 6h4M6 6v4";
   return (
     <div
       style={{
-        width: 56, height: 56, borderRadius: 28,
+        width: 76, height: 76, borderRadius: 38,
         background: isFlag ? TOKENS.flagTrack : TOKENS.brandTrack,
         display: "flex", alignItems: "center", justifyContent: "center",
       }}
     >
-      <svg width="28" height="28" viewBox="0 0 16 16" fill="none">
+      <svg width="38" height="38" viewBox="0 0 16 16" fill="none">
         <path d={d} stroke={isFlag ? TOKENS.flag : TOKENS.brand} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </div>
@@ -101,32 +101,32 @@ function Row({ row }: { row: CardRow }) {
   return (
     <div
       style={{
-        display: "flex", alignItems: "center", gap: 24,
-        padding: "22px 60px", opacity: row.type === "rest" ? 0.5 : 1,
+        display: "flex", alignItems: "center", gap: 30,
+        padding: "44px 60px", opacity: row.type === "rest" ? 0.5 : 1,
         background: isFlag ? TOKENS.flagWash : "transparent",
         borderBottom: isFlag ? "none" : `2px solid ${TOKENS.gridline}`,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", width: 92 }}>
-        <span style={{ fontSize: 28, fontWeight: 700, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.day}</span>
-        <span style={{ fontSize: 20, color: TOKENS.textMuted }}>{row.date}</span>
+      <div style={{ display: "flex", flexDirection: "column", width: 118 }}>
+        <span style={{ fontSize: 34, fontWeight: 700, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.day}</span>
+        <span style={{ fontSize: 24, color: TOKENS.textMuted }}>{row.date}</span>
       </div>
       <RowIcon type={row.type} />
       <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 30, fontWeight: 600, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.label}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ fontSize: 38, fontWeight: 600, color: isFlag ? TOKENS.flag : TOKENS.textPrimary }}>{row.label}</span>
           {row.tag ? (
             <span
               style={{
-                fontSize: 17, fontWeight: 700, letterSpacing: 0.6, color: TOKENS.surface,
-                background: TOKENS.brand, borderRadius: 6, padding: "3px 11px", textTransform: "uppercase" as const,
+                fontSize: 19, fontWeight: 700, letterSpacing: 0.6, color: TOKENS.surface,
+                background: TOKENS.brand, borderRadius: 7, padding: "4px 13px", textTransform: "uppercase" as const,
               }}
             >
               {row.tag}
             </span>
           ) : null}
         </div>
-        {row.detail ? <span style={{ fontSize: 23, color: TOKENS.textSecondary, marginTop: 4 }}>{row.detail}</span> : null}
+        {row.detail ? <span style={{ fontSize: 27, color: TOKENS.textSecondary, marginTop: 8 }}>{row.detail}</span> : null}
       </div>
     </div>
   );
@@ -149,16 +149,17 @@ export async function GET(req: NextRequest) {
 
   // Content-driven height, not a fixed canvas — a fixed 2280px height left ~1000px of dead
   // blank canvas below a light week's content, which reads as broken, not "fills the screen."
-  // These constants mirror the actual padding/line-height budget of each block below; a
-  // fixed-canvas version could still be revisited later with more content designed to fill
-  // it (e.g. a trend chart), but empty space is worse than a slightly shorter card.
-  const headerH = 100;
-  const heroH = 270;
-  const rowH = 116;
+  // These constants mirror the actual padding/line-height budget of each block below. Row
+  // size (not canvas size) is what was enlarged to approximate a phone-screen shape: a full
+  // 7-day week now runs close to a real portrait phone ratio on its own, without a forced
+  // fixed height that leaves dead space on lighter weeks.
+  const headerH = 120;
+  const heroH = 190;
+  const rowH = 168;
   const watchH = payload.watch.length > 0
-    ? 36 + 26 + 20 + payload.watch.length * 36 + (payload.watch.length - 1) * 18
+    ? 44 + 30 + 24 + payload.watch.length * 44 + (payload.watch.length - 1) * 24
     : 0;
-  const footerH = 130;
+  const footerH = 150;
   const height = headerH + heroH + payload.rows.length * rowH + watchH + footerH;
 
   const fonts = await getFonts();
@@ -172,29 +173,29 @@ export async function GET(req: NextRequest) {
         }}
       >
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "64px 60px 0" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "56px 60px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={BUBBLE_MARK} width={36} height={36} alt="" />
-              <span style={{ fontSize: 26, fontWeight: 700, color: TOKENS.textPrimary }}>Coach Dean</span>
+              <img src={BUBBLE_MARK} width={40} height={40} alt="" />
+              <span style={{ fontSize: 28, fontWeight: 700, color: TOKENS.textPrimary }}>Coach Dean</span>
             </div>
             <div
               style={{
-                fontSize: 20, fontWeight: 700, letterSpacing: 0.6, color: TOKENS.brand,
-                background: TOKENS.brandWash, borderRadius: 100, padding: "9px 22px",
+                fontSize: 21, fontWeight: 700, letterSpacing: 0.6, color: TOKENS.brand,
+                background: TOKENS.brandWash, borderRadius: 100, padding: "10px 24px",
               }}
             >
               {payload.weekLabel}
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", padding: "48px 60px 40px" }}>
-            <span style={{ fontSize: 22, fontWeight: 600, color: TOKENS.textMuted, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 8 }}>
+          <div style={{ display: "flex", flexDirection: "column", padding: "36px 60px 30px" }}>
+            <span style={{ fontSize: 22, fontWeight: 600, color: TOKENS.textMuted, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 6 }}>
               This week
             </span>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
-              <span style={{ fontSize: 148, fontWeight: 800, color: TOKENS.textPrimary, lineHeight: 1 }}>{heroNumber}</span>
-              {heroUnit ? <span style={{ fontSize: 30, fontWeight: 600, color: TOKENS.textSecondary }}>{heroUnit}</span> : null}
+            <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+              <span style={{ fontSize: 92, fontWeight: 800, color: TOKENS.textPrimary, lineHeight: 1 }}>{heroNumber}</span>
+              {heroUnit ? <span style={{ fontSize: 28, fontWeight: 600, color: TOKENS.textSecondary }}>{heroUnit}</span> : null}
             </div>
           </div>
 
@@ -205,25 +206,25 @@ export async function GET(req: NextRequest) {
           </div>
 
           {payload.watch.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", padding: "36px 60px 0" }}>
-              <span style={{ fontSize: 22, fontWeight: 600, color: TOKENS.textMuted, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 20 }}>
+            <div style={{ display: "flex", flexDirection: "column", padding: "44px 60px 0" }}>
+              <span style={{ fontSize: 22, fontWeight: 600, color: TOKENS.textMuted, textTransform: "uppercase" as const, letterSpacing: 1.2, marginBottom: 24 }}>
                 Watching
               </span>
-              <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
                 {payload.watch.map((w, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 18 }}>
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 20 }}>
                     <div
                       style={{
-                        width: 32, height: 32, borderRadius: 16, marginTop: 2,
+                        width: 40, height: 40, borderRadius: 20, marginTop: 2,
                         background: w.flag ? TOKENS.flag : TOKENS.brand,
                         display: "flex", alignItems: "center", justifyContent: "center",
                       }}
                     >
-                      <svg width="16" height="16" viewBox="0 0 8 8" fill="none">
+                      <svg width="20" height="20" viewBox="0 0 8 8" fill="none">
                         <path d="M1 4L3 6L7 1.5" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </div>
-                    <span style={{ fontSize: 26, color: TOKENS.textSecondary, lineHeight: 1.4 }}>{w.text}</span>
+                    <span style={{ fontSize: 30, color: TOKENS.textSecondary, lineHeight: 1.4 }}>{w.text}</span>
                   </div>
                 ))}
               </div>
@@ -233,13 +234,13 @@ export async function GET(req: NextRequest) {
 
         <div
           style={{
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
-            padding: "40px 60px 64px", borderTop: `2px solid ${TOKENS.gridline}`,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
+            padding: "48px 60px 72px", borderTop: `2px solid ${TOKENS.gridline}`,
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={BUBBLE_MARK} width={22} height={22} alt="" />
-          <span style={{ fontSize: 20, color: TOKENS.textMuted }}>Text your coach anytime</span>
+          <img src={BUBBLE_MARK} width={26} height={26} alt="" />
+          <span style={{ fontSize: 24, color: TOKENS.textMuted }}>Text your coach anytime</span>
         </div>
       </div>
     ),

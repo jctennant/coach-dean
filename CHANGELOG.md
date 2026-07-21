@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-20 — Enlarge schedule-card rows toward a phone-screen shape
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "Still doesn't look like it's taking up the full screen. Can we do anything to enlarge it so it's actually not a rectangle, but it's kind of like the full iOS/iPhone shape and taking up the full screen? Maybe we increase the size of each of the segments and decrease the size of the mileage target up top a little bit."
+**Root cause:** The previous fix made height content-driven (correctly, to avoid dead space) but kept the per-row/hero sizing from the original 560px design, just scaled ~2x for the 1080px canvas — a full 7-day week only reached ~0.73:1, well short of a phone's ~0.46:1 screen ratio.
+**Fix / Change:** Enlarged every row substantially (icon 56→76px, row padding 22px→44px, activity text 30→38px, detail 23→27px) and shrank the hero number (148→92px) per the athlete's own suggestion, rather than reaching for a fixed tall canvas again (already tried and reverted last round — it left dead space on lighter weeks). A full 7-row week now renders at ~0.59-0.66:1 depending on variant, notably closer to a phone screen shape, still with zero dead space regardless of row count.
+**Files changed:** `src/app/api/coach/schedule-card/route.tsx`
+
 ## 2026-07-20 — Fix schedule-card resolution and aspect ratio
 
 **Type:** Bug Fix
