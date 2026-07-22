@@ -387,7 +387,8 @@ export function computeWeekOneVolumeCap(
   avgWeeklyMileage: number | null,
   fitnessLevel: string | null,
   forceBeginnerTier: boolean,
-  daysSinceLastRun: number | null = null
+  daysSinceLastRun: number | null = null,
+  activeInjury: boolean = false
 ): { min: number; max: number | null } {
   if (avgWeeklyMileage == null || forceBeginnerTier) {
     if (fitnessLevel === "advanced") return { min: 20, max: null };
@@ -406,8 +407,20 @@ export function computeWeekOneVolumeCap(
   // formal injury-hold return (70%/60%/50% at 1/2/3+ weeks off) so a starter plan after
   // an unflagged layoff doesn't just hand back pre-layoff volume. Below 7 days, gaps are
   // normal week-to-week noise and the base cap already covers them.
-  if (daysSinceLastRun != null && daysSinceLastRun >= 7) {
-    const gapFactor = daysSinceLastRun >= 21 ? 0.50 : daysSinceLastRun >= 14 ? 0.60 : 0.70;
+  //
+  // An active injury on file forces the same scale-down even when daysSinceLastRun is
+  // small or ambiguous (the gradual-taper case: an athlete nursing shin splints who
+  // "backed off recently" rather than stopping outright never trips the >=7-day gap
+  // check, so historical volume passed through untouched — see the 2026-07-22
+  // changelog: 18mi/week average + active shin splints still produced an 8.5mi long
+  // run because the volume tier alone gated the cap). When there's no real day count to
+  // scale from, 0.60 (the 2-week-off factor) is the conservative default — an active,
+  // reported injury is never treated as "just noise" the way a sub-7-day running gap is.
+  const gapApplies = (daysSinceLastRun != null && daysSinceLastRun >= 7) || activeInjury;
+  if (gapApplies) {
+    const gapFactor = daysSinceLastRun != null && daysSinceLastRun >= 7
+      ? (daysSinceLastRun >= 21 ? 0.50 : daysSinceLastRun >= 14 ? 0.60 : 0.70)
+      : 0.60;
     const gapMax = Math.round(avgWeeklyMileage * gapFactor);
     return {
       min: Math.round(Math.min(base.min, gapMax * 0.85)),
@@ -436,13 +449,21 @@ export function computeWeekOneVolumeCap(
  * athlete with an active shin injury and a 2-week gap, avg ~18mi/week). When the gap
  * applies, base the 35% cap on the gap-adjusted weekly max (already scaled down by
  * computeWeekOneVolumeCap's 70/60/50% factor) instead of the raw historical average.
+ *
+ * `activeInjury` covers a case the gap check alone still misses: an athlete who tapered
+ * down gradually (rather than stopping outright) never trips the >=7-day gap, so an
+ * active, currently-symptomatic injury with an ambiguous recent-run history passed
+ * through with no cap at all once avgWeeklyMileage crossed 10 — the exact scenario in
+ * the 2026-07-21 example above (18mi/week average, active shin splints, "backed off
+ * recently" rather than a clean stop). An active injury on file forces the same
+ * gap-adjusted math regardless of the day count.
  */
-export function computeLongRunCap(avgWeeklyMileage: number | null, daysSinceLastRun: number | null = null): number | null {
+export function computeLongRunCap(avgWeeklyMileage: number | null, daysSinceLastRun: number | null = null, activeInjury: boolean = false): number | null {
   if (avgWeeklyMileage == null) return null;
-  const gapApplies = daysSinceLastRun != null && daysSinceLastRun >= 7;
+  const gapApplies = (daysSinceLastRun != null && daysSinceLastRun >= 7) || activeInjury;
   if (avgWeeklyMileage >= 10 && !gapApplies) return null;
   const base = gapApplies
-    ? computeWeekOneVolumeCap(avgWeeklyMileage, null, false, daysSinceLastRun).max ?? avgWeeklyMileage
+    ? computeWeekOneVolumeCap(avgWeeklyMileage, null, false, daysSinceLastRun, activeInjury).max ?? avgWeeklyMileage
     : avgWeeklyMileage;
   return Math.max(Math.ceil(base * 0.35), 3);
 }

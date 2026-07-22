@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-22 — Long-run cap still had no effect above 10mi/week when the layoff was gradual, not a clean stop
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "just tried onboarding again... I'm still feeling like maybe this is a bit aggressive - maybe it should say like to gradually ramp up from my 3x5 min intervals" — pasted transcript for a Teton Crest Trail (5.5 weeks out) athlete with active shin splints, Strava showing ~18mi/week average, longest recent run 15.3mi, "backed off recently." initial_plan still prescribed an 8.5mi long run.
+**Root cause:** The previous fix (below, same date) added `gapBeforeLastRun` to catch a hard stop followed by one "testing the waters" run, but this athlete's case was different — a gradual taper (still logging occasional reduced runs, never a clean 7+ day gap) with an active, currently-symptomatic injury on file. `computeLongRunCap`/`computeWeekOneVolumeCap` gated their gap-adjusted reduction purely on `daysSinceLastRun >= 7`; an active injury with no matching day-count gap fell straight through to the raw historical average, so the volume tier (18mi/week, comfortably above the 10mi/week threshold where any cap applies at all) asserted no cap whatsoever.
+**Fix / Change:** Both functions now accept an `activeInjury` boolean that forces the same gap-adjusted math `daysSinceLastRun >= 7` triggers, independent of the day count — an active injury is never treated as "just noise" the way a sub-7-day running gap is. When there's no real day count to scale from, defaults to the 0.60 (2-week-off) factor. Wired `!!(profile?.active_injury)` into both `route.ts` call sites (the `plan.weekly_total`/`plan.long_run_distance` clamps) and into `buildFitnessTierBlock`'s prompt-side caps, with a new "ACTIVE INJURY ON FILE" note distinct from the day-count "GAP SINCE LAST RUN" note so the prompt doesn't contradict itself when there's no real gap to cite.
+**Files changed:** `src/lib/plan-validation.ts`, `src/lib/coach-fitness-tier.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/plan-validation.test.ts`, `src/__tests__/lib/coach-fitness-tier.test.ts`
+
 ## 2026-07-22 — A single "testing the waters" run erased the layoff signal; onboarding's completion message and initial_plan repeated each other
 
 **Type:** Bug Fix

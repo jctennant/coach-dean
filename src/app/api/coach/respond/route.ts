@@ -3447,7 +3447,8 @@ OUTPUT CONTRACT:
             avgWeeklyMileage,
             (profile?.fitness_level as string | null) ?? null,
             trigger === "initial_plan" && (profile?.fitness_level as string | null) === "beginner" && (avgWeeklyMileage ?? 0) > 8,
-            daysSinceLastRunForCap
+            daysSinceLastRunForCap,
+            !!(profile?.active_injury)
           ).max
         : periodization.suggestedWeeklyMiles;
       let validatedTotal = statedTotal;
@@ -3479,7 +3480,7 @@ OUTPUT CONTRACT:
     // pre-layoff volume to an athlete with an active injury and a real gap since their
     // last run is a safety issue, not a phrasing nit (see 2026-07-21 changelog).
     if (trigger === "initial_plan") {
-      const longRunCap = computeLongRunCap(avgWeeklyMileage, daysSinceLastRunForCap);
+      const longRunCap = computeLongRunCap(avgWeeklyMileage, daysSinceLastRunForCap, !!(profile?.active_injury));
       const statedLongRun = typeof planInput?.long_run_distance === "number" ? planInput.long_run_distance : null;
       if (longRunCap != null && statedLongRun != null && statedLongRun > longRunCap * 1.15) {
         log.warn("structured plan.long_run_distance exceeded safe cap — clamping", { trigger, statedLongRun, longRunCap });
@@ -6422,6 +6423,7 @@ ${buildFitnessTierBlock({
   daysPerWeek: (profile?.days_per_week as number | null) ?? null,
   isMetric: spUseMetric,
   daysSinceLastRun: daysSinceLastRunForCap,
+  activeInjury: !!(profile?.active_injury),
 })}
 
 ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:

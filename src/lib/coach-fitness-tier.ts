@@ -32,6 +32,8 @@ export interface FitnessTierParams {
   isMetric: boolean;
   /** Days since the athlete's most recent logged run — reduces the Week-1 cap on a real layoff. Null/omitted when not applicable (only meaningful for initial_plan). */
   daysSinceLastRun?: number | null;
+  /** An active, currently-symptomatic injury is on file. Forces the same gap-adjusted cap as a real layoff even when daysSinceLastRun is small or ambiguous (a gradual taper rather than a clean stop) — see computeWeekOneVolumeCap/computeLongRunCap. */
+  activeInjury?: boolean;
 }
 
 function buildNoHistoryTier(params: FitnessTierParams, spMi: (miles: number) => string): string {
@@ -64,21 +66,28 @@ function buildNoHistoryTier(params: FitnessTierParams, spMi: (miles: number) => 
 
 /** Builds the FITNESS TIER block: tier label + prose + hard volume/long-run caps. */
 export function buildFitnessTierBlock(params: FitnessTierParams): string {
-  const { avgWeeklyMileage, forceBeginnerTier, isMetric, daysSinceLastRun } = params;
+  const { avgWeeklyMileage, forceBeginnerTier, isMetric, daysSinceLastRun, activeInjury = false } = params;
   const spMi = (miles: number) => (isMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`);
 
   if (avgWeeklyMileage == null || forceBeginnerTier) {
     return buildNoHistoryTier(params, spMi);
   }
 
-  const cap = computeWeekOneVolumeCap(avgWeeklyMileage, null, false, daysSinceLastRun ?? null);
-  const gapApplies = daysSinceLastRun != null && daysSinceLastRun >= 7;
-  const gapNote = gapApplies
+  const cap = computeWeekOneVolumeCap(avgWeeklyMileage, null, false, daysSinceLastRun ?? null, activeInjury);
+  const realGap = daysSinceLastRun != null && daysSinceLastRun >= 7;
+  const gapApplies = realGap || activeInjury;
+  // A real day-count gap and an active-injury-only gap (gradual taper, no clean stop)
+  // get different phrasing — there's no day count to cite in the injury-only case, and
+  // saying "GAP SINCE LAST RUN: 2 days" while still applying an injury-scale reduction
+  // would read as a contradiction to Claude.
+  const gapNote = realGap
     ? ` GAP SINCE LAST RUN: ${daysSinceLastRun} days. That average was built before this gap and overstates current readiness — it's already been factored into the caps below, do not layer your own additional reduction or add it back on top.`
-    : "";
+    : activeInjury
+      ? ` ACTIVE INJURY ON FILE: historical volume overstates what this athlete can currently absorb — it's already been factored into the caps below, do not layer your own additional reduction or add it back on top.`
+      : "";
 
   if (avgWeeklyMileage < 10) {
-    const longRunCap = computeLongRunCap(avgWeeklyMileage)!;
+    const longRunCap = computeLongRunCap(avgWeeklyMileage, daysSinceLastRun ?? null, activeInjury)!;
     return `FITNESS TIER: LOW VOLUME (avg ${spMi(avgWeeklyMileage)}).${gapNote} Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
 <rule>WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${spMi(avgWeeklyMileage)}. Week 1 MUST NOT exceed ${spMi(cap.max!)} total${gapApplies ? "" : ` (current volume × 1.30, floor ${spMi(6)})`}. This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. Do not exceed this cap under any circumstances, regardless of race goals or timelines.</rule>
 <rule>LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(longRunCap)} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`;
@@ -88,7 +97,7 @@ export function buildFitnessTierBlock(params: FitnessTierParams): string {
   // should be right now, the same way it overstates the weekly total — see
   // computeLongRunCap's daysSinceLastRun handling. Outside a gap, moderate/high volume
   // tiers assert no separate long-run number (the weekly cap is the only guardrail).
-  const gapLongRunCap = gapApplies ? computeLongRunCap(avgWeeklyMileage, daysSinceLastRun) : null;
+  const gapLongRunCap = gapApplies ? computeLongRunCap(avgWeeklyMileage, daysSinceLastRun ?? null, activeInjury) : null;
   const longRunRule = gapLongRunCap != null
     ? `\n<rule>LONG RUN CAP — HARD LIMIT: Given the layoff, the single longest run in Week 1 must not exceed ${spMi(gapLongRunCap)} (35% of the gap-adjusted weekly cap, floor ${spMi(3)}). Returning from time off with a long run sized to pre-layoff volume is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`
     : "";

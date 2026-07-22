@@ -93,4 +93,20 @@ describe("buildFitnessTierBlock — data-backed tiers", () => {
     expect(text).toContain("avg 32.2 km"); // 20 * 1.60934
     expect(text).not.toMatch(/\d+(\.\d+)?\s*mi\b/);
   });
+
+  it("an active injury applies the gap-adjusted long-run cap above 10mi/week even with no real layoff gap", () => {
+    // 18mi/week, active injury, no daysSinceLastRun -> weekOneVolumeCap uses the 0.60 default:
+    // gapMax = round(18*0.6) = 11, long run cap = ceil(11*0.35) = 4
+    const text = base({ avgWeeklyMileage: 18, activeInjury: true });
+    expect(text).toContain("FITNESS TIER: MODERATE VOLUME (avg 18.0 mi)");
+    expect(text).toContain("ACTIVE INJURY ON FILE");
+    expect(text).toContain("LONG RUN CAP — HARD LIMIT");
+    expect(text).toContain("must not exceed 4.0 mi (35% of the gap-adjusted weekly cap");
+  });
+
+  it("with no injury and no gap, the same 18mi/week average asserts no long-run number at all", () => {
+    const text = base({ avgWeeklyMileage: 18 });
+    expect(text).not.toContain("LONG RUN CAP");
+    expect(text).not.toContain("ACTIVE INJURY ON FILE");
+  });
 });

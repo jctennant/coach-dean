@@ -419,6 +419,19 @@ describe("computeWeekOneVolumeCap", () => {
   it("gap reduction still respects the beginner/no-history floor logic (forceBeginnerTier short-circuits before the gap check)", () => {
     expect(computeWeekOneVolumeCap(15, "beginner", true, 30)).toEqual({ min: 0, max: 10 });
   });
+
+  it("an active injury forces the same gap-adjusted reduction even with no real day-count gap (the gradual-taper case)", () => {
+    // avg 18mi/week, daysSinceLastRun null, activeInjury true -> defaults to the 0.60 factor
+    expect(computeWeekOneVolumeCap(18, null, false, null, true)).toEqual({ min: 9, max: 11 });
+    // a small, sub-7-day gap plus an active injury still gets the injury-driven 0.60 default,
+    // not the (inapplicable) day-count factor
+    expect(computeWeekOneVolumeCap(18, null, false, 2, true)).toEqual({ min: 9, max: 11 });
+  });
+
+  it("a real day-count gap still takes priority over the injury default when both are present", () => {
+    // 21-day gap -> 0.50 factor wins over the injury-only 0.60 default
+    expect(computeWeekOneVolumeCap(18, null, false, 21, true)).toEqual({ min: 8, max: 9 });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -446,6 +459,12 @@ describe("computeLongRunCap", () => {
     expect(computeLongRunCap(18, 14)).toBe(4);
     // avg 18mi/week, 21+ day gap -> weekOneVolumeCap.max = round(18*0.5) = 9 -> ceil(9*0.35) = 4
     expect(computeLongRunCap(18, 21)).toBe(4);
+  });
+
+  it("an active injury forces a cap above 10mi/week even with no real layoff gap — the gradual-taper case", () => {
+    // avg 18mi/week, no gap, active injury -> weekOneVolumeCap.max = 11 (0.60 default) -> ceil(11*0.35) = 4
+    expect(computeLongRunCap(18, null, true)).toBe(4);
+    expect(computeLongRunCap(18, 3, true)).toBe(4); // small gap doesn't override the injury flag
   });
 });
 
