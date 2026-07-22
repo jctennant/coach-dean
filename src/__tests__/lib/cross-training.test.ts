@@ -78,7 +78,7 @@ describe("computeRunGapSignal", () => {
 
   it("returns null daysSinceLastRun and 0 consecutiveCrossTrainOnlyDays with no activities", () => {
     const signal = computeRunGapSignal([], "UTC", refDate);
-    expect(signal).toEqual({ daysSinceLastRun: null, consecutiveCrossTrainOnlyDays: 0 });
+    expect(signal).toEqual({ daysSinceLastRun: null, consecutiveCrossTrainOnlyDays: 0, gapBeforeLastRun: null });
   });
 
   it("returns 0 days since last run when the athlete ran today", () => {
@@ -146,5 +146,41 @@ describe("computeRunGapSignal", () => {
       refDate
     );
     expect(signal.daysSinceLastRun).toBe(3);
+  });
+
+  it("computes gapBeforeLastRun as the days between the two most recent runs", () => {
+    const signal = computeRunGapSignal(
+      [
+        { activity_type: "Run", start_date: "2026-07-16T08:00:00Z" }, // today — the "testing the waters" run
+        { activity_type: "Run", start_date: "2026-07-04T08:00:00Z" }, // 12 days before that
+      ],
+      "UTC",
+      refDate
+    );
+    expect(signal.daysSinceLastRun).toBe(0);
+    expect(signal.gapBeforeLastRun).toBe(12);
+  });
+
+  it("returns null gapBeforeLastRun when only one run exists in history", () => {
+    const signal = computeRunGapSignal(
+      [{ activity_type: "Run", start_date: "2026-07-16T08:00:00Z" }],
+      "UTC",
+      refDate
+    );
+    expect(signal.gapBeforeLastRun).toBeNull();
+  });
+
+  it("collapses same-day duplicate run entries before computing gapBeforeLastRun", () => {
+    const signal = computeRunGapSignal(
+      [
+        { activity_type: "Run", start_date: "2026-07-16T08:00:00Z" },
+        { activity_type: "Run", start_date: "2026-07-16T18:00:00Z" }, // same local day, second session
+        { activity_type: "Run", start_date: "2026-07-01T08:00:00Z" },
+      ],
+      "UTC",
+      refDate
+    );
+    expect(signal.daysSinceLastRun).toBe(0);
+    expect(signal.gapBeforeLastRun).toBe(15);
   });
 });

@@ -266,6 +266,16 @@ export interface RunGapSignal {
    * or no corroborating cross-training signal.
    */
   consecutiveCrossTrainOnlyDays: number;
+  /**
+   * Days between the most recent run and the run before it — captures a layoff that a single
+   * recent "testing the waters" run would otherwise erase. Without this, an athlete who takes
+   * 2+ weeks off then logs one cautious test run has daysSinceLastRun snap back to 0/1, making
+   * a fresh return-from-injury read exactly like an athlete training continuously — which
+   * defeats every volume/long-run cap keyed off daysSinceLastRun (see the 2026-07-22
+   * changelog: an 8.5mi long run was prescribed the same day a returning athlete logged one
+   * easy treadmill test run after a 12-day gap). Null if fewer than two runs exist in history.
+   */
+  gapBeforeLastRun: number | null;
 }
 
 /**
@@ -289,26 +299,37 @@ export function computeRunGapSignal(
     .sort((a, b) => (a.dateStr < b.dateStr ? 1 : -1)); // most recent first
 
   let lastRunDateStr: string | null = null;
+  let secondLastRunDateStr: string | null = null;
   let hasCrossTrainSinceLastRun = false;
   for (const a of sorted) {
     if (RUN_TYPES.has(a.type)) {
-      lastRunDateStr = a.dateStr;
-      break;
+      if (lastRunDateStr == null) {
+        lastRunDateStr = a.dateStr;
+        continue;
+      }
+      if (a.dateStr !== lastRunDateStr) {
+        secondLastRunDateStr = a.dateStr;
+        break;
+      }
+      continue; // same-day second run — keep scanning for a genuinely earlier date
     }
-    if (CROSS_TRAINING_TYPES.has(a.type)) hasCrossTrainSinceLastRun = true;
+    if (lastRunDateStr == null && CROSS_TRAINING_TYPES.has(a.type)) hasCrossTrainSinceLastRun = true;
   }
 
   if (!lastRunDateStr) {
-    return { daysSinceLastRun: null, consecutiveCrossTrainOnlyDays: 0 };
+    return { daysSinceLastRun: null, consecutiveCrossTrainOnlyDays: 0, gapBeforeLastRun: null };
   }
 
-  const daysSinceLastRun = Math.round(
-    (new Date(`${todayStr}T00:00:00Z`).getTime() - new Date(`${lastRunDateStr}T00:00:00Z`).getTime()) / 86400000
+  const daysBetween = (aStr: string, bStr: string) => Math.round(
+    (new Date(`${aStr}T00:00:00Z`).getTime() - new Date(`${bStr}T00:00:00Z`).getTime()) / 86400000
   );
+  const daysSinceLastRun = daysBetween(todayStr, lastRunDateStr);
+  const gapBeforeLastRun = secondLastRunDateStr != null ? daysBetween(lastRunDateStr, secondLastRunDateStr) : null;
 
   return {
     daysSinceLastRun,
     consecutiveCrossTrainOnlyDays: hasCrossTrainSinceLastRun ? daysSinceLastRun : 0,
+    gapBeforeLastRun,
   };
 }
 

@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-22 — A single "testing the waters" run erased the layoff signal; onboarding's completion message and initial_plan repeated each other
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** Retested onboarding after yesterday's fixes went live. Two issues: (1) "way too much repetition/text overall... we need to go further" — the message right before the plan and the plan message itself both opened with "Teton Crest Trail 6 weeks out," both restated the injury body part and management, and both closed with a "keep it easy, tell me how it felt" line; (2) "maybe this is a bit aggressive — maybe it should say to gradually ramp up from my 3x5 min intervals" — the long run was still 8.5mi despite an active shin injury and a 2-week gap since the last real run, even though the 2026-07-21 gap-adjusted long-run cap fix was live.
+**Root cause (2 distinct bugs):**
+1. `computeRunGapSignal` (cross-training.ts) computes `daysSinceLastRun` from the single most recent logged run. This athlete did one cautious easy treadmill test run on the same day Strava connected — exactly the kind of low-risk probe Dean's own advice recommends — which reset `daysSinceLastRun` to 0. That erased all evidence of the real 12-day layoff immediately before it, so `computeWeekOneVolumeCap`/`computeLongRunCap`'s gap-adjustment (added 2026-07-21) never triggered: the athlete read as "trained continuously," not "just returned from 12 days off."
+2. Onboarding's `buildDeterministicCompletion` (a hardcoded template, not an LLM call) and coach/respond's `initial_plan` trigger (a separate Claude call) run back-to-back with zero shared context — neither has ever seen what the other is about to say. Both independently open with the race name + timeline, restate the injury body part and management, and close with "first run stays easy, tell me how it felt" — three-way repetition across two messages a few seconds apart.
+**Fix / Change:**
+1. `computeRunGapSignal` now also returns `gapBeforeLastRun` — the day gap between the two most recent runs, so a real layoff is visible even when the most recent entry is a fresh test run. In `coach/respond/route.ts`, when the last run is very recent (≤3 days) and the gap before it was a real layoff (≥7 days), the volume/long-run caps now use `gapBeforeLastRun` instead of the masked `daysSinceLastRun`.
+2. `buildUserMessage`'s `initial_plan` case now receives the literal text of the immediately-preceding assistant message and is explicitly told not to restate the race/timeline, injury body part, or "easy/tell me how it felt" refrain if it was just said — with the actual prior message quoted in the rule so the model can check against real text, not a vague "avoid repetition" instruction. Also trimmed `buildDeterministicCompletion`'s injury-active closing sentence entirely, since `initial_plan`'s own closer already states the same "first run stays easy" idea moments later — no reason to say it twice across two hardcoded/generated messages.
+**Files changed:** `src/lib/cross-training.ts`, `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/lib/cross-training.test.ts`
+
+---
+
 ## 2026-07-21 — Long-run cap had no effect above 10mi/week average, even with an active injury and a real layoff gap
 
 **Type:** Bug Fix

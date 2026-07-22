@@ -1645,9 +1645,13 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
     if (injuryNote) parts.push(injuryNote);
   }
 
-  // Close with how coaching works — specific to injury situation.
+  // Close with how coaching works — specific to injury situation. When there's an active
+  // injury, skip the "first run stays easy, tell me how it felt" close here — the
+  // initial_plan closer (coach/respond/route.ts) already states that same idea once the
+  // plan itself is delivered a few seconds later, so repeating it here just doubles it up
+  // (see the 2026-07-22 changelog on cross-turn repetition between these two messages).
   if (activeInjury && injuryBodyPart) {
-    parts.push(`First run on it stays easy — then tell me how the ${injuryBodyPart} felt during and after, and that decides the next session.`);
+    // No additional closing sentence — the plan delivery message closes the loop.
   } else if (stravaConnected) {
     parts.push("After your next run, I'll send a coaching note — what it means for the week ahead and what to watch for. That's where we start.");
   } else {

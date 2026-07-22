@@ -1526,9 +1526,22 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
   // Only relevant for a brand-new plan — reduces the Week-1 volume cap when there's been
   // a real gap since the last run (e.g. an unflagged injury layoff), since avgWeeklyMileage
   // was built before the gap and overstates current readiness on its own.
-  const daysSinceLastRunForCap = trigger === "initial_plan"
-    ? computeRunGapSignal(recentActivities, userTimezone).daysSinceLastRun
-    : null;
+  //
+  // A single recent "testing the waters" run resets daysSinceLastRun to ~0, which erases
+  // the layoff signal entirely right when it matters most — see the 2026-07-22 changelog:
+  // an athlete logged one easy treadmill run after a 12-day gap and got an 8.5mi long run
+  // prescribed the same day, because daysSinceLastRun read 0 instead of reflecting the gap
+  // that just ended. When the most recent run is itself very recent (<=3 days), prefer the
+  // gap immediately before it (gapBeforeLastRun) if that gap was a real layoff (>=7 days) —
+  // one cautious test run shouldn't count as "back to normal training."
+  const daysSinceLastRunForCap = (() => {
+    if (trigger !== "initial_plan") return null;
+    const gap = computeRunGapSignal(recentActivities, userTimezone);
+    if (gap.daysSinceLastRun != null && gap.daysSinceLastRun <= 3 && gap.gapBeforeLastRun != null && gap.gapBeforeLastRun >= 7) {
+      return gap.gapBeforeLastRun;
+    }
+    return gap.daysSinceLastRun;
+  })();
   const coachingFocus = ((user.onboarding_data as Record<string, unknown> | null)?.coaching_focus as string | null) ?? null;
   const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null, weekMileageSoFar);
 
@@ -2806,7 +2819,16 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     return questions;
   })();
 
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null);
+  // initial_plan fires immediately after onboarding's own final message (the injury
+  // acknowledgment / Strava-connected reply) — without seeing that text, the plan-delivery
+  // call independently re-derives the same opening beats (race name + weeks out, injury
+  // body part, "keep it easy"/"tell me how it felt") that were just said seconds ago. See
+  // the 2026-07-22 changelog: two back-to-back messages both opened with "Teton Crest Trail
+  // 6 weeks out" and repeated the injury summary and "easy/tell me how it felt" refrain.
+  const priorAssistantMessageForInitialPlan = trigger === "initial_plan"
+    ? ([...recentMessages].reverse().find(m => m.role === "assistant")?.content as string | undefined) ?? null
+    : null;
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null, priorAssistantMessageForInitialPlan);
 
   // Re-anchor today/tomorrow right next to the generation instructions. The full
   // DATE CONTEXT block lives early in the (much longer) system prompt — by the time
@@ -7390,6 +7412,7 @@ function buildUserMessage(
   preInjuryMileageTarget: number | null = null,
   injuryBodyPart: string | null = null,
   injurySeverity: "mild" | "moderate" | "severe" | null = null,
+  priorAssistantMessage: string | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -8361,11 +8384,14 @@ CRITICAL — COMMUNICATE THE PARTIAL WEEK TO THE ATHLETE: In your first bubble, 
       const weekMilesBudgetNote = weekMileageSoFar > 0
         ? `\n<rule>ALREADY COMPLETED THIS WEEK: The athlete has already logged ${weekMileageSoFar.toFixed(1)} miles this week. ${weekBudgetExhausted ? `Their weekly budget is essentially met — do NOT prescribe a long run or quality session today. Acknowledge the miles already done and tell them Sunday's full plan will kick off their first complete training week.` : `Any additional sessions you prescribe must be feasible on top of that — do NOT prescribe a long run or quality session that would push their weekly total well beyond a safe ramp from their average. If combined miles would be excessive, keep the remaining sessions light or simply say Sunday's full plan will cover next week.`}</rule>`
         : "";
+      const priorMessageGuard = priorAssistantMessage
+        ? `\n<rule>YOU JUST SENT THIS MESSAGE SECONDS AGO — DO NOT REPEAT IT: "${priorAssistantMessage.slice(0, 400)}"\nDo not restate the race name + timeline, the injury body part, or an "easy"/"tell me how it felt" refrain if you already said it above — the athlete just read it. Open this message by moving straight into the plan itself. This is the single most common quality failure in onboarding: two consecutive messages both re-introducing the race, the injury, and "keep it easy" as if for the first time.</rule>\n`
+        : "";
       return `This athlete just finished onboarding. Send them a brief conversational first-week orientation — not a plan document. The coaching relationship starts now.
 
 <rule>NEVER refer to yourself as "Dean" in any part of this response. Never write "Dean is calibrated", "Dean will", "Dean has been", etc. You are the coach — always use "I".</rule>
-
-BUBBLE 1: One sentence grounding them in where they are and where this is going. Reference their specific race and timeline if there is one. Example: "Dipsea in 6 weeks — I'll be watching every run and calibrating as we go." 2 sentences max, no generic "Welcome aboard."
+${priorMessageGuard}
+BUBBLE 1: One sentence grounding them in where they are and where this is going — only if you haven't just said it in the prior message (see rule above); otherwise skip straight to the plan. Reference their specific race and timeline if there is one and it wasn't just stated. Example: "Dipsea in 6 weeks — I'll be watching every run and calibrating as we go." 2 sentences max, no generic "Welcome aboard."
 
 BUBBLE 2: How you're thinking about the next 1-2 weeks. Conversational, not a day-by-day schedule. ${weekBudgetExhausted ? `The week is essentially done — just orient them to next week's structure (weekly mileage, one quality session). Keep it brief.` : `Three things: what the weekly mileage target looks like this week, one quality session to slot in, and what the long run should be. Frame it as your thinking, not a prescription — "this week I'd aim for X miles, one quality session mid-week, and a longer easy run on the weekend." Invite them to push back: "Text me if anything needs adjusting."` }
 
