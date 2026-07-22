@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-22 — Extend the stated_facts fact gate to catch misidentified activity type
+
+**Type:** Bug Fix
+**Reported by:** User feedback / conversation review
+**User feedback:** Reviewing Gwyneth's (+19788094688) injury conversation, Dean told her "1–2/10 during throwing, then lingering afterward. That's your groin reacting to the lateral load and explosive movement" in response to a post-walk pain report — but she hadn't thrown anything that session, she'd walked on a treadmill. Dean carried forward a different incident from the prior day (ball-throwing with her husband) instead of reading the actual logged activity. She had to correct him twice before he updated his read.
+**Root cause:** `checkStatedFacts`/`FactGroundTruth` (fact-check.ts) — the Phase B fact gate that already catches hallucinated week numbers, mileage, and race countdowns on every `deliver_message` call — had no `activity_type` field, so a wrong activity-type claim in a `post_run` message was never checkable against ground truth. The actual Strava `activity_type` for the triggering activity was already being fetched into `route.ts` (`activityData`) for other purposes; it just wasn't wired into the fact gate.
+**Fix / Change:** Added `activity_type` (`run`/`walk`/`bike`/`swim`/`other`) to `StatedFacts`/`FactGroundTruth` in `fact-check.ts`, plus a `normalizeActivityType()` helper collapsing raw Strava types into that set. `deliver_message`'s `stated_facts` schema now requires Dean to echo the activity category his message describes; on `post_run`, ground truth comes from `activityData.activity_type` for the specific activity that fired the trigger (other triggers pass `null` — no single activity in play, so nothing to check). A mismatch now rejects the delivery and retries once, same as the existing week/mileage/race checks. Mirrored into `evals/run-evals.mjs` (`computeFactTruth`, `buildFactGateTool`) with a keyword-based normalizer for fixtures' free-text `activity_details.type` labels ("Easy Run" → run), since fixtures don't carry raw Strava type strings.
+**Files changed:** `src/lib/fact-check.ts`, `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`
+
+---
+
 ## 2026-07-21 — Stop forcing a full exercise/poster dump onto injury mentions that weren't asking for one
 
 **Type:** Bug Fix

@@ -1064,8 +1064,22 @@ function stripReasoningPreamble(text) {
 // here doesn't tell you whether production would have caught and retried it.
 const FACT_GATE_TRIGGERS = new Set(["post_run", "user_message", "morning_plan", "weekly_recap", "initial_plan"]);
 
+// Fixture activity_details.type is a free-text display label ("Easy Run", "Trail Run"),
+// unlike production's raw Strava activity_type ("Run", "TrailRun") — normalizeActivityType
+// in fact-check.ts expects the latter, so this does the same coarse-category collapse by
+// keyword instead of exact match.
+function normalizeFixtureActivityType(label) {
+  if (!label) return null;
+  const l = label.toLowerCase();
+  if (l.includes("walk") || l.includes("hike")) return "walk";
+  if (l.includes("bike") || l.includes("ride") || l.includes("cycl")) return "bike";
+  if (l.includes("swim")) return "swim";
+  if (l.includes("run")) return "run";
+  return "other";
+}
+
 function computeFactTruth(fixture) {
-  const { trigger, user } = fixture;
+  const { trigger, user, activity_details } = fixture;
   const isMetric = user.preferred_units === "metric";
   const toDisplay = (mi) => (mi == null ? null : isMetric ? mi * 1.60934 : mi);
   const injuryHoldActive = !!user.injury_hold_since;
@@ -1083,6 +1097,7 @@ function computeFactTruth(fixture) {
     days_until_race: daysUntilRace,
     injuryHoldActive,
     unit: isMetric ? "km" : "mi",
+    activity_type: trigger === "post_run" ? normalizeFixtureActivityType(activity_details?.type) : null,
   };
 }
 
@@ -1106,8 +1121,13 @@ function buildFactGateTool() {
             week_distance_completed: { type: ["number", "null"], description: "Distance already completed this week as stated, else null." },
             days_until_race: { type: ["number", "null"], description: "Days until the athlete's race as stated, else null." },
             plan_source: { type: ["string", "null"], enum: ["return_to_run", "full_arc", null] },
+            activity_type: {
+              type: ["string", "null"],
+              enum: ["run", "walk", "bike", "swim", "other", null],
+              description: "If your message describes a specific just-logged activity, its broad category, else null.",
+            },
           },
-          required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source"],
+          required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source", "activity_type"],
         },
       },
       required: ["message", "stated_facts"],

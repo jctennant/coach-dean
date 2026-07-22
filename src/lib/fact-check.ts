@@ -17,12 +17,15 @@
  * definition).
  */
 
+export type ActivityCategory = "run" | "walk" | "bike" | "swim" | "other";
+
 export interface StatedFacts {
   week_number?: number | null;
   weekly_target?: number | null;
   week_distance_completed?: number | null;
   days_until_race?: number | null;
   plan_source?: "return_to_run" | "full_arc" | null;
+  activity_type?: ActivityCategory | null;
 }
 
 export interface FactGroundTruth {
@@ -34,6 +37,8 @@ export interface FactGroundTruth {
   injuryHoldActive: boolean;
   /** "mi" or "km" — display unit, used only for correction-message wording. */
   unit: "mi" | "km";
+  /** The Strava activity type this message is actually about, normalized. Null when there's no single activity in play (skip the check). */
+  activity_type: ActivityCategory | null;
 }
 
 export interface FactMismatch {
@@ -44,6 +49,19 @@ export interface FactMismatch {
 
 function isNum(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
+}
+
+const RUN_STRAVA_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+const BIKE_STRAVA_TYPES = new Set(["Ride", "VirtualRide", "EBikeRide", "MountainBikeRide", "GravelRide"]);
+
+/** Collapses a raw Strava activity_type into the coarse category deliver_message's stated_facts echo uses. */
+export function normalizeActivityType(rawType: string | null | undefined): ActivityCategory | null {
+  if (!rawType) return null;
+  if (RUN_STRAVA_TYPES.has(rawType)) return "run";
+  if (rawType === "Walk" || rawType === "Hike") return "walk";
+  if (BIKE_STRAVA_TYPES.has(rawType)) return "bike";
+  if (rawType === "Swim") return "swim";
+  return "other";
 }
 
 /**
@@ -84,6 +102,9 @@ export function checkStatedFacts(
   if (truth.injuryHoldActive && s.plan_source === "full_arc") {
     mismatches.push({ fact: "plan_source", stated: "full_arc", actual: "return_to_run" });
   }
+  if (s.activity_type && truth.activity_type != null && s.activity_type !== truth.activity_type) {
+    mismatches.push({ fact: "activity_type", stated: s.activity_type, actual: truth.activity_type });
+  }
   return mismatches;
 }
 
@@ -93,6 +114,7 @@ const FACT_LABELS: Record<keyof StatedFacts, (unit: string) => string> = {
   week_distance_completed: (unit) => `distance completed so far this week (${unit})`,
   days_until_race: () => "days until the race",
   plan_source: () => "which context block a future-week mileage figure came from",
+  activity_type: () => "what type of activity this message is about",
 };
 
 /**

@@ -30,7 +30,7 @@ import type { Json } from "@/lib/database.types";
 import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/timezone";
 import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
-import { checkStatedFacts, buildFactCorrection, type FactGroundTruth } from "@/lib/fact-check";
+import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
@@ -241,8 +241,14 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                       "\"return_to_run\" if it came from RETURN-TO-RUN CONTEXT (the only valid source while the athlete is on injury hold), " +
                       "\"full_arc\" if it came from FULL TRAINING PLAN ARC data. Null if your message doesn't state a future week's mileage.",
                   },
+                  activity_type: {
+                    type: ["string", "null"],
+                    enum: ["run", "walk", "bike", "swim", "other", null],
+                    description:
+                      "If your message describes what the athlete just did in a specific just-logged activity (e.g. 'that run', 'the walk felt good'), the broad category of it — else null. Never guess from earlier conversation; only report this from the activity data given to you for the CURRENT session.",
+                  },
                 },
-                required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source"],
+                required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source", "activity_type"],
               },
             }
           : {}),
@@ -3215,6 +3221,12 @@ OUTPUT CONTRACT:
       days_until_race: daysUntilRaceTruth,
       injuryHoldActive: injuryHoldActiveForFacts,
       unit: isMetricUser ? "km" : "mi",
+      // Only post_run has one concrete activity in play — everything else (user_message,
+      // weekly_recap, etc.) may reference several sessions across the week, so there's no
+      // single ground truth to check against.
+      activity_type: trigger === "post_run"
+        ? normalizeActivityType((activityData as { activity_type?: string | null } | null)?.activity_type ?? null)
+        : null,
     };
     const mismatches = checkStatedFacts((deliverBlock.input as { stated_facts?: unknown }).stated_facts, factTruth);
     if (mismatches.length > 0) {
