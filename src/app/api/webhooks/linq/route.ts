@@ -374,30 +374,49 @@ async function handleInboundMessage(
   // Content-based dedup: if the exact same text body arrived from this user within
   // the last 60 seconds, it's a duplicate send (e.g. user double-tapped, Linq retry
   // with a different message ID). Skip processing to avoid double responses.
-  if (body) {
-    const contentCutoff = new Date(Date.now() - 60_000).toISOString();
-    const { data: recentSame } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "user")
-      .eq("content", messageBody)
-      .gte("created_at", contentCutoff)
-      .limit(1)
-      .maybeSingle();
-    if (recentSame) {
-      console.log("[linq-webhook] content-dedup: same body within 30s, skipping:", user.id);
-      return;
-    }
-  }
-
-  const { id: storedMsgId } = await insertConversationReturningId({
+  //
+  // This insert happens BEFORE the duplicate check (rather than select-then-insert)
+  // to close a race window: two near-simultaneous webhook deliveries for the same
+  // text could otherwise both pass a "does a matching row already exist" check before
+  // either had written its row, producing two assistant replies (observed in
+  // production — see 2026-07-22 changelog). Inserting first means whichever request's
+  // insert commits second will always see the first one's row in its follow-up
+  // duplicate check. The tie-break (`created_at < mine, or equal with a lower id`)
+  // guarantees exactly one of two truly-concurrent inserts treats itself as the
+  // duplicate, even if both commit within the same millisecond.
+  const { id: storedMsgId, created_at: storedCreatedAt } = await insertConversationReturningId({
     user_id: user.id,
     role: "user",
     content: messageBody,
     message_type: "user_message",
     external_message_id: messageId,
   });
+
+  if (body && storedMsgId && storedCreatedAt) {
+    const contentCutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data: earlierSame } = await supabase
+      .from("conversations")
+      .select("id, created_at")
+      .eq("user_id", user.id)
+      .eq("role", "user")
+      .eq("content", messageBody)
+      .gte("created_at", contentCutoff)
+      .neq("id", storedMsgId)
+      .order("created_at", { ascending: true })
+      .limit(5);
+
+    const isDuplicate = (earlierSame ?? []).some((row) => {
+      const rowCreatedAt = row.created_at as string;
+      if (rowCreatedAt < storedCreatedAt) return true;
+      if (rowCreatedAt === storedCreatedAt) return (row.id as string) < storedMsgId;
+      return false;
+    });
+
+    if (isDuplicate) {
+      console.log("[linq-webhook] content-dedup: same body within 60s, skipping:", user.id);
+      return;
+    }
+  }
   const storedMsg = storedMsgId ? { id: storedMsgId } : null;
 
   // Feedback / refund commands — intercept before onboarding and coaching

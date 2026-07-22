@@ -8,6 +8,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-22 — Four onboarding/initial_plan bugs from a real transcript: aggressive layoff volume, missing injury protocol, duplicate messages, weak close
+
+**Type:** Bug Fix
+**Reported by:** User feedback / conversation review
+**User feedback:** Reviewing a "Coach Dean Test" onboarding transcript (posterior shin splints, 11-day gap since last run after averaging ~18–25mi/week): "gives me a plan with a lot of running mileage when I just started ramping back from 0 miles... doesn't really give me a plan for the shin splits... could have been improved at the end." Follow-up: two consecutive Dean messages both opened with "Teton Crest Trail 6 weeks out," and one contained a broken repeated clause ("using the stick to roll inner shin for the inner shin") — "reads like two draft variants got concatenated"; the plan then closed on an open-ended "How does this look?" with no clear first action.
+**Root cause (4 distinct bugs, same transcript):**
+1. `computeWeekOneVolumeCap` (plan-validation.ts) was purely a function of the athlete's 6-week average mileage — it had no way to know that average was built *before* an 11-day layoff, so a returning/injured athlete got a Week-1 plan at ~90% of pre-layoff volume instead of a real restart.
+2. The deterministic strength/rehab routine block (already correctly computing shin-splint-specific exercises via `composeStrengthRoutine`) was explicitly gated to `trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message"` — `initial_plan` was never in the allowed list, so the athlete's very first plan (the moment they most needed concrete rehab guidance) never got it, no matter how well the injury data was captured during onboarding.
+3. Traced via conversation-row timestamps: the athlete's "Sleep has been good" and earlier "No just you" messages were each delivered to the `/api/webhooks/linq` endpoint twice (webhook redelivery or client double-send with different `external_message_id`s). The content-based dedup check ran as SELECT-then-INSERT, so two near-simultaneous deliveries could both pass the "does a duplicate exist" check before either had written its row — a classic TOCTOU race. One of the resulting duplicate turns generated the garbled message.
+4. The initial_plan closing bubble was a hardcoded, always-identical string ("How does this look? Happy to adjust anything.") — an unconstrained free-text prompt right after the highest-cognitive-load message in onboarding, with no explicit first action for what to do today.
+**Fix / Change:**
+1. `computeWeekOneVolumeCap` now takes an optional `daysSinceLastRun` (from the existing `computeRunGapSignal` helper) and scales the cap down the same way the formal injury-hold return ramp does (70%/60%/50% at 1/2/3+ weeks off) when the gap is ≥7 days. Wired into both the structured `plan.weekly_total` clamp and the `coach-fitness-tier.ts` prompt text (which now explains the reduction inline so Dean doesn't fight the lower number or double-apply it).
+2. Added `initial_plan` to the strength-routine block's trigger allowlist, and gave it its own instruction: when there's an active injury on file, include the full routine directly in the first plan delivery (not just a promise to "watch it") and send the illustrated poster alongside it.
+3. Restructured the linq webhook's content-dedup to insert-first-then-check instead of select-then-insert, closing the race window: whichever delivery's insert commits second will always see the first one's already-committed row in its follow-up duplicate check. A deterministic tie-break (`created_at`, then `id`) guarantees exactly one survivor even if both inserts land within the same instant.
+4. Replaced the hardcoded initial_plan closer with a concrete confirm-or-correct ask ("Reply YES to lock this in, or tell me what's off/to change"), plus a first-action anchor (keep the first run easy, stop if the injured area flares) when there's an active injury on file.
+**Files changed:** src/lib/plan-validation.ts, src/lib/coach-fitness-tier.ts, src/lib/conversations.ts, src/app/api/coach/respond/route.ts, src/app/api/webhooks/linq/route.ts, src/__tests__/lib/plan-validation.test.ts, src/__tests__/api/coach-respond.test.ts, src/__tests__/api/linq-webhook.test.ts
+
+---
+
 ## 2026-07-22 — Extend the stated_facts fact gate to catch misidentified activity type
 
 **Type:** Bug Fix

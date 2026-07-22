@@ -357,20 +357,36 @@ export function applyStructuredWeeklyTotal(message: string, validatedTotal: numb
 export function computeWeekOneVolumeCap(
   avgWeeklyMileage: number | null,
   fitnessLevel: string | null,
-  forceBeginnerTier: boolean
+  forceBeginnerTier: boolean,
+  daysSinceLastRun: number | null = null
 ): { min: number; max: number | null } {
   if (avgWeeklyMileage == null || forceBeginnerTier) {
     if (fitnessLevel === "advanced") return { min: 20, max: null };
     if (fitnessLevel === "intermediate") return { min: 12, max: null };
     return { min: 0, max: 10 }; // beginner — stale history or no history
   }
-  if (avgWeeklyMileage < 10) {
-    return { min: 0, max: Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6) };
+  const base = avgWeeklyMileage < 10
+    ? { min: 0, max: Math.max(Math.ceil(avgWeeklyMileage * 1.3), 6) }
+    : avgWeeklyMileage < 30
+      ? { min: Math.round(avgWeeklyMileage * 0.90), max: Math.round(avgWeeklyMileage * 1.2) }
+      : { min: Math.round(avgWeeklyMileage * 0.90), max: Math.round(avgWeeklyMileage * 1.12) };
+
+  // A real gap since the last run means avgWeeklyMileage (averaged over complete weeks
+  // before the gap) overstates current fitness — the athlete hasn't been holding that
+  // load recently. Scale the cap down the same way computeReturnToRunRamp scales a
+  // formal injury-hold return (70%/60%/50% at 1/2/3+ weeks off) so a starter plan after
+  // an unflagged layoff doesn't just hand back pre-layoff volume. Below 7 days, gaps are
+  // normal week-to-week noise and the base cap already covers them.
+  if (daysSinceLastRun != null && daysSinceLastRun >= 7) {
+    const gapFactor = daysSinceLastRun >= 21 ? 0.50 : daysSinceLastRun >= 14 ? 0.60 : 0.70;
+    const gapMax = Math.round(avgWeeklyMileage * gapFactor);
+    return {
+      min: Math.round(Math.min(base.min, gapMax * 0.85)),
+      max: base.max != null ? Math.min(base.max, gapMax) : gapMax,
+    };
   }
-  if (avgWeeklyMileage < 30) {
-    return { min: Math.round(avgWeeklyMileage * 0.90), max: Math.round(avgWeeklyMileage * 1.2) };
-  }
-  return { min: Math.round(avgWeeklyMileage * 0.90), max: Math.round(avgWeeklyMileage * 1.12) };
+
+  return base;
 }
 
 /**

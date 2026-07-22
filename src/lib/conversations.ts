@@ -93,15 +93,15 @@ export async function insertConversation(
   return { error };
 }
 
-/** Same as insertConversation, but returns the inserted row's id (webhook dedup paths need it). */
+/** Same as insertConversation, but returns the inserted row's id + created_at (webhook dedup paths need both — see linq webhook's insert-then-check dedup). */
 export async function insertConversationReturningId(
   row: ConversationInsertRow
-): Promise<{ id: string | null; error: PostgrestError | null }> {
+): Promise<{ id: string | null; created_at: string | null; error: PostgrestError | null }> {
   const { data, error } = await supabase
     .from("conversations")
     .insert(row)
-    .select("id")
+    .select("id, created_at")
     .single();
   if (error) reportInsertError([row], error);
-  return { id: data?.id ?? null, error };
+  return { id: data?.id ?? null, created_at: data?.created_at ?? null, error };
 }

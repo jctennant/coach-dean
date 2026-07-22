@@ -384,6 +384,23 @@ describe("computeWeekOneVolumeCap", () => {
   it("bounds high-volume athletes (30mi+ avg) to 0.90x-1.12x", () => {
     expect(computeWeekOneVolumeCap(40, null, false)).toEqual({ min: 36, max: 45 });
   });
+
+  it("ignores a short gap since last run (<7 days) — normal week-to-week noise", () => {
+    expect(computeWeekOneVolumeCap(20, null, false, 5)).toEqual({ min: 18, max: 24 });
+  });
+
+  it("reduces the cap for a real layoff — a high pre-layoff average shouldn't hand back full volume (the reported bug: 11-day gap, 25mi avg, shin splints)", () => {
+    expect(computeWeekOneVolumeCap(25, null, false, 11)).toEqual({ min: 15, max: 18 });
+  });
+
+  it("reduces the cap further for a longer layoff (14-20 days → 60%, 21+ days → 50%)", () => {
+    expect(computeWeekOneVolumeCap(20, null, false, 14)).toEqual({ min: 10, max: 12 });
+    expect(computeWeekOneVolumeCap(20, null, false, 21)).toEqual({ min: 9, max: 10 });
+  });
+
+  it("gap reduction still respects the beginner/no-history floor logic (forceBeginnerTier short-circuits before the gap check)", () => {
+    expect(computeWeekOneVolumeCap(15, "beginner", true, 30)).toEqual({ min: 0, max: 10 });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,8 @@ export interface FitnessTierParams {
   fitnessLevel: string | null;
   daysPerWeek: number | null;
   isMetric: boolean;
+  /** Days since the athlete's most recent logged run — reduces the Week-1 cap on a real layoff. Null/omitted when not applicable (only meaningful for initial_plan). */
+  daysSinceLastRun?: number | null;
 }
 
 function buildNoHistoryTier(params: FitnessTierParams, spMi: (miles: number) => string): string {
@@ -62,29 +64,36 @@ function buildNoHistoryTier(params: FitnessTierParams, spMi: (miles: number) => 
 
 /** Builds the FITNESS TIER block: tier label + prose + hard volume/long-run caps. */
 export function buildFitnessTierBlock(params: FitnessTierParams): string {
-  const { avgWeeklyMileage, forceBeginnerTier, isMetric } = params;
+  const { avgWeeklyMileage, forceBeginnerTier, isMetric, daysSinceLastRun } = params;
   const spMi = (miles: number) => (isMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`);
 
   if (avgWeeklyMileage == null || forceBeginnerTier) {
     return buildNoHistoryTier(params, spMi);
   }
 
-  const cap = computeWeekOneVolumeCap(avgWeeklyMileage, null, false);
+  const cap = computeWeekOneVolumeCap(avgWeeklyMileage, null, false, daysSinceLastRun ?? null);
+  const gapApplies = daysSinceLastRun != null && daysSinceLastRun >= 7;
+  const gapNote = gapApplies
+    ? ` GAP SINCE LAST RUN: ${daysSinceLastRun} days. That average was built before this gap and overstates current readiness — it's already been factored into the caps below, do not layer your own additional reduction or add it back on top.`
+    : "";
 
   if (avgWeeklyMileage < 10) {
     const longRunCap = computeLongRunCap(avgWeeklyMileage)!;
-    return `FITNESS TIER: LOW VOLUME (avg ${spMi(avgWeeklyMileage)}). Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
-<rule>WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${spMi(avgWeeklyMileage)}. Week 1 MUST NOT exceed ${spMi(cap.max!)} total (current volume × 1.30, floor ${spMi(6)}). This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. Do not exceed this cap under any circumstances, regardless of race goals or timelines.</rule>
+    return `FITNESS TIER: LOW VOLUME (avg ${spMi(avgWeeklyMileage)}).${gapNote} Prioritize easy aerobic volume and consistency. Include at least 1 quality session per week (strides, a short tempo, or brief intervals) — even low-volume athletes benefit from variety and it keeps training engaging. Calibrate the intensity and duration of quality work to their actual experience level (check all-time Strava mileage) and race goal — a true beginner building their first base needs gentler introductions to quality work than an experienced runner who's simply at low volume right now.
+<rule>WEEK 1 VOLUME CAP — HARD LIMIT: This athlete currently runs ~${spMi(avgWeeklyMileage)}. Week 1 MUST NOT exceed ${spMi(cap.max!)} total${gapApplies ? "" : ` (current volume × 1.30, floor ${spMi(6)})`}. This is non-negotiable — prescribing 2–3× their current volume is a guaranteed injury risk. Do not exceed this cap under any circumstances, regardless of race goals or timelines.</rule>
 <rule>LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(longRunCap)} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`;
   }
 
   if (avgWeeklyMileage < 30) {
-    return `FITNESS TIER: MODERATE VOLUME (avg ${spMi(avgWeeklyMileage)}). This athlete has an established aerobic base. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
-<rule>WEEK 1 VOLUME CAP — LIMIT: Current avg is ${spMi(avgWeeklyMileage)}. Week 1 should target ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(Math.round(avgWeeklyMileage * 1.15))}. Do not exceed ${spMi(cap.max!)} — if your sessions sum above this ceiling, reduce at least one easy run until the total is under it. A first-week spike risks overuse injury at the start of the plan.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}. Starting below the athlete's current base has no training rationale — they are already adapted to their current volume. Even for first-timers, dropping significantly below current base wastes existing fitness.</rule>`;
+    const targetMin = gapApplies ? cap.min : Math.round(avgWeeklyMileage * 1.05);
+    const targetMax = gapApplies ? cap.max! : Math.round(avgWeeklyMileage * 1.15);
+    return `FITNESS TIER: MODERATE VOLUME (avg ${spMi(avgWeeklyMileage)}).${gapNote} This athlete has an established aerobic base${gapApplies ? ", but hasn't been holding that volume recently" : ""}. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
+<rule>WEEK 1 VOLUME CAP — LIMIT: Week 1 should target ${spMi(targetMin)}–${spMi(targetMax)}. Do not exceed ${spMi(cap.max!)} — if your sessions sum above this ceiling, reduce at least one easy run until the total is under it. A first-week spike risks overuse injury at the start of the plan.</rule>
+<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}.${gapApplies ? "" : " Starting below the athlete's current base has no training rationale — they are already adapted to their current volume. Even for first-timers, dropping significantly below current base wastes existing fitness."}</rule>`;
   }
 
-  return `FITNESS TIER: HIGH VOLUME (avg ${spMi(avgWeeklyMileage)}). This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
-<rule>WEEK 1 VOLUME CAP — GUIDELINE: Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Current avg: ${spMi(avgWeeklyMileage)} → Week 1 target: ${spMi(Math.round(avgWeeklyMileage * 1.05))}–${spMi(cap.max!)}. Don't jump to peak volume on Day 1.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}. Even for masters athletes, first-timers, or conservative builds, starting significantly below current base wastes the fitness already built. 90% of current average is the floor.</rule>`;
+  const targetMax = gapApplies ? cap.max! : Math.round(avgWeeklyMileage * 1.05);
+  return `FITNESS TIER: HIGH VOLUME (avg ${spMi(avgWeeklyMileage)}).${gapNote} This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
+<rule>WEEK 1 VOLUME CAP — GUIDELINE: ${gapApplies ? `Given the layoff, Week 1 target is ${spMi(cap.min)}–${spMi(cap.max!)}` : `Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Week 1 target: ${spMi(targetMax)}–${spMi(cap.max!)}`}. Don't jump to peak volume on Day 1.</rule>
+<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}.${gapApplies ? "" : " Even for masters athletes, first-timers, or conservative builds, starting significantly below current base wastes the fitness already built. 90% of current average is the floor."}</rule>`;
 }

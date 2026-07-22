@@ -316,11 +316,11 @@ describe("POST /api/webhooks/linq — message routing", () => {
     vi.useFakeTimers();
     try {
       mockTables({
-        // conversations is called 4x: dedup check, content-dedup check, insert (storedMsg), debounce latest-msg check
+        // conversations is called 4x: dedup check, insert (storedMsg), content-dedup check (post-insert), debounce latest-msg check
         conversations: [
           { data: null, error: null },                    // dedup → no existing
-          { data: null, error: null },                    // content-dedup → no recent duplicate
-          { data: { id: "conv-001" }, error: null },      // insert → storedMsg
+          { data: { id: "conv-001", created_at: "2026-01-01T00:00:00.000Z" }, error: null },      // insert → storedMsg
+          { data: null, error: null },                    // post-insert content-dedup → no earlier duplicate
           { data: { id: "conv-001" }, error: null },      // debounce check → same id → proceed
         ],
         users: {
@@ -356,11 +356,11 @@ describe("POST /api/webhooks/linq — message routing", () => {
     vi.useFakeTimers();
     try {
       mockTables({
-        // conversations: dedup → null, content-dedup → null, insert → conv-001, debounce check → conv-002 (newer!)
+        // conversations: dedup → null, insert → conv-001, content-dedup (post-insert) → null, debounce check → conv-002 (newer!)
         conversations: [
           { data: null, error: null },
-          { data: null, error: null },                    // content-dedup → no recent duplicate
-          { data: { id: "conv-001" }, error: null },
+          { data: { id: "conv-001", created_at: "2026-01-01T00:00:00.000Z" }, error: null }, // insert storedMsg
+          { data: null, error: null },                    // post-insert content-dedup → no earlier duplicate
           { data: { id: "conv-002" }, error: null }, // different id → newer message arrived
         ],
         users: {
@@ -415,8 +415,8 @@ describe("POST /api/webhooks/linq — message routing", () => {
       mockTables({
         conversations: [
           { data: null, error: null },           // dedup check → no existing
-          { data: null, error: null },           // content-dedup → no recent duplicate
-          { data: { id: "conv-001" }, error: null }, // insert storedMsg
+          { data: { id: "conv-001", created_at: "2026-01-01T00:00:00.000Z" }, error: null }, // insert storedMsg
+          { data: null, error: null },           // post-insert content-dedup → no earlier duplicate
         ],
         users: {
           data: {
@@ -449,8 +449,8 @@ describe("POST /api/webhooks/linq — message routing", () => {
     mockTables({
       conversations: [
         { data: null, error: null },               // dedup check
-        { data: null, error: null },               // content-dedup → no recent duplicate
-        { data: { id: "conv-001" }, error: null }, // insert storedMsg
+        { data: { id: "conv-001", created_at: "2026-01-01T00:00:00.000Z" }, error: null }, // insert storedMsg
+        { data: null, error: null },               // post-insert content-dedup → no earlier duplicate
       ],
       users: {
         data: {
@@ -491,8 +491,8 @@ describe("POST /api/webhooks/linq — message routing", () => {
       mockTables({
         conversations: [
           { data: null, error: null },
-          { data: null, error: null },               // content-dedup
-          { data: { id: "conv-001" }, error: null }, // insert storedMsg
+          { data: { id: "conv-001", created_at: "2026-01-01T00:00:00.000Z" }, error: null }, // insert storedMsg
+          { data: null, error: null },               // post-insert content-dedup
         ],
         users: {
           data: {
@@ -524,8 +524,8 @@ describe("POST /api/webhooks/linq — message routing", () => {
       mockTables({
         conversations: [
           { data: null, error: null },               // dedup check → no existing
-          { data: null, error: null },               // content-dedup → no recent duplicate
-          { data: { id: "conv-001" }, error: null }, // insert storedMsg
+          { data: { id: "conv-001", created_at: "2026-01-01T00:00:00.000Z" }, error: null }, // insert storedMsg
+          { data: null, error: null },               // post-insert content-dedup → no earlier duplicate
         ],
         users: {
           data: {
@@ -592,14 +592,14 @@ describe("POST /api/webhooks/linq — message routing", () => {
       mockTables({
         // conversations calls in order:
         //   [0] pre-after dedup check → no existing row (both webhooks pass)
-        //   [1] content-dedup → no recent duplicate
-        //   [2] insert storedMsg → returns "conv-zzz" (lexicographically larger id)
+        //   [1] insert storedMsg → returns "conv-zzz" (lexicographically larger id)
+        //   [2] content-dedup (post-insert) → no earlier duplicate
         //   [3] debounce latest-msg check → same id → no newer message, proceed to dedup guard
         //   [4] external_message_id check → two rows exist (duplicate delivery!) → "conv-aaa" < "conv-zzz"
         conversations: [
           { data: null, error: null },                                               // dedup check
-          { data: null, error: null },                                               // content-dedup
-          { data: { id: "conv-zzz" }, error: null },                                 // insert storedMsg
+          { data: { id: "conv-zzz", created_at: "2026-01-01T00:00:00.000Z" }, error: null }, // insert storedMsg
+          { data: null, error: null },                                               // post-insert content-dedup
           { data: { id: "conv-zzz" }, error: null },                                 // debounce check
           { data: [{ id: "conv-aaa" }, { id: "conv-zzz" }], error: null },           // duplicate guard
         ],
@@ -636,12 +636,12 @@ describe("POST /api/webhooks/linq — message routing", () => {
     vi.useFakeTimers();
     try {
       mockTables({
-        // conversations: dedup → null, content-dedup → null,
-        // insert → conv-001, debounce → same id, duplicate guard → single row (no duplicate)
+        // conversations: dedup → null, insert → conv-001, content-dedup (post-insert) → null,
+        // debounce → same id, duplicate guard → single row (no duplicate)
         conversations: [
           { data: null, error: null },                           // dedup check
-          { data: null, error: null },                           // content-dedup → no recent duplicate
-          { data: { id: "conv-001" }, error: null },             // insert storedMsg
+          { data: { id: "conv-001", created_at: "2026-01-01T00:00:00.000Z" }, error: null }, // insert storedMsg
+          { data: null, error: null },                           // post-insert content-dedup
           { data: { id: "conv-001" }, error: null },             // debounce check
           { data: [{ id: "conv-001" }], error: null },           // duplicate guard → only one row
         ],

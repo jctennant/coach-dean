@@ -1523,6 +1523,12 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
   // enough activity history accumulates for a real 6-week average.
   const weeklyMilesBaseline = ((user.onboarding_data as Record<string, unknown> | null)?.weekly_miles as number | null) ?? null;
   const avgWeeklyMileage = computeAvgWeeklyMileage(recentActivities, userTimezone) ?? weeklyMilesBaseline;
+  // Only relevant for a brand-new plan — reduces the Week-1 volume cap when there's been
+  // a real gap since the last run (e.g. an unflagged injury layoff), since avgWeeklyMileage
+  // was built before the gap and overstates current readiness on its own.
+  const daysSinceLastRunForCap = trigger === "initial_plan"
+    ? computeRunGapSignal(recentActivities, userTimezone).daysSinceLastRun
+    : null;
   const coachingFocus = ((user.onboarding_data as Record<string, unknown> | null)?.coaching_focus as string | null) ?? null;
   const coachingSignals = computeCoachingSignals(recentActivities, userTimezone, profile?.race_date as string | null, weekMileageSoFar);
 
@@ -1960,7 +1966,7 @@ Use this data to:
   // poster image when Dean emits [STRENGTH_POSTER].
   let strengthPosterRoutineKey: string | null = null;
   const strengthRoutineBlock = await (async () => {
-    if (trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message") return "";
+    if (trigger !== "post_run" && trigger !== "weekly_recap" && trigger !== "user_message" && trigger !== "initial_plan") return "";
     const insights = (profile?.dashboard_insights as Record<string, unknown> | null) ?? null;
 
     // Always recompute fresh from the current strength-library.ts catalog — composeStrengthRoutine
@@ -2003,7 +2009,7 @@ Use this data to:
     const posterNote = strengthPosterRoutineKey
       ? `\nWHEN you list the FULL routine (above), append the token [STRENGTH_POSTER] at the very end of your message — the system strips it and texts the athlete an illustrated poster of this exact routine they can save or print. Athletes consistently love receiving the poster — it's a concrete, savable artifact, not just text. Lead toward sending it whenever you list the routine. Only include the token when you actually list the routine; never otherwise. If instead you're swapping in a lighter or different exercise (e.g. the athlete said one hurt or was too hard), skip the token and pass the \`exercise_ids\` argument on deliver_message with just the exercise(s) you actually named — same illustrated-image follow-up, matched to what you prescribed.`
       : "";
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\nSEND THE FULL ROUTINE (every exercise with complete specs/cues + frequency) AND the poster whenever EITHER is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; OR (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most. Don't wait to be asked twice. When you're just referencing it in passing (e.g. a routine post-run note or recap) you don't need to dump the full list — a brief mention is fine. Never lecture about it with no injury signal.${posterNote}`;
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\n${trigger === "initial_plan" ? `THIS IS THE ATHLETE'S FIRST PLAN — an active injury is on file, so this routine IS the concrete answer to "what do I do about it." Include the full routine (every exercise with specs/cues + frequency) directly in the plan delivery message, not just a mention that you're "watching" the injury — a returning athlete needs the actual exercises now, not a promise to follow up. Append [STRENGTH_POSTER] at the end so they get the illustrated poster alongside the plan.` : `SEND THE FULL ROUTINE (every exercise with complete specs/cues + frequency) AND the poster whenever EITHER is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; OR (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most. Don't wait to be asked twice. When you're just referencing it in passing (e.g. a routine post-run note or recap) you don't need to dump the full list — a brief mention is fine. Never lecture about it with no injury signal.`}${posterNote}`;
   })();
 
   // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
@@ -2054,7 +2060,8 @@ Do NOT surface this every message. Once is enough — reinforce only 4+ weeks la
     // classifiedIntent is only computed for user_message (see above) — for every
     // other trigger, keep the unconditional recurring-injury framing since there's
     // no per-message intent signal to gate on there.
-    trigger !== "user_message" || classifiedIntent.intent === "injury_query"
+    trigger !== "user_message" || classifiedIntent.intent === "injury_query",
+    daysSinceLastRunForCap
   );
   // Cacheable, athlete-independent coaching framework (identity, principles, comms style,
   // tone, formatting, behavior rules) sits in builtPrompt.static — sent as a cached system
@@ -3417,7 +3424,8 @@ OUTPUT CONTRACT:
         ? computeWeekOneVolumeCap(
             avgWeeklyMileage,
             (profile?.fitness_level as string | null) ?? null,
-            trigger === "initial_plan" && (profile?.fitness_level as string | null) === "beginner" && (avgWeeklyMileage ?? 0) > 8
+            trigger === "initial_plan" && (profile?.fitness_level as string | null) === "beginner" && (avgWeeklyMileage ?? 0) > 8,
+            daysSinceLastRunForCap
           ).max
         : periodization.suggestedWeeklyMiles;
       let validatedTotal = statedTotal;
@@ -4000,8 +4008,17 @@ OUTPUT CONTRACT:
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
-    // Send a follow-up "How does this look?" bubble after the plan description.
-    const closingMsg = "How does this look? Happy to adjust anything.";
+    // Send a follow-up confirmation bubble after the plan description. An open-ended
+    // "How does this look?" right after a dense plan dump gives the athlete nothing to
+    // react to but free text — most go quiet instead of replying (see the 60%-silent
+    // stat this closer was written against). A concrete yes/no plus one first action
+    // gives them a low-friction way to confirm and removes the "what do I even do
+    // today" gap for athletes coming back from a layoff or injury.
+    const hasActiveInjuryOnClose = !!(profile?.active_injury);
+    const closingBodyPart = (profile?.injury_body_part as string | null)?.replace(/_/g, " ") ?? null;
+    const closingMsg = hasActiveInjuryOnClose
+      ? `Reply YES to lock this in, or tell me what's off. First run: keep it easy${closingBodyPart ? ` and stop if the ${closingBodyPart} flares up` : ""} — text me how it felt either way.`
+      : "Reply YES to lock this in, or tell me what to change.";
     if (!dry_run) {
       if (chatId) await startTyping(chatId);
       await new Promise((r) => setTimeout(r, 1500));
@@ -5750,7 +5767,11 @@ function buildSystemPrompt(
   // status update, or a question about something unrelated that happens to name
   // the body part). Only meaningful for user_message; other triggers pass false
   // and keep the unconditional recurring-injury framing below.
-  askedAboutInjury = false
+  askedAboutInjury = false,
+  // Days since the athlete's most recent logged run — only computed/passed for
+  // initial_plan (see call site). Feeds the Week-1 volume cap so a real layoff
+  // reduces the starting volume even when the pre-layoff average was high.
+  daysSinceLastRunForCap: number | null = null
 ): { static: string; dynamic: string } {
   // Which trigger-conditional sections to include.
   const isReminder = trigger === "morning_reminder" || trigger === "nightly_reminder";
@@ -6373,6 +6394,7 @@ ${buildFitnessTierBlock({
   fitnessLevel: (profile?.fitness_level as string | null) ?? "beginner",
   daysPerWeek: (profile?.days_per_week as number | null) ?? null,
   isMetric: spUseMetric,
+  daysSinceLastRun: daysSinceLastRunForCap,
 })}
 
 ${!isReminder ? `TRAINING PHILOSOPHY — apply in this priority order, within the context of the fitness tier above:

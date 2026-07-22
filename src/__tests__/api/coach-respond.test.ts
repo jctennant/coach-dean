@@ -583,12 +583,14 @@ describe("coach/respond — initial_plan closing message", () => {
     const gpCalls = (generateAndSaveFullPlan as ReturnType<typeof vi.fn>).mock.calls;
     expect(gpCalls.length).toBeGreaterThan(0);
 
-    // Closing message is always "How does this look? Happy to adjust anything."
+    // Closing message asks for a concrete yes/no confirmation rather than an open-ended
+    // "how does this look?" — see the 2026-07-22 changelog on why an unconstrained close
+    // led to athletes going quiet instead of confirming.
     const allTexts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map(
       (c: unknown[]) => c[1] as string
     );
     const combined = allTexts.join("\n");
-    expect(combined).toMatch(/how does this look/i);
+    expect(combined).toMatch(/reply yes/i);
   });
 });
 
