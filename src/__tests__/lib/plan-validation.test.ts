@@ -7,6 +7,7 @@ import {
   fixSessionDayAbbreviations,
   countRunningSessions,
   applyStructuredWeeklyTotal,
+  applyStructuredLongRun,
   computeWeekOneVolumeCap,
   computeLongRunCap,
   parsePaceStrToSecPerMile,
@@ -351,6 +352,23 @@ describe("applyStructuredWeeklyTotal", () => {
   });
 });
 
+describe("applyStructuredLongRun", () => {
+  it("corrects a long-run distance that exceeds the cap", () => {
+    const msg = "Long run: 8.5mi easy. Keeps the legs sharp without loading the shin.";
+    expect(applyStructuredLongRun(msg, 4)).toContain("Long run: 4mi easy");
+  });
+
+  it("leaves an already-within-cap long run untouched", () => {
+    const msg = "Long run: 4mi easy on trails.";
+    expect(applyStructuredLongRun(msg, 4)).toBe(msg);
+  });
+
+  it("is a no-op when no long-run phrasing is present", () => {
+    const msg = "Great week of running! Keep the easy days easy.";
+    expect(applyStructuredLongRun(msg, 4)).toBe(msg);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // computeWeekOneVolumeCap
 // ---------------------------------------------------------------------------
@@ -413,13 +431,21 @@ describe("computeLongRunCap", () => {
     expect(computeLongRunCap(9)).toBe(4); // ceil(9*0.35)=4
   });
 
-  it("returns null for athletes at or above 10mi/week — no stated cap for that tier", () => {
+  it("returns null for athletes at or above 10mi/week with no layoff gap — no stated cap for that tier", () => {
     expect(computeLongRunCap(10)).toBeNull();
     expect(computeLongRunCap(40)).toBeNull();
+    expect(computeLongRunCap(18, 3)).toBeNull(); // 3-day gap is normal noise, not a real layoff
   });
 
   it("returns null when average mileage is unknown", () => {
     expect(computeLongRunCap(null)).toBeNull();
+  });
+
+  it("applies a cap for moderate/high-volume athletes with a real layoff gap (>=7 days)", () => {
+    // avg 18mi/week, 14-day gap -> weekOneVolumeCap.max = round(18*0.6) = 11 -> ceil(11*0.35) = 4
+    expect(computeLongRunCap(18, 14)).toBe(4);
+    // avg 18mi/week, 21+ day gap -> weekOneVolumeCap.max = round(18*0.5) = 9 -> ceil(9*0.35) = 4
+    expect(computeLongRunCap(18, 21)).toBe(4);
   });
 });
 

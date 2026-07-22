@@ -565,7 +565,7 @@ In ALL cases:
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 EXCEPTION: For return_to_running or injury_recovery goals (athlete's primary goal is recovering from injury or getting back to running), ask ONE injury question BEFORE asking for Strava. Do NOT mention Strava in this message at all — that comes after the injury question is answered.
-Keep the pitch simple: "I'll connect to Strava to read your runs automatically." Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention coaching notes or friends seeing anything.
+Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs automatically") — the system appends that line automatically right after the link. Writing it yourself will make it appear twice. Just lead naturally into [STRAVA_LINK]; a short transition or nothing at all before the placeholder is fine. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention coaching notes or friends seeing anything.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -1258,14 +1258,14 @@ Write 3–4 sentences:
 3. One forward-looking sentence about what the coaching relationship will specifically monitor — make the athlete feel watched, not just coached.
 
 Do NOT lead with or headline HR zone analysis. If the Z3 pattern is relevant (extra fatigue → slower recovery), you may mention it briefly as one supporting observation, but it must not be the opening or the main point.
-Close with TWO questions combined naturally into one sentence — ask what they're doing for the injury AND how sleep has been. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment — and how's sleep been lately?" One sentence, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
+Close with ONE question — ask what they're doing for the injury right now. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment?" One sentence, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
 Write 3–4 sentences:
 1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data (e.g. weekly mileage, HR zone %, longest run, weeks until race). Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
 2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
 3. One forward-looking sentence about what the coaching will watch.
 
-Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now — and how's sleep been lately? Both affect how I set up the plan."`}
+Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now? That affects how I set up the plan."`}
 
 Rules:
 - Do NOT ask for road race times — training zones calibrate from Strava data

@@ -338,6 +338,35 @@ export function applyStructuredWeeklyTotal(message: string, validatedTotal: numb
   return corrected;
 }
 
+/** Matches the "Long run: Xmi <descriptor>" line initial_plan/weekly_recap prose uses (see route.ts's OUTPUT format examples). */
+export const LONG_RUN_PATTERNS: RegExp[] = [
+  /(Long run:\s*~?)(?<![-\d]|to )(\d+(?:\.\d+)?)(\s*(?:mi(?:les?)?|km))/gi,
+];
+
+/**
+ * Force the long-run distance stated in initial_plan prose to match a validated,
+ * capped number — the same mechanism as applyStructuredWeeklyTotal, for the same
+ * reason: a hard safety cap (see computeLongRunCap's daysSinceLastRun handling) is
+ * only worth having if a blown cap actually gets corrected in the text an athlete
+ * receives, not just logged. Unlike the weekly total, this only fires when a cap is
+ * known (computeLongRunCap returns non-null) and exceeded — most tiers outside a
+ * layoff gap have no long-run number to enforce, so callers should only invoke this
+ * once they've confirmed a cap applies.
+ */
+export function applyStructuredLongRun(message: string, cappedDistance: number): string {
+  const rounded = Math.round(cappedDistance * 10) / 10;
+  let corrected = message;
+  for (const pattern of LONG_RUN_PATTERNS) {
+    corrected = corrected.replace(pattern, (full, pre, num, post) => {
+      const stated = parseFloat(num);
+      if (stated <= rounded + 0.4) return full; // already within cap
+      console.warn(`[applyStructuredLongRun] stated ${stated}mi, cap is ${rounded}mi — correcting`);
+      return `${pre}${rounded}${post}`;
+    });
+  }
+  return corrected;
+}
+
 /**
  * Safe Week-1 weekly-mileage range for a brand-new training plan, by fitness tier.
  *
@@ -391,14 +420,31 @@ export function computeWeekOneVolumeCap(
 
 /**
  * Safe Week-1 long-run cap, in the athlete's mileage unit — mirrors the
- * "LONG RUN CAP — HARD LIMIT" `<rule>` in buildSystemPrompt (route.ts), which only
- * asserts an explicit numeric long-run cap for the LOW VOLUME tier (avg < 10mi/week).
- * Other tiers give a weekly-total cap but no separately-stated long-run number, so this
- * deliberately returns null for them rather than inventing a cap the prompt never asserts.
+ * "LONG RUN CAP — HARD LIMIT" `<rule>` in buildSystemPrompt (route.ts). Outside a real
+ * layoff, this only asserts an explicit numeric long-run cap for the LOW VOLUME tier
+ * (avg < 10mi/week) — other tiers give a weekly-total cap but no separately-stated
+ * long-run number, so this deliberately returns null for them rather than inventing a
+ * cap the prompt never asserts.
+ *
+ * A real gap since the last run (>=7 days) is the exception: a moderate/high-volume
+ * athlete's historical average overstates what their body can absorb in a single long
+ * run right now the same way it overstates the weekly total (see
+ * computeWeekOneVolumeCap's daysSinceLastRun handling) — a returning athlete can get
+ * prescribed a long run that's 30-40% of the week's *pre-layoff* volume with no cap at
+ * all once avgWeeklyMileage crosses 10, which is exactly backwards for someone coming
+ * back from time off (see the 2026-07-21 changelog: 8.5mi long run prescribed to an
+ * athlete with an active shin injury and a 2-week gap, avg ~18mi/week). When the gap
+ * applies, base the 35% cap on the gap-adjusted weekly max (already scaled down by
+ * computeWeekOneVolumeCap's 70/60/50% factor) instead of the raw historical average.
  */
-export function computeLongRunCap(avgWeeklyMileage: number | null): number | null {
-  if (avgWeeklyMileage == null || avgWeeklyMileage >= 10) return null;
-  return Math.max(Math.ceil(avgWeeklyMileage * 0.35), 3);
+export function computeLongRunCap(avgWeeklyMileage: number | null, daysSinceLastRun: number | null = null): number | null {
+  if (avgWeeklyMileage == null) return null;
+  const gapApplies = daysSinceLastRun != null && daysSinceLastRun >= 7;
+  if (avgWeeklyMileage >= 10 && !gapApplies) return null;
+  const base = gapApplies
+    ? computeWeekOneVolumeCap(avgWeeklyMileage, null, false, daysSinceLastRun).max ?? avgWeeklyMileage
+    : avgWeeklyMileage;
+  return Math.max(Math.ceil(base * 0.35), 3);
 }
 
 /**

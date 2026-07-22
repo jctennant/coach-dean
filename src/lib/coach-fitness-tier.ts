@@ -84,16 +84,25 @@ export function buildFitnessTierBlock(params: FitnessTierParams): string {
 <rule>LONG RUN CAP — HARD LIMIT: The single longest run in Week 1 must not exceed ${spMi(longRunCap)} (35% of current weekly volume, floor ${spMi(3)}). A long run that equals or exceeds the athlete's entire weekly baseline is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`;
   }
 
+  // A real layoff gap means the historical average overstates what a single long run
+  // should be right now, the same way it overstates the weekly total — see
+  // computeLongRunCap's daysSinceLastRun handling. Outside a gap, moderate/high volume
+  // tiers assert no separate long-run number (the weekly cap is the only guardrail).
+  const gapLongRunCap = gapApplies ? computeLongRunCap(avgWeeklyMileage, daysSinceLastRun) : null;
+  const longRunRule = gapLongRunCap != null
+    ? `\n<rule>LONG RUN CAP — HARD LIMIT: Given the layoff, the single longest run in Week 1 must not exceed ${spMi(gapLongRunCap)} (35% of the gap-adjusted weekly cap, floor ${spMi(3)}). Returning from time off with a long run sized to pre-layoff volume is a serious injury risk. State your long run distance, then verify it does not exceed this cap before sending.</rule>`
+    : "";
+
   if (avgWeeklyMileage < 30) {
     const targetMin = gapApplies ? cap.min : Math.round(avgWeeklyMileage * 1.05);
     const targetMax = gapApplies ? cap.max! : Math.round(avgWeeklyMileage * 1.15);
     return `FITNESS TIER: MODERATE VOLUME (avg ${spMi(avgWeeklyMileage)}).${gapNote} This athlete has an established aerobic base${gapApplies ? ", but hasn't been holding that volume recently" : ""}. 1–2 quality sessions per week (tempo or interval work) are appropriate and expected alongside easy volume. The 80/20 principle applies — most miles easy, but don't withhold quality work.
 <rule>WEEK 1 VOLUME CAP — LIMIT: Week 1 should target ${spMi(targetMin)}–${spMi(targetMax)}. Do not exceed ${spMi(cap.max!)} — if your sessions sum above this ceiling, reduce at least one easy run until the total is under it. A first-week spike risks overuse injury at the start of the plan.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}.${gapApplies ? "" : " Starting below the athlete's current base has no training rationale — they are already adapted to their current volume. Even for first-timers, dropping significantly below current base wastes existing fitness."}</rule>`;
+<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}.${gapApplies ? "" : " Starting below the athlete's current base has no training rationale — they are already adapted to their current volume. Even for first-timers, dropping significantly below current base wastes existing fitness."}</rule>${longRunRule}`;
   }
 
   const targetMax = gapApplies ? cap.max! : Math.round(avgWeeklyMileage * 1.05);
   return `FITNESS TIER: HIGH VOLUME (avg ${spMi(avgWeeklyMileage)}).${gapNote} This is an experienced, high-volume runner. Skip base-building preamble — they already have the base. Quality sessions are appropriate from the start. Plan to their current training level, not a conservative floor. Don't apply beginner defaults to an athlete running this kind of volume.
 <rule>WEEK 1 VOLUME CAP — GUIDELINE: ${gapApplies ? `Given the layoff, Week 1 target is ${spMi(cap.min)}–${spMi(cap.max!)}` : `Even for high-volume runners, Week 1 of a new plan should not spike more than 10–15% above current base. Week 1 target: ${spMi(targetMax)}–${spMi(cap.max!)}`}. Don't jump to peak volume on Day 1.</rule>
-<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}.${gapApplies ? "" : " Even for masters athletes, first-timers, or conservative builds, starting significantly below current base wastes the fitness already built. 90% of current average is the floor."}</rule>`;
+<rule>WEEK 1 MINIMUM FLOOR: Week 1 must not fall below ${spMi(cap.min)}.${gapApplies ? "" : " Even for masters athletes, first-timers, or conservative builds, starting significantly below current base wastes the fitness already built. 90% of current average is the floor."}</rule>${longRunRule}`;
 }

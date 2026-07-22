@@ -8,6 +8,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-21 — Long-run cap had no effect above 10mi/week average, even with an active injury and a real layoff gap
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "but I don't think I should be doing 8.5 miles if my shin still hurts and I haven't run the past 2 weeks" — reacting to their own onboarding transcript's first plan: 25mi week, "Long run: 8.5mi easy" prescribed with an active posterior shin splint on file and an 11-14 day gap since their last run, avg ~18mi/week pre-layoff.
+**Root cause:** `computeLongRunCap` (plan-validation.ts) only ever asserted a numeric long-run ceiling for the LOW VOLUME tier (avg < 10mi/week) — for any athlete averaging 10mi/week or more it unconditionally returned `null`, regardless of injury status or how long it had been since their last run. `computeWeekOneVolumeCap` already had a `daysSinceLastRun` gap-adjustment (70%/60%/50% scaling for a 1/2/3+ week layoff, added in the 2026-07-22 fix) that correctly capped the *weekly total* down for this athlete (25mi), but the long-run cap was never wired to the same signal — so a returning athlete's single longest run could still be sized off their stale pre-layoff average (8.5mi ≈ 34% of a fresh-off-two-weeks-off week) with zero guardrail once average mileage crossed 10. Compounding it, even where a cap number *was* asserted (LOW VOLUME tier), the route.ts check that compared Claude's stated `plan.long_run_distance` against it was advisory-only — it logged and tracked an event but never corrected the message text, unlike the equivalent weekly-total check which does clamp.
+**Fix / Change:** `computeLongRunCap` now accepts an optional `daysSinceLastRun` — when a real gap applies (>=7 days), it derives the 35%-of-weekly cap from the gap-adjusted weekly max (`computeWeekOneVolumeCap`'s output) instead of returning null, regardless of mileage tier. `coach-fitness-tier.ts`'s MODERATE/HIGH VOLUME prompt blocks now include a `LONG RUN CAP — HARD LIMIT` rule whenever the gap applies (previously only the LOW VOLUME block ever stated one). Added `applyStructuredLongRun`/`LONG_RUN_PATTERNS` (mirroring `applyStructuredWeeklyTotal`) so a blown long-run cap on `initial_plan` now actually corrects the "Long run: Xmi ..." line in the sent message instead of just logging a telemetry event — this is a safety-relevant number, not a phrasing nit, so per CLAUDE.md's fix-mechanism guidance it gets a real correction, not an advisory-only pass.
+**Files changed:** `src/lib/plan-validation.ts`, `src/lib/coach-fitness-tier.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/plan-validation.test.ts`
+
+---
+
+## 2026-07-21 — Drop the sleep question; fix the real Strava pitch duplication (still present after the 2026-07-22 dedup fix)
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback
+**User feedback:** Re-pasted the same shin-splints/Teton-Crest onboarding transcript after the 2026-07-22 dedup fix and it still showed the Strava pitch line twice ("I'll connect to Strava to read your runs automatically." appeared once before the link and again right after it, followed by "Strava connected Jake!..."). Also asked whether the sleep question at the end of the injury/Strava-connected messages is extraneous.
+**Root cause:** The 2026-07-22 fix addressed a *different* duplication mechanism — a TOCTOU race on duplicate inbound SMS deliveries producing two outbound turns. This transcript's duplication was a same-message bug: the onboarding prompt (route.ts, STRAVA section) instructed Claude to literally write "I'll connect to Strava to read your runs automatically." as its own pitch text, while the code that assembles `stravaMsg` (`src/app/api/onboarding/handle/route.ts`) *also* hardcoded that exact same sentence after the write-URL — so any time Claude followed the prompt's example verbatim (as it did here), the sentence rendered twice in the same bubble. Two independent sources of truth for one piece of copy.
+**Fix / Change:** Removed the instruction telling Claude to write the pitch sentence itself; the prompt now explicitly says the system appends that line automatically and Claude should not restate it, just lead into the `[STRAVA_LINK]` placeholder. The code-side sentence is now the single source of truth for that copy. Also removed the "how's sleep been lately" half of the closing question in both the injury-flagged and no-injury post-Strava-connect messages — it was tacked onto an already-dense first coaching message and wasn't acted on distinctly from the injury-treatment answer; the `avg_sleep_hours` passive-extraction field is left in place in case an athlete volunteers it unprompted.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`
+
+---
+
 ## 2026-07-22 — Four onboarding/initial_plan bugs from a real transcript: aggressive layoff volume, missing injury protocol, duplicate messages, weak close
 
 **Type:** Bug Fix

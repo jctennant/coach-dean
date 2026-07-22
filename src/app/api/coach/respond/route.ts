@@ -22,7 +22,7 @@ function capitalizeBodyPartForCard(bodyPart: string): string {
   if (spaced === "it band") return "IT band";
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
-import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
+import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, applyStructuredLongRun, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { normalizeEmDashes } from "@/lib/text-format";
 import { getValidAccessToken } from "@/lib/strava";
@@ -3451,13 +3451,18 @@ OUTPUT CONTRACT:
     // repetition-check.ts shipping advisory-only first.
 
     // Long-run cap only has an explicit numeric value in the prompt for the LOW VOLUME
-    // tier on initial_plan (see computeLongRunCap) — no invented cap for other tiers.
+    // tier, or any tier with a real layoff gap (see computeLongRunCap) — no invented cap
+    // otherwise. When a cap is known and blown, correct the stated prose the same way
+    // applyStructuredWeeklyTotal corrects the weekly total — a long run prescribed at
+    // pre-layoff volume to an athlete with an active injury and a real gap since their
+    // last run is a safety issue, not a phrasing nit (see 2026-07-21 changelog).
     if (trigger === "initial_plan") {
-      const longRunCap = computeLongRunCap(avgWeeklyMileage);
+      const longRunCap = computeLongRunCap(avgWeeklyMileage, daysSinceLastRunForCap);
       const statedLongRun = typeof planInput?.long_run_distance === "number" ? planInput.long_run_distance : null;
       if (longRunCap != null && statedLongRun != null && statedLongRun > longRunCap * 1.15) {
-        log.warn("structured plan.long_run_distance exceeded safe cap", { trigger, statedLongRun, longRunCap });
+        log.warn("structured plan.long_run_distance exceeded safe cap — clamping", { trigger, statedLongRun, longRunCap });
         void trackEvent(userId, "plan_long_run_exceeded_cap", { trigger, statedLongRun, longRunCap });
+        rawText = applyStructuredLongRun(rawText, longRunCap);
       }
     }
 
