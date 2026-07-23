@@ -330,7 +330,7 @@ Add a fixture whenever a conversation bug is reported (repetition, re-asking, wr
 
 ## Simulation Evals (`/evals/fixtures/simulation/`)
 
-`npm run eval:simulation` — end-to-end multi-turn onboarding simulations. A user agent (Haiku) plays each persona across multiple turns; Dean (Sonnet) responds; Haiku extracts fields after each exchange; Opus judges the full transcript.
+`npm run eval:simulation` — end-to-end multi-turn onboarding simulations. A user agent (Haiku) plays each persona across multiple turns; Dean (Sonnet) responds; Haiku extracts fields after each exchange; Sonnet judges the full transcript (switched from Opus 2026-07-22 — no measurable quality difference on this rubric-style scoring, at meaningfully lower cost per run).
 
 ### What the simulations test
 
@@ -341,22 +341,27 @@ Add a fixture whenever a conversation bug is reported (repetition, re-asking, wr
 | `sim-general-fitness` | No race → general_fitness goal, [READY] without race_date |
 | `sim-injury-runner` | Injury collected before [READY], return_to_running goal, supportive tone |
 | `sim-terse-user` | Minimal answers, follow-up questioning, higher turn budget |
+| `sim-shin-splint-trail-race` | Strava scope honesty, race-countdown consistency across messages, injury red-flag screen (diffuse vs. localized/rest shin pain) before completion, no cross-message re-summarization of the same mileage-drop story |
 
 ### How it works
 
 Each simulation turn:
 1. Dean (Sonnet) generates a response given current `collected` + conversation history
-2. [STRAVA_LINK] is intercepted — if persona has Strava, OAuth is simulated and Strava connected message injected
-3. User agent (Haiku) replies as the persona
-4. Haiku extraction runs on full history → merges into `collected`
-5. Repeat until [READY] or max_turns
+2. [STRAVA_LINK] is intercepted — if persona has Strava, OAuth is simulated
+3. Once connected, a real Strava-analysis message is generated (mirrors `handleDataAnalysis`'s system prompt — not a static placeholder), then an injury-intake follow-up loop runs (mirrors `handleInjuryIntake`'s gate/questions, capped at 2 follow-ups), then a completion message is generated (mirrors `buildDeterministicCompletion`) — this ends the simulation the same way production ends onboarding from this stage, without further [READY]-seeking turns
+4. If Strava is skipped, or before Strava connects, a normal user-agent reply follows instead
+5. Haiku extraction runs on full history → merges into `collected`
+6. Repeat until [READY]/completion or max_turns
 
 ### Key parity points to maintain with `onboarding/handle/route.ts`
 
 - `buildDeanSystemPrompt` → mirrors `handleConversation` system prompt exactly
-- `summarizeCollected` → mirrors same function in route.ts
-- `extractFields` + `mergeCollected` → mirrors Haiku extraction and merge logic
+- `summarizeCollected` → mirrors same function in route.ts, including the deterministic race-countdown line (`(N days / M weeks away — always use this exact figure...)`) added 2026-07-22 — this is the fix for cross-message countdown drift; if it's ever removed from the runner's mirror without removing it from route.ts, the countdown-consistency check on `sim-shin-splint-trail-race` will pass for the wrong reason (an LLM getting lucky) rather than the actual reason (a shared computed value).
+- `extractFields` + `mergeCollected` → mirrors Haiku extraction and merge logic (now includes the injury-detail fields: `active_injury`, `injury_severity`, `injury_body_part_current`, `reported_during`, `injury_management`, `injury_pain_character`)
 - VALID_GOAL_BUCKETS set
+- `buildStravaAnalysisPrompt` → mirrors `handleDataAnalysis`'s system prompt (added 2026-07-22)
+- `injuryShouldComplete` / `injuryMissingFields` / `getInjuryFollowUp` → mirrors `handleInjuryIntake`'s gate (including the `injury_severity`-required fix and the shin/tibia red-flag question), added 2026-07-22
+- `buildCompletionMessage` → mirrors `buildDeterministicCompletion`'s active-injury path (added 2026-07-22; does not cover the Sonnet-synthesis uploaded-plan branch, since no simulation fixture has an uploaded plan)
 
 Use `--verbose` to print the full simulated conversation as it runs:
 ```bash

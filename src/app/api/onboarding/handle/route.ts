@@ -1371,9 +1371,20 @@ async function handleInjuryIntake(
   // were doing about it, never how severe it was or whether it hurt at rest. Severity is
   // the single most safety-relevant field (it's the "can they run at all" screen), so it
   // must be known before treating the injury intake as complete (see 2026-07-22 changelog).
-  const injuryAlreadyKnown = !!(mergedData.injury_history || mergedData.current_niggles || mergedData.injury_notes) && !!mergedData.injury_severity;
-  // All three fields needed: body_part, severity, reported_during
-  const hasAllSymptomFields = !!(mergedData.injury_body_part_current && mergedData.injury_severity && mergedData.reported_during);
+  // Shin/tibia red-flag screen (diffuse ache vs. one specific spot / rest pain) must also
+  // be answered before completing, same as severity — otherwise a severity value inferred
+  // or volunteered early (e.g. "I've cut back a lot" read as moderate) can short-circuit
+  // completion before the stress-fracture screen ever gets asked, exactly defeating the
+  // point of adding it. Only required when the body part is actually shin-related.
+  const bodyPartForGate = ((mergedData.injury_body_part_current as string | null) ?? "").toLowerCase();
+  const isShinRelatedForGate = /shin|tibia/.test(bodyPartForGate);
+  const redFlagScreenAnswered = !isShinRelatedForGate || !!mergedData.injury_pain_character;
+  const injuryAlreadyKnown = !!(mergedData.injury_history || mergedData.current_niggles || mergedData.injury_notes)
+    && !!mergedData.injury_severity
+    && redFlagScreenAnswered;
+  // All three fields needed: body_part, severity, reported_during (+ red-flag screen for shins)
+  const hasAllSymptomFields = !!(mergedData.injury_body_part_current && mergedData.injury_severity && mergedData.reported_during)
+    && redFlagScreenAnswered;
   // Hard cap at 2 follow-up questions total
   const hitFollowUpCap = followUpCount >= 2;
   const shouldComplete = noInjury || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;

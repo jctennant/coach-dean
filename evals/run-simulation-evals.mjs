@@ -29,7 +29,9 @@ const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
 
 const DEAN_MODEL = "claude-sonnet-4-5-20250929";
 const AGENT_MODEL = "claude-haiku-4-5-20251001";
-const JUDGE_MODEL = "claude-opus-4-5";
+// Sonnet judges too — Opus was overkill for this rubric-style scoring and cost
+// meaningfully more per run with no measurable quality difference.
+const JUDGE_MODEL = "claude-sonnet-4-5-20250929";
 
 const OPENAI_MODEL_MAP = {
   "claude-haiku-4-5-20251001": "gpt-4o-mini",
@@ -76,7 +78,8 @@ const VALID_GOAL_BUCKETS = new Set([
 // ─────────────────────────────────────────────
 // Mirrors summarizeCollected in onboarding/handle/route.ts
 // ─────────────────────────────────────────────
-function summarizeCollected(data) {
+function summarizeCollected(data, today) {
+  const nowMs = new Date(today + "T12:00:00Z").getTime();
   const lines = [];
   if (data.name) lines.push(`Name: ${data.name}`);
   if (data.goal) {
@@ -89,7 +92,13 @@ function summarizeCollected(data) {
   if (data.race_date) {
     const formatted = new Date(data.race_date + "T12:00:00Z")
       .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-    lines.push(`Race date: ${formatted}`);
+    const daysUntil = Math.round(
+      (new Date(data.race_date + "T12:00:00Z").getTime() - nowMs) / (24 * 60 * 60 * 1000)
+    );
+    const weeksUntil = Math.round(daysUntil / 7);
+    // Mirrors the 2026-07-22 route.ts fix: one deterministic countdown, stated once, so every
+    // message (goals stage, Strava-connected analysis, injury intake, completion) agrees.
+    lines.push(`Race date: ${formatted} (${daysUntil} days / ${weeksUntil} week${weeksUntil !== 1 ? "s" : ""} away — always use this exact figure when stating the countdown; never recompute it from the date yourself)`);
   }
   if (data.goal_time_minutes) {
     const h = Math.floor(data.goal_time_minutes / 60);
@@ -110,6 +119,11 @@ function summarizeCollected(data) {
   if (data.weekly_miles) lines.push(`Current weekly mileage: ~${data.weekly_miles} miles`);
   if (data.easy_pace) lines.push(`Easy pace: ${data.easy_pace}/mi`);
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);
+  if (data.injury_history) lines.push(`Injury history: ${data.injury_history}`);
+  if (data.current_niggles) lines.push(`Current niggles: ${data.current_niggles}`);
+  if (data.injury_management) lines.push(`What they're doing for it: ${data.injury_management}`);
+  if (data.reported_during) lines.push(`Injury timing: pain reported ${data.reported_during} runs`);
+  if (data.injury_pain_character === "localized_or_rest_pain") lines.push(`RED FLAG: shin/tibia pain described as one specific spot or present at rest — possible stress fracture. Do not recommend continuing to run or add load until checked by a doctor.`);
   if (data.timezone) lines.push(`Timezone: ${data.timezone}`);
   if (data.strava_city) {
     const loc = data.strava_state ? `${data.strava_city}, ${data.strava_state}` : data.strava_city;
@@ -126,8 +140,8 @@ function summarizeCollected(data) {
 // ─────────────────────────────────────────────
 // Mirrors handleConversation system prompt in onboarding/handle/route.ts
 // ─────────────────────────────────────────────
-function buildDeanSystemPrompt(collected, stravaContext, isFirstResponse) {
-  const collectedStr = summarizeCollected(collected);
+function buildDeanSystemPrompt(collected, stravaContext, isFirstResponse, today) {
+  const collectedStr = summarizeCollected(collected, today);
 
   return `${!isFirstResponse ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.\n\n` : ""}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
 
@@ -195,7 +209,7 @@ EXCEPTION — injury_recovery or return_to_running goals: If the athlete's goal 
 
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-Keep the pitch simple: "I'll connect to Strava and add a short coaching note to each activity after every run — your friends will see it too." Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism. The benefit is the coaching note in their feed.
+Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs and add a coaching note to each one") — the system appends that line automatically right after the link, and it accurately describes both what's read and what's written back. Writing your own version will make it appear twice, and any wording that undersells it (e.g. "read your runs automatically" alone) will contradict the write-access grant the link actually requests. Just lead naturally into [STRAVA_LINK]; a short transition or nothing at all before the placeholder is fine. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -280,6 +294,14 @@ Output format (include only fields that are clearly stated — use null for anyt
   "recent_race_distance_km": number | null,
   "recent_race_time_minutes": number | null,
   "injury_notes": string | null,
+  "injury_history": string | null,
+  "current_niggles": string | null,
+  "injury_management": string | null,
+  "reported_during": "during"|"after"|"both" | null,
+  "active_injury": boolean | null,
+  "injury_severity": "mild"|"moderate"|"severe" | null,
+  "injury_body_part_current": string | null,
+  "injury_pain_character": "diffuse"|"localized_or_rest_pain" | null,
   "ultra_race_history": string | null,
   "other_races": [{"name": string|null, "date": "YYYY-MM-DD"|null, "priority": "B"|"C", "goal": string|null}] | null,
   "timezone": string | null,
@@ -287,6 +309,14 @@ Output format (include only fields that are clearly stated — use null for anyt
 }
 
 Rules:
+- injury_history: historical injuries the athlete has recovered from — not current issues.
+- current_niggles: current aches or pain being managed right now.
+- injury_management: what the athlete is doing for a current injury (PT, rest, ice, etc.) — only from their own words.
+- reported_during: when the pain occurs relative to running — 'during', 'after', or 'both'.
+- active_injury: true if the athlete describes a CURRENT injury they're managing right now. False/null for historical/resolved injuries.
+- injury_severity: mild=annoyance, can run modified. moderate=skipping/modifying some sessions. severe=cannot run at all.
+- injury_body_part_current: body part of the CURRENT active injury (e.g. "left shin"). Null for historical injuries.
+- injury_pain_character: for shin/tibia pain only — 'diffuse' if a general ache along the bone that eases with rest (typical shin splints), 'localized_or_rest_pain' if one specific painful spot or pain even at rest/walking/night (possible stress fracture). Null if not shin-related or not mentioned.
 - Only extract data clearly stated in the conversation. Do not infer or guess.
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets only for road races at those distances. IMPORTANT: if the athlete says they have no committed race — only aspirational/eventual talk ("maybe a marathon someday", "thinking about eventually") — use "return_to_running" or "general_fitness", NOT the race distance. The goal must reflect what they are actually training for right now, not what they might do later.
 - external_plan_description: capture a brief factual summary when the athlete describes a training plan they're currently following (plan source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan. Do NOT capture a plan Dean is going to build. (has_existing_plan / wants_plan are NOT extracted here — they come from Dean's [MODE:...] tag, which the runner parses separately.)
@@ -323,11 +353,197 @@ function mergeCollected(existing, extracted) {
   return merged;
 }
 
+const INJURY_ACTION = {
+  hamstring: "leg swings and walking lunges before your next run",
+  "it band": "side-lying leg raises or banded walks before each run",
+  itb: "side-lying leg raises or banded walks before each run",
+  knee: "glute activation — clamshells or bridges — before your next run",
+  achilles: "calf drops (straight + bent knee) after your next run",
+  calf: "calf drops after your next run",
+  shin: "reduce intensity for the next few days and ice if tender to touch",
+  hip: "hip flexor stretch and single-leg glute work before your next run",
+  plantar: "foot rolling and calf stretches first thing in the morning",
+};
+function getInjuryAction(bodyPart) {
+  const lower = (bodyPart || "").toLowerCase();
+  for (const [key, action] of Object.entries(INJURY_ACTION)) {
+    if (lower.includes(key)) return action;
+  }
+  return "an easy warm-up before your next run";
+}
+
+// ─────────────────────────────────────────────
+// Mirrors handleDataAnalysis's system prompt in onboarding/handle/route.ts —
+// fires once, right after Strava connects, before the injury_intake stage.
+// ─────────────────────────────────────────────
+function buildStravaAnalysisPrompt(collected, stravaContext, firstName, today) {
+  const raceName = collected.race_name;
+  const raceDate = collected.race_date;
+  const goal = collected.goal;
+  const nowMs = new Date(today + "T12:00:00Z").getTime();
+
+  let raceContext = "";
+  if (raceName && raceDate) {
+    const weeksUntil = Math.round(
+      (new Date(raceDate + "T12:00:00Z").getTime() - nowMs) / (7 * 24 * 60 * 60 * 1000)
+    );
+    raceContext = `${raceName} on ${raceDate} (${weeksUntil} week${weeksUntil !== 1 ? "s" : ""} away)`;
+  } else if (goal) {
+    raceContext = goal.replace(/_/g, " ");
+  }
+
+  const injuryAlreadyCollected = !!(collected.injury_history || collected.current_niggles || collected.injury_notes);
+  const injuryContext = [collected.current_niggles, collected.injury_notes, collected.injury_history]
+    .filter(Boolean).join("; ") || null;
+
+  return `You are Coach Dean, an AI running coach. ${firstName ? firstName + "'s" : "An athlete's"} Strava just connected.
+
+ATHLETE CONTEXT:
+${raceContext ? `Race/Goal: ${raceContext}` : "Goal: general fitness"}
+${stravaContext}
+${injuryAlreadyCollected && injuryContext ? `\nINJURY FLAGGED BEFORE STRAVA: ${injuryContext}` : ""}
+
+${injuryAlreadyCollected ? `YOUR JOB — INJURY IS THE PRIMARY LENS:
+The athlete already flagged an injury before connecting Strava. That injury is the primary coaching concern. Do NOT lead with HR zone distribution or aerobic efficiency. Use load/volume signals (weekly mileage, trend, weeks to race) as the data backbone, and connect everything back to the injury and race timeline.
+
+Write 3–4 sentences:
+1. Lead with the injury + what the training volume says about risk given the race timeline. Use at least 2 specific numbers from the STRAVA context above (e.g. weekly mileage, weeks to race, mileage trend). CRITICAL: only cite numbers that appear in the STRAVA data above — never invent figures.
+2. One specific signal you'll watch: name it clearly (load spike, pace drop, mileage jump). Connect it to the injury. Don't be generic.
+3. One forward-looking sentence about what the coaching relationship will specifically monitor — make the athlete feel watched, not just coached.
+
+Close with ONE question — ask what they're doing for the injury right now. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment?" One sentence, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline.
+
+Write 3–4 sentences:
+1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data.
+2. One thing that needs attention or one adjustment.
+3. One forward-looking sentence about what the coaching will watch.
+
+Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now? That affects how I set up the plan."`}`;
+}
+
+// ─────────────────────────────────────────────
+// Mirrors handleInjuryIntake's completion gate in onboarding/handle/route.ts.
+// injuryAlreadyKnown requires injury_severity too (2026-07-22 fix) — a bare injury
+// mention is no longer enough on its own to skip the follow-up loop.
+// ─────────────────────────────────────────────
+function injuryShouldComplete(collected, followUpCount, lastUserReply) {
+  const noInjury = /\b(no injury|no injuries|no issues|no pain|no niggles|all good|nothing|clean|healthy|fine|never|n\/a)\b/i
+    .test(lastUserReply || "");
+  // Red-flag screen must be answered too, same as severity — otherwise an early/inferred
+  // severity value can short-circuit completion before the stress-fracture screen is asked
+  // (this was a real gap found by sim-shin-splint-trail-race on first run: injury_severity
+  // got inferred before injury_pain_character was ever asked about, and completion fired
+  // with the red-flag question skipped entirely).
+  const bodyPartForGate = (collected.injury_body_part_current || "").toLowerCase();
+  const isShinRelatedForGate = /shin|tibia/.test(bodyPartForGate);
+  const redFlagScreenAnswered = !isShinRelatedForGate || !!collected.injury_pain_character;
+  const injuryAlreadyKnown = !!(collected.injury_history || collected.current_niggles || collected.injury_notes)
+    && !!collected.injury_severity
+    && redFlagScreenAnswered;
+  const hasAllSymptomFields = !!(collected.injury_body_part_current && collected.injury_severity && collected.reported_during)
+    && redFlagScreenAnswered;
+  const hitFollowUpCap = followUpCount >= 2;
+  return noInjury || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
+}
+
+// Mirrors the missingFields priority list in handleInjuryIntake, including the
+// shin/tibia red-flag question ahead of the generic severity question.
+function injuryMissingFields(collected) {
+  const missingFields = [];
+  if (!collected.injury_body_part_current) missingFields.push("which body part specifically");
+
+  const bodyPartLower = (collected.injury_body_part_current || "").toLowerCase();
+  const isShinRelated = /shin|tibia/.test(bodyPartLower);
+  if (isShinRelated && !collected.injury_pain_character) {
+    missingFields.push("whether the pain is a diffuse ache along the shin bone or one specific painful spot, and whether it hurts even at rest or walking (not just during runs) — this distinguishes ordinary shin splints from something that needs a doctor before any loading, like a stress fracture");
+  }
+
+  if (!collected.injury_management && !collected.reported_during) {
+    missingFields.push("what they're doing for it (physio, rest, ice, etc.) and when the pain flares — ask both in one question");
+  } else if (!collected.injury_management) {
+    missingFields.push("what they're doing for it right now — any treatment, physio, rest");
+  } else if (!collected.reported_during) {
+    missingFields.push("when it flares (during runs, after, or both)");
+  }
+  if (!collected.injury_severity) missingFields.push("how limiting it is right now — can they run modified, or not at all");
+  return missingFields;
+}
+
+async function getInjuryFollowUp(missingFields, followUpCount) {
+  const system = followUpCount === 0
+    ? `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question targeting the most important unknown: ${missingFields[0] ?? "how long it's been happening and whether they're doing anything for it"}.
+
+ONE question only. No advice, no stretches, no reassurance. Just the question.
+Plain text, 1–2 sentences max.`
+    : `You are Coach Dean. You've asked one follow-up about an injury. Ask ONE final targeted question to fill the most important remaining gap: ${missingFields[0] ?? "whether they're doing anything for it and how limiting it is"}.
+
+This is the last question before onboarding completes — make it count. ONE question, no reassurance.
+Plain text, 1–2 sentences max.`;
+
+  const response = await client.messages.create({
+    model: AGENT_MODEL,
+    max_tokens: 120,
+    system,
+    messages: [{ role: "user", content: "(continue)" }],
+  });
+  return response.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim()
+    || "How long has it been bothering you, and do you feel it during runs, after, or both?";
+}
+
+// ─────────────────────────────────────────────
+// Mirrors buildDeterministicCompletion's active-injury path in onboarding/handle/route.ts
+// (simplified — the fixtures this covers never have an uploaded plan, so the
+// Sonnet-synthesis branch in the real code never fires for them).
+// ─────────────────────────────────────────────
+function buildCompletionMessage(collected, today) {
+  const firstName = (collected.name || "Hey").split(" ")[0];
+  const raceName = collected.race_name;
+  const raceDate = collected.race_date;
+  const activeInjury = collected.active_injury === true;
+  const injuryBodyPart = collected.injury_body_part_current || null;
+  const injurySeverity = collected.injury_severity || null;
+  const injuryManagement = collected.injury_management || null;
+  const injuryPainCharacter = collected.injury_pain_character || null;
+  const reportedDuring = collected.reported_during || null;
+
+  let opening = "";
+  if (raceName && raceDate) {
+    const nowMs = new Date(today + "T12:00:00Z").getTime();
+    const weeksUntil = Math.round((new Date(raceDate + "T12:00:00Z").getTime() - nowMs) / (7 * 24 * 60 * 60 * 1000));
+    const timelineStr = weeksUntil <= 1 ? "this week" : weeksUntil === 2 ? "2 weeks out" : `${weeksUntil} weeks out`;
+    opening = `${firstName}, ${raceName} ${timelineStr}.`;
+  } else {
+    opening = `${firstName}, you're set up.`;
+  }
+
+  let injuryNote = "";
+  if (activeInjury && injuryBodyPart) {
+    const action = getInjuryAction(injuryBodyPart);
+    const whenStr = reportedDuring === "during" ? "during runs"
+      : reportedDuring === "after" ? "after runs"
+      : reportedDuring === "both" ? "during and after runs"
+      : null;
+    const duringNote = whenStr ? ` Pain ${whenStr} is the watch-point for whether a session stays or gets swapped.` : "";
+
+    if (injuryPainCharacter === "localized_or_rest_pain") {
+      injuryNote = `One thing before anything else: a specific painful spot (rather than a general ache) or pain even at rest can point to a stress fracture, not standard shin splints — get that checked by a doctor before adding any more running load, including easy miles or incline treadmill work.`;
+    } else if (injuryManagement) {
+      injuryNote = `${injuryManagement} for the ${injuryBodyPart} — good. Before your next run, also ${action}.${duringNote}`;
+    } else {
+      const severityNote = injurySeverity === "severe" ? "Given the severity, "
+        : injurySeverity === "moderate" ? "Given how it's affecting training, " : "";
+      injuryNote = `${severityNote}Before your next run, do ${action}.${duringNote}`;
+    }
+  }
+
+  return [opening, injuryNote].filter(Boolean).join(" ");
+}
+
 // ─────────────────────────────────────────────
 // Get Dean's response for a given history
 // ─────────────────────────────────────────────
-async function getDeanResponse(collected, stravaContext, history, isFirstResponse) {
-  const systemPrompt = buildDeanSystemPrompt(collected, stravaContext, isFirstResponse);
+async function getDeanResponse(collected, stravaContext, history, isFirstResponse, today) {
+  const systemPrompt = buildDeanSystemPrompt(collected, stravaContext, isFirstResponse, today);
 
   const response = await client.messages.create({
     model: DEAN_MODEL,
@@ -397,8 +613,17 @@ async function runSimulation(fixture, verbose) {
   while (deanTurns < max_turns && !readyFired) {
     const isFirstResponse = deanTurns === 0;
 
+    // Extract BEFORE generating Dean's response, on history as it stands (already ending
+    // with the latest user message) — mirrors route.ts's "EXTRACT FIRST" comment: Haiku
+    // extraction runs on the current message before the system prompt is built, so a
+    // race_date given in THIS message is already in `collected` (and its deterministic
+    // countdown line) for THIS SAME response, not one turn late. Without this, the very
+    // first Dean reply always free-hands the countdown from scratch (2026-07-22 bug).
+    const preExtracted = await extractFields(history, today);
+    collected = mergeCollected(collected, preExtracted);
+
     // Get Dean's response
-    const rawDeanResponse = await getDeanResponse(collected, stravaContext, history, isFirstResponse);
+    const rawDeanResponse = await getDeanResponse(collected, stravaContext, history, isFirstResponse, today);
 
     const wantsStravaLink = /\[STRAVA_LINK\]/i.test(rawDeanResponse);
     const wantsDashboardLink = /\[DASHBOARD_LINK\]/i.test(rawDeanResponse);
@@ -423,7 +648,10 @@ async function runSimulation(fixture, verbose) {
       .trim();
 
     if (wantsStravaLink) {
-      deanText += `\n\nhttps://coachdean.ai/api/auth/strava?userId=sim\n\nNo Strava? Just reply "skip".`;
+      // Structural fix mirror (2026-07-22): the honest pitch line is appended by code,
+      // not written by the model — this is what makes strava_scope_honest a guaranteed
+      // pass rather than a hope that the LLM chooses accurate wording every time.
+      deanText += `\n\nhttps://coachdean.ai/api/auth/strava?userId=sim\n\nI'll connect to Strava to read your runs and add a coaching note to each one.\n\nNo Strava? Just reply "skip".`;
     }
 
     history.push({ role: "assistant", content: deanText });
@@ -443,23 +671,64 @@ async function runSimulation(fixture, verbose) {
 
     // Handle Strava link
     if (wantsStravaLink && persona.strava_connected) {
-      // Simulate OAuth callback — inject Strava connected message
-      const stravaMsg = persona.strava_summary || "Strava connected! I can see your training history — that's great context.";
-      history.push({ role: "assistant", content: stravaMsg });
       collected = mergeCollected(collected, { strava_connected: true });
       stravaContext = fixture.persona.strava_context_after_connect
         ?? "STRAVA: Connected. No races found for VDOT calculation — ask for a recent race time or PR to set training paces.";
+
+      // Real Strava-connected data-analysis message (mirrors handleDataAnalysis in
+      // onboarding/handle/route.ts) — generated live, not a static placeholder, so the
+      // race-countdown consistency and Strava-scope wording this message produces are
+      // actually exercised, not hardcoded around.
+      const analysisPrompt = buildStravaAnalysisPrompt(collected, stravaContext, (collected.name || "").split(" ")[0], today);
+      const analysisResp = await client.messages.create({
+        model: DEAN_MODEL,
+        max_tokens: 400,
+        system: analysisPrompt,
+        messages: [{ role: "user", content: "(Strava just connected — write your message now.)" }],
+      });
+      const stravaMsg = analysisResp.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+      history.push({ role: "assistant", content: stravaMsg });
 
       if (verbose) {
         console.log(`\n  [Strava OAuth simulated]`);
         console.log(`  Dean (auto): ${stravaMsg}`);
       }
 
-      // User agent responds to Strava connected message
-      const userReply = await getUserAgentResponse(persona, history);
+      // User agent responds to the analysis message
+      let userReply = await getUserAgentResponse(persona, history);
       history.push({ role: "user", content: userReply });
-
       if (verbose) console.log(`\n  User: ${userReply}`);
+
+      let extracted = await extractFields(history, today);
+      collected = mergeCollected(collected, extracted);
+
+      // Injury intake stage (mirrors handleInjuryIntake) — runs for every athlete after
+      // Strava connects, same as production. Bounded at 2 follow-ups.
+      let followUpCount = 0;
+      while (!injuryShouldComplete(collected, followUpCount, userReply)) {
+        const missingFields = injuryMissingFields(collected);
+        const followUpText = await getInjuryFollowUp(missingFields, followUpCount);
+        history.push({ role: "assistant", content: followUpText });
+        followUpCount++;
+        if (verbose) console.log(`\n  Dean (injury intake): ${followUpText}`);
+
+        userReply = await getUserAgentResponse(persona, history);
+        history.push({ role: "user", content: userReply });
+        if (verbose) console.log(`\n  User: ${userReply}`);
+
+        extracted = await extractFields(history, today);
+        collected = mergeCollected(collected, extracted);
+      }
+
+      // Completion — mirrors buildDeterministicCompletion + completeOnboarding firing.
+      // This ends the simulation the same way production ends onboarding from this
+      // stage: no further [READY]-seeking turns, straight to the wrap-up message.
+      const completionMsg = buildCompletionMessage(collected, today);
+      history.push({ role: "assistant", content: completionMsg });
+      deanTurns++;
+      readyFired = true;
+      if (verbose) console.log(`\n  Dean (completion): ${completionMsg}`);
+      break;
 
     } else if (wantsStravaLink && !persona.strava_connected) {
       // Persona doesn't have Strava — simulate skip
@@ -476,10 +745,6 @@ async function runSimulation(fixture, verbose) {
 
       if (verbose) console.log(`\n  User: ${userReply}`);
     }
-
-    // Extract fields after each full exchange
-    const extracted = await extractFields(history, today);
-    collected = mergeCollected(collected, extracted);
 
     if (verbose) {
       const collectedKeys = Object.keys(collected).filter(k => collected[k] !== null && collected[k] !== undefined);
@@ -532,7 +797,7 @@ async function runEval(fixture, verbose) {
   try {
     const judgeMsg = await client.messages.create({
       model: JUDGE_MODEL,
-      max_tokens: 800,
+      max_tokens: 1300, // bumped 2026-07-22 for the 3 added judge dimensions (strava_scope_honest, race_countdown_consistent, injury_redflag_screened) — 800 was truncating responses mid-JSON
       messages: [{ role: "user", content: judgePromptStr }],
     });
     const judgeText = judgeMsg.content

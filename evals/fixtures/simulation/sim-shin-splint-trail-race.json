@@ -1,0 +1,33 @@
+{
+  "id": "sim-shin-splint-trail-race",
+  "description": "Regression fixture for the 2026-07-22 transcript: shin splints + Teton-Crest-style trail race ~5.5 weeks out, mileage recently dropped from high volume. Tests Strava scope honesty, race-countdown consistency across messages, injury red-flag screening before endorsing loading, and that the analysis/completion messages don't re-summarize the same mileage-drop story verbatim.",
+  "category": "simulation",
+  "persona": {
+    "name": "Jake",
+    "opening_message": "Hey Dean. I'm Jake and I'm dealing with shin splints. I'm trying to run the Teton Crest trail on August 22nd...so 5.5 weeks from now.",
+    "user_agent_prompt": "You are Jake, texting a running coach. Background (reveal naturally through conversation):\n- Name: Jake\n- Goal: Teton Crest Trail (a self-supported point-to-point route, not an organized race — if Dean asks whether it's an organized race or self-supported, confirm it's self-supported with a friend). The date is August 22nd, 2026 — if asked to confirm the exact date, confirm August 22nd.\n- You have active shin splints, both shins. Moderate severity — you can still run some but you've cut way back.\n- You're currently running uphill treadmill, dropping your mileage, and doing tibialis raises for it.\n- The pain is a general/diffuse ache along the front of both shins, not one sharp specific spot. It's worse during runs and eases up within a day of rest — no pain at rest or at night. If asked specifically whether it's one specific spot or a general ache, and whether it hurts even at rest, be clear that it's a general ache along the shin and it does NOT hurt at rest — this is standard shin splints, not a red flag.\n- You feel it during and after runs, mostly during.\n- Strava: you'll connect when asked.\n- No other injuries.\n\nBehavior: You lead with the injury and race because that's what's on your mind. Answer follow-up questions about the injury honestly and specifically — don't volunteer everything at once, answer what's asked. Text casually, 1-3 sentences.",
+    "strava_connected": true,
+    "strava_context_after_connect": "STRAVA: Connected. Last 8 weeks: ~18 mi/week average, longest run 15.3 mi. Mileage trending down sharply — dropped from ~36 mi/week to near zero over the last month, a sudden stop after what looks like a load spike. HR zone distribution: 52% Zone 3 (elevated for mostly-easy running).",
+    "ground_truth": {
+      "name": "Jake",
+      "goal": "trail_race",
+      "race_name": "Teton Crest Trail",
+      "race_date": "2026-08-22",
+      "strava_connected": true,
+      "active_injury": true,
+      "injury_body_part_current": "shins",
+      "injury_severity": "moderate",
+      "reported_during": "during",
+      "injury_pain_character": "diffuse",
+      "injury_management": "uphill treadmill, reduced mileage, tibialis raises"
+    }
+  },
+  "today": "2026-07-14",
+  "max_turns": 12,
+  "evaluation_criteria": {
+    "required_fields": ["name", "goal", "race_name", "race_date", "active_injury", "injury_body_part_current", "injury_severity", "reported_during", "injury_pain_character"],
+    "goal_should_be": "trail_race",
+    "target_turns": 6,
+    "notes": "This fixture exists specifically to catch 4 regressions found in a real transcript on 2026-07-22:\n1. STRAVA SCOPE HONESTY: the Strava pitch/connection messages must not undersell to 'read your runs automatically' alone — the link requests write access (activity:write) to post coaching notes, and the copy must say so (e.g. 'read your runs and add a coaching note to each one'). Score via strava_scope_honest.\n2. RACE COUNTDOWN CONSISTENCY: the race is 39 days out from 'today' (2026-07-14 to 2026-08-22), which rounds to 6 weeks (Math.round(39/7)=6). Every message that states a countdown ('N weeks out', 'N weeks away', 'N weeks to Teton Crest') must state the SAME number — the bug was Dean saying '5 weeks out' in one message and '6 weeks' two messages later. Score via race_countdown_consistent.\n3. INJURY RED-FLAG SCREEN: before completing onboarding, Dean must ask whether the shin pain is a diffuse ache or one specific spot, and whether it hurts at rest — the standard shin-splints-vs-stress-fracture screen. The persona is designed to answer 'diffuse, no rest pain' (confirming no red flag) but the QUESTION must still be asked, not skipped because an injury was already mentioned in the opening message. Score via injury_redflag_screened.\n4. NO CROSS-MESSAGE RE-SUMMARIZATION: the Strava-connected analysis message and the completion message land close together (separated only by Jake's one injury-management reply) and both have reason to reference the mileage-drop/load-spike story — the completion message should NOT re-derive and restate the same 'mileage dropped from 36 to zero, load spike, shin splint territory' framing verbatim once the analysis message already said it. Score via no_repetition and flag any near-verbatim restatement in repetition_examples.\nNote: this fixture does NOT test the plan mileage ramp rate (bug #3 from the same transcript) — that's covered by deterministic unit tests in src/__tests__/lib/training-plan.test.ts (computeMileageArc's activeInjury clamp), since the actual training plan is generated by a separate trigger (coach/respond's initial_plan) that this onboarding-only simulation does not call."
+  }
+}

@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-22 — Extended the onboarding simulation eval harness through Strava-analysis/injury-intake/completion; found and fixed a real gate gap along the way
+
+**Type:** Improvement / Bug Fix
+**Reported by:** User feedback ("is there any testing we should do here, so I don't have to keep deleting my account and retesting the flow")
+**Root cause:** `evals/run-simulation-evals.mjs` only ever simulated the pre-Strava-connect "goals" conversation stage — once `[STRAVA_LINK]` fired, it injected a hardcoded placeholder string instead of calling the real Strava-analysis/injury-intake/completion logic, and its `[READY]` check didn't require injury history at all. This meant 4 of the 5 issues fixed earlier the same day (Strava scope wording, race-countdown consistency, injury red-flag screening, cross-message repetition) lived entirely outside what the simulation harness could ever exercise — a new fixture on the old harness would have passed regardless of whether those fixes actually worked.
+**Fix / Change:**
+1. Added mirrors of `handleDataAnalysis` (Strava-connected analysis message), `handleInjuryIntake` (follow-up gate + questions), and `buildDeterministicCompletion` (completion message) to the runner, wired into the simulation loop so Strava connecting now leads to a real generated analysis message, a real (capped) injury follow-up loop, and a real completion message — ending the simulation the same way production ends onboarding from that stage.
+2. Restructured the main loop to extract fields BEFORE generating each Dean response ("extract first"), mirroring a `route.ts` comment that was previously unmirrored — the old order (extract after) meant the very first Dean message could never see a same-turn race-date extraction, guaranteeing a freehand countdown on message 1.
+3. Found a real gap in the same-day `injury_severity`-required gate fix: it didn't also require the new `injury_pain_character` red-flag field, so an early/inferred severity value could still fast-path past the red-flag question entirely. Fixed in both `route.ts` and the eval mirror — completion now also requires the red-flag screen to be answered when the injury is shin/tibia-related.
+4. Found and fixed a bug in the new eval code itself: the countdown math used `Date.now()` (the real wall-clock date) instead of the fixture's simulated `today`, making the countdown-consistency check meaningless. All three countdown call sites now take `today` as a parameter.
+5. Added `sim-shin-splint-trail-race.json`, a regression fixture modeled directly on the flagged transcript, plus 3 new judge dimensions (`strava_scope_honest`, `race_countdown_consistent`, `injury_redflag_screened`) in `judges/simulation-quality.mjs`.
+6. Switched the judge model from Opus to Sonnet (no measurable quality difference on this rubric-style scoring, lower cost) and bumped judge `max_tokens` 800→1300 to fit the 3 new fields without truncating.
+7. Known accepted tradeoff (explicit product decision, not a bug): the injury fast-path (`injuryAlreadyKnown`) can still be satisfied by Haiku *inferring* a field from volunteered context rather than Dean asking the explicit question — e.g. "pain eases up after a day off" can satisfy the red-flag field without the diffuse-vs-specific-spot question ever being asked verbatim. Tightening this to require an explicit question would mean re-asking things athletes already said naturally, which is worse UX than the current tradeoff. This also newly surfaces in the pre-existing `sim-active-injury-marathon` fixture for `reported_during`, now that the harness actually reaches this stage — not a new regression, just newly visible.
+**Files changed:** `evals/run-simulation-evals.mjs`, `evals/judges/simulation-quality.mjs`, `evals/fixtures/simulation/sim-shin-splint-trail-race.json`, `src/app/api/onboarding/handle/route.ts`, `CLAUDE.md`
+
 ## 2026-07-22 — Five onboarding trust/safety issues from one transcript: OAuth scope mismatch, inconsistent race countdown, injury-blind plan ramp, message chattiness, no red-flag screen before loading
 
 **Type:** Bug Fix

@@ -105,6 +105,12 @@ Score each dimension, then give an overall score:
 
 10. overall_score (1–10): Holistic quality — would a real user have had a good experience AND be likely to see value in the product?
 
+11. strava_scope_honest (boolean | null): Only score when Strava was connected. Does every Strava pitch/connection message in the transcript accurately reflect that Dean both reads activities AND writes a coaching note back to them (e.g. "read your runs and add a coaching note to each one")? False if any message undersells this to "read your runs automatically" alone with no mention of writing anything back — that's a scope mismatch an athlete could notice on the actual OAuth consent screen. Null if Strava was skipped.
+
+12. race_countdown_consistent (boolean | null): Only score when a race_date/timeline exists. Scan every mention of "X weeks out" / "X weeks away" / "N weeks to [race]" across the WHOLE transcript — do they all state the same number? False if the countdown value changes between any two messages (e.g. "5 weeks out" in one message, "6 weeks" in a later one) even if individually plausible — the athlete reads these messages minutes apart and notices. Null if no race timeline is in play.
+
+13. injury_redflag_screened (boolean | null): Only score when the injury is shin/tibia-related. Did Dean ask, before completing onboarding, whether the pain is a diffuse ache along the bone vs. one specific painful spot, and whether it hurts at rest/walking (not just during runs) — the standard screen that distinguishes ordinary shin splints from a possible stress fracture? False if Dean moved straight to management advice (icing, reduced intensity, etc.) or endorsed continued loading (e.g. treadmill work) without ever asking this. Null if the injury isn't shin/tibia-related.
+
 SCORING RUBRIC:
 - 10: All fields correct, [READY] fired efficiently, natural conversation, no repetition, strong conversion signals
 - 7–9: [READY] fired, fields mostly correct (1 minor error), mostly natural, user likely to convert
@@ -124,6 +130,9 @@ Return ONLY valid JSON:
   "natural_flow": 0,
   "efficiency": 0,
   "scope_handled": true | false | null,
+  "strava_scope_honest": true | false | null,
+  "race_countdown_consistent": true | false | null,
+  "injury_redflag_screened": true | false | null,
   "conversion_likelihood": 0,
   "overall_score": 0,
   "score_rationale": "2-3 sentences on what went well and what didn't",
