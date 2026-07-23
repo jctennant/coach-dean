@@ -2825,8 +2825,24 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // body part, "keep it easy"/"tell me how it felt") that were just said seconds ago. See
   // the 2026-07-22 changelog: two back-to-back messages both opened with "Teton Crest Trail
   // 6 weeks out" and repeated the injury summary and "easy/tell me how it felt" refrain.
+  // Last 2 assistant messages, not just 1 — a same-turn "completion message immediately
+  // followed by plan delivery" pair only catches the most recent one, but onboarding's
+  // earlier data-analysis message (sent right after Strava connects, one full user reply
+  // earlier) restates the identical mileage-drop/load-spike/injury framing that initial_plan
+  // then re-derives a THIRD time. See the 2026-07-22 changelog: "Teton Crest Trail 6 weeks
+  // out... mileage dropped from 36 to zero... classic shin splint territory" appeared in
+  // both the data-analysis message and the initial_plan opening, two messages apart, so a
+  // single-message lookback missed it entirely.
   const priorAssistantMessageForInitialPlan = trigger === "initial_plan"
-    ? ([...recentMessages].reverse().find(m => m.role === "assistant")?.content as string | undefined) ?? null
+    ? (() => {
+        const priorTexts = [...recentMessages].reverse()
+          .filter(m => m.role === "assistant")
+          .slice(0, 2)
+          .reverse()
+          .map(m => m.content as string)
+          .filter(Boolean);
+        return priorTexts.length > 0 ? priorTexts.join("\n---\n") : null;
+      })()
     : null;
   let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null, priorAssistantMessageForInitialPlan);
 
@@ -7830,6 +7846,7 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
               goal: null,
               hasRace: hasRaceForArc,
               targetPeakOverride: preInjuryPeakMileage,
+              activeInjury: true,
             }).slice(0, 3);
           })()
         : null;
@@ -8387,7 +8404,7 @@ CRITICAL — COMMUNICATE THE PARTIAL WEEK TO THE ATHLETE: In your first bubble, 
         ? `\n<rule>ALREADY COMPLETED THIS WEEK: The athlete has already logged ${weekMileageSoFar.toFixed(1)} miles this week. ${weekBudgetExhausted ? `Their weekly budget is essentially met — do NOT prescribe a long run or quality session today. Acknowledge the miles already done and tell them Sunday's full plan will kick off their first complete training week.` : `Any additional sessions you prescribe must be feasible on top of that — do NOT prescribe a long run or quality session that would push their weekly total well beyond a safe ramp from their average. If combined miles would be excessive, keep the remaining sessions light or simply say Sunday's full plan will cover next week.`}</rule>`
         : "";
       const priorMessageGuard = priorAssistantMessage
-        ? `\n<rule>YOU JUST SENT THIS MESSAGE SECONDS AGO — DO NOT REPEAT IT: "${priorAssistantMessage.slice(0, 400)}"\nDo not restate the race name + timeline, the injury body part, or an "easy"/"tell me how it felt" refrain if you already said it above — the athlete just read it. Open this message by moving straight into the plan itself. This is the single most common quality failure in onboarding: two consecutive messages both re-introducing the race, the injury, and "keep it easy" as if for the first time.</rule>\n`
+        ? `\n<rule>YOU JUST SENT THE MESSAGE(S) BELOW SECONDS/MOMENTS AGO — DO NOT REPEAT THEM: "${priorAssistantMessage.slice(0, 800)}"\nDo not restate the race name + timeline, the injury body part, a mileage-drop/load-spike data interpretation, or an "easy"/"tell me how it felt" refrain if you already said any of it above — the athlete just read it, possibly across more than one recent message. This applies even if the exact wording differs (e.g. "mileage dropped from 36 to zero, classic shin splint territory" said two messages ago still counts as already stated). Open this message by moving straight into the plan itself — treat the injury/timeline/data framing as established context, not something to re-derive. This is the single most common quality failure in onboarding: consecutive messages each re-introducing the race, the injury, and the same data interpretation as if for the first time.</rule>\n`
         : "";
       return `This athlete just finished onboarding. Send them a brief conversational first-week orientation — not a plan document. The coaching relationship starts now.
 

@@ -172,6 +172,34 @@ describe("computeMileageArc", () => {
     const params = { baseMileage: 18, totalWeeks: 8, goal: null, hasRace: false } as const;
     expect(computeMileageArc(params)).toEqual(computeMileageArc(params));
   });
+
+  it("an active injury tightens the weekly build-factor ceiling from 10% to 5% — no build week jumps more than 5%", () => {
+    // baseMileage 10 vs. a marathon-scale targetPeak forces the raw factor well above
+    // 10%/week, so both variants hit their respective ceilings rather than the raw rate.
+    const withInjury = computeMileageArc({ baseMileage: 10, totalWeeks: 10, goal: "marathon", hasRace: true, activeInjury: true });
+    const withoutInjury = computeMileageArc({ baseMileage: 10, totalWeeks: 10, goal: "marathon", hasRace: true });
+
+    const maxRatio = (arc: typeof withInjury) => {
+      let max = 1;
+      for (let i = 1; i < arc.length; i++) {
+        if (arc[i].phase === "taper" || arc[i].phase === "deload" || arc[i - 1].phase === "taper" || arc[i - 1].phase === "deload") continue;
+        max = Math.max(max, arc[i].mileage_target / arc[i - 1].mileage_target);
+      }
+      return max;
+    };
+
+    expect(maxRatio(withInjury)).toBeLessThanOrEqual(1.051);
+    expect(maxRatio(withoutInjury)).toBeGreaterThan(1.06); // hits the normal 10% ceiling, well above the injury cap
+  });
+
+  it("this is the 2026-07-22 regression case: 25mi/week base with an active injury no longer ramps to a 37mi peak in 5 weeks", () => {
+    // The original bug: baseMileage 25, peaking at 37 by week 5 (~10.3%/week, effectively
+    // uncapped by the injury-blind 10% ceiling). With activeInjury, the ceiling drops to 5%.
+    const arc = computeMileageArc({ baseMileage: 25, totalWeeks: 6, goal: "trail_race", hasRace: true, activeInjury: true });
+    const peak = Math.max(...arc.map(w => w.mileage_target));
+    // 25 * 1.05^4 (4 build weeks before a 2-week taper) ≈ 30.4 — well under the original 37mi peak.
+    expect(peak).toBeLessThan(32);
+  });
 });
 
 // ---------------------------------------------------------------------------

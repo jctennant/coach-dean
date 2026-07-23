@@ -565,7 +565,7 @@ In ALL cases:
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 EXCEPTION: For return_to_running or injury_recovery goals (athlete's primary goal is recovering from injury or getting back to running), ask ONE injury question BEFORE asking for Strava. Do NOT mention Strava in this message at all — that comes after the injury question is answered.
-Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs automatically") — the system appends that line automatically right after the link. Writing it yourself will make it appear twice. Just lead naturally into [STRAVA_LINK]; a short transition or nothing at all before the placeholder is fine. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention coaching notes or friends seeing anything.
+Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs and add a coaching note to each one") — the system appends that line automatically right after the link, and it accurately describes both what's read and what's written back. Writing your own version will make it appear twice, and any wording that undersells it (e.g. "read your runs automatically" alone) will contradict the write-access grant the link actually requests — the athlete can see the OAuth scope screen. Just lead naturally into [STRAVA_LINK]; a short transition or nothing at all before the placeholder is fine. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -788,7 +788,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
       .trim();
     responseText = beforeStrava;
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${writeUrl}\n\nI'll connect to Strava to read your runs automatically.`;
+    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${writeUrl}\n\nI'll connect to Strava to read your runs and add a coaching note to each one.`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -902,7 +902,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
         })
         .eq("id", user.id);
       const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-      const pitch = `Before we kick off — I need Strava to coach you properly. I'll read every run automatically. Takes two minutes:\n\n${writeUrl}`;
+      const pitch = `Before we kick off — I need Strava to coach you properly. I'll read every run and add a coaching note to each one. Takes two minutes:\n\n${writeUrl}`;
       await sendAndStore(user.id, user.phone_number, pitch, "awaiting_strava");
       return NextResponse.json({ ok: true });
     }
@@ -955,7 +955,15 @@ function summarizeCollected(data: Record<string, unknown>): string {
   if (data.race_date) {
     const formatted = new Date((data.race_date as string) + "T12:00:00Z")
       .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-    lines.push(`Race date: ${formatted}`);
+    const daysUntil = Math.round(
+      (new Date((data.race_date as string) + "T12:00:00Z").getTime() - Date.now()) / (24 * 60 * 60 * 1000)
+    );
+    const weeksUntil = Math.round(daysUntil / 7);
+    // Computed once here so every turn states the same countdown — leaving this to the
+    // model to recompute from the calendar date each message is exactly how "5 weeks
+    // out," "6 weeks to [race]," and "6 weeks out" ended up in three different messages
+    // of the same conversation (see 2026-07-22 changelog on race-countdown drift).
+    lines.push(`Race date: ${formatted} (${daysUntil} days / ${weeksUntil} week${weeksUntil !== 1 ? "s" : ""} away — always use this exact figure when stating the countdown; never recompute it from the date yourself)`);
   }
   if (data.goal_time_minutes) {
     const h = Math.floor((data.goal_time_minutes as number) / 60);
@@ -996,6 +1004,7 @@ function summarizeCollected(data: Record<string, unknown>): string {
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);
   if (data.injury_management) lines.push(`What they're doing for it: ${data.injury_management}`);
   if (data.reported_during) lines.push(`Injury timing: pain reported ${data.reported_during} runs`);
+  if (data.injury_pain_character === "localized_or_rest_pain") lines.push(`RED FLAG: shin/tibia pain described as one specific spot or present at rest — possible stress fracture. Do not recommend continuing to run or add load (including easy miles or incline treadmill work) until the athlete confirms they've been checked by a doctor.`);
   if (data.avg_sleep_hours) lines.push(`Avg sleep: ${data.avg_sleep_hours} hours/night`);
   if (data.strength_habits) lines.push(`Strength/cross-training: ${data.strength_habits}`);
   if (data.ultra_race_history) lines.push(`Ultra background: ${data.ultra_race_history}`);
@@ -1052,6 +1061,7 @@ Rules:
 - current_niggles: any current aches, pain, or issues the athlete is managing right now (distinct from past injury history). Null if not mentioned.
 - injury_management: what the athlete is doing to manage a current injury — physical therapy, rest, icing, stretching protocol, seeing a doctor or physio, etc. Extract from the athlete's own words. Null if not mentioned or no current injury.
 - reported_during: when the injury pain occurs — 'during' if they feel it while running, 'after' if only after finishing, 'both' if during and after. Null if not mentioned.
+- injury_pain_character: for shin/tibia pain specifically — 'diffuse' if described as a general ache along the bone that's worse during/after running and eases with rest (typical shin splints), 'localized_or_rest_pain' if there's one specific painful spot, or pain present even at rest/walking/at night (possible stress fracture — needs medical evaluation before more loading). Null if not mentioned or not shin/tibia-related.
 - avg_sleep_hours: if the athlete mentions how many hours of sleep they get (e.g. "I sleep about 7 hours", "usually 6-7 hours"), extract as a number. Null if not mentioned.
 - strength_habits: a brief description of the athlete's strength training and cross-training habits — what they do, how often. Examples: "3x/week lifting, no cross-training", "yoga 2x/week, cycling occasionally", "no strength work". Null if not mentioned.
 - cross_training_activities: array of cross-training activities the athlete does (e.g. ['cycling', 'swimming', 'yoga', 'lifting']). Null if not mentioned.
@@ -1115,6 +1125,7 @@ Rules:
           injury_severity: { type: ["string", "null"], enum: ["mild", "moderate", "severe", null], description: "Severity of the current active injury. mild=annoyance, can run modified. moderate=skipping some sessions, modifying others. severe=cannot run at all." },
           injury_body_part_current: { type: ["string", "null"], description: "Body part of the CURRENT active injury (e.g. 'left achilles', 'right knee'). Null for historical injuries." },
           reported_during: { type: ["string", "null"], enum: ["during", "after", "both", null], description: "When the injury pain occurs relative to running. 'during' = feels it while running, 'after' = feels it after finishing, 'both' = during and after. Null if not mentioned." },
+          injury_pain_character: { type: ["string", "null"], enum: ["diffuse", "localized_or_rest_pain", null], description: "Shin/tibia pain only. 'diffuse' = general ache along the bone, eases with rest — typical shin splints. 'localized_or_rest_pain' = one specific painful spot, or pain even at rest/walking/night — possible stress fracture, needs medical evaluation before more loading. Null if not shin-related or not mentioned." },
           avg_sleep_hours: { type: ["number", "null"], description: "Average hours of sleep per night the athlete gets. E.g. '7 hours' → 7.0, '6-7 hours' → 6.5. Null if not mentioned." },
           experience_years: { type: ["number", "null"] },
           other_races: {
@@ -1352,8 +1363,15 @@ async function handleInjuryIntake(
 
   // Detect "no injury" responses
   const noInjury = /\b(no (injury|injuries|issues|pain|niggles|problems)|all good|nothing|clean|healthy|fine|never|n\/a)\b/i.test(message);
-  // Injury already captured during goals stage (follow-up pre-marked by handleDataAnalysis)
-  const injuryAlreadyKnown = !!(mergedData.injury_history || mergedData.current_niggles || mergedData.injury_notes);
+  // Injury already captured during goals stage (follow-up pre-marked by handleDataAnalysis).
+  // Requiring injury_severity here (not just any injury text) closes a real gate gap: a
+  // bare mention like "I'm dealing with shin splints" in the athlete's very first message
+  // used to be enough on its own to skip straight to plan delivery once the athlete
+  // answered ANY injury-adjacent question — including one that only described what they
+  // were doing about it, never how severe it was or whether it hurt at rest. Severity is
+  // the single most safety-relevant field (it's the "can they run at all" screen), so it
+  // must be known before treating the injury intake as complete (see 2026-07-22 changelog).
+  const injuryAlreadyKnown = !!(mergedData.injury_history || mergedData.current_niggles || mergedData.injury_notes) && !!mergedData.injury_severity;
   // All three fields needed: body_part, severity, reported_during
   const hasAllSymptomFields = !!(mergedData.injury_body_part_current && mergedData.injury_severity && mergedData.reported_during);
   // Hard cap at 2 follow-up questions total
@@ -1374,6 +1392,19 @@ async function handleInjuryIntake(
   // Choose follow-up target based on what's missing
   const missingFields: string[] = [];
   if (!mergedData.injury_body_part_current) missingFields.push("which body part specifically");
+  // Shin/tibia pain specifically needs a red-flag screen before severity alone: diffuse
+  // ache along the bone that eases with rest reads as shin splints, but a single sharply
+  // painful point, or pain that persists at rest/walking/at night, is the classic
+  // presentation that should raise a stress fracture concern instead — a materially
+  // different (and more urgent) answer than "how limiting is it." Ask this ahead of the
+  // generic severity question whenever the body part is shin-related and it hasn't been
+  // answered yet.
+  const bodyPartLower = ((mergedData.injury_body_part_current as string | null) ?? "").toLowerCase();
+  const isShinRelated = /shin|tibia/.test(bodyPartLower);
+  const hasRedFlagScreen = !!mergedData.injury_pain_character;
+  if (isShinRelated && !hasRedFlagScreen) {
+    missingFields.push("whether the pain is a diffuse ache along the shin bone or one specific painful spot, and whether it hurts even at rest or walking (not just during runs) — this distinguishes ordinary shin splints from something that needs a doctor before any loading, like a stress fracture");
+  }
   if (!mergedData.injury_management && !mergedData.reported_during) {
     missingFields.push("what they're doing for it (physio, rest, ice, etc.) and when the pain flares — ask both in one question");
   } else if (!mergedData.injury_management) {
@@ -1460,6 +1491,10 @@ async function buildSynthesisMessage(data: Record<string, unknown>, timezone: st
       const lastMsgContext = lastUserMessage
         ? `\nATHLETE'S LAST MESSAGE: "${lastUserMessage}"`
         : "";
+      const injuryPainCharacter = (data.injury_pain_character as string | null) || null;
+      const redFlagInstruction = injuryPainCharacter === "localized_or_rest_pain"
+        ? `\n\nRED FLAG — OVERRIDES EVERYTHING BELOW: the athlete described one specific painful spot or pain even at rest, not a diffuse ache — that's a possible stress fracture, not standard shin splints. Do NOT give load-management suggestions or schedule any session. Tell them directly to get it checked by a doctor before any more running, including easy miles or incline treadmill work. Skip point 2 (no session this week until cleared).`
+        : "";
 
       const synthesisPrompt = `You are Coach Dean, a running coach. An athlete just completed onboarding. Write their completion message.
 
@@ -1468,7 +1503,7 @@ ATHLETE:
 - Active injury: ${injuryBodyPart} (${injurySeverity})
 - Race: ${raceName}${raceDate ? ` on ${raceDate}` : ""}
 - Weekly mileage: ${avgMiles ? `~${avgMiles} mi/week` : "unknown"}
-${lastMsgContext}
+${lastMsgContext}${redFlagInstruction}
 
 REMAINING PLAN SESSIONS THIS WEEK:
 ${sessionList}
@@ -1550,6 +1585,7 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
   const injurySeverity = (data.injury_severity as string | null) || null;
   const reportedDuring = (data.reported_during as string | null) || null;
   const injuryManagement = (data.injury_management as string | null) || null;
+  const injuryPainCharacter = (data.injury_pain_character as string | null) || null;
   const stravaConnected = !!(data.strava_connected);
   const goal = (data.goal as string | null) || null;
   const isRTR = goal === "return_to_running" || goal === "injury_recovery";
@@ -1601,9 +1637,13 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
       : "";
     const duringNote = whenStr ? ` Pain ${whenStr} is the watch-point for whether a session stays or gets swapped.` : "";
 
-    // Management-aware injury action
+    // Management-aware injury action. A "localized_or_rest_pain" character overrides
+    // all of the below — it's the shin-splints-vs-stress-fracture red flag, and no
+    // amount of "manage it, reduce intensity" advice is appropriate until it's ruled out.
     let mgmtActionPart: string;
-    if (injuryManagement && /physio|pt\b|physical therapy|therapist|sports medicine|doctor|clinic/i.test(injuryManagement)) {
+    if (injuryPainCharacter === "localized_or_rest_pain") {
+      mgmtActionPart = `One thing before anything else: a specific painful spot (rather than a general ache) or pain even at rest can point to a stress fracture, not standard shin splints — get that checked by a doctor before adding any more running load, including easy miles or incline treadmill work.`;
+    } else if (injuryManagement && /physio|pt\b|physical therapy|therapist|sports medicine|doctor|clinic/i.test(injuryManagement)) {
       mgmtActionPart = `Working alongside your physio on the ${injuryBodyPart}. If load from runs is pushing against the recovery timeline I'll flag it before it compounds.`;
     } else if (injuryManagement && /rest|taking.*off|not running|stopped/i.test(injuryManagement)) {
       mgmtActionPart = `Good call giving it some rest. When you're back running, I'll pace the ramp and flag any load spikes early.`;
@@ -1676,7 +1716,7 @@ async function handleStrava(
   // If asking about Strava — explain what it is and re-send the link
   const isAskingAboutStrava = /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
   if (isAskingAboutStrava || (/strava/i.test(message) && message.includes("?"))) {
-    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run and give you feedback after each one.\n\n${writeUrl}`;
+    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run and add a coaching note to it.\n\n${writeUrl}`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }

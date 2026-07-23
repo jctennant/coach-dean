@@ -242,6 +242,15 @@ export interface MileageArcParams {
    * smaller peak re-computed from the reduced starting point.
    */
   targetPeakOverride?: number | null;
+  /**
+   * An active, currently-symptomatic injury is on file. Tightens the weekly build-factor
+   * ceiling from 10% to 5% — the standard "safe" 10%/week ramp assumes healthy tissue;
+   * compromised tissue (e.g. shin splints) needs a slower reintroduction to load even
+   * when the week-1 volume itself is already capped (see computeWeekOneVolumeCap's
+   * activeInjury handling in plan-validation.ts, which caps the *starting* point — this
+   * caps how fast the plan climbs from there). Never speeds the ramp up; only slows it.
+   */
+  activeInjury?: boolean;
 }
 
 /**
@@ -253,7 +262,7 @@ export interface MileageArcParams {
  * the plan is actually built with once it's generated for real.
  */
 export function computeMileageArc(params: MileageArcParams): MileageArcWeek[] {
-  const { baseMileage, totalWeeks, goal, hasRace, aRaceWeekNum = null, planExtendsPostA = false, targetPeakOverride = null } = params;
+  const { baseMileage, totalWeeks, goal, hasRace, aRaceWeekNum = null, planExtendsPostA = false, targetPeakOverride = null, activeInjury = false } = params;
 
   // Compute a race-type-aware peak with both a floor (low-mileage runners still get
   // a plan sufficient for the target distance) and a hard cap (no 100+ mpw marathon
@@ -272,8 +281,11 @@ export function computeMileageArc(params: MileageArcParams): MileageArcWeek[] {
   }
   // Derived factor: (targetPeak / baseMileage) ^ (1 / realBuildWeeks)
   // Clamped to 2%–10%/week: never slower than a plateau, never faster than convention allows.
+  // An active injury tightens the ceiling to 5%/week — the 10% convention assumes healthy
+  // tissue reintroducing load, not tissue currently symptomatic (see MileageArcParams doc).
   const rawFactor = realBuildWeeks > 0 ? Math.pow(targetPeak / baseMileage, 1 / realBuildWeeks) : 1.07;
-  const weeklyBuildFactor = Math.max(1.02, Math.min(1.10, rawFactor));
+  const maxBuildFactor = activeInjury ? 1.05 : 1.10;
+  const weeklyBuildFactor = Math.max(1.02, Math.min(maxBuildFactor, rawFactor));
 
   // Build the arc week by week.
   // `buildMileage` tracks the real progression level (deloads and tapers branch off it).
@@ -541,6 +553,7 @@ export async function generateAndSaveFullPlan(
     hasRace,
     aRaceWeekNum,
     planExtendsPostA,
+    activeInjury: !!(profile?.active_injury),
   });
 
   // Enrich each week with key_workout and notes via Claude Haiku (single call).
