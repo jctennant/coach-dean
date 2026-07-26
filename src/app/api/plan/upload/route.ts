@@ -116,6 +116,16 @@ export async function POST(request: Request) {
       }
     }
 
+    // Switch coaching_mode to "complement" so Dean reads/adjusts this plan instead of
+    // generating a competing one (see route.ts's weekly_recap/initial_plan/rebuild_plan
+    // handling of coaching_mode === 'complement'). No-ops harmlessly if onboarding hasn't
+    // completed yet and no training_profiles row exists — completeOnboarding sets it from
+    // onboarding_data.plan_uploaded in that case instead.
+    await supabase
+      .from("training_profiles")
+      .update({ coaching_mode: "complement" })
+      .eq("user_id", userId);
+
     console.log(`[plan/upload] stored plan context for user ${userId}${filename ? ` (${filename})` : ""} — ${storedText.length} chars${truncated ? " (truncated)" : ""}`);
 
     return NextResponse.json({ ok: true });

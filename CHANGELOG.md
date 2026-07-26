@@ -8,6 +8,31 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-26 — Onboarding message splitting/brevity, and uploaded-plan "complement" mode actually turned on
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback (real onboarding transcript pasted) + user request
+**User feedback:** "For the more succinct speech I onboarded yesterday, again, I just feel like it's not quite succinct enough... maybe he could break up into more messages or something." Also: "I'd like to be able to upload a plan whenever and overwrite what Dean has, or just start with my own plan... this also could be important for injury prevention/recovery cases."
+
+**Root cause (succinctness):** The 2026-07-19/07-20 LENGTH/PUNCTUATION tightening passes (see archive) only ever touched `coach/respond/route.ts`'s prompt — `onboarding/handle/route.ts` is a separate prompt/handler and never got them. On top of that, onboarding's `sendAndStore()` always sent the full reply as one `sendSMS()` call — unlike `coach/respond`, which already breaks long replies into multiple bubbles via `splitIntoMessages()`. So onboarding replies had neither the tightened length rules nor the bubble-splitting safety net.
+
+**Root cause (uploaded plan):** The infrastructure for "bring your own plan" already existed — `plan/upload/route.ts` extracts a structured week-by-week plan and seeds `training_state.weekly_plan_sessions`, and `route.ts` even has a `coaching_mode === 'complement'` code path built for it — but nothing anywhere ever wrote `coaching_mode = 'complement'`. Consequence: every Sunday, `weekly_recap`'s `after()` unconditionally ran `syncWeekFromArc()` first (overwriting `weekly_plan_sessions` with Dean's own generated arc), and the `syncWeekFromUploadedPlan()` call meant to win right after only fired under the dead `isComplementMode` check — so an uploaded plan survived exactly one week before getting silently clobbered.
+
+**Fix / Change:**
+- Extracted `splitIntoMessages`/`MAX_MSG_CHARS` out of `route.ts` into a new shared `src/lib/message-split.ts`; both `route.ts` and `onboarding/handle/route.ts` now import from there.
+- `onboarding/handle/route.ts`'s `sendAndStore()` now runs every outgoing message through `normalizeEmDashes()` (existing structural fix, previously only used in `coach/respond`) and `splitIntoMessages()` before sending, with a short compose-style delay between bubbles.
+- Tightened the main onboarding conversation prompt's length rule (2 sentences normal, 3 is the ceiling) and the Strava-connect analysis prompt (`handleDataAnalysis`) from a loosely-enforced "3–4 sentences" down to an explicit 3-sentences/one-clause-each cap in both the injury-lens and standard branches — this was the single biggest offender in the pasted transcript, regularly running 5–6 sentences despite its own "3–4" instruction.
+- `plan/upload/route.ts` now sets `training_profiles.coaching_mode = 'complement'` whenever structured week extraction succeeds (no-ops harmlessly if onboarding hasn't completed and no profile row exists yet).
+- `completeOnboarding()` in `onboarding/handle/route.ts` no longer unconditionally writes `coaching_mode: 'adaptive'` — it now checks `onboarding_data.plan_uploaded`/`has_existing_plan` first, so a plan uploaded mid-onboarding doesn't get its mode stomped back to `'adaptive'` the moment onboarding completes.
+- `weekly_recap`'s `after()` now branches on `isComplementMode`: complement-mode users only get `syncWeekFromUploadedPlan()` (arc sync is skipped entirely, not just overwritten after the fact).
+- `initial_plan` and `rebuild_plan` (`handleRebuildPlan`) now check `coaching_mode === 'complement'` before calling `generateAndSaveFullPlan()` — complement-mode users get `syncWeekFromUploadedPlan()` instead, with a short prompt note (`initial_plan`) or a direct SMS explaining Dean works alongside their plan (`rebuild_plan`) rather than a silently-regenerated competing arc.
+
+**Known open scope (flagged, not fixed here):** how `coaching_mode === 'complement'` should interact with the injury-hold/injury-clear flow (`handleInjuryClear` etc., which builds its own return-to-run arc) is undecided — should an injury override with Dean's own ramp, or should Dean annotate/adjust the athlete's own uploaded plan instead? Left untouched pending a product decision. Also: no eval fixture yet covers the onboarding Strava-connect analysis path's mileage-figure accuracy — unlike `post_run`/`user_message`/`morning_plan`/`weekly_recap`/`initial_plan`, `handleDataAnalysis` has no `stated_facts`-style fact-check gate, only a prompt instruction ("only cite numbers that appear in the STRAVA data above").
+
+**Files changed:** `src/lib/message-split.ts` (new), `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/app/api/plan/upload/route.ts`
+
+---
+
 ## 2026-07-25 — Onboarding hardening pass: injury-recovery and race-prep both to 8+/10 on picked simulation fixtures
 
 **Type:** Bug Fix / Improvement

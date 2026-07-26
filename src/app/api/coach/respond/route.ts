@@ -31,6 +31,7 @@ import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/ti
 import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
+import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
@@ -483,6 +484,20 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
 
   const phoneNumber = user.phone_number as string;
   const hasStrava = !!(user.strava_athlete_id as number | null);
+
+  // Complement-mode athletes follow their own uploaded plan — rebuild_plan exists to
+  // regenerate Dean's own arc, which doesn't apply here. Re-sync the current week from
+  // the uploaded plan instead (picks up an edit/re-upload) and skip arc generation.
+  if (profile.coaching_mode === 'complement') {
+    const timezone = (user.timezone as string | null) ?? "America/New_York";
+    const { data: stateRow } = await supabase.from("training_state").select("current_week").eq("user_id", userId).maybeSingle();
+    const currentWeek = (stateRow?.current_week as number | null) ?? 1;
+    await syncWeekFromUploadedPlan(userId, currentWeek, timezone);
+    if (!dryRun && !silent) {
+      await sendSMS(phoneNumber, "You're following your own uploaded plan, so I don't build a separate one for you — I read and adjust yours instead. Text me an updated PDF or paste in changes anytime you want to swap it out.");
+    }
+    return NextResponse.json({ ok: true, skipped: "complement_mode_no_rebuild" });
+  }
 
   // Fetch Strava activities, B/C races, training_state, and recent conversations in parallel.
   // No profile re-fetch needed — profile was already persisted by user_message before this fires.
@@ -2941,6 +2956,16 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   if (trigger === "initial_plan") {
     const { data: fpForArc } = await supabase.from("training_profiles").select("*").eq("user_id", userId).single();
     if (fpForArc) profile = fpForArc;
+    const isComplementForInitialPlan = (fpForArc as Record<string, unknown> | null)?.coaching_mode === 'complement';
+
+    if (isComplementForInitialPlan) {
+      // Athlete uploaded their own plan (see plan/upload/route.ts) — don't generate a
+      // competing arc into training_plans/training_state. Seed week 1 from their plan
+      // instead so morning_plan can name today's specific uploaded session immediately.
+      const timezone = (user.timezone as string | null) ?? "America/New_York";
+      await syncWeekFromUploadedPlan(userId, 1, timezone);
+      initialPlanArcConstraint = "\n\nATHLETE IS FOLLOWING THEIR OWN UPLOADED PLAN — do NOT invent a mileage arc, long run, or quality session; that data isn't generated for this athlete. Reference the ATHLETE'S UPLOADED TRAINING PLAN context elsewhere in this prompt instead, and confirm you'll coach alongside it (adjusting for injuries, fatigue, or missed sessions) rather than replacing it.";
+    } else {
     const bCRacesForArc = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
     await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, {
       bRaces: bCRacesForArc.length > 0 ? bCRacesForArc : undefined,
@@ -3025,6 +3050,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES:\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.\n\n${fullArcSummary ? `MILEAGE PROGRESSION: ${fullArcSummary}\nAt the end of your message, include one sentence summarizing the overall mileage arc so the athlete knows how their plan builds. Keep it brief and natural.` : ""}</arc_values>`;
     }
     console.log("[initial_plan] arc pre-generated — longRun:", arcLongRun, "quality:", arcQuality, "target:", arcTarget);
+    }
   }
   if (initialPlanArcConstraint) userMessage += initialPlanArcConstraint;
 
@@ -4145,15 +4171,20 @@ OUTPUT CONTRACT:
 
         // During injury hold: don't sync arc — the arc will be rebuilt when injury clears.
         if (!isOnInjuryHold) {
-          // Advance simplified week-level plan state from the training arc.
-          await syncWeekFromArc(userId, periodization.effectiveWeek, userTimezone);
-          console.log(`[weekly_recap] synced arc week ${periodization.effectiveWeek} to training_state`);
-
-          // For complement-mode users with an uploaded plan, advance weekly_plan_sessions
-          // to the next week so morning_plan can name today's specific session.
           if (isComplementMode) {
+            // Complement-mode users follow their own uploaded plan — never touch the
+            // arc-generated sessions for them, or the arc write would win the week and
+            // silently replace their own plan's sessions (this was the bug: the arc sync
+            // below used to run unconditionally first for every user, complement mode or
+            // not, and only got overwritten back to the uploaded plan when this branch
+            // also fired — which it never did before coaching_mode='complement' was wired
+            // up anywhere).
             await syncWeekFromUploadedPlan(userId, periodization.effectiveWeek, userTimezone);
             console.log(`[weekly_recap] synced uploaded plan week ${periodization.effectiveWeek} to training_state`);
+          } else {
+            // Advance simplified week-level plan state from the training arc.
+            await syncWeekFromArc(userId, periodization.effectiveWeek, userTimezone);
+            console.log(`[weekly_recap] synced arc week ${periodization.effectiveWeek} to training_state`);
           }
         }
       } catch (err) {
@@ -4698,18 +4729,6 @@ function stripMarkdown(text: string): string {
 }
 
 /**
- * Split a coach response into iMessage-sized chunks (≤ MAX_CHARS each).
- *
- * Strategy:
- *   1. Split on blank lines (paragraph breaks) — Claude is prompted to use these.
- *   2. If any paragraph still exceeds MAX_CHARS, split further at sentence boundaries.
- *
- * Each chunk is sent as a separate text message with its own typing indicator,
- * so it feels like a real person sending a few short follow-up texts.
- */
-const MAX_MSG_CHARS = 480;
-
-/**
  * Defense-in-depth regex safety net for reasoning leaks — kept in case a reasoning
  * scratchpad ever ends up in athlete-facing text despite the structural fix.
  *
@@ -4856,49 +4875,6 @@ function stripBoilerplateSignoffs(text: string): string {
     cleaned = cleaned.replace(pattern, "");
   }
   return cleaned.trim();
-}
-
-function splitIntoMessages(text: string): string[] {
-  const trimmed = text.trim();
-  if (trimmed.length <= MAX_MSG_CHARS) return [trimmed];
-
-  const chunks: string[] = [];
-  const paragraphs = trimmed.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-
-  let current = "";
-
-  for (const para of paragraphs) {
-    if (para.length > MAX_MSG_CHARS) {
-      // Flush current buffer first
-      if (current) { chunks.push(current); current = ""; }
-
-      // Split long paragraph at sentence boundaries
-      const sentences = para.match(/[^.!?…]+(?:[.!?…]+\s*|$)/g) ?? [para];
-      for (const raw of sentences) {
-        const s = raw.trim();
-        if (!s) continue;
-        if (!current) {
-          current = s;
-        } else if (current.length + 1 + s.length <= MAX_MSG_CHARS) {
-          current += " " + s;
-        } else {
-          chunks.push(current);
-          current = s;
-        }
-      }
-    } else if (!current) {
-      current = para;
-    } else if (current.length + 2 + para.length <= MAX_MSG_CHARS) {
-      // Fits in the same bubble — join with a single newline (not blank line)
-      current += "\n" + para;
-    } else {
-      chunks.push(current);
-      current = para;
-    }
-  }
-
-  if (current) chunks.push(current);
-  return chunks.filter((c) => c.length > 0);
 }
 
 /**

@@ -12,6 +12,8 @@ import { parseTimezoneFromLocation } from "@/lib/timezone";
 import type { UploadedPlanWeek } from "@/lib/training-plan";
 import { computeWeekSessions } from "@/lib/training-plan";
 import { composeStrengthRoutine } from "@/lib/strength-library";
+import { splitIntoMessages } from "@/lib/message-split";
+import { normalizeEmDashes } from "@/lib/text-format";
 
 export const maxDuration = 60;
 
@@ -28,7 +30,12 @@ interface OnboardingRequest {
 }
 
 
-/** Send SMS and store in conversations. */
+/**
+ * Send SMS and store in conversations. Long replies are broken into iMessage-sized
+ * bubbles (same splitter coach/respond uses) so onboarding reads like a person
+ * sending a few short texts instead of one long block — a background typing
+ * keep-alive loop (started in POST) already covers the pause between bubbles.
+ */
 async function sendAndStore(
   userId: string,
   phone: string,
@@ -36,17 +43,25 @@ async function sendAndStore(
   messageType?: MessageType
 ): Promise<{ chatId: string | null }> {
   const isDryRun = dryRunUsers.has(userId);
+  const parts = splitIntoMessages(normalizeEmDashes(message));
   let chatId: string | null = null;
-  if (!isDryRun) {
-    const result = await sendSMS(phone, message);
-    chatId = result?.chatId ?? null;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!isDryRun) {
+      if (i > 0) {
+        const composeMs = Math.min(2000, Math.max(800, part.length * 8));
+        await new Promise((r) => setTimeout(r, composeMs));
+      }
+      const result = await sendSMS(phone, part);
+      if (result?.chatId && !chatId) chatId = result.chatId;
+    }
+    await insertConversation({
+      user_id: userId,
+      role: "assistant",
+      content: part,
+      message_type: messageType ?? "coach_response",
+    });
   }
-  await insertConversation({
-    user_id: userId,
-    role: "assistant",
-    content: message,
-    message_type: messageType ?? "coach_response",
-  });
   return { chatId };
 }
 
@@ -538,8 +553,8 @@ INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list. If you need multiple things, prioritize and ask the single most important one.
 - Do not re-ask for anything listed under "what you already know" above, or anything the user has clearly stated earlier in this conversation.
 - Acknowledge what they share before asking the next thing.
-- Be warm and specific to their goal. 3–4 sentences per message max.
-- Plain text only. No markdown, asterisks, or bullet points.
+- LENGTH — this is the most important rule: you're texting, not emailing. 2 sentences is normal. 3 is the ceiling. If you catch yourself writing a 4th sentence, cut instead of adding — a short reply that lands the one point beats a longer one that covers more ground. Don't restate what the athlete just told you before responding to it, and don't explain your reasoning out loud ("I'm asking this because...") — just ask or say the thing.
+- Plain text only. No markdown, asterisks, or bullet points. Prefer short sentences connected with a period over one long clause stitched together with a dash.
 - Never start a message with just the athlete's name alone on its own line. Use the name naturally within a sentence instead.
 - When the athlete tells you their name for the first time, acknowledge it warmly at the start of your response — e.g. "Jake!" or "Hey Jake —" before continuing. Do NOT use "Nice to meet you" or any formal first-meeting phrase. Just use the name naturally.
 - React to a race or goal with ONE concrete coaching observation — NOT generic praise, NOT a race description. Banned phrases (hard errors): "great choice!", "exciting challenge!", "big commitment!", "that sounds like a challenging", "that sounds like an exciting", "what an exciting", "sounds like a great goal", "that's exciting". A coaching observation names a specific training demand: "Snowbird's vertical is the whole race — climbing legs matter more than pacing there." Name the actual demand, not your opinion of the goal.
@@ -1294,18 +1309,18 @@ ${injuryAlreadyCollected && injuryContext ? `\nINJURY FLAGGED BEFORE STRAVA: ${i
 ${injuryAlreadyCollected ? `YOUR JOB — INJURY IS THE PRIMARY LENS:
 The athlete already flagged an injury before connecting Strava. That injury is the primary coaching concern. Do NOT lead with HR zone distribution or aerobic efficiency. Use load/volume signals (weekly mileage, trend, weeks to race) as the data backbone, and connect everything back to the injury and race timeline.
 
-Write 3–4 sentences:
-1. Lead with the injury + what the training volume says about risk given the race timeline. Use at least 2 specific numbers from the STRAVA context above (e.g. weekly mileage, weeks to race, mileage trend). CRITICAL: only cite numbers that appear in the STRAVA data above — never invent figures. If no mileage data is available, say so and ask the athlete instead of guessing.
-2. One specific signal you'll watch: name it clearly (load spike, pace drop, mileage jump). Connect it to the injury. Don't be generic.
-3. One forward-looking sentence about what the coaching relationship will specifically monitor — make the athlete feel watched, not just coached.
+EXACTLY 3 sentences, ONE clause each — no "X, and Y" or "X, which means Y" compound sentences:
+1. The injury + one number from the STRAVA context above that speaks to risk given the race timeline (weekly mileage, weeks to race, or mileage trend). CRITICAL: only cite numbers that appear in the STRAVA data above — never invent figures. If no mileage data is available, say so and ask the athlete instead of guessing.
+2. The one specific signal you'll watch (load spike, pace drop, mileage jump) — name it, don't explain the mechanism behind it.
+3. One forward-looking sentence: what the coaching relationship will monitor.
 
-Do NOT lead with or headline HR zone analysis. If the Z3 pattern is relevant (extra fatigue → slower recovery), you may mention it briefly as one supporting observation, but it must not be the opening or the main point.
-Close with ONE question — ask what they're doing for the injury right now. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment?" One sentence, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
+Do NOT lead with or headline HR zone analysis. If the Z3 pattern is relevant (extra fatigue → slower recovery), fold it into sentence 2 as the signal, don't add a 4th sentence for it.
+Close with ONE question on its own — ask what they're doing for the injury right now. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment?"` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
-Write 3–4 sentences:
-1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data (e.g. weekly mileage, HR zone %, longest run, weeks until race). Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
-2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
-3. One forward-looking sentence about what the coaching will watch.
+EXACTLY 3 sentences, ONE clause each — no "X, and Y" or "X, which means Y" compound sentences:
+1. One insight connecting their training data to the race timeline, with one number from the Strava data (weekly mileage, HR zone %, longest run, or weeks until race). Be direct — not "solid base" but what it means for THIS specific race.
+2. One thing that needs attention — name it, don't explain the reasoning.
+3. One forward-looking sentence: what the coaching will watch.
 
 Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now? That affects how I set up the plan."`}
 
@@ -1313,7 +1328,7 @@ Rules:
 - Do NOT ask for road race times — training zones calibrate from Strava data
 - Do NOT narrate all the stats — pick 2–3 meaningful facts and make them mean something
 - Avoid: "solid base", "great foundation", "exciting", "strong work", "keep it up"
-- 4 sentences max${injuryAlreadyCollected ? "" : " before the injury question"}
+- 3 sentences max${injuryAlreadyCollected ? "" : " before the injury question"} — you're texting, not writing a report
 - Plain text, no markdown
 - RACE HISTORY: If a RACE HISTORY section appears above, you MUST reference at least one race by name or result. Acknowledging it ("I can see you ran a 1:48 half in September") shows you've read their full background, not just the last 8 weeks. Don't list all races — pick the one most relevant to the current goal.
 - PACE TREND: If "Easy pace trend (Z2 runs): improving" appears, mention it explicitly as a positive signal ("your Z2 pace has improved ~22s/mi"). If "declining", flag it. Don't skip this data point.
@@ -2320,7 +2335,10 @@ async function completeOnboarding(
           lthr_last_updated: new Date().toISOString(),
           hr_zone_method: "lthr",
         } : {}),
-        coaching_mode: 'adaptive',
+        // Athletes who uploaded their own plan stay in "complement" mode — Dean reads and
+        // adjusts their plan instead of generating a competing one. See plan/upload/route.ts,
+        // which also writes this once a plan is uploaded after onboarding is already complete.
+        coaching_mode: (data.plan_uploaded === true || data.has_existing_plan === true) ? 'complement' : 'adaptive',
         ...(((data.avg_sleep_hours as number | null) != null) ? { avg_sleep_hours: data.avg_sleep_hours as number } : {}),
         ...(strengthRoutine ? { dashboard_insights: { strength_recovery: strengthRoutine } as unknown as Json } : {}),
         updated_at: new Date().toISOString(),
