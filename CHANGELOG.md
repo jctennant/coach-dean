@@ -8,6 +8,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-25 — Dean confidently "corrected" a race date to a different, similarly-named race
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (`sim-ultra-first-timer` still scoring low after the ultra-background gate fix, root-caused by inspecting the raw `web_search` tool response)
+**Root cause:** Not memory hallucination — the search results were genuinely correct, but contained two separate real races at the same venue: "Rocky Raccoon" (Feb 6, 2027, what the athlete actually named) and "Rocky 50"/"Rocky 50 by USWE" (Feb 13, 2027, a different event the following weekend). Dean matched the wrong result and confidently told the athlete their stated date (Feb 7) was wrong, "correcting" it to Feb 13 — the wrong race entirely — complete with citations that looked authoritative. Reproduced directly by replaying the exact search call outside the app and inspecting the raw `web_search_tool_result` content.
+**Fix / Change:** Added a one-sentence "NAME COLLISION GUARD" to the race-date search instructions in both `onboarding/handle/route.ts` and its eval mirror: only use a search result whose name exactly matches what the athlete said, and ask for confirmation rather than "correcting" the date if the closest match isn't an exact name match. Re-running `sim-ultra-first-timer` 3x afterward showed the false-correction failure mode gone in every run (no more wrong-race dates stated as fact). Two separate, pre-existing issues surfaced in the same runs and are left open: Dean doesn't always actually invoke `web_search` before accepting a stated date (compliance gap, not a new regression), and Haiku's field extraction can populate `ultra_race_history` with a vague inferred value when the athlete never actually described their background, which would silently satisfy the new ultra-background gate. Both are distinct from this fix and would need their own investigation.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`
+
+---
+
 ## 2026-07-25 — Ultra-goal athletes could complete onboarding without ever giving ultra/trail race background
 
 **Type:** Bug Fix
