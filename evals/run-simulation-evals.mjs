@@ -409,17 +409,17 @@ ${injuryAlreadyCollected && injuryContext ? `\nINJURY FLAGGED BEFORE STRAVA: ${i
 ${injuryAlreadyCollected ? `YOUR JOB — INJURY IS THE PRIMARY LENS:
 The athlete already flagged an injury before connecting Strava. That injury is the primary coaching concern. Do NOT lead with HR zone distribution or aerobic efficiency. Use load/volume signals (weekly mileage, trend, weeks to race) as the data backbone, and connect everything back to the injury and race timeline.
 
-Write 3–4 sentences:
-1. Lead with the injury + what the training volume says about risk given the race timeline. Use at least 2 specific numbers from the STRAVA context above (e.g. weekly mileage, weeks to race, mileage trend). CRITICAL: only cite numbers that appear in the STRAVA data above — never invent figures.
-2. One specific signal you'll watch: name it clearly (load spike, pace drop, mileage jump). Connect it to the injury. Don't be generic.
-3. One forward-looking sentence about what the coaching relationship will specifically monitor — make the athlete feel watched, not just coached.
+EXACTLY 3 sentences, ONE clause each — no "X, and Y" or "X, which means Y" compound sentences:
+1. The injury + one number from the STRAVA context above that speaks to risk given the race timeline (weekly mileage, weeks to race, or mileage trend). CRITICAL: only cite numbers that appear in the STRAVA data above — never invent figures.
+2. The one specific signal you'll watch (load spike, pace drop, mileage jump) — name it, don't explain the mechanism behind it.
+3. One forward-looking sentence: what the coaching relationship will monitor.
 
-Close with ONE question — ask what they're doing for the injury right now. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment?" One sentence, nothing else after it.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline.
+Close with ONE question on its own — ask what they're doing for the injury right now. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment?"` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline.
 
-Write 3–4 sentences:
-1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data.
-2. One thing that needs attention or one adjustment.
-3. One forward-looking sentence about what the coaching will watch.
+EXACTLY 3 sentences, ONE clause each — no "X, and Y" or "X, which means Y" compound sentences:
+1. One insight connecting their training data to the race timeline, with one number from the Strava data.
+2. One thing that needs attention — name it, don't explain the reasoning.
+3. One forward-looking sentence: what the coaching will watch.
 
 Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now? That affects how I set up the plan."`}`;
 }

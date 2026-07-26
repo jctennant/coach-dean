@@ -3,6 +3,8 @@ import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation, type MessageType } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
+import type Anthropic from "@anthropic-ai/sdk";
+import { checkStravaAnalysisNumbers, buildStravaFactCorrection } from "@/lib/onboarding-fact-check";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { trackEvent } from "@/lib/track";
 import { calculateVDOTPaces, easyPaceRange, formatRaceDistance } from "@/lib/paces";
@@ -349,6 +351,9 @@ async function handleConversation(
 
   // Build Strava context (best race for pace suggestion, if available)
   let stravaContext = "";
+  // Every legitimate mileage/frequency/elevation number injected into stravaContext
+  // below — the allow-list handleDataAnalysis's fact-check gate compares against.
+  const stravaGroundTruthNumbers: number[] = [];
   if (mergedData.strava_connected) {
     const sbr = await lookupBestStravaRace(user.id);
     // Build analytics lines from stored data (computed at Strava connect time)
@@ -361,6 +366,11 @@ async function handleConversation(
     const hrZonePct = mergedData.strava_hr_zone_pct as { z1: number; z2: number; z3: number; z4: number; z5: number } | null ?? null;
     const estimatedMaxHR = mergedData.strava_estimated_max_hr as number | null ?? null;
     const maxWeeklySpikePct = mergedData.strava_max_weekly_spike_pct as number | null ?? null;
+    for (const n of [avgWeeklyMiles, avgElevFtPerRun, longestRunMiles, avgRunsPerWeek, estimatedMaxHR, maxWeeklySpikePct]) {
+      if (n != null) stravaGroundTruthNumbers.push(n);
+    }
+    if (recent4Weeks) stravaGroundTruthNumbers.push(...recent4Weeks.filter((m) => m > 0));
+    if (hrZonePct) stravaGroundTruthNumbers.push(hrZonePct.z1, hrZonePct.z2, hrZonePct.z3, hrZonePct.z4, hrZonePct.z5);
 
     // If Strava connected but all analytics are null, the activity import failed.
     // Tell Claude directly so it doesn't hallucinate numbers from missing data.
@@ -375,10 +385,12 @@ async function handleConversation(
       : "";
     const frequencyLine = avgRunsPerWeek != null ? ` ~${avgRunsPerWeek} runs/week.` : "";
     const longRunPct = mergedData.strava_long_run_pct as number | null ?? null;
+    if (longRunPct != null) stravaGroundTruthNumbers.push(longRunPct);
     const longestLine = longestRunMiles != null
       ? ` Longest run (8 weeks): ${longestRunMiles} mi${longRunPct != null ? ` (${longRunPct}% of weekly volume)` : ""}.`
       : "";
     const daysSinceLastRun = mergedData.strava_days_since_last_run as number | null ?? null;
+    if (daysSinceLastRun != null) stravaGroundTruthNumbers.push(daysSinceLastRun);
     const lastRunLine = daysSinceLastRun != null
       ? daysSinceLastRun <= 3
         ? ` Last run: ${daysSinceLastRun} day${daysSinceLastRun !== 1 ? "s" : ""} ago.`
@@ -388,6 +400,7 @@ async function handleConversation(
       : "";
     const easyPaceTrend = mergedData.strava_easy_pace_trend as string | null ?? null;
     const easyPaceDelta = mergedData.strava_easy_pace_trend_delta_sec as number | null ?? null;
+    if (easyPaceDelta != null) stravaGroundTruthNumbers.push(easyPaceDelta);
     const paceTrendLine = easyPaceTrend
       ? ` Easy pace trend (Z2 runs): ${easyPaceTrend}${easyPaceDelta != null && easyPaceDelta >= 5 ? ` (~${easyPaceDelta}s/mi ${easyPaceTrend === "improving" ? "faster" : "slower"} recently)` : ""}.`
       : "";
@@ -474,7 +487,7 @@ async function handleConversation(
   const currentStage = mergedData.stage as string | undefined;
   if (message === "(strava connected)" && mergedData.strava_connected) {
     // Post-Strava: opinionated data synthesis + ask about injury.
-    return handleDataAnalysis(user, mergedData, stravaContext, chatId);
+    return handleDataAnalysis(user, mergedData, stravaContext, chatId, stravaGroundTruthNumbers);
   }
   if (currentStage === "injury_intake") {
     // Injury intake: one focused follow-up probe, then deterministic completion.
@@ -1235,7 +1248,8 @@ async function handleDataAnalysis(
   user: { id: string; phone_number: string; name: string | null },
   data: Record<string, unknown>,
   stravaContext: string,
-  chatId?: string | null
+  chatId?: string | null,
+  stravaGroundTruthNumbers: number[] = []
 ): Promise<NextResponse> {
   void chatId;
   const injuryAlreadyCollected = !!(data.injury_history || data.current_niggles || data.injury_notes);
@@ -1336,18 +1350,73 @@ Rules:
 ${injuryAlreadyCollected ? `- HR ZONES: Do not lead with or headline HR zone analysis when injury is already known. If ≥50% of runs are in Z3 and the pattern is relevant to injury recovery (more fatigue → slower healing), you may mention it as a supporting detail only — never the headline.` : `- HIGH Z3 WARNING: If ≥50% of runs are in Z3, name this clearly but without alarm. Z3 is "no man's land" — hard enough to accumulate fatigue, too easy to build race-specific fitness. Note that wrist-based HR can read high, so the real zones might be slightly lower, but the pattern is still worth polarizing: more true easy (Z1/Z2) and add one genuine quality session (Z4/Z5). Frame it as a direction to move toward, not a condemnation of what they've been doing.`}
 - TRAIL RACES: If "Avg elevation/run: 0 ft (no vertical training)" appears explicitly in the Strava context AND the race is a trail/mountain race, lead with the elevation gap. Use the athlete's actual weekly mileage and weeks to race from the data above — do not invent or estimate these numbers.`;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 400,
-    system: systemPrompt,
-    messages: [{ role: "user", content: "(strava connected)" }],
-  });
+  // Fact-check gate: force this call through a tool that echoes every specific
+  // mileage/frequency/elevation figure the message states, then check each one
+  // against stravaGroundTruthNumbers (the numbers actually injected into the
+  // STRAVA context above). Mirrors the Phase B stated_facts pattern already used
+  // for coach/respond (src/lib/fact-check.ts) — this call never had it, and was
+  // protected only by the prompt's "only cite numbers that appear above" sentence.
+  const analysisTool: Anthropic.Messages.Tool = {
+    name: "save_analysis",
+    description: "Deliver the athlete-facing analysis message.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        message: { type: "string", description: "The athlete-facing analysis text." },
+        stated_mileage_figures: {
+          type: "array",
+          items: { type: "number" },
+          description: "Every specific mileage, frequency, elevation, HR-zone %, or pace-delta number cited in `message` (e.g. if the message says \"~18 mi/week\" and \"36mi to zero\", this is [18, 36, 0]). Empty array if no such numbers were cited.",
+        },
+      },
+      required: ["message", "stated_mileage_figures"],
+    },
+  };
 
-  const synthesisText = response.content
-    .filter(b => b.type === "text")
-    .map(b => (b as { type: "text"; text: string }).text)
-    .join("")
-    .trim();
+  const messagesForAnalysis: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "(strava connected)" }];
+  let synthesisText = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 400,
+      system: systemPrompt,
+      messages: messagesForAnalysis,
+      tools: [analysisTool],
+      tool_choice: { type: "tool", name: "save_analysis" },
+    });
+
+    const toolBlock = response.content.find((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use" && b.name === "save_analysis");
+    if (!toolBlock) break;
+    const input = toolBlock.input as { message?: string; stated_mileage_figures?: unknown };
+    const candidateText = (input.message ?? "").trim();
+    const statedNumbers = Array.isArray(input.stated_mileage_figures)
+      ? input.stated_mileage_figures.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+      : [];
+
+    const mismatches = checkStravaAnalysisNumbers(statedNumbers, stravaGroundTruthNumbers);
+    if (mismatches.length === 0 || attempt === 1) {
+      if (mismatches.length > 0) {
+        console.warn("[handleDataAnalysis] stated_facts still mismatched after retry — sending anyway (fail-open)", mismatches);
+        void trackEvent(user.id, "stated_facts_mismatch_after_retry", { trigger: "onboarding_strava_analysis", facts: mismatches });
+      }
+      synthesisText = candidateText;
+      break;
+    }
+
+    console.warn("[handleDataAnalysis] stated_facts mismatch — rejecting delivery for one retry", mismatches);
+    void trackEvent(user.id, "stated_facts_mismatch", { trigger: "onboarding_strava_analysis", facts: mismatches, retried: true });
+    messagesForAnalysis.push(
+      { role: "assistant", content: response.content },
+      {
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: toolBlock.id,
+          content: buildStravaFactCorrection(mismatches),
+        }],
+      }
+    );
+  }
 
   const finalText = synthesisText || "Your training data is in. Has injury ever been a factor for you, or anything you're managing right now?";
 

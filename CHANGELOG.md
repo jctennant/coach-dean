@@ -8,6 +8,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-26 — Complement-mode athletes can now get injury-driven plan adjustments; onboarding Strava-analysis mileage numbers fact-checked
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User request (follow-up to the same day's complement-mode fix)
+**User feedback:** "I think the primary use case is gonna be for Dean to either use the plan, or, if the user has an injury, to ask him to update the plan so that it's adjusted for injury, maybe has more cross-training, etc. I think we should enable that route. Let's add the fact-check gate on the Onboarding Strava Analysis numbers."
+
+**Root cause (complement + injury):** Earlier the same day, `coaching_mode = 'complement'` was wired up so uploaded-plan athletes stop getting their plan silently overwritten by Dean's own arc. But the COMPLEMENT MODE prompt block in `route.ts` (`buildUserMessage`) told Dean, unconditionally: "Do NOT prescribe new sessions, alter their schedule, or suggest changing their upcoming workouts... do not treat Dean as the source of their plan." That blanket rule blocked exactly the scenario the user actually wants — an athlete on their own uploaded plan asking Dean to adjust it for an injury (swap a run for cross-training, reduce load). The mechanics for this already existed and are plan-source-agnostic — `[SESSION_SWAP day="X" to="Y"]` and `[LIGHTER_WEEK]` both patch `training_state.weekly_plan_sessions` directly regardless of whether those sessions came from Dean's arc or an upload — the prompt rule was the only thing standing in the way.
+
+**Root cause (onboarding fact-check):** `handleDataAnalysis` (the Strava-connect analysis message — the same one from this morning's shin-splint transcript) was a bare `anthropic.messages.create` call with no tool constraint, protected only by the prompt sentence "only cite numbers that appear in the STRAVA data above — never invent figures." Every other fact-sensitive trigger (`post_run`, `user_message`, `morning_plan`, `weekly_recap`, `initial_plan`) already has the Phase B `stated_facts` gate (`src/lib/fact-check.ts`); this one call, despite citing several mileage/frequency numbers per message, never got it.
+
+**Fix / Change:**
+- `route.ts`'s COMPLEMENT MODE rule now carves out an explicit injury exception: when there's an active injury, reported pain, or the athlete asks for an adjustment because of one, Dean should use `[SESSION_SWAP]`/`[LIGHTER_WEEK]` directly on the uploaded plan's sessions — same tags, same mechanism as a normal plan — while stating plainly he's adjusting their plan for the injury, not replacing it. Outside that exception, the original "hands off their schedule" behavior is unchanged.
+- New `src/lib/onboarding-fact-check.ts` (`checkStravaAnalysisNumbers`/`buildStravaFactCorrection`): unlike `fact-check.ts`'s named facts (week_number, weekly_target, etc.), this call's shape is a handful of different mileage/frequency/elevation numbers in free prose, so instead each number Dean's message states is checked against an allow-list of the actual numbers injected into that athlete's STRAVA context (plus km-equivalents, since unit preference isn't always settled yet at this stage).
+- `handleConversation` in `onboarding/handle/route.ts` now collects every legitimate number injected into `stravaContext` (avg weekly miles, longest run, runs/week, 4-week progression, elevation, HR zone %, pace-trend delta, mileage-spike figures, days since last run, long-run %) into `stravaGroundTruthNumbers`, threaded into `handleDataAnalysis`.
+- `handleDataAnalysis` now forces its Sonnet call through a `save_analysis` tool requiring a `stated_mileage_figures` echo, checks it against the ground-truth allow-list, and retries once with a correction `tool_result` on mismatch (fail-open + logged after the retry, same pattern as `route.ts`'s Phase B gate).
+- Updated `evals/run-simulation-evals.mjs`'s `buildStravaAnalysisPrompt` mirror to match the tightened 3-sentence/one-clause prompt text from the earlier succinctness pass (parity rule in this file) — the fact-check gate itself is not yet wired into the simulation harness (flagged below).
+
+**Known open scope:** the fact-check gate isn't wired into `evals/run-simulation-evals.mjs` — the simulation harness still generates this message as plain text with no tool constraint, so it can't yet tell you whether the gate would have caught a given fixture's mileage figures. Also: `handleInjuryClear`/`handleInjuryHold`'s own return-to-run arc generation still doesn't check `coaching_mode === 'complement'` — an injury-hold/clear cycle for a complement-mode athlete still builds Dean's own arc rather than working from the athlete's uploaded plan; today's fix covers the `user_message`-driven "adjust my plan" ask, not the full injury-hold state machine.
+
+**Files changed:** `src/lib/onboarding-fact-check.ts` (new), `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `evals/run-simulation-evals.mjs`
+
+---
+
 ## 2026-07-26 — Onboarding message splitting/brevity, and uploaded-plan "complement" mode actually turned on
 
 **Type:** Bug Fix / Improvement
