@@ -8,6 +8,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-26 — Post-run messages rebuilt: deterministic mileage line + optional 1-sentence Dean commentary, positive by default
+
+**Type:** Feature / Improvement
+**Reported by:** User request
+**User feedback:** "Can we trim this down to be shorter and also just generally be positive? ... maybe just very light analysis, like a line or two. I think if we have it in code, we could say what mileage the user is up to so far for running or for biking or cross-training that week." Follow-up: "I think the template is two sentences: 1. How many miles to run or bike was, and then what that puts him out for the week so far. 2. If needed, a question about how their injury is feeling or a check-in on how they're feeling, but again, this could be optional... right now, when people do cross-training, like biking or swimming, we don't call out what sport they did — maybe we mention that in line one."
+
+**Root cause:** Post-run messages had grown into a full training-log breakdown — pace/HR/zone analysis, cardiac drift, 80/20 intensity distribution commentary, effort corrections ("keep it easy", Z3/gray-zone warnings) — none of it wrong, but far more than a light touch after a run, and none of the mileage numbers in it were structurally guaranteed to be correct (same bug family as every other mileage-accuracy fix in this file).
+
+**Fix / Change:**
+- New `buildPostRunMileageLine()` + `computeWeekActivityTotals()` in `src/lib/cross-training.ts`: fully deterministic "line 1" computed from the just-logged activity + this week's Mon–Sun activity rows — e.g. "5.2mi run today — 22.4mi running this week." or "15mi bike today — 22.4mi running, 15mi biking this week." Non-run/non-bike sessions (swim, walk, strength, elliptical, etc.) now name the actual sport instead of defaulting to running-shaped language: "Swim today — 22.4mi running this week."
+- `coach/respond/route.ts` composes this line in code for every `post_run` trigger, before the dry_run/`[NO_REPLY]` checks, so it flows through the existing SMS-bubble-splitting path with no special-casing needed downstream.
+- Dean's own generated text is now explicitly scoped to an OPTIONAL second line only — a check-in question (injury/how they're feeling) or a genuinely unique observation about that specific run — via a rewritten post_run-only OUTPUT CONTRACT (split out from the shared post_run/user_message contract, which now only applies to `user_message`). Most runs are expected to get no second line at all (`[NO_REPLY]`, same literal convention used elsewhere) — sending only the mileage line is the explicit default, not a fallback.
+- Positive-by-default: effort corrections, Z3/gray-zone warnings, and cardiac-drift "ease off" advice are now suppressed by default for post_run (previously opt-in only via `[POSITIVE_ONLY]`/`coaching_style`). Injury/safety signals are the one explicit exception — an active injury, load-spike risk, or reported pain still overrides brevity and positivity.
+- Fixed a side effect caught by the test suite: the deterministic mileage line always says "today," which unconditionally tripped `checkDateConsistency`'s relative-day-language gate and `checkSemanticRepetition` (the line's phrasing is intentionally similar run over run) on every post-run message. Both checks now scan only Dean's optional second line for `post_run`, not the full composed message.
+
+**Known open scope, not addressed here:** the large pre-existing lens-selection / HR-zone / intensity-distribution instruction blocks earlier in the post_run prompt were not rewritten or removed — the new OUTPUT CONTRACT relies on this file's established "closest-to-generation wins" pattern (it's appended last, right before generation) to override them, the same mechanism already used for `[POSITIVE_ONLY]` mode elsewhere. This should be confirmed with a `response_quality`/`mileage_accuracy` eval re-run rather than assumed — many existing post_run fixtures' `ground_truth` were written for the old, longer-analysis behavior and will need updating to match the new one-line-plus-optional-sentence contract, which is expected fallout from this change, not a regression to chase down.
+
+**Files changed:** `src/lib/cross-training.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-07-26 — Complement-mode athletes can now get injury-driven plan adjustments; onboarding Strava-analysis mileage numbers fact-checked
 
 **Type:** Bug Fix / Improvement

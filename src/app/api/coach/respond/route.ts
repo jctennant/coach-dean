@@ -40,7 +40,7 @@ import { computePaceContext } from "@/lib/coach-pace-context";
 import { parseSessionMiles } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
-import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, RUN_TYPES } from "@/lib/cross-training";
+import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
 import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
@@ -2106,7 +2106,17 @@ Do NOT surface this every message. Once is enough — reinforce only 4+ weeks la
 NO SIGN-OFFS. Never end with "Let me know if you have questions", "Feel free to reach out", "Don't hesitate to ask", "You've got this!", or any variation. The message ends on the coaching point. If the athlete wants to follow up, they will.
 NO GENERIC OPENERS. Never start with "Great week!", "Nice work!", "Awesome session!" or any praise that isn't tied to a specific data observation.`
     : "";
-  const outputContract = (trigger === "post_run" || trigger === "user_message")
+  const postRunOutputContract = trigger === "post_run"
+    ? `\n\nOUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
+1. YOUR MESSAGE IS ONLY AN OPTIONAL SECOND LINE. Today's activity and the week's mileage-by-category are already sent automatically as a separate first message, computed directly from Strava data — do NOT restate, estimate, or recompute distance, pace, or weekly mileage yourself; you have no role in that line at all.
+2. Your one job is to decide whether a second line is warranted, and if so, write ONE short sentence — nothing more. It's either:
+   (a) a check-in question about how they're feeling or how an injury/niggle is doing, or
+   (b) a genuinely unique or interesting observation about this specific run (only if something actually stands out — a real PR-adjacent effort, a notable HR/pace pattern, a meaningful comeback moment). Do not manufacture an observation just to fill this line.
+3. MOST RUNS GET NO SECOND LINE. If neither (a) nor (b) clearly applies, call deliver_message with message set to exactly [NO_REPLY] — sending only the mileage line is the correct, common outcome, not a missed opportunity. Do not stretch for generic praise or filler to avoid an empty second line.
+4. POSITIVE BY DEFAULT — SKIP EFFORT CORRECTIONS. No "keep easy runs truly easy", no "pull your HR down" / "run easier next time", no Z3/gray-zone warnings, no cardiac-drift "ease off" advice, no aerobic-base lecture, no generic praise ("Nice work!", "Great job!"). When in doubt, leave it out.
+5. INJURY & SAFETY STILL OVERRIDE ALL OF THE ABOVE. If there's an active injury, a real load-spike/overtraining risk, or the athlete mentions pain, tightness, or soreness (now or recently), say what needs to be said even if it runs longer than one sentence — that safety read is the one exception brevity and positivity don't apply to.`
+    : "";
+  const outputContract = trigger === "user_message"
     ? `\n\nOUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
 1. NO SIGN-OFFS OR FILLER. The LAST sentence is the coaching point — never "Let me know if you have questions", "Feel free to reach out", "You've got this!", "Keep it up", "Keep the momentum going." Cut anything that would appear in a form letter. This is the most important rule.
 2. OPEN WITH THE INSIGHT, NOT A GREETING OR PRAISE. When you're reading a run or how their training is going, the first sentence states the specific thing THIS athlete's data shows and what it MEANS — never "Nice work", "Great job", "Saw your run come through". A number alone is not an insight; pair it with an interpretation. Bad: "Solid run, 8:58/mi!" Good: "8:58/mi at 153 bpm — that's 38s/mi quicker than the same effort last month, so the base work is paying off."
@@ -2125,7 +2135,7 @@ Focus: ${coachingFocus}
 Apply this to bias which metric lens you pick and what advice you give proactively. When in doubt, respect what the athlete said they want.`
     : "") + (uploadedPlanContext
     ? `\n\nATHLETE'S UPLOADED TRAINING PLAN (for reference — use this when they ask about their plan, upcoming workouts, or weekly structure; do NOT reproduce it in full; answer specific questions from it directly):\n${uploadedPlanContext}`
-    : "") + outputContract + proactiveOutputContract;
+    : "") + outputContract + postRunOutputContract + proactiveOutputContract;
 
   // For weekly_recap and user_message, fetch the stored training plan.
   // weekly_recap: injects the current-week plan so Dean recaps what was planned vs actual.
@@ -3771,6 +3781,31 @@ OUTPUT CONTRACT:
   // the same text an athlete would receive.
   let coachMessage = normalizeEmDashes(stripBoilerplateSignoffs(dayAbbrevFixed));
 
+  // Post-run line 1 is fully deterministic — today's activity + the week's mileage-by-category
+  // so far, computed from activity rows, never LLM-authored (see buildPostRunMileageLine). Dean's
+  // own generated text becomes an optional line 2 (injury check-in or a genuine standout
+  // observation, per the post_run OUTPUT CONTRACT) — [NO_REPLY]/empty means skip it and send only
+  // the mileage line. Composed here (before the dry_run/[NO_REPLY] checks below) so both paths —
+  // and splitIntoMessages' paragraph-break bubble splitting — handle it the same as any other
+  // reply, with no special-casing needed downstream.
+  // Dean's own line (if any) — kept separate so the date-consistency/semantic-repetition
+  // checks below can scan only this, not the deterministic mileage line (which always
+  // mentions "today" and repeats similar phrasing run over run by design, so running those
+  // checks against the full composed message would flag it as an inconsistency/repeat every
+  // single time for no reason).
+  let postRunLine2 = "";
+  if (trigger === "post_run") {
+    const weekTotals = computeWeekActivityTotals(recentActivities, userTimezone, weekRefDate);
+    const line1 = buildPostRunMileageLine(
+      (activityData?.activity_type as string | null) ?? null,
+      (activityData?.distance_meters as number | null) ?? null,
+      weekTotals,
+      isMetricUser
+    );
+    postRunLine2 = coachMessage.trim() === "[NO_REPLY]" ? "" : coachMessage.trim();
+    coachMessage = postRunLine2 ? `${line1}\n\n${postRunLine2}` : line1;
+  }
+
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage, strength_poster: (wantsStrengthPoster && strengthPosterRoutineKey) ? strengthPosterRoutineKey : null });
 
   // Claude signals "nothing to send" with [NO_REPLY] — skip all SMS and DB writes.
@@ -3815,8 +3850,12 @@ OUTPUT CONTRACT:
     // Latency-sensitive triggers (inbound SMS, post_run webhook): advisory-only, fired
     // without awaiting so the checks never delay the send. checkDateConsistency no-ops
     // (no API call) when the message mentions no relative-day language.
-    if (trigger === "post_run" && priorSameTypeTexts.length > 0) {
-      void checkSemanticRepetition(coachMessage, priorSameTypeTexts)
+    // post_run scans only Dean's optional line (postRunLine2), not the deterministic
+    // mileage line — that line always says "today" and repeats similar phrasing by
+    // design, which would otherwise flag as a date issue / repetition every single time.
+    const dateConsistencyCheckText = trigger === "post_run" ? postRunLine2 : coachMessage;
+    if (trigger === "post_run" && priorSameTypeTexts.length > 0 && postRunLine2) {
+      void checkSemanticRepetition(postRunLine2, priorSameTypeTexts)
         .then((result) => {
           if (result.repeats) {
             log.warn("semantic repetition detected", { trigger, angle: result.angle });
@@ -3825,7 +3864,7 @@ OUTPUT CONTRACT:
         })
         .catch((err) => log.error("semantic repetition check errored", { error: String(err) }));
     }
-    void checkDateConsistency(coachMessage, getDateFacts(userTimezone))
+    void checkDateConsistency(dateConsistencyCheckText, getDateFacts(userTimezone))
       .then((result) => {
         if (result.inconsistent) {
           log.warn("date consistency issue detected", { trigger, issue: result.issue });

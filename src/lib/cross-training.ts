@@ -256,6 +256,92 @@ export function computeWeekCrossTrainingAerobicMinutes(
   return total;
 }
 
+export interface WeekActivityTotals {
+  runMiles: number;
+  bikeMiles: number;
+  /** Count of non-run, non-bike sessions this week (swim, strength, elliptical, etc.) — a
+   * session count rather than a distance, since duration/effort is the meaningful unit for
+   * most cross-training, not mileage. */
+  crossTrainSessions: number;
+}
+
+/**
+ * Deterministic this-week (Mon–Sun) totals by activity category — run mileage, bike mileage,
+ * and a cross-training session count. Computed purely from Strava activity rows so a post-run
+ * message can state "up to X mi running, Y mi biking" as a fact rather than Dean reconstructing
+ * or estimating it from conversation memory.
+ */
+export function computeWeekActivityTotals(
+  activities: Array<{ activity_type: string | null; distance_meters: number | null; start_date: string }>,
+  timezone: string,
+  refDate: Date = new Date(),
+): WeekActivityTotals {
+  const currentMonday = weekMonday(refDate, timezone);
+  let runMiles = 0;
+  let bikeMiles = 0;
+  let crossTrainSessions = 0;
+  for (const a of activities) {
+    if (!a.activity_type) continue;
+    if (weekMonday(new Date(a.start_date), timezone) !== currentMonday) continue;
+    const miles = (a.distance_meters ?? 0) / 1609.34;
+    if (RUN_TYPES.has(a.activity_type)) {
+      runMiles += miles;
+    } else if (BIKE_TYPES.has(a.activity_type)) {
+      bikeMiles += miles;
+    } else {
+      crossTrainSessions += 1;
+    }
+  }
+  return {
+    runMiles: Math.round(runMiles * 10) / 10,
+    bikeMiles: Math.round(bikeMiles * 10) / 10,
+    crossTrainSessions,
+  };
+}
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  Run: "Run", TrailRun: "Trail run", VirtualRun: "Run", Treadmill: "Treadmill run",
+  Ride: "Bike", VirtualRide: "Bike", EBikeRide: "E-bike ride", MountainBikeRide: "Mountain bike ride", GravelRide: "Gravel ride",
+  Swim: "Swim", OpenWaterSwim: "Open water swim",
+  Walk: "Walk", Hike: "Hike", Yoga: "Yoga", Pilates: "Pilates",
+  WeightTraining: "Strength session", Crossfit: "Crossfit session", Elliptical: "Elliptical session", Rowing: "Row", StairStepper: "Stair-stepper session",
+};
+
+/**
+ * Deterministic post-run "line 1" — today's activity + the week's mileage-by-category so far,
+ * computed entirely in code (never LLM-authored). This is the fact-accuracy fix applied to the
+ * post-run message itself: rather than Dean writing "8:58/mi, X miles this week" in prose (a
+ * repeated source of mileage-accuracy bugs — see fact-check.ts), the numbers are stated here and
+ * Dean's own reply is limited to an optional second line (injury check-in or a genuine standout
+ * observation). Also names the actual sport for non-run/non-bike sessions (swim, walk, strength,
+ * etc.) instead of the message defaulting to running-shaped language regardless of activity type.
+ */
+export function buildPostRunMileageLine(
+  activityType: string | null,
+  activityDistanceMeters: number | null,
+  weekTotals: WeekActivityTotals,
+  isMetricUser: boolean,
+): string {
+  const fmtMi = (mi: number) => (isMetricUser ? `${(mi * 1.60934).toFixed(1)}km` : `${mi}mi`);
+  const weekParts: string[] = [];
+  if (weekTotals.runMiles > 0) weekParts.push(`${fmtMi(weekTotals.runMiles)} running`);
+  if (weekTotals.bikeMiles > 0) weekParts.push(`${fmtMi(weekTotals.bikeMiles)} biking`);
+  if (weekTotals.crossTrainSessions > 0) {
+    weekParts.push(`${weekTotals.crossTrainSessions} cross-training session${weekTotals.crossTrainSessions !== 1 ? "s" : ""}`);
+  }
+  const weekSummary = weekParts.length > 0 ? `${weekParts.join(", ")} this week` : "first session logged this week";
+
+  const isRun = !!activityType && RUN_TYPES.has(activityType);
+  const isBike = !!activityType && BIKE_TYPES.has(activityType);
+  const todayMiles = activityDistanceMeters != null ? Math.round((activityDistanceMeters / 1609.34) * 10) / 10 : null;
+
+  if ((isRun || isBike) && todayMiles != null && todayMiles > 0) {
+    return `${fmtMi(todayMiles)} ${isRun ? "run" : "bike"} today — ${weekSummary}.`;
+  }
+  const label = activityType ? (ACTIVITY_LABELS[activityType] ?? activityType) : "Session";
+  return `${label} today — ${weekSummary}.`;
+}
+
 export interface RunGapSignal {
   /** Days since the most recent run in the provided activity history, null if no run appears at all. */
   daysSinceLastRun: number | null;
