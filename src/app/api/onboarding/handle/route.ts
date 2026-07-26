@@ -6,6 +6,8 @@ import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { checkStravaAnalysisNumbers, buildStravaFactCorrection } from "@/lib/onboarding-fact-check";
 import { sendSMS, startTyping } from "@/lib/linq";
+import { sendPoll, isPhotonProvider } from "@/lib/photon";
+import { GOAL_POLL, type OnboardingPoll } from "@/lib/onboarding-polls";
 import { trackEvent } from "@/lib/track";
 import { calculateVDOTPaces, easyPaceRange, formatRaceDistance } from "@/lib/paces";
 import { getCheckoutPageUrl } from "@/lib/stripe";
@@ -65,6 +67,23 @@ async function sendAndStore(
     });
   }
   return { chatId };
+}
+
+/**
+ * Send a Photon/iMessage poll and store it in conversation history, followed by a
+ * one-line plain-text fallback so the question is still answerable on clients that
+ * can't render the interactive poll (e.g. an out-of-date iOS/macOS Messages build).
+ */
+async function sendPollAndStore(userId: string, phone: string, poll: OnboardingPoll): Promise<void> {
+  const isDryRun = dryRunUsers.has(userId);
+  if (!isDryRun) await sendPoll(phone, poll.title, poll.options);
+  await insertConversation({
+    user_id: userId,
+    role: "assistant",
+    content: `[Poll] ${poll.title}`,
+    message_type: "onboarding",
+  });
+  await sendAndStore(userId, phone, poll.fallbackHint, "onboarding");
 }
 
 /**
@@ -318,6 +337,20 @@ async function handleConversation(
   if (mergedData.goal && !VALID_GOAL_BUCKETS.has(mergedData.goal as string)) {
     delete mergedData.goal;
   }
+
+  // Pilot: Photon/iMessage users answer the goal question via a poll instead of
+  // free text, once a name is known but goal isn't yet — mirrors what Dean would
+  // otherwise ask in message 2 ("what's your goal?"). goal_poll_sent guards against
+  // re-sending on a duplicate/retried webhook call. See onboarding-polls.ts for why
+  // this is the only poll wired in so far (injury/training-days don't have as clean
+  // a fixed insertion point).
+  if (isPhotonProvider() && mergedData.name && !mergedData.goal && !mergedData.goal_poll_sent) {
+    const updatedData = { ...mergedData, goal_poll_sent: true };
+    await supabase.from("users").update({ onboarding_data: updatedData as unknown as Json }).eq("id", user.id);
+    await sendPollAndStore(user.id, user.phone_number, GOAL_POLL);
+    return NextResponse.json({ ok: true });
+  }
+
   if (mergedData.race_date) {
     const dateStr = mergedData.race_date as string;
     const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(Date.parse(dateStr));

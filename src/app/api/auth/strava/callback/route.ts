@@ -521,6 +521,13 @@ export async function GET(request: Request) {
   // For mid-onboarding users, automatically continue the conversation after Strava connects
   // so Dean picks up where he left off without the user having to text first.
   // Recent activities are already imported synchronously above — Claude has good context.
+  //
+  // Note: the injury question and (when Strava has no day-level data) the training-days
+  // question both live inside handleDataAnalysis / the goals-stage Sonnet prompt as
+  // context-dependent, personalized text — not fixed deterministic prompts — so they're
+  // not good poll candidates without either stripping a question out of Sonnet-generated
+  // text (fragile) or double-asking. Only the goal question (asked deterministically in
+  // handleConversation before a name is known) gets a poll for now — see onboarding-polls.ts.
   if (!alreadyOnboarded) {
     const chatId = currentUser?.linq_chat_id as string | null;
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";

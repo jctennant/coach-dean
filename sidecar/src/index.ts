@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { Spectrum, text, typing, attachment } from "spectrum-ts";
+import { Spectrum, text, typing, attachment, poll } from "spectrum-ts";
 import { imessage, effect, nativeContactCard } from "spectrum-ts/providers/imessage";
 
 function requireEnv(name: string): string {
@@ -67,6 +67,18 @@ app.post("/send-media", async (c) => {
       name: name ?? "image.png",
     })
   );
+  return c.json({ ok: true });
+});
+
+// POST /send-poll — send a native iMessage poll
+// Body: { to: string, title: string, options: string[] }
+// Requires a Spectrum plan with poll support (imessage-kit/advanced-imessage) —
+// on lower tiers this will throw, which /send-poll surfaces as a 500 to the caller.
+app.post("/send-poll", async (c) => {
+  const { to, title, options } = await c.req.json<{ to: string; title: string; options: string[] }>();
+  console.log("[sidecar] send-poll →", to, title);
+  const space = await openSpace(to);
+  await space.send(poll(title, options));
   return c.json({ ok: true });
 });
 

@@ -5,6 +5,7 @@ import { insertConversation, insertConversationReturningId } from "@/lib/convers
 import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
+import { ONBOARDING_POLLS_BY_TITLE } from "@/lib/onboarding-polls";
 import crypto from "crypto";
 
 // 120s: matches linq webhook — coaching responses can take 30-60s
@@ -26,6 +27,7 @@ export const maxDuration = 120;
  *     space: { id, platform, type, phone },
  *     content: { type: "text", text: "..." }
  *              | { type: "attachment", id, name, mimeType, size? }
+ *              | { type: "poll_option", option: { title }, poll: { title, options }, selected }
  *   }
  * }
  */
@@ -70,8 +72,14 @@ export async function POST(request: Request) {
   const senderPhone = message.sender?.id ?? null;
   const content = message.content;
 
-  // Extract text body
-  const body = content?.type === "text" ? (content.text ?? "").trim() : "";
+  // Extract text body. Poll answers arrive as a separate content type with no
+  // free-text body — synthesize one so they flow through the same pipeline
+  // (dedup, debounce, Haiku extraction) as if the athlete had typed the answer.
+  let body = content?.type === "text" ? (content.text ?? "").trim() : "";
+  if (content?.type === "poll_option" && content.selected) {
+    const matchedPoll = content.poll?.title ? ONBOARDING_POLLS_BY_TITLE[content.poll.title] : undefined;
+    body = matchedPoll ? matchedPoll.optionToMessage(content.option.title) : content.option.title;
+  }
 
   // Attachments: Photon webhooks include metadata only (no download URL).
   // Image workout extraction requires bytes — not supported via Photon webhook.
@@ -447,7 +455,14 @@ interface PhotonAttachmentContent {
   size?: number;
 }
 
-type PhotonContent = PhotonTextContent | PhotonAttachmentContent;
+interface PhotonPollOptionContent {
+  type: "poll_option";
+  option: { title: string };
+  poll: { title: string; options?: { title: string }[] };
+  selected: boolean;
+}
+
+type PhotonContent = PhotonTextContent | PhotonAttachmentContent | PhotonPollOptionContent;
 
 interface PhotonWebhookPayload {
   event: string;

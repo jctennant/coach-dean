@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-26 — Pilot: native iMessage poll for the onboarding goal question (Photon only)
+
+**Type:** Feature
+**Reported by:** Internal — reducing onboarding friction by replacing some free-text questions with tappable polls
+**User feedback:** N/A
+**Root cause:** N/A (new capability, not a bug fix)
+**Fix / Change:** Added native iMessage poll support via `spectrum-ts`'s `poll()` API, gated entirely behind the Photon/Spectrum provider (`SMS_PROVIDER=photon`) — Linq has no poll equivalent. Sidecar gained `POST /send-poll`; `photon.ts` gained `sendPoll()` and `isPhotonProvider()`. A new `src/lib/onboarding-polls.ts` defines poll question/option sets and maps a selected option back to a natural-language sentence, which is fed into the existing onboarding pipeline exactly as if the athlete had typed it — this reuses Haiku extraction and the Sonnet conversation logic unchanged, and means a plain-text reply works identically to tapping the poll (the fallback path for clients that can't render the interactive poll UI, e.g. macOS Messages lagging the iOS release that added poll rendering — confirmed via live test: the same poll rendered as an interactive card on iPhone but as a plain "Sent a poll" bubble on an unpatched Mac). `webhooks/photon/route.ts` now handles the `poll_option` content type generically via `ONBOARDING_POLLS_BY_TITLE`, correlating by poll title since Spectrum's `poll_option` payload carries no poll ID. Wired in one poll so far — the goal question, fired from `onboarding/handle/route.ts`'s `handleConversation` once a name is known but goal isn't, guarded by a `goal_poll_sent` flag to prevent duplicate sends on webhook retries. Considered but explicitly deferred: injury and training-days polls. Both questions live inside context-dependent, personalized Sonnet-generated text (`handleDataAnalysis`'s fact-checked Strava synthesis message, and the goals-stage prompt's Strava-data-dependent training-days ask) rather than a fixed deterministic prompt — an earlier draft of this change bypassed `handleDataAnalysis` entirely to fire a training-days poll after Strava connects, which would have skipped the injury question and the fact-checked Strava synthesis for every Photon user; caught and reverted before landing. Poll-ifying those two properly would require either stripping a question out of LLM-generated text (fragile) or asking twice, so they're left as free text for now — see the comment block at the top of `onboarding-polls.ts`.
+**Files changed:** `sidecar/src/index.ts`, `src/lib/photon.ts`, `src/lib/onboarding-polls.ts` (new), `src/app/api/webhooks/photon/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/lib/onboarding-polls.test.ts` (new)
+
+---
+
 ## 2026-07-26 — Mid-week onboarding starter plan now reconciled with the stored arc, instead of drifting silently
 
 **Type:** Bug Fix

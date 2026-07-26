@@ -59,6 +59,20 @@ export async function sendMediaSMS(
   }
 }
 
+export function isPhotonProvider(): boolean {
+  return process.env.SMS_PROVIDER === "photon";
+}
+
+/**
+ * Send a native iMessage poll. Photon/Spectrum-only — no Linq equivalent exists,
+ * so callers must gate on isPhotonProvider() before calling this.
+ * Requires a Spectrum plan with poll support; throws on lower tiers.
+ */
+export async function sendPoll(to: string, title: string, options: string[]): Promise<void> {
+  await callSidecar("/send-poll", { to, title, options });
+  console.log("[photon] sendPoll ok →", to, title);
+}
+
 export async function startTyping(phone: string): Promise<void> {
   try {
     await callSidecar("/typing", { to: phone });
