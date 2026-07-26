@@ -1379,15 +1379,28 @@ async function handleInjuryIntake(
   const bodyPartForGate = ((mergedData.injury_body_part_current as string | null) ?? "").toLowerCase();
   const isShinRelatedForGate = /shin|tibia/.test(bodyPartForGate);
   const redFlagScreenAnswered = !isShinRelatedForGate || !!mergedData.injury_pain_character;
+  // Ultra goals (30k+) require ultra/trail race background before [READY] per the main
+  // conversation prompt (line ~646), but Strava connecting mid-conversation routes straight
+  // into this deterministic injury-intake → completion pipeline, bypassing that question
+  // entirely if it hadn't come up yet. Gate completion on it here too, same pattern as the
+  // shin red-flag screen, so a fast Strava connect can't skip a required field.
+  const goalForGate = (mergedData.goal as string | null) ?? null;
+  const isUltraGoalForGate = !!goalForGate && ULTRA_GOALS.includes(goalForGate);
+  const ultraBackgroundAnswered = !isUltraGoalForGate || !!mergedData.ultra_race_history;
   const injuryAlreadyKnown = !!(mergedData.injury_history || mergedData.current_niggles || mergedData.injury_notes)
     && !!mergedData.injury_severity
-    && redFlagScreenAnswered;
+    && redFlagScreenAnswered
+    && ultraBackgroundAnswered;
   // All three fields needed: body_part, severity, reported_during (+ red-flag screen for shins)
   const hasAllSymptomFields = !!(mergedData.injury_body_part_current && mergedData.injury_severity && mergedData.reported_during)
-    && redFlagScreenAnswered;
-  // Hard cap at 2 follow-up questions total
-  const hitFollowUpCap = followUpCount >= 2;
-  const shouldComplete = noInjury || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
+    && redFlagScreenAnswered
+    && ultraBackgroundAnswered;
+  // Hard cap at 2 follow-up questions total. If ultra background is still outstanding at
+  // that point, allow one extra turn (cap 3) to ask it specifically rather than either
+  // looping forever or silently dropping a required field — but never beyond that, so a
+  // stuck extraction can't block onboarding indefinitely.
+  const hitFollowUpCap = followUpCount >= (ultraBackgroundAnswered ? 2 : 3);
+  const shouldComplete = (noInjury && ultraBackgroundAnswered) || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
 
   if (shouldComplete) {
     const timezone = (mergedData.timezone as string | null) ?? "America/New_York";
@@ -1424,6 +1437,38 @@ async function handleInjuryIntake(
     missingFields.push("when it flares (during runs, after, or both)");
   }
   if (!mergedData.injury_severity) missingFields.push("how limiting it is right now — can they run modified, or not at all");
+  // Ultra background is asked last, after any injury-symptom gaps — same priority order as
+  // the main conversation prompt (injury before ultra background).
+  if (!ultraBackgroundAnswered) {
+    missingFields.push("their ultra/trail race background — how many ultras they've done, or trail race experience, or if this is their first");
+  }
+
+  // "no injury" + missing ultra background: this is not an injury follow-up at all, so use
+  // a plain race-background question instead of the injury-framed prompts below. Bounded by
+  // the same cap as everything else so a stuck extraction can't loop forever.
+  if (noInjury && !ultraBackgroundAnswered && !hitFollowUpCap) {
+    const response = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 120,
+      system: `You are Coach Dean. The athlete just said they have no current injury. Ask ONE question about their ultra/trail race background — how many ultras they've done, or trail race experience, or whether this would be their first.
+
+ONE question only. No advice, no reassurance. Just the question.
+Plain text, 1–2 sentences max.`,
+      messages: [{ role: "user", content: message }],
+    });
+    const followUpText = response.content
+      .filter(b => b.type === "text")
+      .map(b => (b as { type: "text"; text: string }).text)
+      .join("")
+      .trim() || "Have you run any ultras before, or would this be your first?";
+
+    const updatedData = { ...mergedData, injury_follow_up_count: followUpCount + 1 };
+    await supabase.from("users")
+      .update({ onboarding_data: updatedData as unknown as Json })
+      .eq("id", user.id);
+    await sendAndStore(user.id, user.phone_number, followUpText, "onboarding");
+    return NextResponse.json({ ok: true });
+  }
 
   const followUpSystem = followUpCount === 0
     ? `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question targeting the most important unknown: ${missingFields[0] ?? "how long it's been happening and whether they're doing anything for it"}.

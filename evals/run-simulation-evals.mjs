@@ -27,6 +27,8 @@ const RESULTS_DIR = path.join(__dirname, "results");
 
 const PROVIDER = process.env.AI_PROVIDER ?? "anthropic";
 
+const ULTRA_GOALS = ["30k", "50k", "50mi", "100k", "100mi"];
+
 const DEAN_MODEL = "claude-sonnet-4-5-20250929";
 const AGENT_MODEL = "claude-haiku-4-5-20251001";
 // Sonnet judges too — Opus was overkill for this rubric-style scoring and cost
@@ -437,13 +439,20 @@ function injuryShouldComplete(collected, followUpCount, lastUserReply) {
   const bodyPartForGate = (collected.injury_body_part_current || "").toLowerCase();
   const isShinRelatedForGate = /shin|tibia/.test(bodyPartForGate);
   const redFlagScreenAnswered = !isShinRelatedForGate || !!collected.injury_pain_character;
+  // Ultra goals (30k+) require ultra/trail background before [READY], but a Strava connect
+  // mid-conversation routes straight into this deterministic pipeline and can skip that
+  // question entirely if it hadn't come up yet (2026-07-26 gap, sim-ultra-first-timer).
+  const isUltraGoalForGate = !!collected.goal && ULTRA_GOALS.includes(collected.goal);
+  const ultraBackgroundAnswered = !isUltraGoalForGate || !!collected.ultra_race_history;
   const injuryAlreadyKnown = !!(collected.injury_history || collected.current_niggles || collected.injury_notes)
     && !!collected.injury_severity
-    && redFlagScreenAnswered;
+    && redFlagScreenAnswered
+    && ultraBackgroundAnswered;
   const hasAllSymptomFields = !!(collected.injury_body_part_current && collected.injury_severity && collected.reported_during)
-    && redFlagScreenAnswered;
-  const hitFollowUpCap = followUpCount >= 2;
-  return noInjury || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
+    && redFlagScreenAnswered
+    && ultraBackgroundAnswered;
+  const hitFollowUpCap = followUpCount >= (ultraBackgroundAnswered ? 2 : 3);
+  return (noInjury && ultraBackgroundAnswered) || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
 }
 
 // Mirrors the missingFields priority list in handleInjuryIntake, including the
@@ -466,10 +475,30 @@ function injuryMissingFields(collected) {
     missingFields.push("when it flares (during runs, after, or both)");
   }
   if (!collected.injury_severity) missingFields.push("how limiting it is right now — can they run modified, or not at all");
+  const isUltraGoal = !!collected.goal && ULTRA_GOALS.includes(collected.goal);
+  if (isUltraGoal && !collected.ultra_race_history) {
+    missingFields.push("their ultra/trail race background — how many ultras they've done, or trail race experience, or if this is their first");
+  }
   return missingFields;
 }
 
-async function getInjuryFollowUp(missingFields, followUpCount) {
+async function getInjuryFollowUp(missingFields, followUpCount, noInjuryUltraOnly) {
+  // "no injury" + missing ultra background: not an injury follow-up at all — mirrors the
+  // plain race-background question route.ts asks in this branch.
+  if (noInjuryUltraOnly) {
+    const response = await client.messages.create({
+      model: AGENT_MODEL,
+      max_tokens: 120,
+      system: `You are Coach Dean. The athlete just said they have no current injury. Ask ONE question about their ultra/trail race background — how many ultras they've done, or trail race experience, or whether this would be their first.
+
+ONE question only. No advice, no reassurance. Just the question.
+Plain text, 1–2 sentences max.`,
+      messages: [{ role: "user", content: "(continue)" }],
+    });
+    return response.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim()
+      || "Have you run any ultras before, or would this be your first?";
+  }
+
   const system = followUpCount === 0
     ? `You are Coach Dean. An athlete just described an injury. Ask ONE specific follow-up question targeting the most important unknown: ${missingFields[0] ?? "how long it's been happening and whether they're doing anything for it"}.
 
@@ -707,7 +736,11 @@ async function runSimulation(fixture, verbose) {
       let followUpCount = 0;
       while (!injuryShouldComplete(collected, followUpCount, userReply)) {
         const missingFields = injuryMissingFields(collected);
-        const followUpText = await getInjuryFollowUp(missingFields, followUpCount);
+        const noInjuryDetected = /\b(no injury|no injuries|no issues|no pain|no niggles|all good|nothing|clean|healthy|fine|never|n\/a)\b/i
+          .test(userReply || "");
+        const isUltraGoal = !!collected.goal && ULTRA_GOALS.includes(collected.goal);
+        const noInjuryUltraOnly = noInjuryDetected && isUltraGoal && !collected.ultra_race_history;
+        const followUpText = await getInjuryFollowUp(missingFields, followUpCount, noInjuryUltraOnly);
         history.push({ role: "assistant", content: followUpText });
         followUpCount++;
         if (verbose) console.log(`\n  Dean (injury intake): ${followUpText}`);

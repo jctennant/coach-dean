@@ -8,6 +8,16 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-25 — Ultra-goal athletes could complete onboarding without ever giving ultra/trail race background
+
+**Type:** Bug Fix
+**Reported by:** Internal observation (running `sim-ultra-first-timer` on request, ahead of onboarding real users)
+**Root cause:** The main onboarding conversation prompt tells Dean he "must ask about ultra/trail race history before signaling [READY]" for 30k+ goals, but that question is asked relatively late (step 7) while Strava connects earlier (step 3). Once Strava connects mid-conversation, `route.ts` routes unconditionally into `handleDataAnalysis` → `handleInjuryIntake` → completion — a deterministic pipeline that never returns to the main conversation. `handleInjuryIntake`'s completion gate only checked injury fields (body part, severity, reported-during, shin red-flag screen), so an ultra athlete who connected Strava before mentioning their race background could complete onboarding with `ultra_race_history` permanently null. Found via `sim-ultra-first-timer`, which scored 2/10 for skipping straight to a bare "Jordan, Rocky Raccoon 44 weeks out." completion with no ultra background ever collected.
+**Fix / Change:** Added `ultra_race_history` to `handleInjuryIntake`'s completion gate (`shouldComplete`) for goals in `ULTRA_GOALS`, mirroring the existing shin/tibia red-flag-screen pattern. When the athlete has no injury but ultra background is still missing, a dedicated non-injury-framed follow-up question now fires instead of completing immediately. Bounded the follow-up loop at 3 turns (up from 2) specifically for this case so a stuck extraction can't loop forever. Mirrored the same gate in `evals/run-simulation-evals.mjs` per the project's parity convention. Re-running `sim-ultra-first-timer` confirmed `ultra_race_history` is now populated before completion; the fixture's remaining low score is a separate, pre-existing race-date hallucination bug (Dean "corrected" a user-stated date to the wrong one), not this gap.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`
+
+---
+
 ## 2026-07-22 — Extended the onboarding simulation eval harness through Strava-analysis/injury-intake/completion; found and fixed a real gate gap along the way
 
 **Type:** Improvement / Bug Fix
