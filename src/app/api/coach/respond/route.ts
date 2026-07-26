@@ -12,7 +12,7 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeStarterWeekSkeleton, arcWeekSlotLabel, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc } from "@/lib/training-plan";
 import type { ArcWeekSlot, RecoveryWeekSlot } from "@/lib/training-plan";
 import { buildRecoveryCardPayload, buildRegularCardPayload, encodeCardPayload } from "@/lib/schedule-card";
 
@@ -958,11 +958,13 @@ async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextR
   console.log(`[handleLighterWeek] userId=${userId} — reducing ${currentTarget} → ${reducedTarget} mi`);
 
   if (!dryRun) {
+    const todayLabel = new Date().toISOString().slice(0, 10);
     await supabase
       .from("training_state")
       .update({
         weekly_mileage_target: reducedTarget,
         weekly_plan_sessions: null,
+        plan_adjustments: `Lighter week: ${currentTarget}mi → ${reducedTarget}mi (${todayLabel})`,
       })
       .eq("user_id", userId);
     void trackEvent(userId, "lighter_week_set", { previous_target: currentTarget, new_target: reducedTarget });
@@ -2037,7 +2039,12 @@ Use this data to:
     const posterNote = strengthPosterRoutineKey
       ? `\nWHEN you list the FULL routine (above), append the token [STRENGTH_POSTER] at the very end of your message — the system strips it and texts the athlete an illustrated poster of this exact routine they can save or print. Athletes consistently love receiving the poster — it's a concrete, savable artifact, not just text. Lead toward sending it whenever you list the routine. Only include the token when you actually list the routine; never otherwise. If instead you're swapping in a lighter or different exercise (e.g. the athlete said one hurt or was too hard), skip the token and pass the \`exercise_ids\` argument on deliver_message with just the exercise(s) you actually named — same illustrated-image follow-up, matched to what you prescribed.`
       : "";
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${sr.frequency ? `Frequency: ${sr.frequency}\n` : ""}${lines}\n${trigger === "initial_plan" ? `THIS IS THE ATHLETE'S FIRST PLAN — an active injury is on file, so this routine IS the concrete answer to "what do I do about it." Include the full routine (every exercise with specs/cues + frequency) directly in the plan delivery message, not just a mention that you're "watching" the injury — a returning athlete needs the actual exercises now, not a promise to follow up. Append [STRENGTH_POSTER] at the end so they get the illustrated poster alongside the plan.` : `SEND THE FULL ROUTINE (every exercise with complete specs/cues + frequency) AND the poster whenever EITHER is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; OR (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most. Don't wait to be asked twice. When you're just referencing it in passing (e.g. a routine post-run note or recap) you don't need to dump the full list — a brief mention is fine. Never lecture about it with no injury signal.`}${posterNote}`;
+    // sr.frequency is a whole-routine dosage (all ${sr.exercises.length} exercises as one circuit) —
+    // it does not describe any subset of exercises taken on their own. Keeping it out of the
+    // always-shown block and scoped only to the "send the full routine" instruction stops it from
+    // being carried over when Dean cites just 1-2 exercises, where each exercise's own specs
+    // (sets×reps, already in `lines`) is the only dosage that actually applies.
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${lines}\n${trigger === "initial_plan" ? `THIS IS THE ATHLETE'S FIRST PLAN — an active injury is on file, so this routine IS the concrete answer to "what do I do about it." Include the full routine (every exercise with specs/cues${sr.frequency ? ` + frequency: ${sr.frequency}` : ""}) directly in the plan delivery message, not just a mention that you're "watching" the injury — a returning athlete needs the actual exercises now, not a promise to follow up. Append [STRENGTH_POSTER] at the end so they get the illustrated poster alongside the plan.` : `SEND THE FULL ROUTINE (every exercise with complete specs/cues${sr.frequency ? ` + frequency: ${sr.frequency}` : ""}) AND the poster whenever EITHER is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; OR (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most. Don't wait to be asked twice. When you're just referencing it in passing, or naming only 1-2 specific exercises (e.g. a routine post-run note or recap), you don't need to dump the full list or the routine-level frequency — use only the sets×reps already given for the exercise(s) you name. Never lecture about it with no injury signal.`}${posterNote}`;
   })();
 
   // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
@@ -2983,9 +2990,74 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       wantsSpeedWork,
     });
     const { data: arcState } = await supabase.from("training_state").select("weekly_long_run_miles, weekly_quality_session, weekly_mileage_target").eq("user_id", userId).single();
-    const arcLongRun = (arcState?.weekly_long_run_miles as number | null) ?? null;
-    const arcQuality = (arcState?.weekly_quality_session as string | null) ?? null;
-    const arcTarget = (arcState?.weekly_mileage_target as number | null) ?? null;
+    let arcLongRun = (arcState?.weekly_long_run_miles as number | null) ?? null;
+    let arcQuality = (arcState?.weekly_quality_session as string | null) ?? null;
+    let arcTarget = (arcState?.weekly_mileage_target as number | null) ?? null;
+
+    // Mid-week onboarding: the arc's Week 1 above describes a full Mon-Sun week, but the
+    // initial_plan message only covers today through this Sunday (days already elapsed
+    // can't be re-planned). Slice the same deterministic skeleton down to the remaining
+    // days and persist THAT as this week's stored facts, so the numbers Dean is about to
+    // state in the SMS are the same numbers training_state holds afterward — see the
+    // 2026-07-26 changelog entry for the bug this closes (arc wrote 8.5mi/25mi while Dean
+    // told the athlete 6mi/13mi, and nothing reconciled the two).
+    const initTimezone = (user.timezone as string | null) ?? "America/New_York";
+    const initLocalDow = new Date(new Intl.DateTimeFormat("en-CA", { timeZone: initTimezone }).format(new Date()) + "T12:00:00Z").getUTCDay();
+    const isMidWeekOnboard = initLocalDow !== 0; // today isn't Sunday — a partial week
+    if (isMidWeekOnboard && arcTarget != null && arcLongRun != null) {
+      const trainingDaysForStarter = (profile?.training_days as string[] | null) ?? [];
+      const crosstrainingToolsForStarter = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
+      const strengthForStarter = computeWeeklyStrength(profile as Record<string, unknown> | null);
+      const starterSkeleton = computeStarterWeekSkeleton({
+        trainingDays: trainingDaysForStarter,
+        weeklyTotalMiles: arcTarget,
+        longRunMiles: arcLongRun,
+        keyWorkoutText: arcQuality,
+        strengthDay: strengthForStarter.day,
+        crosstrainingTools: crosstrainingToolsForStarter,
+        timezone: initTimezone,
+      });
+      if (starterSkeleton.length > 0) {
+        const runSlots = starterSkeleton.filter(s => s.type !== "rest");
+        const starterTotal = Math.round(runSlots.reduce((sum, s) => sum + (s.distanceMiles ?? 0), 0) * 2) / 2;
+        const starterLongRunSlot = starterSkeleton.find(s => s.type === "long_run");
+        const starterQualitySlot = starterSkeleton.find(s => s.type === "quality");
+        const isMetricStarter = (profile?.preferred_units as string | null) === "metric";
+        const starterSessions = runSlots.map(s => ({
+          day: s.day,
+          date: s.date,
+          label: arcWeekSlotLabel(s, isMetricStarter),
+          type: (s.type === "cross_train" ? "cross_train" : s.type === "strength" ? "strength" : "run") as "run" | "strength" | "cross_train",
+          ...(s.type === "strength" && strengthForStarter.routineKey ? { routine_key: strengthForStarter.routineKey } : {}),
+        }));
+        arcTarget = starterTotal;
+        arcLongRun = starterLongRunSlot?.distanceMiles ?? arcLongRun;
+        arcQuality = starterQualitySlot ? arcWeekSlotLabel(starterQualitySlot, isMetricStarter) : arcQuality;
+        await supabase.from("training_state").update({
+          weekly_mileage_target: arcTarget,
+          weekly_long_run_miles: arcLongRun,
+          weekly_quality_session: arcQuality,
+          weekly_plan_sessions: starterSessions as unknown as import("@/lib/database.types").Json,
+        }).eq("user_id", userId);
+        console.log(`[initial_plan] mid-week onboard — sliced starter week: ${starterTotal}mi, long run ${arcLongRun}mi (arc week1 was ${arcState?.weekly_mileage_target}mi/${arcState?.weekly_long_run_miles}mi)`);
+      } else {
+        // No explicit training_days on file (schedule inferred from Strava frequency
+        // instead) — computeArcWeekSkeleton can't assign day-level slots without them.
+        // Fall back to a plain numeric proration by days remaining in the week so the
+        // stored total/long-run at least match what Dean is about to state, even without
+        // a day-by-day breakdown.
+        const daysToSundayForStarter = initLocalDow === 0 ? 0 : 7 - initLocalDow;
+        const daysRemainingForStarter = daysToSundayForStarter + 1;
+        const fraction = Math.min(1, daysRemainingForStarter / 7);
+        arcTarget = Math.round(arcTarget * fraction * 2) / 2;
+        arcLongRun = Math.round(arcLongRun * fraction * 2) / 2;
+        await supabase.from("training_state").update({
+          weekly_mileage_target: arcTarget,
+          weekly_long_run_miles: arcLongRun,
+        }).eq("user_id", userId);
+        console.log(`[initial_plan] mid-week onboard, no training_days — prorated starter week: ${arcTarget}mi, long run ${arcLongRun}mi (arc week1 was ${arcState?.weekly_mileage_target}mi/${arcState?.weekly_long_run_miles}mi)`);
+      }
+    }
     const isMetricArc = (profile?.preferred_units as string | null) === "metric";
     const fmtArcMi = (mi: number) => isMetricArc ? `${(mi * 1.60934).toFixed(1)} km` : `${mi} mi`;
     const arcLines: string[] = [];
@@ -4361,8 +4433,18 @@ OUTPUT CONTRACT:
               }
             }
             if (changed) {
+              const { data: adjState } = await supabase
+                .from("training_state")
+                .select("plan_adjustments")
+                .eq("user_id", userId)
+                .single();
+              const todayLabel = new Date().toISOString().slice(0, 10);
+              const newEntries = tagSessionSwaps.map(swap => `${swap.day} → "${swap.to}" (${todayLabel})`);
+              const priorEntries = ((adjState?.plan_adjustments as string | null) ?? "").split("\n").filter(Boolean);
+              const updatedAdjustments = [...priorEntries, ...newEntries].slice(-5).join("\n");
               await supabase.from("training_state").update({
                 weekly_plan_sessions: sessions as unknown as import("@/lib/database.types").Json,
+                plan_adjustments: updatedAdjustments,
               }).eq("user_id", userId);
             }
           } catch (err) {

@@ -8,6 +8,30 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-26 — Mid-week onboarding starter plan now reconciled with the stored arc, instead of drifting silently
+
+**Type:** Bug Fix
+**Reported by:** User feedback (same conversation as the strength-dosage entry below)
+**User feedback:** Concern that Dean was about to re-prescribe a full 6mi Sunday long run on top of a run already adjusted down for a shin issue — investigation showed the "6mi" itself was inconsistent with what was actually stored.
+**Root cause:** At onboarding, `generateAndSaveFullPlan` writes the full arc's Week 1 numbers into `training_state` (for this athlete: 25mi target, 8.5mi long run — already injury-scaled via `computeWeekOneVolumeCap`/`computeLongRunCap`). Separately, in the same request, Dean's `initial_plan` SMS is freehand-composed by Claude — which sensibly noticed that hitting a 25mi week in the ~2 days left before Sunday would be reckless with an active injury, and invented its own smaller numbers ("~13mi total, 6mi long run") for the partial week. Nothing reconciled the two: `training_state` kept the full arc numbers while Dean kept repeating the smaller ones from conversation memory in every later message (post-run recap included), because the PLAN CONSISTENCY rule already tells Dean to trust his own prior statements over re-deriving from scratch — it just had no way to know the stored fact and his prior statement had already diverged.
+**Fix / Change:** Added `computeStarterWeekSkeleton()` in `training-plan.ts`, reusing the same deterministic weekly-skeleton builder (`computeArcWeekSkeleton`) used everywhere else, sliced to just the days remaining before Sunday. For mid-week onboarding, `route.ts` now computes this sliced starter week, persists it to `training_state` (so `weekly_plan_sessions` is no longer left `null` for these athletes either), and feeds those exact numbers to Claude as the authoritative values for the `initial_plan` message — so what Dean says and what's stored are guaranteed to match. Falls back to a simple day-fraction proration when no explicit `training_days` is on file (schedule inferred from Strava frequency instead). Also manually reconciled one live athlete's `training_state` (onboarded before this fix shipped) to match what Dean had already told them.
+**Files changed:** `src/lib/training-plan.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
+## 2026-07-26 — Rehab strength dosage no longer inherits the full-circuit duration on partial mentions; "Active adjustments" fact now actually gets populated
+
+**Type:** Bug Fix
+**Reported by:** User feedback
+**User feedback:** "he's saying 20 to 30 minutes per session of toe taps and tibialis anterior raises, which seems really high" and (same conversation) concern that Dean might re-prescribe a full 6mi Sunday long run after the athlete and Dean had already agreed to cut a run short for a shin issue.
+**Root cause:**
+1. `strength-library.ts`'s `REHAB_FREQ` ("3–5x/week, 20-30 min per session") is a whole-routine dosage sized for a full ~9-exercise circuit, but `route.ts` prepended it unconditionally to every strength block regardless of whether Dean was sending the full routine or just naming 1-2 exercises in passing — so a mention of just toe taps + tibialis raises still carried the aggregate 20-30 min figure that only makes sense for the full routine.
+2. `training_state.plan_adjustments` — the FACTS-block field literally labeled "Active adjustments" that's meant to tell Dean about mid-week plan changes — was read every turn but never written anywhere in the codebase, so it always rendered as "None." Any mid-week `[SESSION_SWAP]`/`[LIGHTER_WEEK]` change was invisible to Dean's next-turn "clean facts," leaving continuity entirely dependent on Dean re-deriving it from raw conversation history (which the PLAN CONSISTENCY rule explicitly tells him not to trust over the stored plan).
+**Fix / Change:** No new prompt rules added, per the project's structural-fix-over-prompt-bloat philosophy. (1) Moved the `Frequency:` line out of the always-shown block and into the "send the full routine" instruction only, so a partial exercise mention now falls back to each exercise's own sets×reps spec instead of the routine-level duration. (2) Wired `plan_adjustments` to actually get written — `[SESSION_SWAP]` and `[LIGHTER_WEEK]` handlers now append a short dated note to it, and `syncWeekFromArc` clears it on each week's advance so stale notes don't leak into the next week. This makes "Active adjustments" a real, always-current fact instead of a permanently-empty field.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`
+
+---
+
 ## 2026-07-26 — Post-run: injury gate question no longer licenses a full paragraph; no dash characters at all
 
 **Type:** Bug Fix

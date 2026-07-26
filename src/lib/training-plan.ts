@@ -1177,6 +1177,28 @@ export function computeArcWeekSkeleton(params: {
 }
 
 /**
+ * When an athlete onboards mid-week, the arc's Week 1 (weeklyTotalMiles/longRunMiles)
+ * describes a full Mon-Sun week — but the initial_plan message only covers today through
+ * this Sunday, since days already elapsed this week can't be re-planned. Rather than let
+ * Claude free-hand a separate, smaller set of numbers for that partial week (which then
+ * never gets persisted and drifts from the arc's stored Week 1 values — see the 2026-07-26
+ * changelog entry), slice the same deterministic skeleton used for full weeks down to just
+ * the remaining days. The arc's Week 1 numbers already have any injury/layoff scale-down
+ * baked in (computeWeekOneVolumeCap/computeLongRunCap), so slicing rather than re-deriving
+ * keeps the starter week and the full arc as two views of one computation, not two.
+ */
+export function computeStarterWeekSkeleton(params: Parameters<typeof computeArcWeekSkeleton>[0]): ArcWeekSlot[] {
+  const full = computeArcWeekSkeleton(params);
+  const tz = params.timezone || "America/New_York";
+  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  const [ty, tm, td] = localStr.split("-").map(Number);
+  const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
+  const todayAbbrev = ORDERED_DAYS[todayDow === 0 ? 6 : todayDow - 1];
+  const todayIdx = ORDERED_DAYS.indexOf(todayAbbrev);
+  return full.filter(s => ORDERED_DAYS.indexOf(s.day) >= todayIdx);
+}
+
+/**
  * Read plan_sessions_all_weeks from the user's onboarding_data, compute absolute
  * dates for the given week number, and write to training_state.weekly_plan_sessions.
  * Called at upload time (week 1) and on each Sunday recap to advance to the next week.
@@ -1252,6 +1274,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
       weekly_mileage_target: week.total_miles || null,
       weekly_strength_day: strength.day,
       weekly_strength_routine_key: strength.routineKey,
+      plan_adjustments: null, // new week — mid-week swaps/lighter-week notes from last week no longer apply
     }).eq("user_id", userId);
   } else {
     const weeks = plan.weeks as DeanWeek[];
@@ -1290,6 +1313,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
       weekly_mileage_target: week.mileage_target || null,
       weekly_strength_day: strength.day,
       weekly_strength_routine_key: strength.routineKey,
+      plan_adjustments: null, // new week — mid-week swaps/lighter-week notes from last week no longer apply
       ...(planSessions.length > 0 ? { weekly_plan_sessions: planSessions as unknown as Json } : {}),
     }).eq("user_id", userId);
   }
@@ -1305,7 +1329,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
  * keyWorkoutText (quality sessions) is left as-is: it's baked in the athlete's preferred
  * units at plan-generation time already, same assumption Dean's own prompt makes.
  */
-function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
+export function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
   const fmtDist = (miles: number) => isMetric ? `${(miles * 1.60934).toFixed(1)}km` : `${miles}mi`;
   return slot.type === "long_run"
     ? `Long run ${fmtDist(slot.distanceMiles ?? 0)}`
