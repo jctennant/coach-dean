@@ -336,10 +336,10 @@ export function buildPostRunMileageLine(
   const todayMiles = activityDistanceMeters != null ? Math.round((activityDistanceMeters / 1609.34) * 10) / 10 : null;
 
   if ((isRun || isBike) && todayMiles != null && todayMiles > 0) {
-    return `${fmtMi(todayMiles)} ${isRun ? "run" : "bike"} today — ${weekSummary}.`;
+    return `${fmtMi(todayMiles)} ${isRun ? "run" : "bike"} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
   }
   const label = activityType ? (ACTIVITY_LABELS[activityType] ?? activityType) : "Session";
-  return `${label} today — ${weekSummary}.`;
+  return `${label} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
 }
 
 export interface RunGapSignal {

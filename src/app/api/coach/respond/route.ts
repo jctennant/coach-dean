@@ -2114,7 +2114,7 @@ NO GENERIC OPENERS. Never start with "Great week!", "Nice work!", "Awesome sessi
    (b) a genuinely unique or interesting observation about this specific run (only if something actually stands out — a real PR-adjacent effort, a notable HR/pace pattern, a meaningful comeback moment). Do not manufacture an observation just to fill this line.
 3. MOST RUNS GET NO SECOND LINE. If neither (a) nor (b) clearly applies, call deliver_message with message set to exactly [NO_REPLY] — sending only the mileage line is the correct, common outcome, not a missed opportunity. Do not stretch for generic praise or filler to avoid an empty second line.
 4. POSITIVE BY DEFAULT — SKIP EFFORT CORRECTIONS. No "keep easy runs truly easy", no "pull your HR down" / "run easier next time", no Z3/gray-zone warnings, no cardiac-drift "ease off" advice, no aerobic-base lecture, no generic praise ("Nice work!", "Great job!"). When in doubt, leave it out.
-5. INJURY & SAFETY STILL OVERRIDE ALL OF THE ABOVE. If there's an active injury, a real load-spike/overtraining risk, or the athlete mentions pain, tightness, or soreness (now or recently), say what needs to be said even if it runs longer than one sentence — that safety read is the one exception brevity and positivity don't apply to.`
+5. INJURY & SAFETY MONITORING STILL APPLIES — BUT STAYS SHORT TOO. If there's an active injury/return-to-run protocol requiring a gate question ("how did it feel"), or the athlete mentions pain, tightness, or soreness, you still need to ask it — but the exception is for ASKING THE QUESTION, not for writing a paragraph. Do NOT pair the gate question with a restated duration/HR recap or a "this is what recovery looks like" framing sentence — line 1 already covered the activity, and this rule's own point 1 already told you not to restate it. Correct: "How did the [body part] feel during the walk — any pain, or all clear?" (one sentence). Wrong: "X min at comfortable aerobic effort. HR averaged Y bpm, well under load threshold. This is exactly what recovery looks like. How did the [body part] feel?" (the safety question is one sentence; everything before it in that example is exactly the restated-analysis this contract exists to cut).`
     : "";
   const outputContract = trigger === "user_message"
     ? `\n\nOUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
@@ -3877,6 +3877,14 @@ OUTPUT CONTRACT:
   // Re-run in case the gate above replaced coachMessage with a repaired version
   // that reintroduced an em dash.
   coachMessage = normalizeEmDashes(coachMessage);
+
+  // post_run: no dash characters at all, not just em dashes — an en dash inside a numeric
+  // pain-scale range ("0.5–1/10") reads the same as an em dash on a small screen and isn't
+  // caught by normalizeEmDashes above (that function only targets sentence-joining "—", not
+  // en dashes used inside a range). A plain hyphen is unambiguous and never misread as a dash.
+  if (trigger === "post_run") {
+    coachMessage = coachMessage.replace(/–/g, "-");
+  }
 
   // Split into iMessage-sized chunks. Each part is sent as a separate text
   // with its own typing indicator so it feels like a real person composing

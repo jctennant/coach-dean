@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-26 — Post-run: injury gate question no longer licenses a full paragraph; no dash characters at all
+
+**Type:** Bug Fix
+**Reported by:** User (checked a real athlete's message in Supabase)
+**User feedback:** "Gwyneth just got a message from him post walk and it was longer - you can take a look at the supabase to see. Also no m dashes in the post run message please."
+
+**Root cause:** Pulled Gwyneth's actual `conversations` rows. Her 2026-07-26 post_run message (post-deploy of the same-day post-run rebuild) read: "Walk today. 12 cross-training sessions this week.\n\n19 min at comfortable aerobic effort. HR averaged 105 bpm, well under any load threshold. This is exactly what recovery looks like right now. Staying aerobic while your pelvis heals.\n\nHow's your pelvis feeling after this walk? Still at the 0.5–1/10 level, or back down closer to 0/10?" Line 1 (the new deterministic mileage line) was correct — she genuinely logged 12 separate Walk/Swim activities this week, confirmed against her `activities` rows, not a counting bug. The problem was line 2: she's in a return-to-run protocol with a mandatory per-session gate question ("how did it feel"), and the post_run OUTPUT CONTRACT's injury-override rule said the gate question could "run longer than one sentence" without capping what "longer" meant — so Dean restated duration/HR and a canned "this is what recovery looks like" framing sentence alongside the question, exactly the paragraph the rest of the contract exists to cut. Separately: the message's pain-scale range ("0.5–1/10") uses an en dash, not an em dash — `normalizeEmDashes` only targets em dashes ("—"), so it passed through untouched, and on a phone reads close enough to an em dash to register as one.
+**Fix / Change:**
+- Rewrote the post_run OUTPUT CONTRACT's injury/safety-override rule: the exception is for asking the gate question, not for writing a paragraph. Explicitly forbids restating duration/HR or "this is what recovery looks like" framing alongside the question, with a right/wrong example matching this exact bug.
+- `buildPostRunMileageLine()` (`src/lib/cross-training.ts`) no longer uses an em dash between the activity and the week summary — uses a period directly instead of relying on a later normalization pass to convert it.
+- Added a post_run-only pass in `route.ts` that strips any remaining en dash (–) to a plain hyphen after the existing em-dash normalization — covers numeric ranges like pain-scale notation that em-dash normalization was never meant to touch.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/cross-training.ts`
+
+---
+
 ## 2026-07-26 — Post-run messages rebuilt: deterministic mileage line + optional 1-sentence Dean commentary, positive by default
 
 **Type:** Feature / Improvement
