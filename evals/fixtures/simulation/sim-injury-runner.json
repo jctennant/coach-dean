@@ -12,8 +12,7 @@
       "goal": "return_to_running",
       "race_name": null,
       "race_date": null,
-      "training_days": ["monday", "wednesday", "saturday"],
-      "timezone": "America/Denver",
+      "days_per_week": 3,
       "strava_connected": false,
       "injury_notes": "returning from tibial stress fracture, cleared 3 weeks ago"
     }
@@ -21,9 +20,9 @@
   "today": "2026-04-06",
   "max_turns": 12,
   "evaluation_criteria": {
-    "required_fields": ["name", "goal", "training_days", "timezone", "injury_notes"],
+    "required_fields": ["name", "goal", "days_per_week", "injury_notes"],
     "goal_should_be": "return_to_running",
     "target_turns": 8,
-    "notes": "Dean must acknowledge the injury and collect injury_notes before signaling [READY]. Goal should be 'return_to_running' or 'injury_recovery'. Dean should NOT push Sam toward a specific race or treat this like normal training goal collection. Dean should be supportive and cautious in tone — no 'let's get you racing in 8 weeks' energy. If Sam asks whether something is safe, Dean should give a brief sensible answer before continuing."
+    "notes": "Dean must acknowledge the injury and collect injury_notes before signaling [READY]. Goal should be 'return_to_running' or 'injury_recovery'. Dean should NOT push Sam toward a specific race or treat this like normal training goal collection. Dean should be supportive and cautious in tone — no 'let's get you racing in 8 weeks' energy. If Sam asks whether something is safe, Dean should give a brief sensible answer before continuing. Timezone is intentionally NOT collected at this stage for non-Strava users — that happens in a separate post-plan 'awaiting_timezone' step (see handleTimezone in onboarding/handle/route.ts), so it is not a required field here. Dean is also intentionally instructed to ask only HOW MANY days a week (days_per_week), never which specific days — plans are day-agnostic by design (see route.ts:503,547) — so training_days (specific named days) is not a required field either."
   }
 }

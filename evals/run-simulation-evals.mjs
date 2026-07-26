@@ -317,20 +317,20 @@ Rules:
 - injury_management: what the athlete is doing for a current injury (PT, rest, ice, etc.) — only from their own words.
 - reported_during: when the pain occurs relative to running — 'during', 'after', or 'both'.
 - active_injury: true if the athlete describes a CURRENT injury they're managing right now. False/null for historical/resolved injuries.
-- injury_severity: mild=annoyance, can run modified. moderate=skipping/modifying some sessions. severe=cannot run at all.
-- injury_body_part_current: body part of the CURRENT active injury (e.g. "left shin"). Null for historical injuries.
-- injury_pain_character: for shin/tibia pain only — 'diffuse' if a general ache along the bone that eases with rest (typical shin splints), 'localized_or_rest_pain' if one specific painful spot or pain even at rest/walking/night (possible stress fracture). Null if not shin-related or not mentioned.
+- injury_severity: mild=noticeable but running is UNCHANGED — same distance and effort as normal, just aware of it. moderate=training has ALREADY changed because of it — cutting runs short, skipping sessions, reducing pace/distance, or it's been going on for multiple weeks without resolving. severe=cannot run at all right now. If the athlete describes any actual change to their running (shorter runs, skipped days, reduced volume) or a persistent multi-week issue, that is moderate, not mild — mild is reserved for "I notice it but haven't changed anything."
+- injury_body_part_current: body part of the CURRENT active injury. ALWAYS include laterality (left/right/bilateral) whenever the athlete states it — e.g. if they say "my left hamstring", extract "left hamstring", not just "hamstring". Never drop the side. Null for historical injuries.
+- injury_pain_character: for shin/tibia pain only — 'diffuse' if the athlete has EXPLICITLY described the pain as spread along the bone AND said it eases with rest. A bare label like "shin splints" is NOT enough on its own — a self-diagnosis doesn't mean the actual pain character was described. 'localized_or_rest_pain' if one specific painful spot or pain even at rest/walking/night (possible stress fracture). Null unless the athlete has actually described the location/character of the pain.
 - Only extract data clearly stated in the conversation. Do not infer or guess.
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets only for road races at those distances. IMPORTANT: if the athlete says they have no committed race — only aspirational/eventual talk ("maybe a marathon someday", "thinking about eventually") — use "return_to_running" or "general_fitness", NOT the race distance. The goal must reflect what they are actually training for right now, not what they might do later.
 - external_plan_description: capture a brief factual summary when the athlete describes a training plan they're currently following (plan source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan. Do NOT capture a plan Dean is going to build. (has_existing_plan / wants_plan are NOT extracted here — they come from Dean's [MODE:...] tag, which the runner parses separately.)
-- training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"])
+- training_days: lowercase full names only (e.g. ["tuesday","thursday","saturday","sunday"]). ONLY extract when the athlete names specific day(s). A bare frequency ("3x a week", "three days a week") is NOT training_days — that goes in days_per_week instead. Do NOT guess or invent which specific days those runs fall on. Null unless specific days were actually named.
 - goal_time_minutes: total float minutes. "1:30" → 90.0, "17:40" → 17.67, "2:05:00" → 125.0
 - race_date: use the most specific date mentioned. If a specific date (day + month) was stated by either participant, use that exact date. If only a month was given with no specific day (e.g. "in June", "sometime in July"), return null — do NOT default to the 1st of that month. Only extract a first-of-month date if someone explicitly said "the 1st" or "June 1st". Today is ${today}.
 - recent_race_distance_km: distance of their most-cited PR or recent race (not the goal race)
 - recent_race_time_minutes: finishing time of that race in total float minutes. M:SS format means minutes:seconds — "18:45" → 18.75, "38:20" → 38.33. H:MM:SS or H:MM format — "1:05:30" → 65.5, "1:52" → 112.0. Never convert M:SS as if the first number were hours.
 - timezone: IANA string when a location is mentioned (e.g. "Chicago, IL" → "America/Chicago", "Seattle, WA" → "America/Los_Angeles", "Provo, UT" → "America/Denver")
 - other_races: only B/C secondary races, not the main A race.
-- ultra_race_history: summarize any ultra or trail race background mentioned (e.g. "3 marathons PR 3:45, 2 trail halves, no prior ultras"). Populate whenever the athlete describes their racing/ultra history, even if they say they have none.
+- ultra_race_history: summarize the athlete's actual racing background (marathons run, trail races done, prior ultras, or explicitly no prior ultras) ONLY when they've described it themselves. The goal itself being "first ultra" is NOT background — do not infer "no prior ultras" just because the athlete called it their first ultra or said they're new to the distance. Null until the athlete has actually described what races (if any) they've run before.
 - strava_skipped: set to true if the athlete explicitly says they don't have Strava, won't use it, or skip it. Leave null if the topic hasn't come up.`,
     messages: [{ role: "user", content: transcript }],
   });
@@ -430,30 +430,49 @@ Then close with exactly: "Has injury ever been a factor for you, or anything you
 // mention is no longer enough on its own to skip the follow-up loop.
 // ─────────────────────────────────────────────
 function injuryShouldComplete(collected, followUpCount, lastUserReply) {
-  const noInjury = /\b(no injury|no injuries|no issues|no pain|no niggles|all good|nothing|clean|healthy|fine|never|n\/a)\b/i
+  // Allows one inserted qualifier word ("no current issues", "no major injuries") rather
+  // than requiring the noun immediately after "no" — mirrors route.ts (2026-07-26,
+  // sim-5k-pr-hunter). A generalized pattern, not another phrase added to the list.
+  const noInjury = /\bno\s+(?:\w+\s+)?(injury|injuries|issues|pain|niggles|problems)\b|\b(all good|nothing|clean|healthy|fine|never|n\/a)\b/i
     .test(lastUserReply || "");
-  // Red-flag screen must be answered too, same as severity — otherwise an early/inferred
-  // severity value can short-circuit completion before the stress-fracture screen is asked
-  // (this was a real gap found by sim-shin-splint-trail-race on first run: injury_severity
-  // got inferred before injury_pain_character was ever asked about, and completion fired
-  // with the red-flag question skipped entirely).
+  // Trusting a populated injury_pain_character (rather than requiring the dedicated question
+  // to have literally been asked) relies on the extraction prompt only setting this field from
+  // an EXPLICIT description of location/rest-pain, never inferred from a bare "shin splints"
+  // label alone — forcing a redundant ask when the athlete already explicitly volunteered both
+  // halves reads as not having listened.
   const bodyPartForGate = (collected.injury_body_part_current || "").toLowerCase();
   const isShinRelatedForGate = /shin|tibia/.test(bodyPartForGate);
   const redFlagScreenAnswered = !isShinRelatedForGate || !!collected.injury_pain_character;
-  // Ultra goals (30k+) require ultra/trail background before [READY], but a Strava connect
-  // mid-conversation routes straight into this deterministic pipeline and can skip that
-  // question entirely if it hadn't come up yet (2026-07-26 gap, sim-ultra-first-timer).
+  // Gated on ultra_background_asked (a question actually having been sent), not just a
+  // non-null ultra_race_history — extraction repeatedly treated the goal framing itself
+  // ("this is my first ultra") as if it were racing background and filled in a plausible-
+  // sounding value with no dedicated question ever asked. Two prompt-wording tightenings on
+  // the extraction instruction each failed to fully stop this, so this is a tracked-ask gate
+  // instead of a third wording iteration (2026-07-26, sim-ultra-first-timer).
   const isUltraGoalForGate = !!collected.goal && ULTRA_GOALS.includes(collected.goal);
-  const ultraBackgroundAnswered = !isUltraGoalForGate || !!collected.ultra_race_history;
+  const ultraBackgroundAnswered = !isUltraGoalForGate || !!collected.ultra_background_asked;
+  // Requiring reported_during here too (not just severity) closes a gap where an athlete who
+  // flagged an injury with any free-text description could reach completion the moment
+  // severity alone was known, skipping whether the pain even happens during runs at all
+  // (2026-07-26, sim-active-injury-marathon).
   const injuryAlreadyKnown = !!(collected.injury_history || collected.current_niggles || collected.injury_notes)
     && !!collected.injury_severity
+    && !!collected.reported_during
     && redFlagScreenAnswered
     && ultraBackgroundAnswered;
   const hasAllSymptomFields = !!(collected.injury_body_part_current && collected.injury_severity && collected.reported_during)
     && redFlagScreenAnswered
     && ultraBackgroundAnswered;
+  // A purely historical, already-resolved injury (injury_history present, nothing active or
+  // currently bothering them) doesn't need the current-symptom workup — body part, severity,
+  // and reported_during only make sense for something actually happening right now. Mirrors
+  // route.ts (2026-07-26, sim-5k-pr-hunter).
+  const historicalInjuryOnlyNoActiveIssue = !!collected.injury_history
+    && collected.active_injury !== true
+    && !collected.current_niggles
+    && ultraBackgroundAnswered;
   const hitFollowUpCap = followUpCount >= (ultraBackgroundAnswered ? 2 : 3);
-  return (noInjury && ultraBackgroundAnswered) || injuryAlreadyKnown || hasAllSymptomFields || hitFollowUpCap;
+  return (noInjury && ultraBackgroundAnswered) || injuryAlreadyKnown || hasAllSymptomFields || historicalInjuryOnlyNoActiveIssue || hitFollowUpCap;
 }
 
 // Mirrors the missingFields priority list in handleInjuryIntake, including the
@@ -477,13 +496,29 @@ function injuryMissingFields(collected) {
   }
   if (!collected.injury_severity) missingFields.push("how limiting it is right now — can they run modified, or not at all");
   const isUltraGoal = !!collected.goal && ULTRA_GOALS.includes(collected.goal);
-  if (isUltraGoal && !collected.ultra_race_history) {
+  if (isUltraGoal && !collected.ultra_background_asked) {
     missingFields.push("their ultra/trail race background — how many ultras they've done, or trail race experience, or if this is their first");
   }
   return missingFields;
 }
 
-async function getInjuryFollowUp(missingFields, followUpCount, noInjuryUltraOnly) {
+async function getInjuryFollowUp(missingFields, followUpCount, noInjuryUltraOnly, lastUserReply, isShinRedFlagPending) {
+  // Shin/tibia red-flag screen: asked verbatim, not left to Haiku to compress into one
+  // question — an earlier version let the two-part ask (location AND rest-pain) get
+  // paraphrased down to just one half (usually dropping location), so even a clear answer
+  // couldn't satisfy the injury_pain_character extraction criteria. Mirrors the same
+  // deterministic branch in handleInjuryIntake (2026-07-26, sim-shin-splint-trail-race).
+  if (isShinRedFlagPending) {
+    return "Is the pain one specific spot, or a general ache along the shin? And does it hurt at all when you're resting or just walking, not just during runs?";
+  }
+
+  // Mirrors handleInjuryIntake's messages: [{ role: "user", content: message }] — the real
+  // last inbound SMS anchors the call. A placeholder like "(continue)" gives Haiku nothing
+  // to ground the question in, which let it produce a confused meta-response instead of an
+  // actual question (found via sim-shin-splint-trail-race: "I need the athlete's injury
+  // description to ask my follow-up question" leaked straight into the SMS, 2026-07-26).
+  const userContent = lastUserReply || "(continue)";
+
   // "no injury" + missing ultra background: not an injury follow-up at all — mirrors the
   // plain race-background question route.ts asks in this branch.
   if (noInjuryUltraOnly) {
@@ -494,7 +529,7 @@ async function getInjuryFollowUp(missingFields, followUpCount, noInjuryUltraOnly
 
 ONE question only. No advice, no reassurance. Just the question.
 Plain text, 1–2 sentences max.`,
-      messages: [{ role: "user", content: "(continue)" }],
+      messages: [{ role: "user", content: userContent }],
     });
     return response.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim()
       || "Have you run any ultras before, or would this be your first?";
@@ -514,27 +549,37 @@ Plain text, 1–2 sentences max.`;
     model: AGENT_MODEL,
     max_tokens: 120,
     system,
-    messages: [{ role: "user", content: "(continue)" }],
+    messages: [{ role: "user", content: userContent }],
   });
   return response.content.filter((b) => b.type === "text").map((b) => b.text).join("").trim()
     || "How long has it been bothering you, and do you feel it during runs, after, or both?";
 }
 
 // ─────────────────────────────────────────────
-// Mirrors buildDeterministicCompletion's active-injury path in onboarding/handle/route.ts
-// (simplified — the fixtures this covers never have an uploaded plan, so the
-// Sonnet-synthesis branch in the real code never fires for them).
+// Mirrors buildDeterministicCompletion in onboarding/handle/route.ts. Previously only
+// ported the opening + active-injury branch, which meant any fixture with no active injury
+// (historical injury_history only, or nothing at all) produced a bare one-line message the
+// judge repeatedly flagged as "truncated"/"abrupt" — a harness fidelity gap, not a real
+// production behavior, since production always adds the Strava observation line and/or an
+// injury-history acknowledgment in these cases. Now ports the observation line (using
+// weekly_miles — this harness doesn't compute HR-zone/mileage-trend stats, so that part of
+// production's observation branch has no equivalent here) and the historical/niggles
+// injuryNote fallbacks, plus the closing sentence. (2026-07-26, sim-5k-pr-hunter)
 // ─────────────────────────────────────────────
 function buildCompletionMessage(collected, today) {
   const firstName = (collected.name || "Hey").split(" ")[0];
   const raceName = collected.race_name;
   const raceDate = collected.race_date;
+  const avgMiles = collected.weekly_miles || null;
+  const currentNiggles = collected.current_niggles || null;
+  const injuryHistory = collected.injury_history || null;
   const activeInjury = collected.active_injury === true;
   const injuryBodyPart = collected.injury_body_part_current || null;
   const injurySeverity = collected.injury_severity || null;
   const injuryManagement = collected.injury_management || null;
   const injuryPainCharacter = collected.injury_pain_character || null;
   const reportedDuring = collected.reported_during || null;
+  const stravaConnected = !!collected.strava_connected;
 
   let opening = "";
   if (raceName && raceDate) {
@@ -545,6 +590,8 @@ function buildCompletionMessage(collected, today) {
   } else {
     opening = `${firstName}, you're set up.`;
   }
+
+  const observation = avgMiles ? `Your base at ${avgMiles} mi/week gives us room to work.` : "";
 
   let injuryNote = "";
   if (activeInjury && injuryBodyPart) {
@@ -564,9 +611,30 @@ function buildCompletionMessage(collected, today) {
         : injurySeverity === "moderate" ? "Given how it's affecting training, " : "";
       injuryNote = `${severityNote}Before your next run, do ${action}.${duringNote}`;
     }
+  } else if (currentNiggles && !/\b(none|no injury|healthy|fine)\b/i.test(currentNiggles)) {
+    injuryNote = "Injury history noted — it factors into how I set your volume and easy/hard balance.";
+  } else if (injuryHistory && !/\b(none|no injury|no injuries|healthy|fine)\b/i.test(injuryHistory)) {
+    injuryNote = "Injury history noted — it factors into how I set your volume and easy/hard balance.";
   }
 
-  return [opening, injuryNote].filter(Boolean).join(" ");
+  const parts = [opening];
+  if (activeInjury && injuryNote) {
+    parts.push(injuryNote);
+    if (observation) parts.push(observation);
+  } else {
+    if (observation) parts.push(observation);
+    if (injuryNote) parts.push(injuryNote);
+  }
+
+  if (activeInjury && injuryBodyPart) {
+    // No additional closing sentence — mirrors route.ts: the plan-delivery message closes the loop.
+  } else if (stravaConnected) {
+    parts.push("After your next run, I'll send a coaching note — what it means for the week ahead and what to watch for. That's where we start.");
+  } else {
+    parts.push("Your first coaching note lands after your first run — what it means for the week ahead and what to watch for.");
+  }
+
+  return parts.join(" ");
 }
 
 // ─────────────────────────────────────────────
@@ -575,13 +643,33 @@ function buildCompletionMessage(collected, today) {
 async function getDeanResponse(collected, stravaContext, history, isFirstResponse, today) {
   const systemPrompt = buildDeanSystemPrompt(collected, stravaContext, isFirstResponse, today);
 
+  // race_date_verified (not mere race_date presence) gates the lookup — mirrors route.ts.
+  // Extraction pulls race_date from "whichever date is stated... athlete's or Dean's",
+  // including the athlete's own unverified claim, on the SAME turn before Dean has said
+  // anything back. Gating on race_date alone meant an athlete stating a date made
+  // collected.race_date non-null immediately, permanently defeating the lookup (and the
+  // forced tool_choice) even though nothing had actually been searched yet. Confirmed via
+  // direct reproduction, 2026-07-26: two real, similarly-named races existed for the same
+  // athlete-stated race, and Dean never got a chance to search because the gate was already
+  // closed by the raw extraction pass.
+  const raceNameChangedSinceVerification = collected.race_name !== collected.race_date_verified_for;
+  const needsRaceDateLookup = !!collected.race_name && (!collected.race_date_verified || raceNameChangedSinceVerification);
+
   const response = await client.messages.create({
     model: DEAN_MODEL,
     max_tokens: 600,
     system: systemPrompt,
     messages: history,
     tools: [{ type: "web_search_20250305", name: "web_search" }],
+    ...(needsRaceDateLookup ? { tool_choice: { type: "tool", name: "web_search" } } : {}),
   });
+
+  // tool_choice forces the search to have happened this turn — mark it verified so later
+  // turns don't force a redundant re-search once the date is confirmed.
+  if (needsRaceDateLookup) {
+    collected.race_date_verified = true;
+    collected.race_date_verified_for = collected.race_name;
+  }
 
   // Mirror route.ts: take only post-search text blocks
   // The hosted web_search tool returns "server_tool_use" blocks (not "tool_use")
@@ -737,11 +825,17 @@ async function runSimulation(fixture, verbose) {
       let followUpCount = 0;
       while (!injuryShouldComplete(collected, followUpCount, userReply)) {
         const missingFields = injuryMissingFields(collected);
-        const noInjuryDetected = /\b(no injury|no injuries|no issues|no pain|no niggles|all good|nothing|clean|healthy|fine|never|n\/a)\b/i
+        const noInjuryDetected = /\bno\s+(?:\w+\s+)?(injury|injuries|issues|pain|niggles|problems)\b|\b(all good|nothing|clean|healthy|fine|never|n\/a)\b/i
           .test(userReply || "");
         const isUltraGoal = !!collected.goal && ULTRA_GOALS.includes(collected.goal);
-        const noInjuryUltraOnly = noInjuryDetected && isUltraGoal && !collected.ultra_race_history;
-        const followUpText = await getInjuryFollowUp(missingFields, followUpCount, noInjuryUltraOnly);
+        const noInjuryUltraOnly = noInjuryDetected && isUltraGoal && !collected.ultra_background_asked;
+        const bodyPartLower = (collected.injury_body_part_current || "").toLowerCase();
+        const isShinRedFlagPending = /shin|tibia/.test(bodyPartLower) && !collected.injury_pain_character;
+        // Only entry left in missingFields once every earlier injury-symptom gap is filled —
+        // used to mark the tracked-ask flag when the general follow-up ends up asking it.
+        const onlyMissingIsUltraBackground = isUltraGoal && !collected.ultra_background_asked && missingFields.length === 1;
+        if (noInjuryUltraOnly || onlyMissingIsUltraBackground) collected.ultra_background_asked = true;
+        const followUpText = await getInjuryFollowUp(missingFields, followUpCount, noInjuryUltraOnly, userReply, isShinRedFlagPending);
         history.push({ role: "assistant", content: followUpText });
         followUpCount++;
         if (verbose) console.log(`\n  Dean (injury intake): ${followUpText}`);

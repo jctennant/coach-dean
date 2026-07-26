@@ -1,20 +1,18 @@
 {
   "id": "sim-ultra-first-timer",
-  "description": "First-time 50K runner with marathon background. Tests ultra background collection and goal classification.",
+  "description": "First-time 100K ultra runner with marathon background. Tests ultra background collection and goal classification.",
   "category": "simulation",
   "persona": {
     "name": "Jordan",
     "opening_message": "Hey! Friend recommended you. I want to try my first ultra this year.",
-    "user_agent_prompt": "You are Jordan, texting a running coach. Background (reveal naturally):\n- Name: Jordan\n- Goal: Rocky Raccoon 50K in Huntsville, TX — February 7, 2027. It's your first ultra.\n- Marathon background: ran 3 marathons, PR is 3:45. Also done a couple trail half marathons. Zero ultras.\n- Training days: Monday, Wednesday, Thursday, Saturday, Sunday (5 days)\n- You have Strava — connect it when asked\n- You're in Houston, TX\n- No current injuries but mention your left knee gets 'a little tight on long downhills' when asked about injuries/limitations\n- Weekly mileage: around 45 miles/week currently\n\nBehavior: You're excited but a bit uncertain about what an ultra requires. You ask one question back when Dean mentions back-to-back long runs ('what does that mean exactly?'). Answer questions naturally, give slightly more context than a terse user but don't dump everything at once. Text casually.",
+    "user_agent_prompt": "You are Jordan, texting a running coach. Background (reveal naturally):\n- Name: Jordan\n- Goal: Rocky Raccoon 100K in Huntsville, TX — February 6, 2027. It's your first ultra.\n- Marathon background: ran 3 marathons, PR is 3:45. Also done a couple trail half marathons. Zero ultras.\n- Training days: Monday, Wednesday, Thursday, Saturday, Sunday (5 days)\n- You have Strava — connect it when asked\n- You're in Houston, TX\n- No current injuries but mention your left knee gets 'a little tight on long downhills' when asked about injuries/limitations\n- Weekly mileage: around 45 miles/week currently\n\nBehavior: You're excited but a bit uncertain about what an ultra requires. You ask one question back when Dean mentions back-to-back long runs ('what does that mean exactly?'). Answer questions naturally, give slightly more context than a terse user but don't dump everything at once. Text casually.",
     "strava_connected": true,
     "strava_summary": "Strava connected Jordan! I can see your recent runs — 183 miles across 28 runs in the last 4 weeks. Nice training load. That's great context.",
     "ground_truth": {
       "name": "Jordan",
-      "goal": "50k",
-      "race_name": "Rocky Raccoon 50K",
+      "goal": "100k",
+      "race_name": "Rocky Raccoon 100K",
       "race_date": "2027-02-06",
-      "training_days": ["monday", "wednesday", "thursday", "saturday", "sunday"],
-      "timezone": "America/Chicago",
       "strava_connected": true,
       "ultra_race_history": "3 marathons (PR 3:45), trail halves, no prior ultras",
       "injury_notes": "left knee tightness on long downhills"
@@ -23,10 +21,10 @@
   "today": "2026-04-06",
   "max_turns": 14,
   "evaluation_criteria": {
-    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone", "ultra_race_history"],
-    "goal_should_be": "50k",
+    "required_fields": ["name", "goal", "race_name", "race_date", "ultra_race_history"],
+    "goal_should_be": "100k",
     "race_date_should_be": "2027-02-06",
     "target_turns": 9,
-    "notes": "Dean must ask about ultra/trail background before signaling [READY] — this is required for 50K+ goals. Goal should be '50k' not 'marathon' or 'trail_race'. Injury notes about the knee should be captured. Race date must come from web search (Rocky Raccoon 50K 2027), not assumed. Dean should handle Jordan's clarifying question ('what does that mean?') naturally before continuing."
+    "notes": "Dean must ask about ultra/trail background before signaling [READY] — this is required for 50K+ goals. Goal should be '100k' not 'marathon' or 'trail_race'. Injury notes about the knee should be captured. Race date must come from web search (Rocky Raccoon 100K 2027, Feb 6), not assumed. Dean should handle Jordan's clarifying question ('what does that mean?') naturally before continuing. Training days/frequency is intentionally NOT asked once Strava is connected — production only asks this when Strava has no data (route.ts:503) — so neither training_days nor days_per_week is required here. Timezone for Strava-connected users is set automatically from the athlete's Strava profile location during the OAuth callback (strava/callback/route.ts), a side channel this conversation-only simulation doesn't model — so it is not a required field here either. Note: an earlier version of this fixture used 'Rocky Raccoon 50K' — that distance/name combination doesn't actually exist for this race (the real Feb 6 Rocky Raccoon event is 100M/100K; the 50K distance belongs to a separate real race, 'Rocky 50', on a different February weekend at the same venue). Dean correctly disambiguating between the two real races when given the old 50K premise was in fact the CORRECT behavior, not a bug — the fixture's own ground truth was the thing that didn't match reality. Switched to 100K, which is real and unambiguous, so the fixture tests ultra-onboarding quality rather than incidentally testing a genuine real-world race-name collision."
   }
 }

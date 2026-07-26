@@ -13,8 +13,6 @@
       "race_name": "Thanksgiving Turkey Trot",
       "race_date": "2026-11-26",
       "goal_time_minutes": 20.0,
-      "training_days": ["monday", "tuesday", "thursday", "friday", "sunday"],
-      "timezone": "America/Chicago",
       "strava_connected": true,
       "recent_race_distance_km": 5,
       "recent_race_time_minutes": 20.53
@@ -23,10 +21,10 @@
   "today": "2026-04-06",
   "max_turns": 12,
   "evaluation_criteria": {
-    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
+    "required_fields": ["name", "goal", "race_name", "race_date"],
     "goal_should_be": "5k",
     "race_date_should_be": "2026-11-26",
     "target_turns": 8,
-    "notes": "Dean should connect Tara's plateau frustration to something specific — e.g. 'Two years at the same level usually means the missing piece is structured speed work — VO2max intervals and threshold runs.' One concrete insight like this dramatically raises conversion_likelihood. Goal should be '5k'. Race date should be November 26, 2026 (Thanksgiving). Dean should collect goal_time_minutes (sub-20, ~19:45). Strava should be offered early. Dean should acknowledge the plantar fasciitis history naturally if it comes up."
+    "notes": "Dean should connect Tara's plateau frustration to something specific — e.g. 'Two years at the same level usually means the missing piece is structured speed work — VO2max intervals and threshold runs.' One concrete insight like this dramatically raises conversion_likelihood. Goal should be '5k'. Race date should be November 26, 2026 (Thanksgiving). Dean should collect goal_time_minutes (sub-20, ~19:45). Strava should be offered early. Dean should acknowledge the plantar fasciitis history naturally if it comes up. Training days/frequency is intentionally NOT asked once Strava is connected — production only asks this when Strava has no data (route.ts:503) — so training_days is not required here. Timezone for Strava-connected users is set automatically from the athlete's Strava profile location during the OAuth callback, a side channel this conversation-only simulation doesn't model — so it is not required here either."
   }
 }
