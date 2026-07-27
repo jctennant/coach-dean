@@ -8,6 +8,8 @@ import { buildHRZoneContext, deriveZones, type LTHRConfidence } from "@/lib/hr-z
 import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { sendSMS, sendMediaSMS, startTyping, typingDurationMs } from "@/lib/linq";
+import { sendPoll, isPhotonProvider } from "@/lib/photon";
+import { RTR_GATE_POLL } from "@/lib/polls";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
@@ -2888,10 +2890,14 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
     // Suppress zone 3 / gray zone lines from the block when:
-    // (a) athlete is on injury hold — irrelevant while they can't run, or
-    // (b) gray zone was mentioned in any of the last 10 coaching messages.
+    // (a) athlete is on injury hold — irrelevant while they can't run,
+    // (b) gray zone was mentioned in any of the last 10 coaching messages, or
+    // (c) trigger is post_run — the OUTPUT CONTRACT there is positive-by-default and
+    // explicitly forbids Z3/gray-zone/moderate-effort commentary, so the data shouldn't
+    // even be visible to tempt a mention (this is what produced "Most of your runs land
+    // in the moderate zone (62%...)" in a post-run message).
     const injuryHoldActive = !!((state?.injury_hold_since as string | null));
-    const suppressGrayZone = injuryHoldActive || grayZoneMentionedRecently;
+    const suppressGrayZone = injuryHoldActive || grayZoneMentionedRecently || trigger === "post_run";
     const effectiveLongitudinalBlock = suppressGrayZone
       ? longitudinalBlock
           .split("\n")
@@ -2904,6 +2910,13 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     if (longitudinalSignals?.requiredMentions.length) {
       const loadMentionedRecently = recentPostRunInsights.includes("load context / volume");
       const filteredMentions = longitudinalSignals.requiredMentions.filter(m => {
+        // post_run's OUTPUT CONTRACT (rule 4) is positive-by-default and explicitly
+        // forbids Z3/gray-zone/moderate-effort commentary — forcing this acknowledgment
+        // for post_run directly contradicted that contract, which is what produced
+        // "Most of your runs land in the moderate zone (62%...)" in a post-run message.
+        // Zone 3 trap is still worth surfacing in weekly_recap, where more coaching
+        // detail is expected, so only post_run drops it unconditionally.
+        if (trigger === "post_run" && /zone.?3|gray.?zone|intensity trap|moderate effort/i.test(m)) return false;
         if (suppressGrayZone && /zone.?3|gray.?zone|intensity trap|moderate effort/i.test(m)) return false;
         // A load spike is real coaching the first time, but nagging the second.
         // If load/volume was already the lens in a recent post-run, drop the forced
@@ -4041,6 +4054,35 @@ OUTPUT CONTRACT:
       .from("users")
       .update({ linq_chat_id: learnedChatId })
       .eq("id", userId);
+  }
+
+  // RTR gate poll: for Photon/iMessage athletes in return-to-run phase 1/2, the free-text
+  // gate question was suppressed from the message above (see the RTR phase prompt block) —
+  // send it here instead as a separate poll bubble. Best-effort: a failure here (e.g. the
+  // Spectrum plan doesn't support polls) must never break the coaching message that already
+  // sent successfully above.
+  const rtrPhaseForPoll = (state as Record<string, unknown> | null)?.return_to_run_phase as number | null;
+  if (trigger === "post_run" && isPhotonProvider() && (rtrPhaseForPoll === 1 || rtrPhaseForPoll === 2)) {
+    try {
+      const pollChatId = chatId ?? learnedChatId;
+      if (pollChatId) await startTyping(pollChatId);
+      await sendPoll(user.phone_number, RTR_GATE_POLL.title, RTR_GATE_POLL.options);
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: `[Poll] ${RTR_GATE_POLL.title}`,
+        message_type: "coach_response",
+      });
+      await sendSMS(user.phone_number, RTR_GATE_POLL.fallbackHint);
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: RTR_GATE_POLL.fallbackHint,
+        message_type: "coach_response",
+      });
+    } catch (err) {
+      console.error("[coach/respond] RTR gate poll failed:", err);
+    }
   }
 
   // Strength routine images: either Dean emitted [STRENGTH_POSTER] after listing the full
@@ -6692,13 +6734,20 @@ ${state?.injury_hold_since ? `INJURY HOLD ACTIVE since ${state.injury_hold_since
   const rtrPhase = (state as Record<string, unknown> | null)?.return_to_run_phase as number | null;
   if (!rtrPhase) return "";
   const bodyPart = (profile?.injury_body_part as string | null) ?? "injury area";
+  // On post_run, Photon/iMessage athletes get the gate question as a separate poll
+  // (sent right after this message — see RTR_GATE_POLL / sendPoll below), not as a
+  // free-text question here — so drop the "ask ONE gate question" line for that
+  // combination specifically. The advancement judgment stays active on every trigger
+  // (including the user_message turn where a poll answer, synthesized to text by the
+  // webhook, actually gets read) since that's a separate turn from this one.
+  const gateQuestionSuppressed = isPhotonProvider() && trigger === "post_run";
   if (rtrPhase === 1) {
-    return `\nRETURN-TO-RUN PHASE 1 ACTIVE: Athlete is returning from injury (${bodyPart}). Walk/run protocol in effect. Rules:\n- Prescribe ONLY walk/run intervals: "Run 2 min, walk 1 min, repeat 6×" (~20–25 min). No continuous easy runs yet.\n- Max 3 sessions this week. Zero quality sessions, zero tempo, zero long run.\n- After each completed session, ask ONE gate question: "How did the ${bodyPart} feel — any pain during or after, or all clear?"\n- If the athlete reports 2 consecutive pain-free sessions: append [RTR_ADVANCE] at the end of your response to advance to phase 2.\n- If they report ANY pain during a session: do NOT advance. Assess severity — if significant, use [INJURY_HOLD] to pause.`;
+    return `\nRETURN-TO-RUN PHASE 1 ACTIVE: Athlete is returning from injury (${bodyPart}). Walk/run protocol in effect. Rules:\n- Prescribe ONLY walk/run intervals: "Run 2 min, walk 1 min, repeat 6×" (~20–25 min). No continuous easy runs yet.\n- Max 3 sessions this week.${gateQuestionSuppressed ? " Zero quality sessions, zero tempo, zero long run. Do NOT ask how the session felt — that question is sent separately." : ` Zero quality sessions, zero tempo, zero long run.\n- After each completed session, ask ONE gate question: "How did the ${bodyPart} feel — any pain during or after, or all clear?"`}\n- If the athlete reports 2 consecutive pain-free sessions: append [RTR_ADVANCE] at the end of your response to advance to phase 2.\n- If they report ANY pain during a session: do NOT advance. Assess severity — if significant, use [INJURY_HOLD] to pause.`;
   }
   if (rtrPhase === 2) {
     const preMiles = (state as Record<string, unknown> | null)?.pre_injury_mileage_target as number | null;
     const cap = preMiles ? Math.round(preMiles * 0.55) : null;
-    return `\nRETURN-TO-RUN PHASE 2 ACTIVE: Athlete is in graduated return to running (${bodyPart}). Rules:\n- Easy running only. No tempo, no intervals, no race-pace effort.\n${cap ? `- Mileage cap this week: ~${cap} miles. Do NOT prescribe sessions that would exceed this total.\n` : ""}- After each run, ask the gate question: "How's the ${bodyPart} feeling — anything during or after the run?"\n- If the athlete completes the week pain-free: append [RTR_ADVANCE] at the end of your response to graduate to a full plan.\n- If they report pain: reassess with [LIGHTER_WEEK] or [INJURY_HOLD] depending on severity.`;
+    return `\nRETURN-TO-RUN PHASE 2 ACTIVE: Athlete is in graduated return to running (${bodyPart}). Rules:\n- Easy running only. No tempo, no intervals, no race-pace effort.\n${cap ? `- Mileage cap this week: ~${cap} miles. Do NOT prescribe sessions that would exceed this total.\n` : ""}${gateQuestionSuppressed ? "- Do NOT ask how the run felt — that question is sent separately." : `- After each run, ask the gate question: "How's the ${bodyPart} feeling — anything during or after the run?"`}\n- If the athlete completes the week pain-free: append [RTR_ADVANCE] at the end of your response to graduate to a full plan.\n- If they report pain: reassess with [LIGHTER_WEEK] or [INJURY_HOLD] depending on severity.`;
   }
   return "";
 })()}${sessionRows}${remainingPlanLine}`;

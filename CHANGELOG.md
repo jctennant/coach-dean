@@ -8,6 +8,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-27 — post_run still surfaced Z3/moderate-zone commentary despite the "positive by default" contract
+
+**Type:** Bug Fix
+**Reported by:** User (Jake), live test
+**User feedback:** "I thought we shortened the post run message, but I got this today: ... Most of your runs land in the moderate zone (62% of recent sessions), above easy but not quite hard enough to deliver quality benefits." Follow-up: "I don't think we should focus on the moderation zone at all - can we remove this from the prompt if there's anything there."
+**Root cause:** The 2026-07-26 post_run rebuild (commit 76f978c6) added an OUTPUT CONTRACT rule (rule 4) telling Dean to skip Z3/gray-zone/effort corrections by default on post_run. But the longitudinal-analysis injection code never got the same memo: `buildLongitudinalSignals` still forced a `REQUIRED ACKNOWLEDGMENT: ... zone 3 intensity trap` line into the post_run prompt whenever `inZone3Trap` was true, and the raw intensity-distribution summary (the "X% easy, Y% moderate, Z% hard" line) stayed visible in the LONGITUDINAL TRAINING ANALYSIS block unless gray-zone had been mentioned recently or the athlete was on injury hold — so the data and the forced-mention instruction directly contradicted the contract telling Dean to stay positive.
+**Fix / Change:** post_run now unconditionally excludes zone-3/gray-zone/moderate-effort content from both the forced REQUIRED ACKNOWLEDGMENT filter and the visible LONGITUDINAL TRAINING ANALYSIS block, regardless of recency or injury-hold state — the data isn't shown to Dean at all on this trigger, rather than being shown and separately told not to use it. weekly_recap is unaffected (zone-3 trap commentary still has room there).
+**Files changed:** src/app/api/coach/respond/route.ts
+
+## 2026-07-26 — Return-to-run gate question as a poll; shorter split onboarding intro (Photon only)
+
+**Type:** Feature / Improvement
+**Reported by:** Internal (live-tested during the goal-poll pilot above)
+**User feedback:** During a real test signup, the goal poll never fired because the athlete gave name and goal together in one message ("Jake - Teton Crest trail end of august") — by the time the code checked, the goal was already known, so there was nothing left to poll. Correct behavior, but it meant the poll rarely gets a chance to fire given Dean's first message explicitly invites both at once.
+**Root cause / Design change:** Two things: (1) shortened and split Dean's first onboarding message so name and goal are asked as two separate texts rather than inviting both in one combined question, giving the goal poll a real chance to fire on message 2. (2) Separately, walked through where else in the app a poll could structurally replace an LLM-judged free-text question, and identified the return-to-run (RTR) phase-1/2 gate question ("how did that feel?", asked after each completed session during return-to-run) as a stronger candidate than the daily injury-hold check-in: it's already single-dimension and already gated on a logged run (unlike the injury-hold check-in, which is correctly a blind daily cron since no running happens during a hold, and which asks two independent things — numeric pain 0–10 plus protocol adherence — that a poll can't cleanly collapse into one question without losing the chart's numeric resolution).
+**Fix / Change:**
+- Onboarding intro: shortened to "Hey! I'm Coach Dean. I read your Strava runs and send a note after each one: what it means for your training, and any early warning signs to watch for. I can also build and adapt a plan around a race, injury recovery, or general fitness.\n\nWhat's your name, and what are you working toward?" `sendAndStore()` gained a `forceParagraphSplit` option so this lands as two separate texts regardless of total character count (the existing length-gated `splitIntoMessages` wouldn't have split a message this short into two bubbles).
+- RTR gate poll: added `RTR_GATE_POLL` ("Pain-free" / "Some pain during or after") to `src/lib/polls.ts` (renamed from `onboarding-polls.ts` now that it covers more than onboarding — registry renamed `POLLS_BY_TITLE`). For Photon athletes on the `post_run` trigger while `return_to_run_phase` is 1 or 2, the RTR phase prompt block in `coach/respond/route.ts` now suppresses its "ask ONE gate question" free-text instruction, and code sends the poll as a separate bubble right after Dean's coaching message instead. The `[RTR_ADVANCE]` judgment itself (2 consecutive pain-free sessions) is unchanged and still runs on every trigger, including the `user_message` turn a poll answer arrives on (synthesized to natural text by the webhook) — this pilot only removes ambiguity in classifying a single reply as pain-free vs. not; it does not make the consecutive-session count itself deterministic, which remains a real follow-up worth doing separately.
+- Failure handling: both the poll send and the RTR gate poll are wrapped so a failure (e.g. the Spectrum plan doesn't support polls) never blocks or breaks the coaching message that already sent successfully.
+**Files changed:** `src/lib/polls.ts` (renamed from `onboarding-polls.ts`), `src/__tests__/lib/polls.test.ts` (renamed), `src/app/api/onboarding/handle/route.ts`, `src/app/api/webhooks/photon/route.ts`, `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-07-26 — Pilot: native iMessage poll for the onboarding goal question (Photon only)
 
 **Type:** Feature
