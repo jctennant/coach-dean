@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-29 — post_run still nagged about "moderate zone" after the longitudinal-block fix — second, separate source found
+
+**Type:** Bug Fix
+**Reported by:** User (Jake), live test (same day as previous entry's fix shipped)
+**User feedback:** New post_run message still read "Most of your runs land in the moderate zone (61%), which is too hard to recover well but not hard enough to deliver race-pace benefits." A day later, another: "58% of your recent runs land in the moderate zone... That's the gray zone trap: accumulates fatigue without the aerobic or speed benefits of proper polarization."
+**Root cause:** The 2026-07-27 fix only addressed the LONGITUDINAL TRAINING ANALYSIS injection path (`buildLongitudinalSignals`/`buildLongitudinalBlock`). It missed a second, older, independent source: the "5 CORE METRICS" lens-selection menu inside `buildUserMessage`'s `case "post_run"` block (pre-dating the 2026-07-26 rebuild) still explicitly offered "Z3 (gray zone, moderate)" as a lens Dean could pick, with instructions to frame it as an observation + question ("Was that intentional...?" / "the gray zone trap"). This directly contradicted the newer OUTPUT CONTRACT rule 4 (skip Z3/effort corrections by default on post_run) — two prompt blocks giving opposite instructions, and Dean kept picking the older, more detailed one.
+**Fix / Change:** Removed the Z3 gray-zone lens option from the 5 CORE METRICS menu entirely and replaced it with an explicit "do NOT flag this" instruction pointing back at the OUTPUT CONTRACT, so there's no remaining path in the post_run prompt that invites moderate-zone commentary. Also dropped the now-stale "or when you'd otherwise repeat a Z3 correction" clause from the PACING ALTERNATIVE note.
+**Files changed:** src/app/api/coach/respond/route.ts
+
 ## 2026-07-27 — post_run still surfaced Z3/moderate-zone commentary despite the "positive by default" contract
 
 **Type:** Bug Fix
