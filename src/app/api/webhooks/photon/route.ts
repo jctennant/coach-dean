@@ -5,7 +5,7 @@ import { insertConversation, insertConversationReturningId } from "@/lib/convers
 import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
-import { ONBOARDING_POLLS_BY_TITLE } from "@/lib/onboarding-polls";
+import { POLLS_BY_TITLE } from "@/lib/polls";
 import crypto from "crypto";
 
 // 120s: matches linq webhook — coaching responses can take 30-60s
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
   // (dedup, debounce, Haiku extraction) as if the athlete had typed the answer.
   let body = content?.type === "text" ? (content.text ?? "").trim() : "";
   if (content?.type === "poll_option" && content.selected) {
-    const matchedPoll = content.poll?.title ? ONBOARDING_POLLS_BY_TITLE[content.poll.title] : undefined;
+    const matchedPoll = content.poll?.title ? POLLS_BY_TITLE[content.poll.title] : undefined;
     body = matchedPoll ? matchedPoll.optionToMessage(content.option.title) : content.option.title;
   }
 

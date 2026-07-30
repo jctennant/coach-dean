@@ -7,7 +7,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { checkStravaAnalysisNumbers, buildStravaFactCorrection } from "@/lib/onboarding-fact-check";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { sendPoll, isPhotonProvider } from "@/lib/photon";
-import { GOAL_POLL, type OnboardingPoll } from "@/lib/onboarding-polls";
+import { GOAL_POLL, type AppPoll } from "@/lib/polls";
 import { trackEvent } from "@/lib/track";
 import { calculateVDOTPaces, easyPaceRange, formatRaceDistance } from "@/lib/paces";
 import { getCheckoutPageUrl } from "@/lib/stripe";
@@ -44,10 +44,17 @@ async function sendAndStore(
   userId: string,
   phone: string,
   message: string,
-  messageType?: MessageType
+  messageType?: MessageType,
+  options?: { forceParagraphSplit?: boolean }
 ): Promise<{ chatId: string | null }> {
   const isDryRun = dryRunUsers.has(userId);
-  const parts = splitIntoMessages(normalizeEmDashes(message));
+  const normalized = normalizeEmDashes(message);
+  // Onboarding's first message is short enough that splitIntoMessages' length gate
+  // never kicks in, but it's still meant to land as two texts (intro, then the
+  // name/goal question) — force the paragraph split regardless of length here.
+  const parts = options?.forceParagraphSplit
+    ? normalized.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
+    : splitIntoMessages(normalized);
   let chatId: string | null = null;
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
@@ -74,7 +81,7 @@ async function sendAndStore(
  * one-line plain-text fallback so the question is still answerable on clients that
  * can't render the interactive poll (e.g. an out-of-date iOS/macOS Messages build).
  */
-async function sendPollAndStore(userId: string, phone: string, poll: OnboardingPoll): Promise<void> {
+async function sendPollAndStore(userId: string, phone: string, poll: AppPoll): Promise<void> {
   const isDryRun = dryRunUsers.has(userId);
   if (!isDryRun) await sendPoll(phone, poll.title, poll.options);
   await insertConversation({
@@ -341,7 +348,7 @@ async function handleConversation(
   // Pilot: Photon/iMessage users answer the goal question via a poll instead of
   // free text, once a name is known but goal isn't yet — mirrors what Dean would
   // otherwise ask in message 2 ("what's your goal?"). goal_poll_sent guards against
-  // re-sending on a duplicate/retried webhook call. See onboarding-polls.ts for why
+  // re-sending on a duplicate/retried webhook call. See polls.ts for why
   // this is the only poll wired in so far (injury/training-days don't have as clean
   // a fixed insertion point).
   if (isPhotonProvider() && mergedData.name && !mergedData.goal && !mergedData.goal_poll_sent) {
@@ -608,7 +615,7 @@ INSTRUCTIONS:
 - Training days: do NOT ask which days of the week they run. Plans are day-agnostic — the athlete picks their own days. If they mention a weekly count (e.g. "5 days a week"), acknowledge it but don't follow up with "which days".
 ${(mergedData.preferred_units as string | null) === "metric" ? "- UNITS: This athlete prefers metric — use km for distances and min/km for paces in all messages.\n" : ""}
 ${isFirstResponse
-  ? `- This is your FIRST message. Lead with the early-warning-signs differentiator: Dean's core value is catching injury and load problems before they sideline athletes — not just recapping data. Example opening: "Hey! I'm Coach Dean — I send a coaching note after every run you log on Strava: what it means for your training, whether to push or ease off, and what to watch for. Think of me as the thing that catches early warning signs so you can race and train without getting sidelined." Then close with a single question that invites both their name and what's going on — e.g. "What's your name, and what are you working toward (or dealing with right now)?" The "dealing with" framing naturally surfaces injuries and current concerns alongside goals. Do NOT ask name and goal as two separate questions — one question. Do NOT reference specific tools like Runna or TrainingPeaks. Do NOT say "SMS running coach" — say "AI running coach".`
+  ? `- This is your FIRST message. Use this exact opening, verbatim, unless the athlete's message already states their name or goal (in which case adapt it minimally to acknowledge what they said instead of ignoring it): "Hey! I'm Coach Dean. I read your Strava runs and send a note after each one: what it means for your training, and any early warning signs to watch for. I can also build and adapt a plan around a race, injury recovery, or general fitness.\n\nWhat's your name, and what are you working toward?" Keep the intro and the question as two separate paragraphs, separated by a blank line — they're sent as two separate texts. Do NOT ask name and goal as two separate questions — one question, in its own paragraph. Do NOT reference specific tools like Runna or TrainingPeaks. Do NOT say "SMS running coach" — say "AI running coach".`
   : ""}
 
 INJURY MENTIONS IN GOALS STAGE:
@@ -1028,7 +1035,9 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   await supabase.from("users")
     .update({ onboarding_data: mergedData as unknown as Json })
     .eq("id", user.id);
-  await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
+  await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding", {
+    forceParagraphSplit: isFirstResponse,
+  });
   return NextResponse.json({ ok: true });
 }
 

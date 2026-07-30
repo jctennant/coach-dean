@@ -527,7 +527,7 @@ export async function GET(request: Request) {
   // context-dependent, personalized text — not fixed deterministic prompts — so they're
   // not good poll candidates without either stripping a question out of Sonnet-generated
   // text (fragile) or double-asking. Only the goal question (asked deterministically in
-  // handleConversation before a name is known) gets a poll for now — see onboarding-polls.ts.
+  // handleConversation before a name is known) gets a poll for now — see polls.ts.
   if (!alreadyOnboarded) {
     const chatId = currentUser?.linq_chat_id as string | null;
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
