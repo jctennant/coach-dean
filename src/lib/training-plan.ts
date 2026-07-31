@@ -114,16 +114,33 @@ function getTargetPeakMileage(goal: string | null, baseMileage: number): number 
   } else if (g === "sprint_tri") {
     // Sprint triathlon: 5K run leg. Athletes cross-train heavily; run volume stays low.
     hardCap = 30; floor = 10;
+  } else if (g === "return_to_running" || g === "injury_recovery") {
+    // No race exists for these goals, so "peak" really means a sensible steady-state
+    // volume ceiling to plateau at — not a taper target (computePhaseForPlan's
+    // hasRace=false branch never even reaches a "peak" phase for these athletes; the arc
+    // just climbs toward this number and holds). The race-goal floors above exist to
+    // guarantee a minimum long run for a known race distance — there's no race here, so a
+    // fixed floor would just push a very-low starting point (e.g. 3mi/week early in a
+    // return-to-run ramp) toward an arbitrary volume while recovering. Floor instead
+    // trails baseMileage itself (capped at 10 so it can't runaway for an athlete with a
+    // high pre-injury average): it stops the max()/min() clamp from doing anything
+    // surprising, not from pushing volume up. hardCap of 35 keeps the ceiling well under
+    // the 60mi generic default — appropriate for general aerobic fitness, not race peak.
+    hardCap = 35; floor = Math.min(baseMileage, 10);
   } else {
     hardCap = 60; floor = 20;
   }
   // Growth multiplier: how much volume can increase over the full training cycle.
   // Ultra goals use 1.6x — doubling is too aggressive when the base is already high
   // (45 mi/week × 2.0 = 90, which overshoots what's appropriate for a recreational 100K).
+  // Return-to-running/injury-recovery goals use 1.5x — more conservative than a standard
+  // race build, matching the cautious-reintroduction philosophy already applied elsewhere
+  // (e.g. activeInjury tightening the weekly build-factor ceiling from 10% to 5%).
   // Road races use 2.0x — a half marathon runner going from 15 → 30 mi/week is normal.
   const isUltra = g.includes("100k") || g.includes("100mi") || g.includes("100 m")
     || g.includes("50mi") || g.includes("50 mi") || g.includes("50k") || g.includes("50 k");
-  const growthMultiplier = isUltra ? 1.6 : 2.0;
+  const isRecoveryGoal = g === "return_to_running" || g === "injury_recovery";
+  const growthMultiplier = isUltra ? 1.6 : isRecoveryGoal ? 1.5 : 2.0;
   return Math.round(Math.max(Math.min(baseMileage * growthMultiplier, hardCap), floor) * 2) / 2;
 }
 

@@ -168,6 +168,28 @@ describe("computeMileageArc", () => {
     expect(peakWith).toBeGreaterThan(peakWithout);
   });
 
+  it("return_to_running/injury_recovery goals plateau well under the generic 60mi/20mi-floor default", () => {
+    // No race exists for these goals, so getTargetPeakMileage falls through the goal
+    // keyword chain — before this fix it landed in the generic `else` branch (hardCap 60,
+    // floor 20), the same default a runner with no stated goal at all would get. A
+    // conservative starting base of 8mi/week should plateau at a modest steady-state
+    // ceiling (hardCap 35), not build toward 60.
+    const rtr = computeMileageArc({ baseMileage: 8, totalWeeks: 20, goal: "return_to_running", hasRace: false });
+    const injuryRecovery = computeMileageArc({ baseMileage: 8, totalWeeks: 20, goal: "injury_recovery", hasRace: false });
+    expect(Math.max(...rtr.map(w => w.mileage_target))).toBeLessThanOrEqual(35);
+    expect(Math.max(...injuryRecovery.map(w => w.mileage_target))).toBeLessThanOrEqual(35);
+  });
+
+  it("return_to_running goal doesn't force a low starting base up toward an arbitrary volume floor", () => {
+    // Race goals use a fixed floor (e.g. 20mi) so a low-mileage runner still gets a plan
+    // sufficient for the race distance. There's no race here, so a very-low starting point
+    // (3mi/week, early in a return-to-run ramp) should climb gradually from base, not jump
+    // toward a floor value in week 1.
+    const arc = computeMileageArc({ baseMileage: 3, totalWeeks: 12, goal: "return_to_running", hasRace: false });
+    expect(arc[0].mileage_target).toBe(3);
+    expect(arc[1].mileage_target).toBeLessThan(10); // gradual climb, not a jump to a 20mi floor
+  });
+
   it("is a pure function — repeated calls with the same params return the same result", () => {
     const params = { baseMileage: 18, totalWeeks: 8, goal: null, hasRace: false } as const;
     expect(computeMileageArc(params)).toEqual(computeMileageArc(params));

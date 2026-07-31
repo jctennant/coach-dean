@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-30 — return_to_running/injury_recovery goals get their own peak-mileage model instead of the generic race-peak default
+
+**Type:** Bug Fix
+**Reported by:** Internal review (broader review of plan structuring/check-ins/adaptation/mileage accuracy)
+**User feedback:** N/A
+**Root cause:** `getTargetPeakMileage()` (`src/lib/training-plan.ts`) matches `goal` against a keyword chain (marathon/half/5k/etc.) to pick a hardCap/floor pair, with a generic fallback (`hardCap=60, floor=20`) for anything unmatched. `return_to_running` and `injury_recovery` — stored as exact goal-bucket strings, not race-distance keywords — never matched any branch, so they fell through to the same 60mi-cap/20mi-floor default as "no goal specified at all." These athletes have no race (`hasRace=false`, so `computePhaseForPlan` never even reaches a "peak" phase for them — the arc just climbs toward this ceiling and plateaus), so the generic race-peak model was doubly wrong: the 20mi floor could push a very-low starting point (e.g. 3mi/week early in a return-to-run ramp) toward an arbitrary volume it doesn't need, and the 60mi/2.0x-growth ceiling models "build toward a race peak" rather than "settle at a sensible general-fitness volume."
+**Fix / Change:** Added a dedicated branch for `return_to_running`/`injury_recovery`: `hardCap=35`, `floor=min(baseMileage, 10)` (trails the starting point instead of forcing it up), and a more conservative `1.5x` growth multiplier (between the `2.0x` road-race default and the `1.6x` ultra rate) — consistent with this codebase's existing cautious-reintroduction philosophy (e.g. `activeInjury` already tightens the weekly build-factor ceiling from 10% to 5% elsewhere in the same file). **Numeric constants (35mi cap, 10mi floor ceiling, 1.5x multiplier) are a first-pass judgment call, not derived from a specific methodology reference — worth revisiting against real athlete outcomes once there's usage data.**
+**Files changed:** `src/lib/training-plan.ts`, `src/__tests__/lib/training-plan.test.ts`
+
 ## 2026-07-30 — Plan components (long run + quality sessions) now validated against the stated weekly total
 
 **Type:** Bug Fix
