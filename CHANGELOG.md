@@ -8,6 +8,20 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-29 — post_run: recovery-goal athletes no longer get HR/gray-zone lens; injury check-in question and recent coaching text no longer repeat verbatim
+
+**Type:** Improvement
+**Reported by:** Internal observation (usage audit before adding more beta testers)
+**User feedback:** N/A — found by pulling real `post_run` sends to the 7 users on `return_to_running`/`injury_recovery` goals or with `active_injury` set. Two concrete patterns: (1) a shin-injury athlete got HR/gray-zone quality-lens commentary ("Most of your runs land in the moderate zone... that's the gray zone trap...") mixed into the same message as the shin check-in — performance-optimization framing next to recovery framing. (2) a pelvis-injury athlete got 8+ consecutive messages with near word-for-word identical phrasing ("This is exactly what recovery looks like right now. Staying aerobic while your pelvis heals... Still at the 0.5-1/10 level, or back down closer to 0/10?").
+**Root cause:** (1) The `GOAL LENS` section in the post_run system prompt (`route.ts`) had no branch for `return_to_running`/`injury_recovery` — it listed trail/marathon/short-race/general_fitness only, so Claude had to guess how to apply the HEART RATE lens to a recovery athlete instead of being told not to. (2) The only anti-repetition signal for post_run was `recentPostRunInsights`/`recentPostRunQuestions` — abstract pattern *names* derived by regex-scanning recent messages, not the actual text. For an athlete doing genuinely repetitive low-intensity sessions day to day (same activity type, same duration, same effort), the underlying facts converge, and an abstract label isn't a strong enough signal to stop Claude from re-deriving the same sentence. The injury pain-check question specifically ("how's the X feeling, still at Y/10?") is a fixed data query dressed as free-generated prose, so it had no mechanism to vary at all.
+**Fix / Change:** Structural fixes, not new phrasing rules (per CLAUDE.md's decision order for recurring repetition/leak bugs):
+- Added an `isRecoveryGoal` branch inside `buildUserMessage`'s post_run case: when the athlete's goal is `return_to_running`/`injury_recovery`, the HEART RATE lens block is replaced entirely with an instruction to skip zone/drift/gray-zone analysis and use load/pacing instead — this removes the HR lens content from the prompt rather than asking Claude to self-filter from a static list. Added a corresponding `return_to_running / injury_recovery` bullet to `GOAL LENS`.
+- Added `recentPostRunVerbatim` (last 2 actual post_run message bodies, verbatim) as a new prompt block ahead of the abstract-label block — literal prior text is a much stronger anti-repetition signal for an LLM than a pattern name it has to reconstruct meaning from.
+- Added `suggestedInjuryCheckQuestion`: for recovery-goal athletes with a known injury body part, the pain-check question is now selected from a 4-item rotating pool (indexed by how many times it's already been asked, counted from `recentMessages`) rather than free-generated — this makes the exact repeat structurally impossible instead of relying on retry/blocking after the fact.
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-07-29 — post_run still nagged about "moderate zone" after the longitudinal-block fix — second, separate source found
 
 **Type:** Bug Fix

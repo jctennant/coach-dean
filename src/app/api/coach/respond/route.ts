@@ -2878,7 +2878,44 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         return priorTexts.length > 0 ? priorTexts.join("\n---\n") : null;
       })()
     : null;
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null, priorAssistantMessageForInitialPlan);
+  // Verbatim (not abstracted-to-a-label) text of the last 2 post_run sends to this athlete.
+  // recentPostRunInsights/recentPostRunQuestions above only carry pattern *names* the model
+  // has to reconstruct meaning from; for athletes whose runs are genuinely repetitive day to
+  // day (e.g. daily recovery walks at a fixed low effort), the underlying facts converge and
+  // abstract labels aren't a strong enough signal to stop Claude from re-deriving the same
+  // sentence. Seeing the literal prior text is a much stronger anti-repetition signal.
+  const recentPostRunVerbatim = trigger === "post_run"
+    ? [...recentMessages].reverse()
+        .filter(m => m.role === "assistant" && m.message_type === "post_run")
+        .slice(0, 2)
+        .map(m => (m.content as string) || "")
+        .filter(Boolean)
+    : [];
+  // For return_to_running/injury_recovery athletes, the "how's the [body part] feeling"
+  // closing question is really a fixed data query dressed as prose — free-generating its
+  // wording every time is exactly what produced 8+ near word-for-word repeats in production
+  // (e.g. "Still at the 0.5-1/10 level, or back down closer to 0/10?" asked verbatim across a
+  // week of recovery walks). Pulling it out of free generation into a rotating pool, indexed
+  // by how many times it's already been asked, makes the repeat structurally impossible
+  // instead of relying on Claude to notice and vary it.
+  const suggestedInjuryCheckQuestion = (() => {
+    if (trigger !== "post_run") return null;
+    const goalIsRecovery = (profile?.goal as string | null) === "return_to_running" || (profile?.goal as string | null) === "injury_recovery";
+    const bodyPart = (profile?.injury_body_part as string | null) ?? null;
+    if (!goalIsRecovery || !bodyPart) return null;
+    const pool = [
+      `How's the ${bodyPart} today — same baseline, or any change?`,
+      `${bodyPart[0].toUpperCase()}${bodyPart.slice(1)} check: better, worse, or holding steady since last time?`,
+      `Where's the ${bodyPart} at now compared to your last update?`,
+      `Any change in the ${bodyPart}, or still the same as before?`,
+    ];
+    const injuryCheckRx = /how.*hip|how.*knee|how.*achilles|how.*shin|how.*pelvis|how.*foot|how.*calf|how.*hamstring|injury.*area|holding up/i;
+    const timesAsked = recentMessages.filter(m =>
+      m.role === "assistant" && m.message_type === "post_run" && injuryCheckRx.test((m.content as string) || "")
+    ).length;
+    return pool[timesAsked % pool.length];
+  })();
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null, priorAssistantMessageForInitialPlan, (profile?.goal as string | null) ?? null, recentPostRunVerbatim, suggestedInjuryCheckQuestion);
 
   // Re-anchor today/tomorrow right next to the generation instructions. The full
   // DATE CONTEXT block lives early in the (much longer) system prompt — by the time
@@ -7585,6 +7622,9 @@ function buildUserMessage(
   injuryBodyPart: string | null = null,
   injurySeverity: "mild" | "moderate" | "severe" | null = null,
   priorAssistantMessage: string | null = null,
+  goalType: string | null = null,
+  recentPostRunVerbatim: string[] = [],
+  suggestedInjuryCheckQuestion: string | null = null,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -7714,6 +7754,7 @@ function buildUserMessage(
           }
         : activityData;
       const injuryReminder = "";
+      const isRecoveryGoal = goalType === "return_to_running" || goalType === "injury_recovery";
 
       // Build data availability guards to prevent Claude from hallucinating specific values
       const hasSplits = !!(rawSummary?.splits && (rawSummary.splits as unknown[]).length > 0);
@@ -7832,6 +7873,10 @@ ${nonObviousWins.length > 0
 ${nonObviousWins.map(w => `- ${w}`).join("\n")}
 
 `
+  : ""}${recentPostRunVerbatim.length > 0
+  ? `YOUR LAST ${recentPostRunVerbatim.length > 1 ? "MESSAGES" : "MESSAGE"} TO THIS ATHLETE (most recent first) — read ${recentPostRunVerbatim.length > 1 ? "these" : "this"} before writing anything:
+${recentPostRunVerbatim.map((m, i) => `[${i === 0 ? "most recent" : `${i + 1} runs ago`}] "${m}"`).join("\n")}
+Do not reuse the same sentence structure, phrasing, or closing question as ${recentPostRunVerbatim.length > 1 ? "these" : "this"} — if the situation (activity type, effort, check-in status) is basically unchanged from last time, that's a signal to say LESS, not to repeat the same note in new words. A short, plain acknowledgment ("Another easy one in the books — same story as usual, which is good.") beats restating the same observation and question every time.\n\n`
   : ""}${recentPostRunInsights.length > 0
   ? `RECENT INSIGHTS YOU'VE ALREADY USED — DO NOT REPEAT THESE THIS TURN:
 ${[...new Set(recentPostRunInsights)].map(s => `- ${s}`).join("\n")}
@@ -7849,7 +7894,9 @@ Pick a DIFFERENT lens from the menu below. If the only available lens for this r
    b) Load spike alert: ONLY when the LONGITUDINAL block explicitly flags a meaningful spike (it already filters out low-volume noise — if it doesn't say "high injury-risk zone AND the absolute jump is meaningful", there is NO spike to mention, so do not raise load at all). When it IS flagged, and you have not already raised load in a recent post-run, translate to plain English: "Your workload this week is running 38% above your recent average — that's the kind of spike where one easy day matters more than the next hard session." Never say "ACWR" to the athlete. Do NOT warn about overtraining for an athlete running low mileage — a few miles a week is never an injury-risk spike, and telling them otherwise reads as a generic bot.
    c) Injury prevention tie-in: when injury_notes exist, connect session load directly to the injury site. "That session was harder than your recent average — given the shin history, this is the signal to watch. If it stays manageable, you're in good shape." Frame it as something you're watching together, not an alarm.
 
-2. HEART RATE — use for quality sessions and long runs; NOT the default for easy runs
+2. HEART RATE — ${isRecoveryGoal
+  ? "DO NOT USE THIS LENS. This athlete's goal is recovery/return-to-running — HR zone and gray-zone/polarization commentary implies a performance-optimization frame that conflicts with the recovery objective. If HR is mentioned at all, it is only ever a one-clause confirmation that effort stayed comfortably easy (e.g. \"HR stayed low and easy the whole way\") — never zone-by-zone analysis, never drift %, never a gray-zone/moderate-effort framing. Use lens 1 (load vs. injury ceiling) or lens 4 (pacing) instead."
+  : `use for quality sessions and long runs; NOT the default for easy runs
    Use this lens when: (a) quality session where zone compliance is part of the prescription; (b) cardiac drift >10% on a long or tempo run flagging meaningful aerobic stress; (c) athlete directly asks about zones or aerobic effort. Do NOT default to HR zones for every easy run — load and pacing are more actionable and less repetitive.
    WRIST HR NOTE: Strava doesn't tell us if HR came from a wrist sensor or chest strap. Most athletes use wrist optical sensors, which are adequate for zone awareness but can produce artifacts (contact loss, motion interference). If DATA AVAILABILITY GUARD above flagged HR artifact risk, skip zone labels and use pace-based context instead (see PACING ALTERNATIVE below). If the athlete mentions using a chest strap, HR data is more reliable and you can be more precise.
    PACING ALTERNATIVE (use when wrist HR artifact risk was flagged): If the athlete's recent easy runs are visible in RECENT WORKOUTS, reference their typical easy-run pace instead of HR zone. Example: "This came in at 9:10/mi — your recent easy runs have averaged 9:30-9:50/mi, so a bit on the brisker side. How did it feel?" This is more actionable than wrist HR zones and doesn't require a chest strap.
@@ -7861,7 +7908,7 @@ Pick a DIFFERENT lens from the menu below. If the only available lens for this r
       Always cite the exact % AND translate it to plain English — never state the number without its meaning. Skip entirely if not in activity JSON. If HR artifact risk was flagged in DATA AVAILABILITY GUARD, add a brief caveat — "drift numbers can be affected by wrist sensor artifacts, so treat this as directional."
       - <5%: "X% drift — your heart held steady the whole [N] miles. That means your aerobic system matched the demand, which is exactly what you want on an easy/long run."
       - 5–10%: "X% drift — your HR worked progressively harder through the run. Normal for [longer distance / heat], and means you were near the edge of your aerobic ceiling by the end."
-      - >10%: "X% drift — your heart was working noticeably harder in the second half. The run pushed a bit beyond your aerobic ceiling. Nothing alarming, but it's worth easing off on the next easy run and letting the system reset."
+      - >10%: "X% drift — your heart was working noticeably harder in the second half. The run pushed a bit beyond your aerobic ceiling. Nothing alarming, but it's worth easing off on the next easy run and letting the system reset."`}
 
 3. AEROBIC EFFICIENCY (pace-at-HR trend) — the best long-term fitness signal
    Only use when multi-week history exists (≥3 comparable runs). Cite exact m/beat + % change from LONGITUDINAL block. Always translate: "Aerobic efficiency up 6% — your heart is working 6% less to hold the same pace. That's what base training builds." Or: "Efficiency dipped this week — your pace needed more HR to hold, which usually signals accumulated fatigue rather than fitness loss."
@@ -7879,6 +7926,7 @@ GOAL LENS:
 - marathon / half: aerobic efficiency, long run progression, cardiac drift
 - 5k / 10k / mile: quality session execution vs prescribed pace, running economy
 - general_fitness: consistency signal, aerobic base progress
+- return_to_running / injury_recovery: tissue tolerance vs current load ceiling, adherence to the recovery protocol, and progression signal (did today's session stay within the cleared range). This is the primary lens for these athletes, not HR or gray-zone framing — see lens 2 above.
 
 OVERRIDES (apply before goal lens):
 - Load spike: ONLY when the LONGITUDINAL block flags a meaningful spike (not low-volume noise) AND you haven't raised load in a recent post-run. Say plainly: "Your workload this week is running X% above your recent average — [implication]." Never say "ACWR" to the athlete. If volume is low, there is no spike — do not mention load.
@@ -7906,7 +7954,9 @@ ${recentPostRunQuestions.length > 0
   ? `ALREADY ASKED recently (don't repeat these types):\n${[...new Set(recentPostRunQuestions)].map(q => `- ${q}`).join("\n")}`
   : ""}
 
-When a question IS warranted: one specific angle — injury history, pace execution, upcoming key session, load management. NOT generic ("how are you feeling?", "how'd it feel?"). Examples: "Any tightness in the quads after that tempo effort?" / "Was that effort sustainable given the heat?" / "Ready for the long run later this week?"
+${suggestedInjuryCheckQuestion
+  ? `INJURY CHECK-IN QUESTION: if you ask a closing question this turn, use exactly this wording (it's rotated automatically each time so it won't repeat): "${suggestedInjuryCheckQuestion}"\n\n`
+  : ""}When a question IS warranted: one specific angle — injury history, pace execution, upcoming key session, load management. NOT generic ("how are you feeling?", "how'd it feel?"). Examples: "Any tightness in the quads after that tempo effort?" / "Was that effort sustainable given the heat?" / "Ready for the long run later this week?"
 
 Always skip when: the injury_reminder block already ends with a question; this is a cross-training or rest-substitute session; the run data is self-explanatory; or you have nothing specific to learn.
 
