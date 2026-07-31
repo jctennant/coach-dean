@@ -11,6 +11,7 @@ import {
   computeWeekOneVolumeCap,
   computeLongRunCap,
   parsePaceStrToSecPerMile,
+  reconcilePlanComponents,
 } from "@/lib/plan-validation";
 
 // ---------------------------------------------------------------------------
@@ -366,6 +367,39 @@ describe("applyStructuredLongRun", () => {
   it("is a no-op when no long-run phrasing is present", () => {
     const msg = "Great week of running! Keep the easy days easy.";
     expect(applyStructuredLongRun(msg, 4)).toBe(msg);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reconcilePlanComponents
+// ---------------------------------------------------------------------------
+
+describe("reconcilePlanComponents", () => {
+  it("is consistent when long run + quality sessions fit within the total", () => {
+    expect(reconcilePlanComponents(20, 8, [4])).toEqual({ consistent: true, correctedLongRun: null });
+  });
+
+  it("is consistent with no long run reported", () => {
+    expect(reconcilePlanComponents(20, null, [4, 5])).toEqual({ consistent: true, correctedLongRun: null });
+  });
+
+  it("flags and clamps when long run + quality sessions exceed the total", () => {
+    // Total: 20mi, Long run: 14mi, tempo: 6mi — components alone sum to 20mi, leaving
+    // 0mi for any easy days, but the long run being 14 while the true remainder is only
+    // 14mi (20 - 6mi quality) is fine; push it further over to trigger a real violation.
+    const result = reconcilePlanComponents(20, 16, [6]);
+    expect(result.consistent).toBe(false);
+    expect(result.correctedLongRun).toBe(14); // 20 - 6mi quality
+  });
+
+  it("floors the corrected long run at 0 when quality sessions alone exceed the total", () => {
+    const result = reconcilePlanComponents(10, 8, [12]);
+    expect(result.consistent).toBe(false);
+    expect(result.correctedLongRun).toBe(0);
+  });
+
+  it("tolerates rounding within 0.5mi", () => {
+    expect(reconcilePlanComponents(20, 14, [6.4])).toEqual({ consistent: true, correctedLongRun: null });
   });
 });
 

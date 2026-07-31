@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-30 — Plan components (long run + quality sessions) now validated against the stated weekly total
+
+**Type:** Bug Fix
+**Reported by:** Internal review (broader review of plan structuring/check-ins/adaptation/mileage accuracy)
+**User feedback:** N/A
+**Root cause:** `initial_plan`/`weekly_recap` are day-agnostic prose (2026-07-11 redesign) and no longer contain dated `Mon D/M · ...` session lines, so `enforceVolumeCaps`/`correctMileageTotal` are no-ops for them. The structural replacement, `applyStructuredWeeklyTotal`, validates and corrects the `plan.weekly_total` number Claude reports via `deliver_message` — but nothing checked that `plan.long_run_distance` and `plan.quality_sessions[].distance`, the other structured numbers in that same tool call, were arithmetically possible given that total. A plan could pass total validation while still being internally impossible, e.g. "Total: 20mi" with "Long run: 16mi" plus a "6mi tempo" — those two components alone already sum to 22mi, more than the whole week.
+**Fix / Change:** Added `reconcilePlanComponents()` (`src/lib/plan-validation.ts`) — a pure function checking that `long_run_distance + sum(quality_sessions distances) <= weekly_total` (0.5mi tolerance for rounding). Wired into `coach/respond/route.ts` right after the existing `plan.weekly_total` validation, for both `initial_plan` and `weekly_recap` (previously the adjacent long-run-cap check only ran for `initial_plan`). On violation, the long run is clamped to `weekly_total - qualityTotal` (quality-session distances are treated as more reliable — small, explicit, session-specific numbers — vs. the long run, which is the recurring source of stale/misattributed mileage per the 2026-07-18/21/22 changelog entries) and the prose is corrected via the existing `applyStructuredLongRun`. Logs a warning and tracks a `plan_components_exceeded_total` event on every correction so real-world frequency can be monitored.
+**Files changed:** `src/lib/plan-validation.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/plan-validation.test.ts`
+
 ## 2026-07-30 — Re-enabled nightly-reminder cron
 
 **Type:** Bug Fix

@@ -368,6 +368,45 @@ export function applyStructuredLongRun(message: string, cappedDistance: number):
 }
 
 /**
+ * Verify that a plan's structured named components (long run + quality sessions) don't
+ * individually sum to more than the stated weekly total.
+ *
+ * `long_run_distance` and `quality_sessions[].distance` are the only sub-components
+ * Claude reports individually via `deliver_message`'s `plan` field for day-agnostic
+ * prose (initial_plan/weekly_recap) — easy-day mileage makes up the rest of the total
+ * and is never itemized. So the only checkable invariant is componentTotal <=
+ * weeklyTotal; there's no way to verify the total exactly (easy-day miles are
+ * unknown), only that the named parts don't already exceed the whole. This is the
+ * arithmetic counterpart to applyStructuredWeeklyTotal (which only validates the total
+ * number in isolation against a safety cap) and catches a plan that passes that check
+ * yet is still internally impossible, e.g. "Total: 20mi" with "Long run: 14mi" plus a
+ * "6mi tempo" session — 20mi and 10 or fewer easy-day miles can't coexist with a 20mi
+ * combined long-run/quality total.
+ *
+ * The long run is the component clamped down when the sum is over, not the quality
+ * sessions or the total — quality-session distances are usually small, explicit, and
+ * session-specific, while a long-run number restated from the wrong week of an arc or
+ * from stale pre-injury data is the recurring failure mode (see the 2026-07-18/21/22
+ * changelog entries).
+ */
+export function reconcilePlanComponents(
+  weeklyTotal: number,
+  longRunDistance: number | null,
+  qualitySessionDistances: number[]
+): { consistent: boolean; correctedLongRun: number | null } {
+  if (longRunDistance == null) {
+    return { consistent: true, correctedLongRun: null };
+  }
+  const qualityTotal = qualitySessionDistances.reduce((sum, d) => sum + d, 0);
+  const componentTotal = longRunDistance + qualityTotal;
+  if (componentTotal <= weeklyTotal + 0.5) {
+    return { consistent: true, correctedLongRun: null };
+  }
+  const correctedLongRun = Math.max(0, Math.round((weeklyTotal - qualityTotal) * 10) / 10);
+  return { consistent: false, correctedLongRun };
+}
+
+/**
  * Safe Week-1 weekly-mileage range for a brand-new training plan, by fitness tier.
  *
  * This MUST stay numerically identical to the WEEK 1 VOLUME CAP <rule> blocks in

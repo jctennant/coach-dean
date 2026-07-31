@@ -24,7 +24,7 @@ function capitalizeBodyPartForCard(bodyPart: string): string {
   if (spaced === "it band") return "IT band";
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
-import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, applyStructuredLongRun, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile } from "@/lib/plan-validation";
+import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, applyStructuredLongRun, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile, reconcilePlanComponents } from "@/lib/plan-validation";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { normalizeEmDashes } from "@/lib/text-format";
 import { getValidAccessToken } from "@/lib/strava";
@@ -3635,6 +3635,34 @@ OUTPUT CONTRACT:
         validatedTotal = capMax;
       }
       rawText = applyStructuredWeeklyTotal(rawText, validatedTotal);
+
+      // Arithmetic consistency: the long run and quality sessions are the only
+      // sub-components of the total Claude reports individually — they must not sum
+      // to more than the (now-validated) total by themselves. Applies to both
+      // initial_plan and weekly_recap since both go through plan_facts mode.
+      const qualityDistancesForSum = Array.isArray(planInput?.quality_sessions)
+        ? (planInput!.quality_sessions as Array<{ distance?: unknown }>)
+            .map((qs) => (typeof qs?.distance === "number" ? qs.distance : null))
+            .filter((d): d is number => d != null)
+        : [];
+      const statedLongRunForSum = typeof planInput?.long_run_distance === "number" ? planInput.long_run_distance : null;
+      const reconciled = reconcilePlanComponents(validatedTotal, statedLongRunForSum, qualityDistancesForSum);
+      if (!reconciled.consistent && reconciled.correctedLongRun != null) {
+        log.warn("plan components exceeded stated weekly total — clamping long run", {
+          trigger,
+          weeklyTotal: validatedTotal,
+          statedLongRun: statedLongRunForSum,
+          qualityTotal: qualityDistancesForSum.reduce((sum, d) => sum + d, 0),
+          correctedLongRun: reconciled.correctedLongRun,
+        });
+        void trackEvent(userId, "plan_components_exceeded_total", {
+          trigger,
+          weeklyTotal: validatedTotal,
+          statedLongRun: statedLongRunForSum,
+          correctedLongRun: reconciled.correctedLongRun,
+        });
+        rawText = applyStructuredLongRun(rawText, reconciled.correctedLongRun);
+      }
     } else {
       log.warn("plan trigger delivered without a usable plan.weekly_total", { trigger });
     }
