@@ -27,11 +27,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Disabled in v2.0 — nightly reminders replaced by reactive post-run analysis.
-  // Preserved for potential reactivation. Remove this block to re-enable.
-  // Cast to boolean so TypeScript doesn't treat the rest of the function as dead code.
-  if (true as boolean) return NextResponse.json({ ok: true, sent: 0, disabled: true });
-
   // Query users who opted into nightly reminders and have completed onboarding.
   // training_profiles.proactive_cadence = 'nightly_reminders'
   const { data: profiles, error } = await supabase

@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-07-30 — Re-enabled nightly-reminder cron
+
+**Type:** Bug Fix
+**Reported by:** Internal review (broader review of plan structuring/check-ins/adaptation/mileage accuracy)
+**User feedback:** N/A
+**Root cause:** `nightly-reminder/route.ts` had the same `if (true as boolean) return {..., disabled: true}` short-circuit added during the 2026-04-14 v2.0 pivot that `morning-reminder/route.ts` had. The morning-reminder copy was already re-enabled on 2026-07-18 after Jake reported not getting daily morning texts, but nightly-reminder was deliberately left as-is at the time since it hadn't been reported broken. Meanwhile `[CADENCE: nightly_reminders]` is still a fully wired, selectable option (both the Haiku intent-classifier short-circuit and Claude's tag path) that confirms "I'll text you the night before with what's coming up" — so any athlete who picked that cadence got a confirmation SMS and then silently nothing, forever. The cron-job.org schedule for this endpoint (`0 */2 * * *`) was already live per docs/crons.md, so the route itself was the only broken piece.
+**Fix / Change:** Removed the disabled short-circuit, restoring the original cadence/timezone/training-day/dedup logic (same fix pattern as morning-reminder's 2026-07-18 fix).
+**Files changed:** `src/app/api/cron/nightly-reminder/route.ts`
+
 ## 2026-07-29 — post_run: recovery-goal athletes no longer get HR/gray-zone lens; injury check-in question and recent coaching text no longer repeat verbatim
 
 **Type:** Improvement
