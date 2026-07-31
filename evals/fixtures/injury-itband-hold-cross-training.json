@@ -17,35 +17,40 @@
     "easy_pace": "10:00/mi",
     "tempo_pace": "7:55/mi",
     "interval_pace": "7:05/mi",
-    "training_days": ["monday", "wednesday", "friday", "sunday"],
+    "training_days": [
+      "monday",
+      "wednesday",
+      "friday",
+      "sunday"
+    ],
     "preferred_units": "imperial",
     "weekly_mileage_target": 0,
     "miles_logged_this_week": 0,
     "runs_this_week": 0,
     "injury_hold_since": "2026-05-04",
-    "injury_notes": "IT band inflammation — left knee. On rest per physio since May 4. Race is 8 weeks away.",
+    "injury_notes": "IT band inflammation \u2014 left knee. On rest per physio since May 4. Race is 8 weeks away.",
     "recent_activities": [],
     "recent_conversation": [
       {
         "role": "assistant",
         "date": "2026-05-04",
-        "content": "IT band at mile 8 on an 11-miler — that's the classic overuse pattern. Rest it fully for 3-5 days, no running. If you have a physio, get in as soon as you can. Keep icing if it's tender. I'll hold the plan until we know more."
+        "content": "IT band at mile 8 on an 11-miler \u2014 that's the classic overuse pattern. Rest it fully for 3-5 days, no running. If you have a physio, get in as soon as you can. Keep icing if it's tender. I'll hold the plan until we know more."
       },
       {
         "role": "user",
         "date": "2026-05-07",
-        "content": "Saw my physio — she said IT band is inflamed, no running for at least a week. Going to be careful."
+        "content": "Saw my physio \u2014 she said IT band is inflamed, no running for at least a week. Going to be careful."
       },
       {
         "role": "assistant",
         "date": "2026-05-07",
-        "content": "Good call going in. Complete rest from running for now. 8 weeks to your half is enough time to recover and still race well — we're not behind yet. Check back in at the end of the week."
+        "content": "Good call going in. Complete rest from running for now. 8 weeks to your half is enough time to recover and still race well \u2014 we're not behind yet. Check back in at the end of the week."
       }
     ]
   },
   "inbound_sms": "Day 6 of no running and it's killing me. Knee is feeling a lot better though. What can I actually do to stay in shape without making it worse?",
   "ground_truth": {
-    "must_contain_tag": "[INJURY_HOLD]",
-    "notes": "Athlete is on an active injury hold (injury_hold_since set, weekly_mileage_target=0). She's asking for cross-training options while on hold — this is the RIGHT question to answer. Dean MUST: (1) keep [INJURY_HOLD] active (IT band not cleared yet); (2) give 2-3 SPECIFIC cross-training options that are safe for IT band — pool running/aqua jogging is the gold standard (near-zero IT band stress), cycling is borderline (some IT band loading) so mention it with a caveat, elliptical is generally okay. Name them specifically; (3) note that pool running at effort preserves aerobic fitness better than pure rest; (4) reinforce the 8-week timeline is still workable. A response that just says 'pool or bike' without explaining WHY those work for IT band scores below 7. A response that suggests any running scores 0. The cross-training specificity is the key criterion."
+    "notes": "Athlete is on an active injury hold (injury_hold_since set, weekly_mileage_target=0). She's asking for cross-training options while on hold \u2014 this is the RIGHT question to answer. Dean MUST: (1) keep plan_action.injury_hold active (IT band not cleared yet); (2) give 2-3 SPECIFIC cross-training options that are safe for IT band \u2014 pool running/aqua jogging is the gold standard (near-zero IT band stress), cycling is borderline (some IT band loading) so mention it with a caveat, elliptical is generally okay. Name them specifically; (3) note that pool running at effort preserves aerobic fitness better than pure rest; (4) reinforce the 8-week timeline is still workable. A response that just says 'pool or bike' without explaining WHY those work for IT band scores below 7. A response that suggests any running scores 0. The cross-training specificity is the key criterion.",
+    "must_set_plan_action": "injury_hold"
   }
 }

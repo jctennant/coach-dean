@@ -25,6 +25,7 @@ function capitalizeBodyPartForCard(bodyPart: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, applyStructuredLongRun, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile, reconcilePlanComponents } from "@/lib/plan-validation";
+import { messageClaimsUnsignaledPlanChange } from "@/lib/plan-action-check";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { normalizeEmDashes } from "@/lib/text-format";
 import { getValidAccessToken } from "@/lib/strava";
@@ -122,7 +123,18 @@ const REHAB_TOOL = {
 //   the skeleton's actual open days — never one already assigned a fixed activity.
 type DeliverMessageMode = "none" | "plan_facts" | "skeleton_annotations" | "recovery_annotations";
 
-function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = false) {
+/** Shape of deliver_message's optional `plan_action` field — see buildDeliverMessageTool. */
+interface PlanActionInput {
+  session_swaps?: Array<{ day?: unknown; to?: unknown }>;
+  lighter_week?: boolean;
+  injury_hold?: boolean;
+  injury_clear?: boolean;
+  rtr_advance?: boolean;
+  rebuild_plan?: boolean;
+  physio_referral?: boolean;
+}
+
+function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = false, includePlanAction = false) {
   const illustratedIds = illustratedExerciseIds();
   return {
     name: "deliver_message" as const,
@@ -132,6 +144,12 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
       "needed (get_rehab_protocol, web_search) have resolved. The `message` argument must be nothing but the finished " +
       "SMS text (or the exact literal string [NO_REPLY] when instructed to send nothing) — no reasoning, no labels, " +
       "no explanation of what you're about to do." +
+      (includePlanAction
+        ? " If your message text tells the athlete you're changing their plan this turn (session swap, lighter week, " +
+          "injury hold/clear, rebuilding the plan, a physio referral), you must ALSO set the matching field(s) in " +
+          "`plan_action` — that structured field is what actually performs the change; stating it in `message` alone " +
+          "does nothing. Omit `plan_action` entirely on turns where you're not changing anything."
+        : "") +
       (mode === "plan_facts"
         ? " You must also report the `plan` object: the concrete numbers behind this message, exactly as you intend " +
           "to state them in your text (same values, same unit). This plan is day-agnostic prose (no day-by-day " +
@@ -252,6 +270,57 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                   },
                 },
                 required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source", "activity_type"],
+              },
+            }
+          : {}),
+        ...(includePlanAction
+          ? {
+              plan_action: {
+                type: "object" as const,
+                description:
+                  "The plan change(s) you're actually making this turn, if any — omit entirely on turns where " +
+                  "you're not changing the athlete's plan. Every field is independently optional; set only the " +
+                  "ones that apply (e.g. physio_referral and injury_hold can both be true in the same turn).",
+                properties: {
+                  session_swaps: {
+                    type: "array" as const,
+                    description:
+                      "One entry per session you're swapping this week (e.g. a run for cross-training). Use for " +
+                      "targeted 1-2 session changes, not a whole-week reduction (use lighter_week for that).",
+                    items: {
+                      type: "object" as const,
+                      properties: {
+                        day: { type: "string", description: "The day of the session being replaced, e.g. \"Mon\", \"Thu\"." },
+                        to: { type: "string", description: "What that session becomes, e.g. \"40min easy bike\"." },
+                      },
+                      required: ["day", "to"],
+                    },
+                  },
+                  lighter_week: {
+                    type: "boolean",
+                    description: "Reduce this week's mileage target ~25% and clear the session list, for a short-term setback the athlete can still run through.",
+                  },
+                  injury_hold: {
+                    type: "boolean",
+                    description: "Zero out this week's running target — the athlete cannot run at all (doctor's orders, acute flare, complete rest). High threshold — not for soreness or 'taking it easy'.",
+                  },
+                  injury_clear: {
+                    type: "boolean",
+                    description: "The athlete was on an injury hold and is now recovered and ready to resume — starts (or advances) the return-to-run protocol.",
+                  },
+                  rtr_advance: {
+                    type: "boolean",
+                    description: "Advance the athlete's return-to-run phase — only after they've cleared the gate question for their current RTR phase (see RETURN-TO-RUN CONTEXT).",
+                  },
+                  rebuild_plan: {
+                    type: "boolean",
+                    description: "The athlete confirmed (\"UPDATE PLAN\" or equivalent) a full plan rebuild you proposed. Only set after that explicit confirmation, never on the proposal turn itself.",
+                  },
+                  physio_referral: {
+                    type: "boolean",
+                    description: "You referred the athlete to a sports physio this turn.",
+                  },
+                },
               },
             }
           : {}),
@@ -457,7 +526,7 @@ export async function POST(request: Request) {
 }
 
 /**
- * Full plan rebuild triggered by a [REBUILD_PLAN] signal from Dean.
+ * Full plan rebuild triggered by plan_action.rebuild_plan from Dean's deliver_message call.
  *
  * Sequencing is the key guarantee here: profile updates from the conversation are
  * persisted FIRST (so corrected paces, training days, etc. are in the DB), then
@@ -746,7 +815,7 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
  * stops prescribing running while the athlete is injured. Stores the pre-injury
  * mileage target for use by handleInjuryClear when computing the return-to-run ramp.
  *
- * Fired by the [INJURY_HOLD] tag in Dean's response or directly via admin curl:
+ * Fired by plan_action.injury_hold on Dean's deliver_message call, or directly via admin curl:
  *   curl -X POST https://coachdean.ai/api/coach/respond -H "Content-Type: application/json" \
  *        -d '{"userId":"<id>","trigger":"injury_hold"}'
  */
@@ -791,7 +860,7 @@ async function handleInjuryHold(userId: string, dryRun: boolean): Promise<NextRe
  *   2 weeks out → 60%
  *   3+ weeks out → 50%
  *
- * Fired by the [INJURY_CLEAR] tag in Dean's response or directly via admin curl:
+ * Fired by plan_action.injury_clear on Dean's deliver_message call, or directly via admin curl:
  *   curl -X POST https://coachdean.ai/api/coach/respond -H "Content-Type: application/json" \
  *        -d '{"userId":"<id>","trigger":"injury_clear"}'
  */
@@ -815,7 +884,7 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
   const currentRtrPhase = stateRow?.return_to_run_phase ?? null;
 
   // If called after RTR phase 2 graduation (via RTR_ADVANCE), rebuild the full plan.
-  // If called directly via [INJURY_CLEAR] tag (athlete bypassing RTR), start RTR phase 1.
+  // If called directly via plan_action.injury_clear (athlete bypassing RTR), start RTR phase 1.
   const isGraduation = currentRtrPhase !== null && currentRtrPhase >= 2;
   console.log(`[handleInjuryClear] userId=${userId} — currentRtrPhase=${currentRtrPhase}, isGraduation=${isGraduation}`);
 
@@ -943,7 +1012,7 @@ async function handleInjuryClear(userId: string, dryRun: boolean): Promise<NextR
 /**
  * Lighter week: reduce this week's mileage target by ~25% and clear the stored
  * session list so the next morning_plan / user_message picks up the lower volume.
- * Fired by the [LIGHTER_WEEK] tag or directly:
+ * Fired by plan_action.lighter_week on Dean's deliver_message call, or directly:
  *   curl -X POST https://coachdean.ai/api/coach/respond -H "Content-Type: application/json" -d '{"userId":"<id>","trigger":"lighter_week"}'
  */
 async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextResponse> {
@@ -1273,7 +1342,7 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
 
   // Rebuild plan early exit: persists profile updates from recent conversation, then
   // regenerates the full plan arc without resetting the week counter. No Claude call needed.
-  // Fired after Dean sends a [REBUILD_PLAN] confirmation to the athlete.
+  // Fired after Dean sets plan_action.rebuild_plan to confirm the athlete's rebuild request.
   if (trigger === "rebuild_plan") {
     return await handleRebuildPlan(userId, dry_run ?? false, silent ?? false, body.prescribedWeek1Miles);
   }
@@ -1909,10 +1978,10 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
       `When any of these areas come up in this message or conversation:`,
       `1. Acknowledge this as a pattern, not a one-off: "You've mentioned your [X] a couple times now — that pattern matters more than a single-session soreness."`,
       `2. Recommend specific load modification: swap or reduce the next hard session, not just a vague "take it easy."`,
-      `3. Use [LIGHTER_WEEK] if the recurrence is moderate severity or unclear, or [SESSION_SWAP] to swap a specific hard session.`,
+      `3. Set plan_action.lighter_week = true if the recurrence is moderate severity or unclear, or use plan_action.session_swaps to swap a specific hard session.`,
     ];
     if (tripleThreshold.length > 0) {
-      parts.push(`MANDATORY ESCALATION: ${tripleThreshold.join(", ")} has been flagged 3+ times. You MUST include a clear recommendation to see a sports physio. Say: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run." Then append [INJURY_HOLD] at the end of your response.`);
+      parts.push(`MANDATORY ESCALATION: ${tripleThreshold.join(", ")} has been flagged 3+ times. You MUST include a clear recommendation to see a sports physio. Say: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run." Then set plan_action.injury_hold = true on your deliver_message call.`);
     }
     return `\n\n${parts.join("\n")}`;
   })();
@@ -3241,7 +3310,12 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   const includeStatedFacts =
     trigger === "post_run" || trigger === "user_message" || trigger === "morning_plan" ||
     trigger === "weekly_recap" || trigger === "initial_plan";
-  const coachTools: Anthropic.Messages.ToolUnion[] = [buildDeliverMessageTool(deliverMessageMode, includeStatedFacts)];
+  // plan_action is only meaningful (and only ever acted on) for user_message — the
+  // dispatch block below that applies it is gated the same way the tag mechanism it
+  // replaces was. Keeping the schema field itself scoped to this trigger avoids offering
+  // Claude a field that would silently do nothing on other triggers.
+  const includePlanAction = trigger === "user_message";
+  const coachTools: Anthropic.Messages.ToolUnion[] = [buildDeliverMessageTool(deliverMessageMode, includeStatedFacts, includePlanAction)];
   if (shouldUseWebSearch) coachTools.push({ type: "web_search_20250305", name: "web_search" });
   if (offerRehabTool) coachTools.push(REHAB_TOOL);
 
@@ -3772,32 +3846,43 @@ OUTPUT CONTRACT:
     }
   }
 
+  // Plan-mutation signals: read directly off the `deliver_message` tool call's structured
+  // `plan_action` field (see buildDeliverMessageTool) instead of regex-scanning `rawText`
+  // for bracket tags. This closes the gap the old mechanism had — a tag embedded in free
+  // text that Claude could state a change in prose without emitting, or emit with a syntax
+  // slip a regex wouldn't match — by making the signal a typed, schema-validated field
+  // Claude sets independently of what it writes in `message`. Only ever populated for
+  // trigger === "user_message" (see includePlanAction above); every other trigger gets
+  // `undefined` here, matching the prior mechanism's dispatch gating below.
+  const planAction = (deliverBlock?.input as { plan_action?: PlanActionInput } | undefined)?.plan_action ?? null;
+  const wantsRebuild = planAction?.rebuild_plan === true;
+  const wantsInjuryHold = planAction?.injury_hold === true;
+  const wantsInjuryClear = planAction?.injury_clear === true;
+  const wantsLighterWeek = planAction?.lighter_week === true;
+  const wantsRtrAdvance = planAction?.rtr_advance === true;
+  const wantsPhysioReferral = planAction?.physio_referral === true;
+  const tagSessionSwaps = Array.isArray(planAction?.session_swaps)
+    ? planAction!.session_swaps
+        .filter((s): s is { day: string; to: string } => typeof s?.day === "string" && typeof s?.to === "string")
+        .map((s) => ({ day: s.day.trim(), to: s.to.trim() }))
+    : [];
+  if (wantsRebuild || wantsInjuryHold || wantsInjuryClear || wantsLighterWeek || wantsPhysioReferral || wantsRtrAdvance || tagSessionSwaps.length > 0) {
+    const actions = [
+      wantsRebuild && "rebuild_plan", wantsInjuryHold && "injury_hold", wantsInjuryClear && "injury_clear",
+      wantsLighterWeek && "lighter_week", wantsRtrAdvance && "rtr_advance", wantsPhysioReferral && "physio_referral",
+      tagSessionSwaps.length > 0 && "session_swaps",
+    ].filter(Boolean);
+    log.info("plan_action detected", { actions });
+  }
+
   // Strip internal system tokens ([NO_REPLY], etc.) from the text before any
   // further processing. These should never reach the athlete's SMS.
   // Also strip any reasoning preamble Claude occasionally outputs before its actual response.
-  const wantsRebuild = /\[REBUILD_PLAN\]/i.test(rawText);
-  const wantsInjuryHold = /\[INJURY_HOLD\]/i.test(rawText);
-  if (wantsRebuild || wantsInjuryHold || /\[INJURY_CLEAR\]/i.test(rawText) || /\[LIGHTER_WEEK\]/i.test(rawText) || /\[PHYSIO_REFERRAL\]/i.test(rawText)) {
-    const tags = [wantsRebuild && "REBUILD_PLAN", wantsInjuryHold && "INJURY_HOLD", /\[INJURY_CLEAR\]/i.test(rawText) && "INJURY_CLEAR", /\[LIGHTER_WEEK\]/i.test(rawText) && "LIGHTER_WEEK", /\[PHYSIO_REFERRAL\]/i.test(rawText) && "PHYSIO_REFERRAL"].filter(Boolean);
-    log.info("action tags detected", { tags });
-  }
-  const wantsInjuryClear = /\[INJURY_CLEAR\]/i.test(rawText);
-  const wantsLighterWeek = /\[LIGHTER_WEEK\]/i.test(rawText);
   const wantsPositiveOnly = /\[POSITIVE_ONLY\]/i.test(rawText);
   const wantsStandardCoaching = /\[STANDARD_COACHING\]/i.test(rawText);
   // CADENCE: athlete asked to change how often Dean proactively texts them.
   const cadenceMatch = rawText.match(/\[CADENCE:\s*(morning_reminders|nightly_reminders|weekly_only)\]/i);
   const tagCadence = cadenceMatch ? cadenceMatch[1].toLowerCase() : null;
-  // RTR_ADVANCE: advance the return-to-run phase when athlete clears the gate.
-  const wantsRtrAdvance = /\[RTR_ADVANCE\]/i.test(rawText);
-  // SESSION_SWAP: swap one or more sessions in the current week plan.
-  const sessionSwapMatches = [...rawText.matchAll(/\[SESSION_SWAP\s+day="([^"]+)"\s+to="([^"]+)"\]/gi)];
-  const tagSessionSwaps = sessionSwapMatches.map(m => ({ day: m[1].trim(), to: m[2].trim() }));
-  // Backward-compat aliases used by the after() condition check below
-  const tagSessionSwapDay = tagSessionSwaps[0]?.day ?? null;
-  const tagSessionSwapTo = tagSessionSwaps[0]?.to ?? null;
-  // PHYSIO_REFERRAL: emitted when Dean refers the athlete to a physical therapist.
-  const wantsPhysioReferral = /\[PHYSIO_REFERRAL\]/i.test(rawText);
   // STRENGTH_POSTER: emitted when Dean lists the full strength routine — triggers a
   // follow-up media message with the illustrated poster for that routine.
   const wantsStrengthPoster = /\[STRENGTH_POSTER\]/i.test(rawText);
@@ -3818,6 +3903,12 @@ OUTPUT CONTRACT:
   const strippedRaw = stripReasoningPreamble(
     rawText
       .replace(/\[NO_REPLY\]/gi, "")
+      // The 7 plan-mutation signals below (REBUILD_PLAN/INJURY_HOLD/INJURY_CLEAR/
+      // LIGHTER_WEEK/SESSION_SWAP/PHYSIO_REFERRAL/RTR_ADVANCE) are no longer read from
+      // `message` — see `planAction` above, sourced from the structured `plan_action`
+      // tool field instead. These `.replace()` calls are pure defense-in-depth: strip the
+      // literal bracket text from the athlete-facing SMS on the off chance Claude still
+      // writes it out of habit, even though doing so no longer has any effect.
       .replace(/\[REBUILD_PLAN\]/gi, "")
       .replace(/\[INJURY_HOLD\]/gi, "")
       .replace(/\[INJURY_CLEAR\]/gi, "")
@@ -3842,6 +3933,15 @@ OUTPUT CONTRACT:
       })())
       .trim()
   );
+
+  // Advisory-only telemetry (see plan-action-check.ts): flags a message that reads like
+  // it's confirming a plan change while plan_action has nothing set — meaning nothing
+  // was actually written. Log/track only, never blocks or rewrites the send.
+  if (trigger === "user_message" && strippedRaw && messageClaimsUnsignaledPlanChange(strippedRaw, planAction)) {
+    log.warn("message implies a plan change but plan_action was empty", { trigger, userId });
+    void trackEvent(userId, "plan_action_unsignaled_change", { trigger });
+  }
+
   // correctMileageTotal catches math errors where Claude states a weekly total that
   // doesn't match the sum of session distances in the response.
   // - post_run: uses correctProjectedTotal instead — no session plan in the response
@@ -6379,15 +6479,15 @@ function buildSystemPrompt(
   // Claude the objective fact fresh every message instead of relying on conversation memory
   // to notice this — the exact gap that let a real account's DB state drift from what Dean's
   // own prose had been saying for days (see 2026-07-17 changelog). Log-only trackEvent below
-  // for admin visibility; the [INJURY_HOLD] judgment call itself stays exactly as strict as
-  // it already is — this only makes sure the input feeding it is never silently missing.
+  // for admin visibility; the plan_action.injury_hold judgment call itself stays exactly as
+  // strict as it already is — this only makes sure the input feeding it is never silently missing.
   const POSSIBLE_UNFLAGGED_INJURY_THRESHOLD_DAYS = 5;
   const possibleUnflaggedInjuryFact = (() => {
     if (state?.injury_hold_since) return null; // already flagged — no need to re-surface
     const { daysSinceLastRun, consecutiveCrossTrainOnlyDays } = computeRunGapSignal(recentActivities, timezone ?? "America/New_York");
     if (consecutiveCrossTrainOnlyDays < POSSIBLE_UNFLAGGED_INJURY_THRESHOLD_DAYS) return null;
     void trackEvent(user.id as string, "possible_unflagged_injury_detected", { consecutiveCrossTrainOnlyDays, daysSinceLastRun });
-    return `POSSIBLE UNFLAGGED INJURY: no logged run in ${daysSinceLastRun} days, cross-training only, and no injury hold is on record — if this reflects an ongoing injury the athlete hasn't formally confirmed, ask directly and consider [INJURY_HOLD] if warranted.`;
+    return `POSSIBLE UNFLAGGED INJURY: no logged run in ${daysSinceLastRun} days, cross-training only, and no injury hold is on record — if this reflects an ongoing injury the athlete hasn't formally confirmed, ask directly and consider plan_action.injury_hold if warranted.`;
   })();
 
 
@@ -6795,7 +6895,7 @@ ${tsDeloadBlock}${tsProgressionLine}- Weekly mileage target (athlete baseline): 
 <rule>LABEL/PACE CONSISTENCY: A session labeled "Tempo", "Threshold", or "Race Pace" MUST have a pace at least 30 sec/mi faster than easy. Never write "Tempo X mi @ [easy pace range]" — fix the label or fix the pace.</rule>
 - Last activity: ${state?.last_activity_summary ? JSON.stringify(state.last_activity_summary) : "None yet"}
 - Active adjustments: ${state?.plan_adjustments || "None"}
-${state?.injury_hold_since ? `INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, append [INJURY_CLEAR] at the end of your response.` : ""}${(() => {
+${state?.injury_hold_since ? `INJURY HOLD ACTIVE since ${state.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. When the athlete explicitly says they are recovered and ready to resume training, set plan_action.injury_clear = true on your deliver_message call.` : ""}${(() => {
   const rtrPhase = (state as Record<string, unknown> | null)?.return_to_run_phase as number | null;
   if (!rtrPhase) return "";
   const bodyPart = (profile?.injury_body_part as string | null) ?? "injury area";
@@ -6807,12 +6907,12 @@ ${state?.injury_hold_since ? `INJURY HOLD ACTIVE since ${state.injury_hold_since
   // webhook, actually gets read) since that's a separate turn from this one.
   const gateQuestionSuppressed = isPhotonProvider() && trigger === "post_run";
   if (rtrPhase === 1) {
-    return `\nRETURN-TO-RUN PHASE 1 ACTIVE: Athlete is returning from injury (${bodyPart}). Walk/run protocol in effect. Rules:\n- Prescribe ONLY walk/run intervals: "Run 2 min, walk 1 min, repeat 6×" (~20–25 min). No continuous easy runs yet.\n- Max 3 sessions this week.${gateQuestionSuppressed ? " Zero quality sessions, zero tempo, zero long run. Do NOT ask how the session felt — that question is sent separately." : ` Zero quality sessions, zero tempo, zero long run.\n- After each completed session, ask ONE gate question: "How did the ${bodyPart} feel — any pain during or after, or all clear?"`}\n- If the athlete reports 2 consecutive pain-free sessions: append [RTR_ADVANCE] at the end of your response to advance to phase 2.\n- If they report ANY pain during a session: do NOT advance. Assess severity — if significant, use [INJURY_HOLD] to pause.`;
+    return `\nRETURN-TO-RUN PHASE 1 ACTIVE: Athlete is returning from injury (${bodyPart}). Walk/run protocol in effect. Rules:\n- Prescribe ONLY walk/run intervals: "Run 2 min, walk 1 min, repeat 6×" (~20–25 min). No continuous easy runs yet.\n- Max 3 sessions this week.${gateQuestionSuppressed ? " Zero quality sessions, zero tempo, zero long run. Do NOT ask how the session felt — that question is sent separately." : ` Zero quality sessions, zero tempo, zero long run.\n- After each completed session, ask ONE gate question: "How did the ${bodyPart} feel — any pain during or after, or all clear?"`}\n- If the athlete reports 2 consecutive pain-free sessions: set plan_action.rtr_advance = true on your deliver_message call to advance to phase 2.\n- If they report ANY pain during a session: do NOT advance. Assess severity — if significant, set plan_action.injury_hold = true to pause.`;
   }
   if (rtrPhase === 2) {
     const preMiles = (state as Record<string, unknown> | null)?.pre_injury_mileage_target as number | null;
     const cap = preMiles ? Math.round(preMiles * 0.55) : null;
-    return `\nRETURN-TO-RUN PHASE 2 ACTIVE: Athlete is in graduated return to running (${bodyPart}). Rules:\n- Easy running only. No tempo, no intervals, no race-pace effort.\n${cap ? `- Mileage cap this week: ~${cap} miles. Do NOT prescribe sessions that would exceed this total.\n` : ""}${gateQuestionSuppressed ? "- Do NOT ask how the run felt — that question is sent separately." : `- After each run, ask the gate question: "How's the ${bodyPart} feeling — anything during or after the run?"`}\n- If the athlete completes the week pain-free: append [RTR_ADVANCE] at the end of your response to graduate to a full plan.\n- If they report pain: reassess with [LIGHTER_WEEK] or [INJURY_HOLD] depending on severity.`;
+    return `\nRETURN-TO-RUN PHASE 2 ACTIVE: Athlete is in graduated return to running (${bodyPart}). Rules:\n- Easy running only. No tempo, no intervals, no race-pace effort.\n${cap ? `- Mileage cap this week: ~${cap} miles. Do NOT prescribe sessions that would exceed this total.\n` : ""}${gateQuestionSuppressed ? "- Do NOT ask how the run felt — that question is sent separately." : `- After each run, ask the gate question: "How's the ${bodyPart} feeling — anything during or after the run?"`}\n- If the athlete completes the week pain-free: set plan_action.rtr_advance = true on your deliver_message call to graduate to a full plan.\n- If they report pain: reassess with plan_action.lighter_week or plan_action.injury_hold depending on severity.`;
   }
   return "";
 })()}${sessionRows}${remainingPlanLine}`;
@@ -6878,21 +6978,21 @@ STOP ASKING RULE: Even for active (non-resolved) injuries, scan RECENT CONVERSAT
 
 SHARP PAIN DISAMBIGUATION: If the athlete uses the word "sharp" to describe pain (not "sharp turn", "sharp hill", "sharp ascent"), DO NOT immediately escalate to a PT referral. First ask one clarifying question: "When you say sharp — is it a sudden stabbing feeling, or more of an intense ache or tightness?" Only escalate after they confirm it's a stabbing/sudden sensation. False escalations (treating "felt a bit sharp" as a medical emergency) damage trust.
 
-GAIT QUESTION — TRIAGE: When the athlete first reports a new symptom (pain, tightness, or soreness in a specific body part), and the conversation doesn't already show gait information, include ONE targeted question alongside your triage: "Does this change how you're walking or running — like favouring one side, any limping?" This is a key differentiator: gait-altering pain = higher urgency (may warrant [INJURY_HOLD] even without sharp pain). If the athlete confirms gait impact in their response, treat it as a mandatory referral trigger (same as sharp pain — see MANDATORY PROFESSIONAL REFERRAL below).
+GAIT QUESTION — TRIAGE: When the athlete first reports a new symptom (pain, tightness, or soreness in a specific body part), and the conversation doesn't already show gait information, include ONE targeted question alongside your triage: "Does this change how you're walking or running — like favouring one side, any limping?" This is a key differentiator: gait-altering pain = higher urgency (may warrant plan_action.injury_hold even without sharp pain). If the athlete confirms gait impact in their response, treat it as a mandatory referral trigger (same as sharp pain — see MANDATORY PROFESSIONAL REFERRAL below).
 
 MANDATORY PROFESSIONAL REFERRAL: You MUST include a clear recommendation to see a sports physio or running-focused physician (not optional, not softened) when ANY of these conditions are true:
 1. The athlete explicitly confirms stabbing/sudden sharp pain during a run (after disambiguation above)
 2. The athlete reports pain that changes their gait or causes them to limp
 3. The athlete reports swelling, numbness, or pins-and-needles in a limb
 4. The symptom history shows the same body part flagged 3+ times (handled by SYMPTOM RECURRENCE block above if present)
-Suggested language: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run. Happy to keep coaching around whatever they prescribe." After sending this, append [PHYSIO_REFERRAL] at the end of your response (before [INJURY_HOLD] if also needed).
+Suggested language: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run. Happy to keep coaching around whatever they prescribe." When you say this, set plan_action.physio_referral = true on your deliver_message call (plan_action.injury_hold = true too, if also needed — both can be set in the same call).
 
 - Post-run feedback: briefly check in on how the affected area held up — only if it's still an active concern and not already cleared in recent messages. One short sentence is enough.
 - Morning/nightly reminders: do NOT ask about injury status. This is handled at post-run and weekly recap — not every touchpoint.
 - Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
 
-SESSION_SWAP tag: When recommending specific session modifications (not a whole-week reduction), use: [SESSION_SWAP day="Mon" to="40min easy bike"] at the end of your response. You can include multiple SESSION_SWAP tags to modify several sessions at once — e.g. [SESSION_SWAP day="Thu" to="40min easy bike"][SESSION_SWAP day="Sun" to="10mi easy"]. This immediately swaps those sessions in the athlete's plan. Use this instead of [LIGHTER_WEEK] when you're making targeted changes to 1–2 specific sessions, not reducing the whole week.
+SESSION SWAP: When recommending specific session modifications (not a whole-week reduction), add one entry per session to plan_action.session_swaps on your deliver_message call, e.g. [{day: "Mon", to: "40min easy bike"}]. Include multiple entries to modify several sessions at once. This immediately swaps those sessions in the athlete's plan. Use this instead of plan_action.lighter_week when you're making targeted changes to 1–2 specific sessions, not reducing the whole week.
 ${(() => {
   const injBP = (profile?.injury_body_part as string | null)?.toLowerCase() ?? null;
   const cadence = coachingSignals?.avgCadenceSpm ?? null;
@@ -8000,7 +8100,7 @@ PLAN CONSISTENCY RULES — follow these exactly:
 - Do NOT mention NEXT WEEK'S PLAN in post-run feedback — that belongs in the Sunday recap.
 
 ${isAnalystMode ? `\n<rule>ANALYST MODE — NO PLAN: This athlete has no training plan and does not want one. Do NOT reference any plan, weekly mileage target, upcoming sessions, or training schedule. Do NOT say anything like "remaining sessions this week", "your plan calls for", or "THIS WEEK'S PLAN". The PLAN CONSISTENCY RULES and WORKOUT STRUCTURE sections do not apply. Focus purely on analyzing this run and end with one forward-looking observation — but no session prescriptions.</rule>\n` : ""}${isComplementMode ? `\n<rule>COMPLEMENT MODE — EXTERNAL PLAN: This athlete follows their own external training plan (Runna, TrainingPeaks, coach-written, uploaded PDF, etc.). For non-injury reasons, do NOT prescribe new sessions, alter their schedule, or suggest changing their upcoming workouts — that's their plan's job, not yours. If CURRENT TRAINING STATE lists sessions, they belong to their external plan — reference them as context only.
-INJURY EXCEPTION — this is the main reason athletes ask Dean to touch their own plan: when there's an active injury, reported pain, or the athlete explicitly asks you to adjust the plan because of it, you SHOULD modify their sessions directly rather than deflecting to "that's your plan, not mine." Use [SESSION_SWAP day="X" to="Y"] to swap 1-2 specific sessions (e.g. a run for cycling, swimming, or the elliptical) or [LIGHTER_WEEK] for a broader load reduction across the week — same tags and mechanism as a normal plan. Say plainly that you're adjusting THEIR plan for the injury (not replacing it) — everything you don't touch stays exactly as they uploaded it.
+INJURY EXCEPTION — this is the main reason athletes ask Dean to touch their own plan: when there's an active injury, reported pain, or the athlete explicitly asks you to adjust the plan because of it, you SHOULD modify their sessions directly rather than deflecting to "that's your plan, not mine." Use plan_action.session_swaps to swap 1-2 specific sessions (e.g. a run for cycling, swimming, or the elliptical) or plan_action.lighter_week for a broader load reduction across the week — same mechanism as a normal plan. Say plainly that you're adjusting THEIR plan for the injury (not replacing it) — everything you don't touch stays exactly as they uploaded it.
 Outside the injury exception, your role stays post-run analysis. The PLAN CONSISTENCY RULES still apply (don't mention next week), but do not treat Dean as the source of their plan.</rule>\n` : ""}${isPositiveOnlyStyle ? `\n<rule>POSITIVE-FIRST COACHING STYLE: This athlete has asked for affirming feedback — they want to know what went well and any notable observations, not corrections about effort or pace. Follow these rules:
 - Lead with what's working. Find the genuine win in this run — fitness progress, execution, consistency, conditions handled well — and lead with it.
 - Skip effort corrections. Do NOT tell them to run easier, pull their HR down, slow down on easy days, or flag Z3/gray zone effort. If HR was elevated, skip the HR lens entirely and pick a different one.
@@ -8035,7 +8135,7 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
       // Inject a compact summary of every planned week so Dean can answer questions about
       // upcoming mileage, peak volume, long runs, or key sessions without guessing.
       // On injury hold, that stored arc was baked in pre-injury and is stale — it gets
-      // rebuilt from a reduced base at [INJURY_CLEAR] (see injury-return.ts), so it's
+      // rebuilt from a reduced base at injury_clear (see injury-return.ts), so it's
       // relabeled as reference-only and paired with the actual predictive return-to-run
       // facts instead of being handed over as next week's number.
       const rtrRamp = injuryHoldSince ? computeReturnToRunRamp(injuryHoldSince, preInjuryMileageTarget) : null;
@@ -8054,7 +8154,7 @@ PLAN ADJUSTMENTS — only if the athlete explicitly mentions something specific 
         ? Array.from(new Set(storedPlanAllWeeks!.map(w => w.phase)))
         : [];
       // Real projected mileage for the first few weeks back — computed with the SAME
-      // mileage-arc math the plan is actually rebuilt with at [INJURY_CLEAR] (computeMileageArc,
+      // mileage-arc math the plan is actually rebuilt with at injury_clear (computeMileageArc,
       // shared with generateAndSaveFullPlan), just previewed from the current return-base
       // estimate instead of persisted. This gives Dean genuine numbers to quote for the near-term
       // "what's the plan" question instead of having to invent a progression past the return week
@@ -8154,7 +8254,7 @@ FULL PLAN REQUESTS (ON injury hold): If the athlete asks to SEE the plan, schedu
 
 EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Handle it using the THIS WEEK SESSION SWAP rules below.
 
-WEEK-LEVEL PLAN CHANGES: Because the plan is day-agnostic, "swap days" requests don't apply. If the athlete asks to move, swap, or reschedule a session, gently redirect — the plan has no days assigned, so they can shift their run whenever works. Example: "Since the week is day-agnostic, just do the tempo whenever it fits — no need to swap." No [WEEK_OVERRIDE] or [SKIP_DAY] tags. However, if they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load, treat that as a [LIGHTER_WEEK] per the rules below.
+WEEK-LEVEL PLAN CHANGES: Because the plan is day-agnostic, "swap days" requests don't apply. If the athlete asks to move, swap, or reschedule a session, gently redirect — the plan has no days assigned, so they can shift their run whenever works. Example: "Since the week is day-agnostic, just do the tempo whenever it fits — no need to swap." No [WEEK_OVERRIDE] or [SKIP_DAY] tags. However, if they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load, treat that as plan_action.lighter_week per the rules below.
 
 RACE COURSE DATA: If the athlete provides course profile details for their race (total elevation gain, total descent, start altitude, or terrain type), save it immediately by appending at the end of your response:
 [RACE_COURSE_UPDATE:{"race_id":"<uuid>","elevation_gain_feet":<number>,"elevation_loss_feet":<number>,"race_altitude_ft":<number>,"trail_subtype":"<groomed|mixed|technical|highly_technical>"}]
@@ -8162,23 +8262,23 @@ Only include fields the athlete actually provided — omit the rest. The race_id
 
 TRAINING PLAN ADJUSTMENT: You can modify upcoming weeks in the athlete's stored training plan when circumstances clearly warrant it — illness, injury, travel, or a deliberate priority change. When you commit to a change, state it explicitly (e.g. "I've updated next week — dropping it to X miles with easy running only" or "I've swapped the tempo for an easy run next week"). Only commit to a change if it's clearly warranted; don't suggest adjustments for minor day-to-day issues. Do not modify weeks that have already passed.
 
-FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "rebuild my plan with more tempo", "add speed work throughout", "update the whole plan" — describe what will change in 1-2 sentences, then end with: "Reply UPDATE PLAN to confirm." Do NOT include a session list or week-by-week schedule. Do NOT say the plan has already been updated — nothing changes until they confirm. Do NOT use [REBUILD_PLAN].${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
+FULL PLAN REBUILD: If the athlete asks to rebuild or update their whole plan (not just swap a session this week) — e.g. "rebuild my plan with more tempo", "add speed work throughout", "update the whole plan" — describe what will change in 1-2 sentences, then end with: "Reply UPDATE PLAN to confirm." Do NOT include a session list or week-by-week schedule. Do NOT say the plan has already been updated — nothing changes until they confirm. Do NOT set plan_action.rebuild_plan on this proposal turn — only after they reply confirming.${nextWeekContext ? `\n\nUPCOMING WEEK (stored plan):\n${nextWeekContext}` : ""}
 
-INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
+INJURY HOLD: When an athlete explicitly tells you they CANNOT run this week — doctor's orders, acute injury flare, or complete rest — set plan_action.injury_hold = true on your deliver_message call. This zeros out this week's running target, clears the session list, and stores the hold state. HIGH THRESHOLD: only use this for clear "can't run at all" situations, NOT soreness, NOT "taking it easy", NOT modified training. Examples that qualify: "doctor said no running this week", "I'm on complete rest", "can't put any weight on it". Examples that do NOT qualify: "my knee is a bit sore", "feeling tired", "going to run shorter distances".
 
-When signaling [INJURY_HOLD], your response MUST do two things:
+When setting plan_action.injury_hold, your response MUST do two things:
 
 1. TIMELINE: If INJURY HOLD ACTIVE does not already appear in CURRENT TRAINING STATE (meaning this is the first hold signal, not a re-check-in), include one sentence giving a realistic return-to-run estimate. Use the known injury type and severity from ATHLETE HISTORY if available. Reference timelines: ${buildTimelinePromptText()}. Frame it matter-of-factly, not alarmingly: "Most [injury type] cases at this severity are back to easy running in [range] — catching it now rather than running through it is what keeps that timeline on the shorter end." If injury type is unknown, use a conservative general range (2–4 weeks).
 
 2. CROSS-TRAINING WEEK: Include a brief cross-training outline — 3–4 sessions using the injury-appropriate options from the ACTIVE INJURY block above (call get_rehab_protocol if you haven't already), otherwise use the athlete's available tools from their profile, otherwise default to easy walking and elliptical. Format as a compact daily suggestion: "Mon/Wed/Fri — 30min [specific safe option]; Thu — optional [second option]. No high-impact activity." Keep the cross-training block to 2–3 lines. Also set a check-in: "Let me know how things feel mid-week." The goal is to give them the best activities for THEIR specific injury — not a generic rest prescription.
 
-INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
+INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — set plan_action.injury_clear = true on your deliver_message call. This triggers a gradual return-to-running plan rebuild. Only use after a confirmed injury hold — not for general "feeling good" messages.
 
 COACHING STYLE PREFERENCES: When an athlete asks for more positive/affirming feedback — e.g. "just tell me good job", "stop telling me to run easier", "I don't need the corrections, just what went well", "less criticism" — acknowledge it warmly and append [POSITIVE_ONLY] at the end of your response. This updates their preference permanently. Example response: "Got it — I'll keep the feedback focused on what's going well. Your data and observations will still be there, just without the effort corrections." If they're already in positive-only mode and want the full analysis back — e.g. "go back to normal", "give me the full feedback" — append [STANDARD_COACHING] instead.
 
 PROACTIVE MESSAGE CADENCE: When an athlete explicitly asks to change how often you text them proactively — e.g. "can you text me every morning with the plan", "opt me into daily morning reminders", "stop texting me at night", "just send the weekly recap, nothing daily" — confirm the change in one sentence and append the matching tag at the end of your response: [CADENCE: morning_reminders] for a daily morning plan text, [CADENCE: nightly_reminders] for the night-before reminder, or [CADENCE: weekly_only] for no daily texts (just the Sunday recap and reactive post-run feedback, which is the default). Example: "Got it — I'll text you each morning on your training days with the plan." [CADENCE: morning_reminders] This rule takes priority over FULL PLAN REQUESTS even though the athlete's message contains the word "plan" — they're asking about texting frequency, not asking to see the plan itself, and this holds whether or not the athlete is on injury hold. Only use this for an explicit, unambiguous cadence request — not general chat about mornings or scheduling.
 
-LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and for any days they'd otherwise skip, give 2-3 specific cross-training alternatives using the injury-safe options from the ACTIVE INJURY block if one is active — or if no active injury, use their available tools from the profile (bike, pool, elliptical). Never just say "rest" or "take it easy" — always give them something concrete and active they can do instead. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
+LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness, or a hectic schedule — that means they should reduce training but CAN still run some, set plan_action.lighter_week = true on your deliver_message call. This reduces this week's mileage target by ~25% and clears the session list so the plan reflects the lighter load. In your response: acknowledge the setback briefly, suggest a reduced week (shorter easy runs, drop quality sessions), and for any days they'd otherwise skip, give 2-3 specific cross-training alternatives using the injury-safe options from the ACTIVE INJURY block if one is active — or if no active injury, use their available tools from the profile (bike, pool, elliptical). Never just say "rest" or "take it easy" — always give them something concrete and active they can do instead. Next week returns to normal. Threshold: use for "my knee is nagging", "feeling beat up", "taking a few easy days", "calf is tight". Do NOT use if they say they can't run at all (use plan_action.injury_hold instead). Do NOT use if they're just asking for a lighter week with no injury/fatigue reason — handle that conversationally.
 
 MANUALLY-REPORTED ACTIVITY: If earlier in RECENT CONVERSATION you told the athlete you could NOT see a specific activity in Strava, and they then provided the details manually (distance, pace, time, etc.) in a follow-up message — those numbers are athlete-reported, NOT Strava-confirmed. Do NOT say "that matches what I saw from the sync" or any phrasing that implies Strava confirmed the data. Acknowledge it as manually noted: e.g. "Got it — I've noted that manually. If it eventually syncs from Strava, I'll reconcile it then." Falsely attributing athlete-provided data to a Strava sync that never happened damages trust.
 

@@ -624,7 +624,7 @@ ATHLETE HISTORY:
 - Goal: ${user.goal_race || user.goal}${raceDate ? ` on ${raceDate}` : ""}${user.goal_race_distance ? ` — ${user.goal_race_distance}` : ""}
 - Experience: ${user.experience_level || "not specified"}
 - Runs per week (approximate): ${(user.training_days || []).length || "—"}${user.training_days && user.training_days.length > 0 && user.training_days.length <= 3 ? `\n- <rule>With only ${user.training_days.length} runs per week, structure each week as: 1 long run + 1 quality session (tempo OR intervals — NOT both in the same week) + ${user.training_days.length === 3 ? "1 easy/medium run" : "easy runs"}. Scheduling separate tempo AND interval sessions in the same week is too much for this volume.</rule>` : ""}
-- Injury / constraints: ${user.injury_notes || "None reported"}${user.injury_body_part && !user.injury_hold_since ? `\n<rule>ACTIVE INJURY — ${user.injury_body_part.toUpperCase()} (${user.injury_severity || "active"}): In your response, you MUST prescribe these specific exercises by name — do not paraphrase, do not say "strengthening exercises": ${getBodyPartExercisesEval(user.injury_body_part).replace(/\n\s+Targeted exercises[^:]+: /, "")}. Also give 1-2 immediate self-care actions (e.g. ice 15min after runs, avoid aggravating surface/distance) alongside the exercises.</rule>` : ""}${user.injury_body_part && user.injury_body_part.toLowerCase() === "achilles" && !user.injury_hold_since ? `\n<rule>ACHILLES TEMPO DECISION RULE: When this athlete asks about an upcoming quality session (tempo, intervals), you MUST give a specific binary decision rule tied to morning stiffness. Required format: "Check how it feels [session day] morning. If stiffness is ≤2/10 (same as usual or better), do the tempo but shorten to [N-1] miles of quality work instead of the full [N] miles. If morning stiffness is 3/10 or higher, swap the entire session for [X]mi easy and protect the tendon." The quality session is: ${user.weekly_plan?.quality_session || "see training plan"}. The threshold numbers AND the shortened session length are both required — do NOT give a vague answer. Also prescribe eccentric heel drops: straight-leg 3×15 + bent-knee 3×15 off a step, after each run.</rule>` : ""}${user.injury_severity === "severe" ? `\n<rule>SEVERITY-BASED HOLD — REQUIRED: This injury is classified SEVERE. You MUST append [INJURY_HOLD] at the end of your response. Do NOT wait for the athlete to say "I can't run" — severe injuries with ongoing pain require stopping. Name the specific exercises for this body part and recommend seeing a physio or sports medicine doctor (framed as "the fastest path back to racing").</rule>` : ""}${user.injury_body_parts && user.injury_body_parts.length > 0 ? `\n<rule>RECURRING INJURY ALERT — ${user.injury_body_parts.join(", ")} flagged multiple times. This is a RED FLAG. In your response you MUST: (1) treat this as a recurring concern, NOT routine soreness; (2) name these specific exercises (do not generalize): ${user.injury_body_parts.map(p => getBodyPartExercisesEval(p).replace(/\n\s+Targeted exercises[^:]+: /, "")).filter(Boolean).join(" | ")}; (3) recommend seeing a physio if not already done.</rule>` : ""}${user.injury_notes && user.injury_notes !== "None" && user.injury_notes !== "None reported" && !user.injury_hold_since ? `\n<rule>ACTIVE INJURY — STRENGTH REQUIRED AFTER HARD EFFORTS: The athlete has an active injury (see above). After any tempo, interval, or hard run, you MUST send a second message with 3–4 specific strengthening exercises targeted to the injury site — exact names with sets × reps (e.g. "Nordic hamstring curl 3×6, single-leg RDL 3×10/leg, glute bridge 3×15"). A check-in question alone is NOT enough — provide the exercises AND optionally ask how the site feels. Do not skip the exercises.</rule>` : ""}${user.injury_history ? `\n- Injury history (past): ${user.injury_history}` : ""}
+- Injury / constraints: ${user.injury_notes || "None reported"}${user.injury_body_part && !user.injury_hold_since ? `\n<rule>ACTIVE INJURY — ${user.injury_body_part.toUpperCase()} (${user.injury_severity || "active"}): In your response, you MUST prescribe these specific exercises by name — do not paraphrase, do not say "strengthening exercises": ${getBodyPartExercisesEval(user.injury_body_part).replace(/\n\s+Targeted exercises[^:]+: /, "")}. Also give 1-2 immediate self-care actions (e.g. ice 15min after runs, avoid aggravating surface/distance) alongside the exercises.</rule>` : ""}${user.injury_body_part && user.injury_body_part.toLowerCase() === "achilles" && !user.injury_hold_since ? `\n<rule>ACHILLES TEMPO DECISION RULE: When this athlete asks about an upcoming quality session (tempo, intervals), you MUST give a specific binary decision rule tied to morning stiffness. Required format: "Check how it feels [session day] morning. If stiffness is ≤2/10 (same as usual or better), do the tempo but shorten to [N-1] miles of quality work instead of the full [N] miles. If morning stiffness is 3/10 or higher, swap the entire session for [X]mi easy and protect the tendon." The quality session is: ${user.weekly_plan?.quality_session || "see training plan"}. The threshold numbers AND the shortened session length are both required — do NOT give a vague answer. Also prescribe eccentric heel drops: straight-leg 3×15 + bent-knee 3×15 off a step, after each run.</rule>` : ""}${user.injury_severity === "severe" ? `\n<rule>SEVERITY-BASED HOLD — REQUIRED: This injury is classified SEVERE. You MUST set plan_action.injury_hold = true on your deliver_message call. Do NOT wait for the athlete to say "I can't run" — severe injuries with ongoing pain require stopping. Name the specific exercises for this body part and recommend seeing a physio or sports medicine doctor (framed as "the fastest path back to racing").</rule>` : ""}${user.injury_body_parts && user.injury_body_parts.length > 0 ? `\n<rule>RECURRING INJURY ALERT — ${user.injury_body_parts.join(", ")} flagged multiple times. This is a RED FLAG. In your response you MUST: (1) treat this as a recurring concern, NOT routine soreness; (2) name these specific exercises (do not generalize): ${user.injury_body_parts.map(p => getBodyPartExercisesEval(p).replace(/\n\s+Targeted exercises[^:]+: /, "")).filter(Boolean).join(" | ")}; (3) recommend seeing a physio if not already done.</rule>` : ""}${user.injury_notes && user.injury_notes !== "None" && user.injury_notes !== "None reported" && !user.injury_hold_since ? `\n<rule>ACTIVE INJURY — STRENGTH REQUIRED AFTER HARD EFFORTS: The athlete has an active injury (see above). After any tempo, interval, or hard run, you MUST send a second message with 3–4 specific strengthening exercises targeted to the injury site — exact names with sets × reps (e.g. "Nordic hamstring curl 3×6, single-leg RDL 3×10/leg, glute bridge 3×15"). A check-in question alone is NOT enough — provide the exercises AND optionally ask how the site feels. Do not skip the exercises.</rule>` : ""}${user.injury_history ? `\n- Injury history (past): ${user.injury_history}` : ""}
 - Preferred units: ${user.preferred_units || "imperial"} — use ${user.preferred_units === "metric" ? "km and min/km" : "miles and min/mile"} in all responses
 ${user.notes ? `- Athlete notes: ${user.notes}` : ""}${timeConstraintBlock}${strengthConstraintBlock}
 
@@ -640,13 +640,13 @@ ${isDeload ? `<rule>DELOAD WEEK: This week's target is ${weeklyTarget} mi — al
 - Current paces (Jack Daniels' VDOT formula — AUTHORITATIVE; treat as ground truth):
   Easy ${paces.easyRange}, Tempo ${paces.tempo}, Interval ${paces.interval}
 <rule>PACE SANITY CHECK (extends principle 10): This athlete's easy pace is ${paces.easy}. Any tempo or interval pace at ${paces.easy} or slower is wrong — use the stored Tempo (${paces.tempo}) instead. WU/CD pace = easy pace range (${paces.easyRange}); never prescribe WU/CD more than 30 sec/mi slower than easy. Always include the unit on every pace.</rule>${sessionRows}${remainingPlanLine}${user.weekly_plan?.quality_session ? `\nTHIS WEEK'S PLAN — Quality session: YES — ${user.weekly_plan.quality_session}` : ""}
-${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. REQUIRED: Append [INJURY_HOLD] at the end of EVERY response while hold is active, to maintain the hold state. Exception: if the athlete explicitly says they are recovered and ready to resume, append [INJURY_CLEAR] instead.` : ""}
+${user.injury_hold_since ? `\n⚠️ INJURY HOLD ACTIVE since ${user.injury_hold_since}: athlete cannot run. Do NOT prescribe running sessions. Focus on cross-training, rest, and monitoring. Weekly mileage target is 0. REQUIRED: set plan_action.injury_hold = true on EVERY deliver_message call while hold is active, to maintain the hold state. Exception: if the athlete explicitly says they are recovered and ready to resume, set plan_action.injury_clear = true instead.` : ""}
 
-INJURY HOLD: When an athlete cannot or should not run — append [INJURY_HOLD] at the end of your response. This zeros out this week's running target and stores the hold state. Use for: (a) explicit "can't run" statements ("doctor said no running", "I'm on complete rest", "can't put any weight on it"); (b) stopping a run mid-session due to pain (6/10 or higher); (c) pain at 7/10+ that has been worsening for 2+ weeks without improvement; (d) any scenario where the MANDATORY PROFESSIONAL REFERRAL rule fires (see below). Do NOT use for: minor soreness manageable with easy running, general fatigue, or voluntary lighter weeks. When signaling [INJURY_HOLD], include a brief cross-training week outline (3-4 sessions: easy bike/elliptical/walk, no high-impact) and a mid-week check-in prompt.
+INJURY HOLD: When an athlete cannot or should not run — set plan_action.injury_hold = true on your deliver_message call. This zeros out this week's running target and stores the hold state. Use for: (a) explicit "can't run" statements ("doctor said no running", "I'm on complete rest", "can't put any weight on it"); (b) stopping a run mid-session due to pain (6/10 or higher); (c) pain at 7/10+ that has been worsening for 2+ weeks without improvement; (d) any scenario where the MANDATORY PROFESSIONAL REFERRAL rule fires (see below). Do NOT use for: minor soreness manageable with easy running, general fatigue, or voluntary lighter weeks. When setting plan_action.injury_hold, include a brief cross-training week outline (3-4 sessions: easy bike/elliptical/walk, no high-impact) and a mid-week check-in prompt.
 
-INJURY CLEAR: When an athlete who was previously on injury hold (check above for "INJURY HOLD ACTIVE") explicitly says they are recovered and cleared to resume — append [INJURY_CLEAR] at the end of your response. Only use after a confirmed injury hold — not for general "feeling good" messages.
+INJURY CLEAR: When an athlete who was previously on injury hold (check above for "INJURY HOLD ACTIVE") explicitly says they are recovered and cleared to resume — set plan_action.injury_clear = true on your deliver_message call. Only use after a confirmed injury hold — not for general "feeling good" messages.
 
-LIGHTER WEEK: When an athlete reports a short-term setback (nagging soreness, minor ache, unexpected fatigue, hectic schedule) that means reduced training but CAN still run some — append [LIGHTER_WEEK] at the end. Threshold: "my knee is nagging", "feeling beat up", "taking a few easy days". Do NOT use if they can't run at all (use [INJURY_HOLD] instead).
+LIGHTER WEEK: When an athlete reports a short-term setback (nagging soreness, minor ache, unexpected fatigue, hectic schedule) that means reduced training but CAN still run some — set plan_action.lighter_week = true on your deliver_message call. Threshold: "my knee is nagging", "feeling beat up", "taking a few easy days". Do NOT use if they can't run at all (use plan_action.injury_hold instead).
 
 MANDATORY PROFESSIONAL REFERRAL: You MUST include a clear recommendation to see a sports physio or running-focused physician (not optional, not softened) when ANY of these conditions are true:
 1. The athlete explicitly confirms stabbing/sudden sharp pain during a run
@@ -654,9 +654,9 @@ MANDATORY PROFESSIONAL REFERRAL: You MUST include a clear recommendation to see 
 3. The athlete reports swelling, numbness, or bone ache (especially with a stress fracture history)
 4. Severe pain (7/10 or above) that has been worsening for more than 1-2 weeks
 5. The athlete was forced to stop a run mid-session due to pain (any severity)
-When ANY of conditions 1-5 are true, you MUST also append [INJURY_HOLD] at the end of your response. Suggested language: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run."
+When ANY of conditions 1-5 are true, you MUST also set plan_action.injury_hold = true on your deliver_message call. Suggested language: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run."
 
-STRESS FRACTURE HISTORY GUARD: If the athlete's injury history includes a stress fracture AND they now report bone ache or deep shin pain on the same side, this is a MANDATORY STOP situation — not "take a rest day", not "reduce intensity." You MUST: (1) explicitly name the concern: "Given your stress fracture history, bone ache on that side is not something to manage through — it needs imaging to rule out recurrence"; (2) tell them to stop running COMPLETELY until evaluated, not just "take it easy"; (3) append [INJURY_HOLD]; (4) recommend an MRI specifically (X-rays have ~70% false-negative rate for early stress fractures). "See a physio" is not enough — name MRI.
+STRESS FRACTURE HISTORY GUARD: If the athlete's injury history includes a stress fracture AND they now report bone ache or deep shin pain on the same side, this is a MANDATORY STOP situation — not "take a rest day", not "reduce intensity." You MUST: (1) explicitly name the concern: "Given your stress fracture history, bone ache on that side is not something to manage through — it needs imaging to rule out recurrence"; (2) tell them to stop running COMPLETELY until evaluated, not just "take it easy"; (3) set plan_action.injury_hold = true; (4) recommend an MRI specifically (X-rays have ~70% false-negative rate for early stress fractures). "See a physio" is not enough — name MRI.
 
 INJURY LOAD MANAGEMENT — connect training volume to symptoms: When an athlete reports new soreness or pain, check their recent week-over-week mileage change. If weekly mileage jumped more than 15%, explicitly name the connection: "You went from X to Y miles this week — that kind of spike is the primary driver of overuse injuries like this." The spike diagnosis AND the corrective action are both required.
 
@@ -767,9 +767,9 @@ STRENGTH & CROSS-TRAINING SCHEDULING:
 - If athlete does 2+ days/week of strength training, reduce peak running volume by 10–15% vs. a running-only athlete.
 - When asked to add strength, give specific days (e.g., "Monday and Thursday after your easy runs"), runner-specific exercises (glutes, hips, core), and warn about DOMS for the first few weeks.
 
-INJURY HOLD: When an athlete cannot or should not run — append [INJURY_HOLD] at the end of your response. Use for: (a) explicit "can't run" statements ("doctor said no running", "complete rest", "can't put any weight on it"); (b) stopping a run mid-session due to pain (6/10 or higher); (c) pain at 7/10+ worsening for 2+ weeks; (d) when the MANDATORY PROFESSIONAL REFERRAL rule fires. Do NOT use for: minor soreness manageable with easy running, general fatigue, or voluntary lighter weeks.
+INJURY HOLD: When an athlete cannot or should not run — set plan_action.injury_hold = true on your deliver_message call. Use for: (a) explicit "can't run" statements ("doctor said no running", "complete rest", "can't put any weight on it"); (b) stopping a run mid-session due to pain (6/10 or higher); (c) pain at 7/10+ worsening for 2+ weeks; (d) when the MANDATORY PROFESSIONAL REFERRAL rule fires. Do NOT use for: minor soreness manageable with easy running, general fatigue, or voluntary lighter weeks.
 
-INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — append [INJURY_CLEAR] at the end of your response. Only use after a confirmed injury hold.
+INJURY CLEAR: When an athlete who was previously on an injury hold (check CURRENT TRAINING STATE for "INJURY HOLD ACTIVE") explicitly says they are recovered and ready to resume full running — set plan_action.injury_clear = true on your deliver_message call. Only use after a confirmed injury hold.
 ${trigger === "user_message" && user.injury_hold_since ? `
 FULL PLAN REQUESTS (ON injury hold): If the athlete asks for the plan, schedule, arc, or "what's next" while on injury hold, use the RETURN-TO-RUN CONTEXT block below instead of any pre-injury arc numbers. Give a real, concrete answer — not "we'll figure it out" — built from these pieces: (1) current phase — cross-training/monitoring and the pain threshold that clears a test run, (2) the actual return-to-run ramp figure and window from RETURN-TO-RUN CONTEXT (state the real percentage and mileage, not a vague "we'll ease back in"), (3) if the athlete asks about more than just the first week back, quote the PROJECTED RETURN RAMP figures when present — those are real computed numbers, safe to state (framed as "roughly," since they're recalculated exactly at clearance), (4) beyond the weeks covered by PROJECTED RETURN RAMP, describe the pre-injury arc shape (peak/taper) qualitatively — phases and the peak-volume figure only, no invented mileage for individual weeks that far out, (5) tie it to the race goal — with the known days-to-race, name what has to be true (e.g. a pain-free long run of a given distance) to stay on track. Never invent a mileage number for a future week that isn't given to you in RETURN-TO-RUN CONTEXT — if you don't have a number for it, describe the shape in words instead.
 
@@ -780,7 +780,7 @@ ${projectedReturnArcEval && projectedReturnArcEval.length > 0 ? `- PROJECTED RET
 ${rtrRecoveryEstimateEval ? `- Typical return-to-run window for this injury/severity: ${rtrRecoveryEstimateEval.minWeeks}-${rtrRecoveryEstimateEval.maxWeeks} weeks from when the hold started` : ""}
 ${daysUntilRace != null ? `- Days until race: ${daysUntilRace}` : ""}` : ""}
 
-LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness — that means they should reduce training but CAN still run some, append [LIGHTER_WEEK] at the end of your response. This reduces this week's mileage target by ~25%. In your response: acknowledge the setback, suggest shorter easy runs (drop quality sessions), and offer cross-training (easy bike, elliptical, swim) for any days they'd otherwise skip. Do NOT use if they say they can't run at all (use [INJURY_HOLD] instead).${(trigger === "post_run" || trigger === "user_message") ? `
+LIGHTER WEEK: When an athlete reports a short-term setback — nagging soreness, minor ache, unexpected fatigue, early illness — that means they should reduce training but CAN still run some, set plan_action.lighter_week = true on your deliver_message call. This reduces this week's mileage target by ~25%. In your response: acknowledge the setback, suggest shorter easy runs (drop quality sessions), and offer cross-training (easy bike, elliptical, swim) for any days they'd otherwise skip. Do NOT use if they say they can't run at all (use plan_action.injury_hold instead).${(trigger === "post_run" || trigger === "user_message") ? `
 
 OUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
 1. OPEN WITH THE INSIGHT, NOT A GREETING OR PRAISE. When you're reading a run or how their training is going, the first sentence states the specific thing THIS athlete's data shows and what it MEANS — never "Nice work", "Great job", "Saw your run come through". A number alone is not an insight; pair it with an interpretation. Bad: "Solid run, 8:58/mi!" Good: "8:58/mi at 153 bpm — that's 38s/mi quicker than the same effort last month, so the base work is paying off."
@@ -1129,6 +1129,31 @@ function buildFactGateTool() {
           },
           required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source", "activity_type"],
         },
+        // Mirrors production's plan_action field (coach/respond/route.ts buildDeliverMessageTool)
+        // — plan-mutation signals reported as structured data, not appended bracket tags, so the
+        // eval exercises the same real contract athletes get instead of a text-scraping stand-in.
+        plan_action: {
+          type: "object",
+          description:
+            "The plan change(s) you're actually making this turn, if any — omit entirely if you're not " +
+            "changing the athlete's plan.",
+          properties: {
+            session_swaps: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { day: { type: "string" }, to: { type: "string" } },
+                required: ["day", "to"],
+              },
+            },
+            lighter_week: { type: "boolean" },
+            injury_hold: { type: "boolean" },
+            injury_clear: { type: "boolean" },
+            rtr_advance: { type: "boolean" },
+            rebuild_plan: { type: "boolean" },
+            physio_referral: { type: "boolean" },
+          },
+        },
       },
       required: ["message", "stated_facts"],
     },
@@ -1153,6 +1178,7 @@ async function runEval(fixture) {
   let coachResponse = null;
   let coachError = null;
   let factGateMismatches = null;
+  let planAction = null;
   try {
     if (useFactGate) {
       const factTruth = computeFactTruth(fixture);
@@ -1191,6 +1217,7 @@ async function runEval(fixture) {
       }
       factGateMismatches = mismatches.length > 0 ? mismatches : null;
       const deliveredText = deliverBlock ? String(deliverBlock.input?.message ?? "").trim() : "";
+      planAction = deliverBlock ? (deliverBlock.input?.plan_action ?? null) : null;
       coachResponse = deliveredText
         ? stripReasoningPreamble(deliveredText)
         : stripReasoningPreamble(
@@ -1234,7 +1261,7 @@ async function runEval(fixture) {
     ? buildPlanJudgePrompt(fixture, coachResponse)
     : isPlanUpdate
     ? buildPlanUpdateJudgePrompt(fixture, coachResponse)
-    : buildJudgePrompt(fixture, coachResponse);
+    : buildJudgePrompt(fixture, coachResponse, planAction);
   let judgment = null;
   let judgeError = null;
 

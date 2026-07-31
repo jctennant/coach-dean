@@ -1,6 +1,6 @@
 {
   "id": "injury-shin-splints-mileage-spike",
-  "description": "Shin splints coming on during a mileage build — 10k runner jumped 30% in one week. Dean must connect the spike to the injury, prescribe load reduction, and give shin-specific advice.",
+  "description": "Shin splints coming on during a mileage build \u2014 10k runner jumped 30% in one week. Dean must connect the spike to the injury, prescribe load reduction, and give shin-specific advice.",
   "category": "response_quality",
   "trigger": "user_message",
   "today": "2026-06-02",
@@ -17,32 +17,92 @@
     "easy_pace": "8:45/mi",
     "tempo_pace": "6:55/mi",
     "interval_pace": "6:10/mi",
-    "training_days": ["monday", "wednesday", "thursday", "saturday"],
+    "training_days": [
+      "monday",
+      "wednesday",
+      "thursday",
+      "saturday"
+    ],
     "preferred_units": "imperial",
     "weekly_mileage_target": 35,
     "miles_logged_this_week": 8.0,
     "runs_this_week": 1,
-    "injury_notes": "Bilateral shin splints — dull ache during and after runs, developing over past week from mileage build",
+    "injury_notes": "Bilateral shin splints \u2014 dull ache during and after runs, developing over past week from mileage build",
     "injury_body_part": "shin",
     "injury_severity": "mild",
     "active_injury": true,
-    "strava_recent_4_weeks": [34, 20, 14, 8],
+    "strava_recent_4_weeks": [
+      34,
+      20,
+      14,
+      8
+    ],
     "strava_max_weekly_spike_pct": 70,
     "recent_activities": [
-      { "date": "2026-06-01", "type": "Easy Run", "distance_miles": 8.0, "pace": "8:50/mi", "average_heartrate": 147 },
-      { "date": "2026-05-29", "type": "Interval", "distance_miles": 7.5, "pace": "7:02/mi", "average_heartrate": 174 },
-      { "date": "2026-05-28", "type": "Easy Run", "distance_miles": 7.0, "pace": "8:48/mi", "average_heartrate": 143 },
-      { "date": "2026-05-26", "type": "Easy Run", "distance_miles": 7.5, "pace": "8:52/mi", "average_heartrate": 145 },
-      { "date": "2026-05-24", "type": "Long Run", "distance_miles": 12.0, "pace": "9:00/mi", "average_heartrate": 152 },
-      { "date": "2026-05-19", "type": "Easy Run", "distance_miles": 6.0, "pace": "8:55/mi", "average_heartrate": 144 },
-      { "date": "2026-05-17", "type": "Easy Run", "distance_miles": 5.0, "pace": "9:00/mi", "average_heartrate": 142 },
-      { "date": "2026-05-15", "type": "Long Run", "distance_miles": 9.0, "pace": "9:10/mi", "average_heartrate": 150 }
+      {
+        "date": "2026-06-01",
+        "type": "Easy Run",
+        "distance_miles": 8.0,
+        "pace": "8:50/mi",
+        "average_heartrate": 147
+      },
+      {
+        "date": "2026-05-29",
+        "type": "Interval",
+        "distance_miles": 7.5,
+        "pace": "7:02/mi",
+        "average_heartrate": 174
+      },
+      {
+        "date": "2026-05-28",
+        "type": "Easy Run",
+        "distance_miles": 7.0,
+        "pace": "8:48/mi",
+        "average_heartrate": 143
+      },
+      {
+        "date": "2026-05-26",
+        "type": "Easy Run",
+        "distance_miles": 7.5,
+        "pace": "8:52/mi",
+        "average_heartrate": 145
+      },
+      {
+        "date": "2026-05-24",
+        "type": "Long Run",
+        "distance_miles": 12.0,
+        "pace": "9:00/mi",
+        "average_heartrate": 152
+      },
+      {
+        "date": "2026-05-19",
+        "type": "Easy Run",
+        "distance_miles": 6.0,
+        "pace": "8:55/mi",
+        "average_heartrate": 144
+      },
+      {
+        "date": "2026-05-17",
+        "type": "Easy Run",
+        "distance_miles": 5.0,
+        "pace": "9:00/mi",
+        "average_heartrate": 142
+      },
+      {
+        "date": "2026-05-15",
+        "type": "Long Run",
+        "distance_miles": 9.0,
+        "pace": "9:10/mi",
+        "average_heartrate": 150
+      }
     ],
     "recent_conversation": []
   },
-  "inbound_sms": "Both shins have been hurting for the past few days — kind of a dull ache that's there during runs and still there after. It's getting harder to ignore. I've been feeling great otherwise and didn't want to miss any runs.",
+  "inbound_sms": "Both shins have been hurting for the past few days \u2014 kind of a dull ache that's there during runs and still there after. It's getting harder to ignore. I've been feeling great otherwise and didn't want to miss any runs.",
   "ground_truth": {
-    "forbidden_tags": ["[INJURY_HOLD]"],
-    "notes": "This is a textbook overuse shin splint presentation from a mileage spike. Devon's recent_4_weeks shows [34, 20, 14, 8] newest→oldest — meaning last week was ~34mi and the week before was ~20mi (a 70% spike). This week is only 8mi so far (1 run). Dean MUST: (1) explicitly connect the mileage spike to the shin symptoms — state that last week (~34mi) was a ~70% jump from the week before (~20mi) — this connection is the primary criterion; the spike was the TWO-WEEKS-AGO→LAST-WEEK jump (20→34), NOT a drop from last week to this week; (2) prescribe load reduction — cut the next 2-3 runs short (e.g. 4-5mi max) or skip one; frame as 1-week correction; (3) name at least 2 specific shin exercises — tibialis anterior raises (stand with back to wall, lift toes 3×15) and eccentric calf raises off a step (straight knee 3×15) are the primary options — these ARE the standard rehab protocol; other cross-training suggestions (uphill treadmill, pool running) are helpful but NOT a pass criterion and must not penalize the response if absent; (4) [INJURY_HOLD] is an overreaction — mild bilateral shin splints from overuse should be managed with load reduction, not complete hold. Core pass criteria (score 7+): mileage spike connection WITH correct numbers (20→34) + at least 2 named shin exercises + load reduction recommendation. A response without the mileage spike connection scores below 5. A response that names only generic advice without specific exercises scores below 6."
+    "notes": "This is a textbook overuse shin splint presentation from a mileage spike. Devon's recent_4_weeks shows [34, 20, 14, 8] newest\u2192oldest \u2014 meaning last week was ~34mi and the week before was ~20mi (a 70% spike). This week is only 8mi so far (1 run). Dean MUST: (1) explicitly connect the mileage spike to the shin symptoms \u2014 state that last week (~34mi) was a ~70% jump from the week before (~20mi) \u2014 this connection is the primary criterion; the spike was the TWO-WEEKS-AGO\u2192LAST-WEEK jump (20\u219234), NOT a drop from last week to this week; (2) prescribe load reduction \u2014 cut the next 2-3 runs short (e.g. 4-5mi max) or skip one; frame as 1-week correction; (3) name at least 2 specific shin exercises \u2014 tibialis anterior raises (stand with back to wall, lift toes 3\u00d715) and eccentric calf raises off a step (straight knee 3\u00d715) are the primary options \u2014 these ARE the standard rehab protocol; other cross-training suggestions (uphill treadmill, pool running) are helpful but NOT a pass criterion and must not penalize the response if absent; (4) plan_action.injury_hold is an overreaction \u2014 mild bilateral shin splints from overuse should be managed with load reduction, not complete hold. Core pass criteria (score 7+): mileage spike connection WITH correct numbers (20\u219234) + at least 2 named shin exercises + load reduction recommendation. A response without the mileage spike connection scores below 5. A response that names only generic advice without specific exercises scores below 6.",
+    "forbidden_plan_actions": [
+      "injury_hold"
+    ]
   }
 }

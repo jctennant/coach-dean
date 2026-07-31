@@ -1748,3 +1748,169 @@ describe("coach/respond — Phase B fact gate (stated_facts equality check)", ()
     expect(events).toContain("stated_facts_mismatch_after_retry");
   });
 });
+
+// ---------------------------------------------------------------------------
+// plan_action — structured plan-mutation signals (replaces the old bracket-tag
+// mechanism: [SESSION_SWAP], [LIGHTER_WEEK], [INJURY_HOLD], [INJURY_CLEAR],
+// [RTR_ADVANCE], [REBUILD_PLAN], [PHYSIO_REFERRAL]). These tests exercise the
+// actual deliver_message → dispatch path via a full user_message request,
+// closing the exact gap the migration fixed: before this, nothing tested that
+// Claude's real tool-call output correctly drives a plan mutation — only the
+// downstream handlers were tested, called directly via `trigger`.
+// ---------------------------------------------------------------------------
+describe("coach/respond — plan_action structured dispatch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+  });
+
+  it("session_swaps: swaps a session's label in weekly_plan_sessions", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Given the calf tightness, I've swapped Thursday's run for an easy bike instead.",
+        plan_action: { session_swaps: [{ day: "Thu", to: "40min easy bike" }] },
+      } }],
+    });
+    const { stateChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [{ day: "Thursday", date: "2026-07-30", label: "Tempo 5mi" }],
+      }),
+      conversations: [
+        { role: "user", content: "My calf is tight, can we swap Thursday's tempo for a bike ride?", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush(); // drain the nested runAfter (session_swap/lighter_week/injury_hold/physio_referral fire from inside the outer coach/respond runAfter)
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const swapUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => Array.isArray(p?.weekly_plan_sessions));
+    expect(swapUpdate).toBeDefined();
+    const sessions = swapUpdate![0].weekly_plan_sessions as Array<{ day: string; label: string }>;
+    expect(sessions.find((s) => s.day === "Thursday")?.label).toBe("40min easy bike");
+  });
+
+  it("lighter_week: fires the lighter_week loopback trigger", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "I've lightened this week given the fatigue — shorter easy runs, no quality sessions.",
+        plan_action: { lighter_week: true },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: [
+        { role: "user", content: "Feeling pretty beat up this week, can we dial it back?", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush(); // drain the nested runAfter (session_swap/lighter_week/injury_hold/physio_referral fire from inside the outer coach/respond runAfter)
+
+    const fetchCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const lighterWeekCall = fetchCalls.find((c: unknown[]) => {
+      const body = JSON.parse((c[1] as { body: string }).body);
+      return body.trigger === "lighter_week";
+    });
+    expect(lighterWeekCall).toBeDefined();
+  });
+
+  it("injury_hold: fires the injury_hold loopback trigger", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Given complete rest from your doctor, I've paused your running plan.",
+        plan_action: { injury_hold: true },
+      } }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: [
+        { role: "user", content: "Doctor put me on complete rest this week.", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush(); // drain the nested runAfter (session_swap/lighter_week/injury_hold/physio_referral fire from inside the outer coach/respond runAfter)
+
+    const fetchCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const injuryHoldCall = fetchCalls.find((c: unknown[]) => {
+      const body = JSON.parse((c[1] as { body: string }).body);
+      return body.trigger === "injury_hold";
+    });
+    expect(injuryHoldCall).toBeDefined();
+  });
+
+  it("physio_referral: writes physio_referral_sent_at directly", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "I'd really encourage you to get in front of a sports physio before your next run.",
+        plan_action: { physio_referral: true },
+      } }],
+    });
+    const { stateChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      conversations: [
+        { role: "user", content: "It's a sharp, stabbing pain in my shin that's gotten worse.", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush(); // drain the nested runAfter (session_swap/lighter_week/injury_hold/physio_referral fire from inside the outer coach/respond runAfter)
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const referralUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.physio_referral_sent_at != null);
+    expect(referralUpdate).toBeDefined();
+  });
+
+  it("does NOT dispatch any plan mutation when plan_action is absent, even if the text sounds like it", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "I've swapped Thursday's run for an easy bike instead.",
+        // plan_action deliberately omitted — this is exactly the gap the old
+        // bracket-tag mechanism had: Claude confirms a change in prose but never
+        // signals it, so nothing should actually happen.
+      } }],
+    });
+    const { stateChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [{ day: "Thursday", date: "2026-07-30", label: "Tempo 5mi" }],
+      }),
+      conversations: [
+        { role: "user", content: "My calf is tight, can we swap Thursday's tempo for a bike ride?", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const { trackEvent } = await import("@/lib/track");
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush(); // drain the nested runAfter (session_swap/lighter_week/injury_hold/physio_referral fire from inside the outer coach/respond runAfter)
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    expect(updateCalls.find(([p]: [Record<string, unknown>]) => Array.isArray(p?.weekly_plan_sessions))).toBeUndefined();
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    // The advisory validator should flag this exact case.
+    const events = (trackEvent as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+    expect(events).toContain("plan_action_unsignaled_change");
+  });
+});

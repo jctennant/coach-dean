@@ -7,7 +7,7 @@
  * Build the judge prompt for a given fixture + coach response.
  * Returns the full prompt string to pass to the judge model.
  */
-export function buildJudgePrompt(fixture, coachResponse) {
+export function buildJudgePrompt(fixture, coachResponse, planAction = null) {
   const { user, ground_truth, category } = fixture;
   const raceDate = user.goal_race_date;
   const today = fixture.today ?? "2026-03-30";
@@ -186,8 +186,25 @@ function buildGroundTruthBlock(gt) {
   if (gt.planned_sessions_miles != null) lines.push(`- Planned future sessions sum to: ${gt.planned_sessions_miles} mi`);
   if (gt.forbidden_phrases) lines.push(`- FORBIDDEN phrases in response: ${gt.forbidden_phrases.join(", ")}`);
   if (gt.forbidden_content) lines.push(`- FORBIDDEN content in response: ${gt.forbidden_content.join(", ")}`);
+  // must_contain_tag/forbidden_tags: for bracket tags NOT migrated to plan_action (e.g.
+  // [CADENCE: ...], [WEEK_OVERRIDE:...]) — these still travel through response text in
+  // production, so a text-scan judge check remains the correct contract for them.
   if (gt.must_contain_tag) lines.push(`- REQUIRED TAG: Response MUST end with ${gt.must_contain_tag} (after the coaching message text). If this tag is absent: score 0. IMPORTANT: If the required tag IS present and forbidden tags are absent, score 10 regardless of mileage figures — the tag check is the PRIMARY criterion for this fixture. Do NOT penalize mileage figures when the required tag is present and the tag test passes.`);
   if (gt.forbidden_tags) lines.push(`- FORBIDDEN TAGS (must NOT appear): ${gt.forbidden_tags.join(", ")}. If any forbidden tag appears: score 0.`);
+  // plan_action is the structured field on the deliver_message tool call that actually
+  // performs a plan mutation (mirrors production's coach/respond/route.ts) — checked here
+  // as a deterministic fact rather than asking the judge to scan response text for a
+  // bracket tag, since this subset of the tag mechanism (session swap/lighter week/injury
+  // hold/injury clear/rtr advance/rebuild plan/physio referral) no longer exists in either
+  // production or this harness (see the 2026-07-30 plan_action migration).
+  if (gt.must_set_plan_action) {
+    const wasSet = planAction?.[gt.must_set_plan_action] === true;
+    lines.push(`- REQUIRED ACTION: plan_action.${gt.must_set_plan_action} must be set to true on the deliver_message call. Actual: ${wasSet ? "SET (true)" : "NOT SET"}. If NOT SET: score 0. IMPORTANT: If the required action IS set and no forbidden action was set, score 10 regardless of mileage figures — this is the PRIMARY criterion for this fixture. Do NOT penalize mileage figures when the required action is set and this check passes.`);
+  }
+  if (gt.forbidden_plan_actions) {
+    const violations = gt.forbidden_plan_actions.filter((f) => planAction?.[f] === true);
+    lines.push(`- FORBIDDEN ACTIONS (must NOT be set): plan_action.${gt.forbidden_plan_actions.join(", plan_action.")}. Actual violations: ${violations.length > 0 ? violations.join(", ") : "none"}. If any forbidden action was set: score 0.`);
+  }
   if (gt.week3_key_sessions) lines.push(`- REQUIRED PLAN SESSIONS: Response must reference these sessions from the uploaded plan (week 3): ${gt.week3_key_sessions.join(", ")}. Inventing different sessions is a failure.`);
   if (gt.week1_sessions) lines.push(`- REQUIRED WEEK 1 SESSIONS: Response must reference these sessions: ${gt.week1_sessions.join(", ")}`);
   if (gt.must_mention_next_monday) lines.push(`- REQUIRED: Response must explicitly mention starting next Monday (not "this Monday" or just "Monday").`);

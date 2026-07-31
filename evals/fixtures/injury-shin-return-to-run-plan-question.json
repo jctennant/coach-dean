@@ -1,6 +1,6 @@
 {
   "id": "injury-shin-return-to-run-plan-question",
-  "description": "Athlete on injury hold for shin splints (11 days in, cross-training only) asks for the high-level plan for the next 2-3 weeks. Dean must NOT quote the stale pre-injury arc mileage as the current plan — must give a concrete, grounded return-to-run answer instead.",
+  "description": "Athlete on injury hold for shin splints (11 days in, cross-training only) asks for the high-level plan for the next 2-3 weeks. Dean must NOT quote the stale pre-injury arc mileage as the current plan \u2014 must give a concrete, grounded return-to-run answer instead.",
   "category": "response_quality",
   "trigger": "user_message",
   "today": "2026-07-18",
@@ -17,7 +17,13 @@
     "easy_pace": "9:15/mi",
     "tempo_pace": "7:50/mi",
     "interval_pace": "6:55/mi",
-    "training_days": ["monday", "wednesday", "friday", "saturday", "sunday"],
+    "training_days": [
+      "monday",
+      "wednesday",
+      "friday",
+      "saturday",
+      "sunday"
+    ],
     "preferred_units": "imperial",
     "weekly_mileage_target": 0,
     "pre_injury_mileage_target": 40,
@@ -28,9 +34,24 @@
     "injury_body_part": "shin",
     "injury_severity": "moderate",
     "recent_activities": [
-      { "date": "2026-07-16", "type": "Ride", "distance_miles": 12.0, "pace": null },
-      { "date": "2026-07-15", "type": "Swim", "distance_miles": 0.9, "pace": null },
-      { "date": "2026-07-13", "type": "Ride", "distance_miles": 10.5, "pace": null }
+      {
+        "date": "2026-07-16",
+        "type": "Ride",
+        "distance_miles": 12.0,
+        "pace": null
+      },
+      {
+        "date": "2026-07-15",
+        "type": "Swim",
+        "distance_miles": 0.9,
+        "pace": null
+      },
+      {
+        "date": "2026-07-13",
+        "type": "Ride",
+        "distance_miles": 10.5,
+        "pace": null
+      }
     ],
     "recent_conversation": [
       {
@@ -41,7 +62,7 @@
       {
         "role": "assistant",
         "date": "2026-07-16",
-        "content": "Tomorrow: bike 40-50 min easy Z2. Sunday: optional 30min elliptical or pool. The shin's been at 1-2/10 for over a week — that's the tissue still protecting itself. Most mild-moderate shin cases are back to easy running in 2-3 weeks when caught early like this, and the cross-training is keeping you aerobic without loading the bone at all."
+        "content": "Tomorrow: bike 40-50 min easy Z2. Sunday: optional 30min elliptical or pool. The shin's been at 1-2/10 for over a week \u2014 that's the tissue still protecting itself. Most mild-moderate shin cases are back to easy running in 2-3 weeks when caught early like this, and the cross-training is keeping you aerobic without loading the bone at all."
       },
       {
         "role": "user",
@@ -51,14 +72,18 @@
       {
         "role": "assistant",
         "date": "2026-07-17",
-        "content": "1/10 at rest is about as close to clear as you can get without being fully symptom-free. If it holds through tomorrow, you can test a very short easy jog Monday or Tuesday — 10 min max, flat surface, stop immediately if anything climbs past 1/10."
+        "content": "1/10 at rest is about as close to clear as you can get without being fully symptom-free. If it holds through tomorrow, you can test a very short easy jog Monday or Tuesday \u2014 10 min max, flat surface, stop immediately if anything climbs past 1/10."
       }
     ]
   },
   "inbound_sms": "What is our high level plan for the next 2-3 weeks?",
   "ground_truth": {
-    "must_contain_tag": "[INJURY_HOLD]",
-    "notes": "Athlete is 11 days into a shin-splint injury hold, pre-injury weekly target was 40mi, and is asking a broad 'what's the plan' question — this is exactly the FULL PLAN REQUESTS (ON injury hold) scenario. As of the 2026-07-18 fix, the system now hands Dean a real computed PROJECTED RETURN RAMP for the first 3 weeks back (~24mi / ~26.5mi / ~29mi, built back toward the 40mi pre-injury peak via computeMileageArc) — quoting those specific numbers is now CORRECT and expected, not a red flag; they are grounded system data, not an invention. Score based on: (1) MUST NOT state a specific future week's mileage pulled from a PRE-INJURY arc as if it is the current/next week's plan (e.g. must NOT say 'next week: ~26mi' framed as the pre-injury schedule resuming, or state the 40mi pre-injury target as this week's/next week's target) — there is no such pre-injury arc data in this fixture. (2) MUST give a concrete, grounded return-to-run figure once cleared: ~24mi first week back (60% of the 40mi pre-injury target, since the athlete is in their 2nd week injured — the rule is 70% at <2wks, 60% at 2wks, 50% at 3+wks). A vague answer with no numbers ('we'll ease back in slowly') scores below 7 — the athlete explicitly wants concrete numbers, not hand-waving. (3) MUST reference the current phase concretely: cross-training/monitoring, and the pain-threshold test-run gate (test a short run once pain is at/near 0-1/10). (4) MUST tie the answer to the race goal — with ~6 weeks to race day (Aug 29), name what needs to be true to stay on track (e.g. a pain-free test run soon, building back toward the pre-injury volume) rather than ignoring the race entirely. (5) If the coach states mileage for weeks 2-3 back, it should be in the neighborhood of the PROJECTED RETURN RAMP figures (~24 / ~26.5 / ~29mi) — that's now correct, grounded precision, not fabrication. A red flag is only a week-by-week table extending PAST week 3 back (e.g. week 4, 5, 6...) with invented specific numbers, or numbers wildly inconsistent with the ramp above (e.g. jumping straight to 40mi in week 2). (6) MUST keep [INJURY_HOLD] framing — the shin is not yet cleared, so no actual running should be prescribed for right now.",
-    "forbidden_content": ["stating the 40mi pre-injury target as this week's or next week's plan", "no numbers at all / purely vague reassurance with zero concrete figures", "a specific invented mileage number for a week beyond the 3rd week back"]
+    "notes": "Athlete is 11 days into a shin-splint injury hold, pre-injury weekly target was 40mi, and is asking a broad 'what's the plan' question \u2014 this is exactly the FULL PLAN REQUESTS (ON injury hold) scenario. As of the 2026-07-18 fix, the system now hands Dean a real computed PROJECTED RETURN RAMP for the first 3 weeks back (~24mi / ~26.5mi / ~29mi, built back toward the 40mi pre-injury peak via computeMileageArc) \u2014 quoting those specific numbers is now CORRECT and expected, not a red flag; they are grounded system data, not an invention. Score based on: (1) MUST NOT state a specific future week's mileage pulled from a PRE-INJURY arc as if it is the current/next week's plan (e.g. must NOT say 'next week: ~26mi' framed as the pre-injury schedule resuming, or state the 40mi pre-injury target as this week's/next week's target) \u2014 there is no such pre-injury arc data in this fixture. (2) MUST give a concrete, grounded return-to-run figure once cleared: ~24mi first week back (60% of the 40mi pre-injury target, since the athlete is in their 2nd week injured \u2014 the rule is 70% at <2wks, 60% at 2wks, 50% at 3+wks). A vague answer with no numbers ('we'll ease back in slowly') scores below 7 \u2014 the athlete explicitly wants concrete numbers, not hand-waving. (3) MUST reference the current phase concretely: cross-training/monitoring, and the pain-threshold test-run gate (test a short run once pain is at/near 0-1/10). (4) MUST tie the answer to the race goal \u2014 with ~6 weeks to race day (Aug 29), name what needs to be true to stay on track (e.g. a pain-free test run soon, building back toward the pre-injury volume) rather than ignoring the race entirely. (5) If the coach states mileage for weeks 2-3 back, it should be in the neighborhood of the PROJECTED RETURN RAMP figures (~24 / ~26.5 / ~29mi) \u2014 that's now correct, grounded precision, not fabrication. A red flag is only a week-by-week table extending PAST week 3 back (e.g. week 4, 5, 6...) with invented specific numbers, or numbers wildly inconsistent with the ramp above (e.g. jumping straight to 40mi in week 2). (6) MUST keep plan_action.injury_hold framing \u2014 the shin is not yet cleared, so no actual running should be prescribed for right now.",
+    "forbidden_content": [
+      "stating the 40mi pre-injury target as this week's or next week's plan",
+      "no numbers at all / purely vague reassurance with zero concrete figures",
+      "a specific invented mileage number for a week beyond the 3rd week back"
+    ],
+    "must_set_plan_action": "injury_hold"
   }
 }
