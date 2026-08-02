@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-02 — Cadence opt-in now asks which days when training_days is unknown, instead of the cron guessing
+
+**Type:** Bug Fix / Follow-up
+**Reported by:** Internal follow-up during review of the same-day morning/nightly reminder fix below
+**User feedback:** "Does that mean the cron would send on every day if training days is empty? ... what would Dean message them every day? Would it just be kind of made up on that day? Wonder if we should confirm what days with the user they want."
+**Root cause:** The first fix below (empty `training_days` falls back to all 7 weekdays in the cron gate) closed the "silently never fires" bug, but on its own it meant any athlete who opts in before `training_days` is known — routinely true for Strava-connected athletes, who are never asked for it explicitly — would get a reminder every single day, including likely rest days, with no way to narrow it. Investigation also surfaced that Jake's `training_state` (weekly_mileage_target, weekly_long_run_miles, quality session) had leftover values from before his current shin-splint symptom monitoring, which the reminder content could reference as still-active. Further check confirmed that specific risk is already closed by an existing early-return in `route.ts` (`pending_symptom_checkin` routes morning/nightly reminder triggers to a dedicated `handleSymptomCheckin()` question instead of the normal reminder) — no change needed there.
+**Fix / Change:** Rather than have the cron keep guessing "every day" indefinitely, both cadence-confirmation paths now ask which days as part of the same confirmation when `training_days` is empty: (1) the deterministic high-confidence short-circuit in `route.ts` (~line 1829) picks a "which days do you want it" variant of the confirmation text instead of "on your training days"; (2) the LLM-authored fallback path's `PROACTIVE MESSAGE CADENCE` prompt rule gets the same instruction, keyed off the existing `TRAINING DAYS: TBD` marker already in the system prompt. The athlete's answer flows into `training_days` automatically via the existing profile-extraction step (`updated_training_days`, already wired for casual mentions like "I run Mon/Wed/Fri") — no new extraction logic needed. The cron's "empty training_days → every day" fallback (below) still applies as the safe default until they answer, so nobody is silently skipped in the interim.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond-field-sync.test.ts` (new coverage — the deterministic short-circuit path had no direct test)
+
 ## 2026-08-02 — Non-run/bike activities (swim, walk, hike) now report distance in the post-activity line instead of a bare label
 
 **Type:** Bug Fix

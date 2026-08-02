@@ -472,6 +472,71 @@ describe("tag-based proactive cadence change ([CADENCE:] tag)", () => {
   });
 });
 
+describe("deterministic cadence short-circuit — asks which days when training_days is unset", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  function mockHighConfidenceCadence(cadence: string) {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "{}" }] }) // extraction
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: JSON.stringify({ intent: "cadence_request", confidence: "high", cadence }) }],
+      }); // intent classifier
+  }
+
+  it("asks which days when opting into morning_reminders with no training_days on file", async () => {
+    mockHighConfidenceCadence("morning_reminders");
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ training_days: [] }),
+      state: baseState(),
+      conversations: baseConversations("can you text me every morning with the plan?"),
+    });
+
+    const res = await POST(mockRequest({ userId: "user-001", trigger: "user_message", dry_run: true })) as { data: { message: string } };
+
+    expect(res.data.message).toMatch(/which days/i);
+    // dry_run skips DB writes, so proactive_cadence isn't persisted here — this test only
+    // verifies the confirmation text asks about days. Persistence is covered by the
+    // [CADENCE:] tag-path tests above and by re-running without dry_run below.
+    expect(profileChain.update).not.toHaveBeenCalled();
+  });
+
+  it("gives the normal confirmation when training_days is already on file", async () => {
+    mockHighConfidenceCadence("morning_reminders");
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ training_days: ["monday", "wednesday", "saturday"] }),
+      state: baseState(),
+      conversations: baseConversations("can you text me every morning with the plan?"),
+    });
+
+    const res = await POST(mockRequest({ userId: "user-001", trigger: "user_message", dry_run: true })) as { data: { message: string } };
+
+    expect(res.data.message).not.toMatch(/which days/i);
+    expect(res.data.message).toMatch(/training days/i);
+  });
+
+  it("persists proactive_cadence for real (non-dry-run) requests", async () => {
+    mockHighConfidenceCadence("morning_reminders");
+    const { profileChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ training_days: [] }),
+      state: baseState(),
+      conversations: baseConversations("can you text me every morning with the plan?"),
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const updateCalls = (profileChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const cadenceUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => p?.proactive_cadence != null);
+    expect(cadenceUpdate?.[0].proactive_cadence).toBe("morning_reminders");
+  });
+});
+
 describe("persistProfileUpdates — new B/C race extraction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
