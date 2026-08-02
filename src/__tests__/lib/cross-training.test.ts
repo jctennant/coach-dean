@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { classifyCrossTrainingEffort, computeRunGapSignal } from "@/lib/cross-training";
+import { classifyCrossTrainingEffort, computeRunGapSignal, buildPostRunMileageLine } from "@/lib/cross-training";
+
+const emptyWeekTotals = { runMiles: 0, bikeMiles: 0, crossTrainSessions: 0 };
 
 const base = {
   movingTimeSeconds: 1200,
@@ -182,5 +184,42 @@ describe("computeRunGapSignal", () => {
     );
     expect(signal.daysSinceLastRun).toBe(0);
     expect(signal.gapBeforeLastRun).toBe(15);
+  });
+});
+
+describe("buildPostRunMileageLine — distance for non-run/bike activities", () => {
+  it("reports a walk in miles, not minutes", () => {
+    const line = buildPostRunMileageLine("Walk", 4828, emptyWeekTotals, false); // ~3mi
+    expect(line).toBe("3mi walk today. First session logged this week.");
+  });
+
+  it("reports a hike in miles", () => {
+    const line = buildPostRunMileageLine("Hike", 8047, emptyWeekTotals, false); // 5mi
+    expect(line).toBe("5mi hike today. First session logged this week.");
+  });
+
+  it("reports a walk in km for metric users", () => {
+    const line = buildPostRunMileageLine("Walk", 4828, emptyWeekTotals, true);
+    expect(line).toBe("4.8km walk today. First session logged this week.");
+  });
+
+  it("reports a pool swim in yards for non-metric users", () => {
+    const line = buildPostRunMileageLine("Swim", 1000, emptyWeekTotals, false); // ~1094yd
+    expect(line).toBe("1094yd swim today. First session logged this week.");
+  });
+
+  it("reports a swim in meters for metric users", () => {
+    const line = buildPostRunMileageLine("Swim", 1000, emptyWeekTotals, true);
+    expect(line).toBe("1000m swim today. First session logged this week.");
+  });
+
+  it("labels open water swims distinctly", () => {
+    const line = buildPostRunMileageLine("OpenWaterSwim", 2000, emptyWeekTotals, false);
+    expect(line).toBe("2187yd open water swim today. First session logged this week.");
+  });
+
+  it("still reports strength/no-distance sessions by label only, no distance line", () => {
+    const line = buildPostRunMileageLine("WeightTraining", null, emptyWeekTotals, false);
+    expect(line).toBe("Strength session today. First session logged this week.");
   });
 });

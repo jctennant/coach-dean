@@ -333,10 +333,22 @@ export function buildPostRunMileageLine(
 
   const isRun = !!activityType && RUN_TYPES.has(activityType);
   const isBike = !!activityType && BIKE_TYPES.has(activityType);
+  const isWalk = activityType === "Walk" || activityType === "Hike";
+  const isSwim = !!activityType && SWIM_TYPES.has(activityType);
   const todayMiles = activityDistanceMeters != null ? Math.round((activityDistanceMeters / 1609.34) * 10) / 10 : null;
 
-  if ((isRun || isBike) && todayMiles != null && todayMiles > 0) {
-    return `${fmtMi(todayMiles)} ${isRun ? "run" : "bike"} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
+  if ((isRun || isBike || isWalk) && todayMiles != null && todayMiles > 0) {
+    const verb = isRun ? "run" : isBike ? "bike" : activityType === "Hike" ? "hike" : "walk";
+    return `${fmtMi(todayMiles)} ${verb} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
+  }
+  if (isSwim && activityDistanceMeters != null && activityDistanceMeters > 0) {
+    // Strava reports swim distance in meters regardless of pool unit, so this is exact —
+    // yards is just the customary display unit for non-metric (largely US) swimmers.
+    const swimDistance = isMetricUser
+      ? `${Math.round(activityDistanceMeters)}m`
+      : `${Math.round(activityDistanceMeters * 1.09361)}yd`;
+    const label = activityType === "OpenWaterSwim" ? "Open water swim" : "Swim";
+    return `${swimDistance} ${label.toLowerCase()} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
   }
   const label = activityType ? (ACTIVITY_LABELS[activityType] ?? activityType) : "Session";
   return `${label} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;

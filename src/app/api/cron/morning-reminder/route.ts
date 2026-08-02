@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
-/** Returns the active training days for a profile — override if valid, else standing schedule. */
+const ALL_WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+/**
+ * Returns the active training days for a profile — override if valid, else standing schedule.
+ * training_days is only ever populated when the athlete named specific days during onboarding
+ * (common for Strava-connected athletes to leave it empty — see onboarding/handle/route.ts).
+ * An empty list must not be read as "no training days" or every proactive_cadence opt-in from
+ * a Strava user with unset training_days would silently never fire.
+ */
 function effectiveTrainingDays(
   trainingDays: string[],
   overrideDays: string[] | null,
@@ -11,7 +19,7 @@ function effectiveTrainingDays(
   if (overrideDays && overrideDays.length > 0 && overrideExpires && todayDateStr <= overrideExpires) {
     return overrideDays;
   }
-  return trainingDays;
+  return trainingDays.length > 0 ? trainingDays : ALL_WEEKDAYS;
 }
 
 /**

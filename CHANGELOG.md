@@ -8,6 +8,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-02 — Non-run/bike activities (swim, walk, hike) now report distance in the post-activity line instead of a bare label
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Gwyneth)
+**User feedback:** "All of her post-run messages look the same. Post-exercise, she said she prefers just getting mileage for everything, so swimming mileage could be yards, meters, or miles. For walking, it should also probably be miles, as opposed to minutes. If there's just strength or something, that can be minutes... This is exactly where you should be. We shouldn't have any of that filler."
+**Root cause:** `buildPostRunMileageLine` (`src/lib/cross-training.ts`) — the deterministic, code-authored "line 1" of every post-activity message — only computed and displayed a distance figure for `isRun || isBike` activity types. Every other type (Walk, Hike, Swim, OpenWaterSwim, etc.) fell through to a bare `"${label} today."` line with no distance at all, and the LLM-authored second line is explicitly forbidden (`postRunOutputContract` rule 1 in `route.ts`) from restating or computing distance itself — so for these activity types there was structurally no path for distance to reach the athlete. Walks specifically also had a coaching-block insight option pointing toward minutes ("Time on feet — total minutes is the meaningful number"), reinforcing the duration framing instead of distance.
+**Fix / Change:** Extended `buildPostRunMileageLine` with two new branches: Walk/Hike now use the same mi/km formatting as run/bike (`"3mi walk today. ..."`); Swim/OpenWaterSwim report distance in meters for metric users or yards for non-metric users (Strava's `distance_meters` is authoritative in meters for every sport regardless of pool unit, so the yards conversion is exact, not estimated). Activities with no meaningful distance (WeightTraining, Yoga, Pilates, Crossfit, etc.) are unchanged — still a bare label, no invented distance. This is a code-level formatting fix per CLAUDE.md's decision order, not a prompt rule — the data was simply never being computed/passed for these activity types, this isn't a phrasing-shaped problem.
+**Files changed:** `src/lib/cross-training.ts`, `src/__tests__/lib/cross-training.test.ts` (new coverage — `buildPostRunMileageLine` had zero existing tests)
+
+## 2026-08-02 — Morning/nightly reminder opt-ins silently never fire for athletes with an empty `training_days` list
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake, 510-708-4020)
+**User feedback:** "I told Dean yesterday I wanted morning reminders, but he hasn't sent me anything."
+**Root cause:** Jake asked for morning reminders on 2026-08-01 ("Can you give me reminders every morning of how far I should be running or what I should be doing that day?"); Dean correctly confirmed and set `training_profiles.proactive_cadence = 'morning_reminders'` via the `[CADENCE:...]` tag path — that part worked. But `src/app/api/cron/morning-reminder/route.ts` and `nightly-reminder/route.ts` both hard-gate sending on `trainingDays.includes(todayDay)`, where `trainingDays` comes from `training_profiles.training_days`. That column is only ever populated when an athlete names specific days during onboarding, and onboarding only asks for it "if Strava has no data" (per CLAUDE.md) — so Strava-connected athletes very commonly have `training_days = []` by design, never an oversight to be filled in later. For Jake specifically, `training_days` was `[]` (confirmed via direct DB query), so `[].includes(todayDay)` was always false and the cron silently skipped him every single run, regardless of his cadence opt-in — no error, no log a human would notice.
+**Fix / Change:** `effectiveTrainingDays` (duplicated in both cron route files) now falls back to all seven weekdays when the resolved `training_days` list is empty, instead of falling back to zero days. An unset preference should mean "no explicit restriction," not "never." No backfill needed since the fallback is computed live in the cron rather than stored — existing users with empty `training_days` are fixed by this deploy alone.
+**Files changed:** `src/app/api/cron/morning-reminder/route.ts`, `src/app/api/cron/nightly-reminder/route.ts`
+
 ## 2026-07-30 — Plan-mutation signals (session swap, lighter week, injury hold/clear, RTR advance, plan rebuild, physio referral) moved from free-text bracket tags to a structured deliver_message field
 
 **Type:** Refactor / Bug Fix
