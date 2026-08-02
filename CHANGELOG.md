@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-02 — Strava link no longer drops in with zero transition after an injury/race observation
+
+**Type:** Bug Fix
+**Reported by:** User feedback (Jake, reviewing a live onboarding transcript)
+**User feedback:** "is this expected in onboarding? ... kind of comes out of context here" — pasted a transcript where Dean's combined injury+race observation ("Jake! Shin splints with four weeks to the Teton Crest's sustained climbing and descents is worth sorting out first. That terrain punishes compromised legs.") was immediately followed by the bare Strava link with no connecting sentence.
+**Root cause:** The STRAVA instruction block in `onboarding/handle/route.ts` explicitly permitted "a short transition or nothing at all" before `[STRAVA_LINK]`. Combined with the injury-in-goals-stage instruction (which front-loads a coaching observation before the Strava ask), Dean would often take the "nothing at all" option, jumping straight from an injury/race insight to a bare link.
+**Fix / Change:** Changed the instruction to require a short transition sentence tying `[STRAVA_LINK]` to whatever was just discussed (the injury, the race, the goal) every time, removing the "or nothing at all" option. Mirrored the same wording change in `evals/run-simulation-evals.mjs` to keep the simulation prompt mirror in parity.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`
+
 ## 2026-08-02 — Strava OAuth now requests read-only scope
 
 **Type:** Improvement
