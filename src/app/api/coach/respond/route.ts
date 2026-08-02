@@ -3122,6 +3122,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // back to prose + a hardcoded 4/week guess. If the signal isn't there (too little or
     // too inconsistent history), leave training_days empty and ask instead of guessing.
     let askAboutTrainingDays = false;
+    let inferredTrainingDaysForConfirmation: string[] | null = null;
     if (!((profile?.training_days as string[] | null)?.length)) {
       const inferredDays = inferTrainingDaysFromActivities(
         recentActivities as unknown as InferableActivity[],
@@ -3130,6 +3131,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       if (inferredDays) {
         await supabase.from("training_profiles").update({ training_days: inferredDays }).eq("user_id", userId);
         profile = { ...profile, training_days: inferredDays } as typeof profile;
+        inferredTrainingDaysForConfirmation = inferredDays;
         console.log(`[initial_plan] inferred training_days from Strava history: ${inferredDays.join(", ")}`);
       } else {
         askAboutTrainingDays = true;
@@ -3286,6 +3288,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
     if (askAboutTrainingDays) {
       initialPlanArcConstraint += `\n\nNo standing training-day schedule is on file, and there wasn't enough recent run history to infer one. End your message by asking which specific days they usually run (or want to run) — this locks in a real day-by-day schedule for next week and lets reminders target the right days, instead of this week's plan being described only in general terms.`;
+    }
+    if (inferredTrainingDaysForConfirmation) {
+      initialPlanArcConstraint += `\n\nNo standing training-day schedule was on file, so it was inferred from their recent run history: ${inferredTrainingDaysForConfirmation.join(", ")}. This week's plan is already built around those days, but state the inferred days explicitly and briefly invite a correction if it's wrong (e.g. "Looks like you typically run ${inferredTrainingDaysForConfirmation.join("/")} — I'll build around that, let me know if you want different days"). Keep it to one short clause, not a separate question.`;
     }
     console.log("[initial_plan] arc pre-generated — longRun:", arcLongRun, "quality:", arcQuality, "target:", arcTarget);
     }
