@@ -20,9 +20,16 @@
 // fixed prompt — poll-ifying them would mean stripping a question out of
 // generated text (fragile) or asking twice. Revisit if those flows are ever
 // restructured to ask a fixed question independently of the surrounding text.
+//
+// TRAINING_DAYS_POLL (added with the awaiting_schedule_confirm checkpoint) is
+// exactly that revisit: it fires from its own dedicated turn after diagnosis
+// (Strava synthesis + injury intake) has already completed, not from inside
+// handleDataAnalysis's generated text — so it doesn't hit the fragility above.
+// Its options are a fixed yes/no, not the (dynamic, per-athlete) day list
+// itself, since poll options can't be templated per-athlete.
 
 export interface AppPoll {
-  id: "goal" | "rtr_gate";
+  id: "goal" | "rtr_gate" | "training_days_confirm" | "strength_routine_offer";
   title: string;
   options: string[];
   /** One-line plain-text fallback appended after the poll, for clients that can't render it. */
@@ -69,7 +76,39 @@ export const RTR_GATE_POLL: AppPoll = {
       : "I felt some pain during or after that.",
 };
 
+// Schedule/preferences checkpoint (onboarding, awaiting_schedule_confirm state):
+// fired once diagnosis (Strava synthesis + injury intake) is done, stating the
+// Strava-inferred (or previously stated) training days and asking for a quick
+// confirm/correct before the plan is generated.
+export const TRAINING_DAYS_POLL: AppPoll = {
+  id: "training_days_confirm",
+  title: "Keep those training days?",
+  options: ["Yes, that works", "I want different days"],
+  fallbackHint: "(Or just tell me which days you'd rather run.)",
+  optionToMessage: (optionTitle) =>
+    optionTitle === "Yes, that works"
+      ? "Yes, those training days work for me."
+      : "I want different training days than what you suggested.",
+};
+
+// First-plan strength-routine offer (coach/respond, initial_plan trigger with an active
+// injury on file): Dean asks a plain yes/no instead of dumping the full routine + poster
+// straight into the plan-delivery message. The full routine is sent as its own follow-up
+// once confirmed — see the (3) affirmative-reply case in the strength-routine prompt block.
+export const STRENGTH_ROUTINE_POLL: AppPoll = {
+  id: "strength_routine_offer",
+  title: "Want a strength routine added in?",
+  options: ["Yes, add it", "Not right now"],
+  fallbackHint: "(Or just reply yes/no.)",
+  optionToMessage: (optionTitle) =>
+    optionTitle === "Yes, add it"
+      ? "Yes, add the strength routine."
+      : "Not right now, thanks.",
+};
+
 export const POLLS_BY_TITLE: Record<string, AppPoll> = {
   [GOAL_POLL.title]: GOAL_POLL,
   [RTR_GATE_POLL.title]: RTR_GATE_POLL,
+  [TRAINING_DAYS_POLL.title]: TRAINING_DAYS_POLL,
+  [STRENGTH_ROUTINE_POLL.title]: STRENGTH_ROUTINE_POLL,
 };

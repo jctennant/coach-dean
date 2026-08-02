@@ -8,6 +8,35 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-02 — Restructured onboarding into diagnosis → schedule confirm → gated plan delivery
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback (Jake, reviewing a live onboarding transcript — Teton Crest Trail shin-splint case)
+**User feedback:** "1) Didn't really acknowledge the teton crest trail distance / challenges with elevation... 2) a message got cut off 'but...' 3) we should say we will give a strength routine and confirm that sounds good before we send the user all of the screenshots... 4) Why did it say keeping the easy days truly easy is the main lever right now... please remove this... 5) He didn't actually give me training days here even though I thought we just looked at how to infer training days from strava... shouldn't he share a high level plan or collaborate with me on what the schedule should look like?"
+**Root cause:** `initial_plan` tried to do everything in one `deliver_message` call (state a diagnosis, infer training days, generate the plan, write a full strength routine, trigger poster images) capped at 1000 max_tokens — hitting that cap mid-tool-call produced the truncated "I'll build around that but—" message. Training-days-confirmation and the strength routine were both instructions buried inside that same mega-prompt, so they either got dropped or dumped unconditionally with no confirmation step. Separately, a hardcoded onboarding template line said "keeping the easy days truly easy is the main lever right now" — text the main coaching prompt already has an explicit rule against, but this one instance wasn't covered since it was a literal string, not model output.
+**Fix / Change:**
+- Removed the hardcoded "easy days are the main lever" line (`onboarding/handle/route.ts`).
+- Added a new `schedule_confirm` onboarding stage: once diagnosis (Strava synthesis + injury intake) completes, Dean states the Strava-inferred (or asks for) training days and plan preferences as its own turn, and waits for a reply before generating the plan — skipped entirely when the athlete already stated their days explicitly (no redundant re-confirm). Sends a Photon poll (`TRAINING_DAYS_POLL`) when available.
+- Split `initial_plan`'s strength-routine handling: instead of dumping the full routine + poster images into the plan-delivery message, Dean now asks a plain yes/no ("want a strength routine for this baked in?") and only sends the full routine (as its own message) once the athlete confirms — recognized via conversation context (an affirmative reply to Dean's own prior offer), no new DB column needed. Sends a Photon poll (`STRENGTH_ROUTINE_POLL`) when available. This also shrinks the initial_plan `deliver_message` payload, directly reducing the mid-tool-call truncation risk.
+- Fixed a related `session_swaps` bug found during this work: moving a session to a day with no existing entry (e.g. "I want to run Thursday instead of Friday") silently failed while Dean's text claimed the move was done — the swap handler now inserts a new session instead of dropping it, and a contradictory prompt instruction (one branch said "redirect, plan is day-agnostic," another said "handle as a swap") was resolved into one consistent rule.
+- Added a brevity instruction and a check-in-cadence closing line to the `initial_plan` prompt so onboarding reads as fewer, shorter messages.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/app/api/coach/respond/route.ts`, `src/lib/polls.ts`, `evals/run-simulation-evals.mjs`, `src/__tests__/api/coach-respond.test.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
+## 2026-08-02 — Fixed duplicate Strava pitch text and made the "existing plan?" question passive instead of mandatory
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback (Jake, reviewing a live onboarding transcript)
+**User feedback:** "Should we be asking if the user already has a coach / plan or not? I wonder if there's a more natural way of going about this... Also seems a bit repetitive on the strava note - let's clean this up."
+**Root cause:**
+1. Dean wrote his own Strava pitch sentence in the same message paragraph as `[STRAVA_LINK]` ("Connect your Strava so I can see your recent runs and mileage pattern...") despite the prompt explicitly forbidding this. The route handler then unconditionally appended its own canonical pitch line right after the link, so both sentences landed in the same SMS — the prompt instruction existed but nothing enforced it.
+2. The "are you following a training plan or working with a coach?" question was a mandatory standalone turn inserted between the goal and Strava for every athlete, even when the answer was already implied by the conversation (or when it interrupted an injury-focused exchange) — pure friction for a signal (`has_existing_plan`) that only needs to be right, not asked about explicitly.
+**Fix / Change:**
+1. `handleConversation`'s Strava-message assembly now always discards any text Dean writes in the same paragraph as `[STRAVA_LINK]` and sends only the URL plus one canonical pitch line — making the duplication structurally impossible instead of relying on Dean to follow the "don't write your own pitch" instruction correctly every time. (Text in earlier paragraphs is unaffected — it's still sent as its own preceding message.)
+2. Replaced the mandatory PLAN CHECK step with passive extraction: `has_existing_plan` is captured whenever the athlete mentions a plan/coach naturally, and the direct question is now a fallback asked only if genuinely unclear once goal + Strava + injury context are known. Updated the injury-stage instructions (which used to pivot into the plan-check question) to move straight to Strava instead. `coaching_mode` (`complement` vs `adaptive`) still derives from `has_existing_plan`; it's just no longer required-for-[READY] friction. Brought `evals/run-onboarding-evals.mjs` and `CLAUDE.md`'s onboarding-order doc into parity (the simulation eval mirror was already ahead of production on this).
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-onboarding-evals.mjs`, `CLAUDE.md`
+
 ## 2026-08-02 — Infer training_days from Strava history at initial_plan time instead of leaving it empty for the account's lifetime
 
 **Type:** Bug Fix / Feature

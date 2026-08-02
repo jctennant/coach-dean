@@ -170,15 +170,16 @@ The old discrete step flow is gone. Onboarding is now a **unified conversation**
 
 **What Dean collects in the unified conversation (rough order):**
 1. Name + goal (combined in first message)
-2. Training context: "Are you working from a plan already, or starting fresh?" (just context — no routing decision)
-3. Strava (mandatory — write-access link used for coaching note annotation)
-4. Injury history (required for all athletes, asked after Strava connects)
-5. Race date (web_search required for any named race — never state from memory)
-6. *(Trail/mountain races)* Race goal (finish vs. competitive placement) + prior race experience
-7. *(Ultra goals 30k+)* Ultra/trail race background
-8. *(return_to_running / injury_recovery)* Injury details + current status
-9. *(Short races: mile / 5k / 10k)* Goal finish time
-10. Training days per week (if Strava has no data)
+2. Strava (mandatory — write-access link used for coaching note annotation)
+3. Injury history (required for all athletes, asked after Strava connects)
+4. Race date (web_search required for any named race — never state from memory)
+5. *(Trail/mountain races)* Race goal (finish vs. competitive placement) + prior race experience
+6. *(Ultra goals 30k+)* Ultra/trail race background
+7. *(return_to_running / injury_recovery)* Injury details + current status
+8. *(Short races: mile / 5k / 10k)* Goal finish time
+9. Training days per week (if Strava has no data)
+
+**Existing plan/coach (`has_existing_plan`)** is captured passively whenever the athlete mentions it naturally ("I'm on a Runna plan", "just running on my own") — it's no longer a dedicated mandatory question. It's only asked directly, as a standalone fallback turn, if still unclear after goal + Strava + injury context are known. It drives `coaching_mode` (`complement` vs `adaptive`) but is not required for [READY].
 
 **Required for [READY]:** Name + goal + Strava connected + injury history answered. No mode question.
 

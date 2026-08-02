@@ -207,6 +207,57 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     expect(textSent).toContain("everything I need");
   });
 
+  it("[READY] signal with no training_days known: enters schedule_confirm checkpoint instead of completing onboarding", async () => {
+    mockTables({
+      users: { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true } }), error: null },
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null }, // no history → inference returns null
+      races: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: null });
+    mockLLMResponse("Awesome, I have everything I need! Let's build your plan.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+    // Should NOT complete onboarding yet — asks about schedule instead.
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const lastText = smsCalls[smsCalls.length - 1]?.[1] as string;
+    expect(lastText).toContain("days of the week");
+
+    // onboarding_data should carry the schedule_confirm stage forward.
+    const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
+    const usersUpdates = fromCalls.filter((c: unknown[]) => c[0] === "users");
+    expect(usersUpdates.length).toBeGreaterThan(0);
+  });
+
+  it("schedule_confirm stage: a reply completes onboarding", async () => {
+    mockTables({
+      users: [
+        { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true, stage: "schedule_confirm" } }), error: null },
+        { data: { dashboard_token: "tok-abc" }, error: null }, // completeOnboarding user lookup
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null },
+      races: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+
+    // Two extraction calls happen for this turn: handleConversation's unconditional
+    // "extract first" pass, then handleScheduleConfirm's own dedicated extraction
+    // (same double-extraction shape as the existing injury_intake stage).
+    mockToolResponse("save_training_fields", { training_days: ["monday", "wednesday", "friday"] });
+    mockToolResponse("save_training_fields", { training_days: ["monday", "wednesday", "friday"] });
+
+    await POST(makeRequest({ userId: "user-001", message: "Mon/Wed/Fri works, no extra preferences" }));
+
+    // completeOnboarding should have run — training_profiles gets written.
+    const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
+    const profileUpdates = fromCalls.filter((c: unknown[]) => c[0] === "training_profiles");
+    expect(profileUpdates.length).toBeGreaterThan(0);
+  });
+
   it("[STRAVA_LINK] signal: sets step to awaiting_strava and injects URL", async () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
 

@@ -638,6 +638,32 @@ function buildCompletionMessage(collected, today) {
 }
 
 // ─────────────────────────────────────────────
+// Mirrors maybeEnterScheduleConfirm + handleScheduleConfirm in onboarding/handle/route.ts.
+// Fires right before completion whenever training_days isn't already known (Strava-inferred
+// or explicitly stated) — a deterministic ask (not an LLM turn) confirming the schedule before
+// the plan generates, then one user reply + extraction resolves it. Skipped entirely when the
+// athlete already stated their training days during the normal conversation, same as
+// production (a redundant confirm on top of an explicit answer would just be more noise).
+// ─────────────────────────────────────────────
+async function maybeRunScheduleConfirm(collected, history, persona, today, verbose) {
+  if (collected.schedule_confirmed) return collected;
+  if (Array.isArray(collected.training_days) && collected.training_days.length > 0) return collected;
+
+  const ask = "What days of the week do you want to run, and anything specific you want out of the plan?";
+  history.push({ role: "assistant", content: ask });
+  if (verbose) console.log(`\n  Dean (schedule confirm): ${ask}`);
+
+  const userReply = await getUserAgentResponse(persona, history);
+  history.push({ role: "user", content: userReply });
+  if (verbose) console.log(`\n  User: ${userReply}`);
+
+  const extracted = await extractFields(history, today);
+  let next = mergeCollected(collected, extracted);
+  next.schedule_confirmed = true;
+  return next;
+}
+
+// ─────────────────────────────────────────────
 // Get Dean's response for a given history
 // ─────────────────────────────────────────────
 async function getDeanResponse(collected, stravaContext, history, isFirstResponse, today) {
@@ -780,10 +806,11 @@ async function runSimulation(fixture, verbose) {
     }
 
     if (isReady) {
-      readyFired = true;
       // Final extraction
       const extracted = await extractFields(history, today);
       collected = mergeCollected(collected, extracted);
+      collected = await maybeRunScheduleConfirm(collected, history, persona, today, verbose);
+      readyFired = true;
       break;
     }
 
@@ -848,9 +875,11 @@ async function runSimulation(fixture, verbose) {
         collected = mergeCollected(collected, extracted);
       }
 
-      // Completion — mirrors buildDeterministicCompletion + completeOnboarding firing.
+      // Schedule/preferences checkpoint, then completion — mirrors
+      // maybeEnterScheduleConfirm + buildDeterministicCompletion + completeOnboarding firing.
       // This ends the simulation the same way production ends onboarding from this
       // stage: no further [READY]-seeking turns, straight to the wrap-up message.
+      collected = await maybeRunScheduleConfirm(collected, history, persona, today, verbose);
       const completionMsg = buildCompletionMessage(collected, today);
       history.push({ role: "assistant", content: completionMsg });
       deanTurns++;

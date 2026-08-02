@@ -1795,6 +1795,39 @@ describe("coach/respond — plan_action structured dispatch", () => {
     expect(sessions.find((s) => s.day === "Thursday")?.label).toBe("40min easy bike");
   });
 
+  it("session_swaps: moving a session onto a day with no existing entry creates it instead of dropping it", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Done — moved to Thursday.",
+        plan_action: { session_swaps: [{ day: "Friday", to: "rest" }, { day: "Thursday", to: "Tempo 5mi" }] },
+      } }],
+    });
+    const { stateChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [{ day: "Friday", date: "2026-07-31", label: "Tempo 5mi" }],
+      }),
+      conversations: [
+        { role: "user", content: "I want to run Thursday instead of Friday", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush(); // drain the nested runAfter (session_swap/lighter_week/injury_hold/physio_referral fire from inside the outer coach/respond runAfter)
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const swapUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => Array.isArray(p?.weekly_plan_sessions));
+    expect(swapUpdate).toBeDefined();
+    const sessions = swapUpdate![0].weekly_plan_sessions as Array<{ day: string; date: string; label: string }>;
+    expect(sessions.find((s) => s.day === "Friday")?.label).toBe("rest");
+    const thursday = sessions.find((s) => s.day === "thursday");
+    expect(thursday?.label).toBe("Tempo 5mi");
+    expect(thursday?.date).toBe("2026-07-30");
+  });
+
   it("lighter_week: fires the lighter_week loopback trigger", async () => {
     (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
       stop_reason: "tool_use",

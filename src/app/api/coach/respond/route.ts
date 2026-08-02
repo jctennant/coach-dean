@@ -9,7 +9,7 @@ import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { sendSMS, sendMediaSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { sendPoll, isPhotonProvider } from "@/lib/photon";
-import { RTR_GATE_POLL } from "@/lib/polls";
+import { RTR_GATE_POLL, STRENGTH_ROUTINE_POLL } from "@/lib/polls";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
@@ -2127,7 +2127,7 @@ Use this data to:
     // always-shown block and scoped only to the "send the full routine" instruction stops it from
     // being carried over when Dean cites just 1-2 exercises, where each exercise's own specs
     // (sets×reps, already in `lines`) is the only dosage that actually applies.
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${lines}\n${trigger === "initial_plan" ? `THIS IS THE ATHLETE'S FIRST PLAN — an active injury is on file, so this routine IS the concrete answer to "what do I do about it." Include the full routine (every exercise with specs/cues${sr.frequency ? ` + frequency: ${sr.frequency}` : ""}) directly in the plan delivery message, not just a mention that you're "watching" the injury — a returning athlete needs the actual exercises now, not a promise to follow up. Append [STRENGTH_POSTER] at the end so they get the illustrated poster alongside the plan.` : `SEND THE FULL ROUTINE (every exercise with complete specs/cues${sr.frequency ? ` + frequency: ${sr.frequency}` : ""}) AND the poster whenever EITHER is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; OR (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most. Don't wait to be asked twice. When you're just referencing it in passing, or naming only 1-2 specific exercises (e.g. a routine post-run note or recap), you don't need to dump the full list or the routine-level frequency — use only the sets×reps already given for the exercise(s) you name. Never lecture about it with no injury signal.`}${posterNote}`;
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${lines}\n${trigger === "initial_plan" ? `THIS IS THE ATHLETE'S FIRST PLAN — an active injury is on file. Do NOT include the full routine in this plan-delivery message; a plan message plus a full exercise list plus poster images is too much for one delivery. Instead, after delivering the plan, ask ONE plain yes/no question offering it as a separate follow-up (e.g. "Want a strength routine for the [body part] baked in too?") — one short sentence, no exercise names or specs yet. Do NOT append [STRENGTH_POSTER] on this message. The full routine goes out as its own message once the athlete confirms yes.` : `SEND THE FULL ROUTINE (every exercise with complete specs/cues${sr.frequency ? ` + frequency: ${sr.frequency}` : ""}) AND the poster whenever ANY of these is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most; OR (3) your own PRIOR message (see RECENT CONVERSATION) asked whether they want a strength routine and this message is an affirmative reply (e.g. "yes", "sure", "sounds good") — that offer-and-confirm exchange is exactly what this routine is for, deliver it now rather than asking again. Don't wait to be asked twice. When you're just referencing it in passing, or naming only 1-2 specific exercises (e.g. a routine post-run note or recap), you don't need to dump the full list or the routine-level frequency — use only the sets×reps already given for the exercise(s) you name. Never lecture about it with no injury signal.`}${posterNote}`;
   })();
 
   // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
@@ -4292,6 +4292,35 @@ OUTPUT CONTRACT:
     }
   }
 
+  // Strength routine offer poll: for Photon/iMessage athletes, initial_plan with an active
+  // injury on file now asks a plain yes/no instead of dumping the full routine into the plan
+  // message (see the initial_plan branch of the strength-routine prompt block) — send that
+  // ask as a poll bubble here. Only fires when Dean actually asked (a routine exists to offer)
+  // and didn't already deliver it this turn (no [STRENGTH_POSTER] tag). Best-effort, same as
+  // the RTR gate poll above.
+  if (trigger === "initial_plan" && isPhotonProvider() && strengthPosterRoutineKey && !wantsStrengthPoster) {
+    try {
+      const pollChatId = chatId ?? learnedChatId;
+      if (pollChatId) await startTyping(pollChatId);
+      await sendPoll(user.phone_number, STRENGTH_ROUTINE_POLL.title, STRENGTH_ROUTINE_POLL.options);
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: `[Poll] ${STRENGTH_ROUTINE_POLL.title}`,
+        message_type: "coach_response",
+      });
+      await sendSMS(user.phone_number, STRENGTH_ROUTINE_POLL.fallbackHint);
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: STRENGTH_ROUTINE_POLL.fallbackHint,
+        message_type: "coach_response",
+      });
+    } catch (err) {
+      console.error("[coach/respond] strength routine offer poll failed:", err);
+    }
+  }
+
   // Strength routine images: either Dean emitted [STRENGTH_POSTER] after listing the full
   // routine, or he named specific exercise_ids on deliver_message (canned routine or an
   // adapted/lighter substitute the athlete can actually do) — either way, follow the text
@@ -4667,13 +4696,33 @@ OUTPUT CONTRACT:
               mon: "monday", tue: "tuesday", wed: "wednesday", thu: "thursday",
               fri: "friday", sat: "saturday", sun: "sunday",
             };
+            const DAY_ORDER: Record<string, number> = {
+              monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6,
+            };
             let changed = false;
             for (const swap of tagSessionSwaps) {
               const targetDay = DAY_ABBREVS[normalizeDay(swap.day).slice(0, 3)] ?? normalizeDay(swap.day);
               const matchIdx = sessions.findIndex(s => normalizeDay(s.day) === targetDay || normalizeDay(s.day).startsWith(targetDay.slice(0, 3)));
               if (matchIdx === -1) {
-                console.warn(`[coach/respond] SESSION_SWAP: no session found for day="${swap.day}" (normalized: "${targetDay}") in weekly_plan_sessions`);
-                void trackEvent(userId, "session_swap_failed", { day: swap.day, to: swap.to });
+                // No existing entry for this day (rest days aren't stored) — insert a new one
+                // instead of silently dropping the move, computing its date from any existing
+                // session in the current week as an anchor.
+                const targetIdx = DAY_ORDER[targetDay];
+                const anchor = targetIdx !== undefined
+                  ? sessions.find(s => DAY_ORDER[normalizeDay(s.day)] !== undefined && s.date)
+                  : undefined;
+                if (anchor) {
+                  const anchorIdx = DAY_ORDER[normalizeDay(anchor.day)];
+                  const anchorDate = new Date(anchor.date + "T12:00:00Z");
+                  anchorDate.setUTCDate(anchorDate.getUTCDate() + (targetIdx - anchorIdx));
+                  sessions.push({ day: targetDay, date: anchorDate.toISOString().slice(0, 10), label: swap.to });
+                  changed = true;
+                  console.log(`[coach/respond] SESSION_SWAP: created new session for day="${targetDay}" → "${swap.to}"`);
+                  void trackEvent(userId, "session_swapped", { day: swap.day, to: swap.to, created: true });
+                } else {
+                  console.warn(`[coach/respond] SESSION_SWAP: no session found for day="${swap.day}" (normalized: "${targetDay}") and no anchor session available to compute a date`);
+                  void trackEvent(userId, "session_swap_failed", { day: swap.day, to: swap.to });
+                }
               } else {
                 sessions[matchIdx] = { ...sessions[matchIdx], label: swap.to };
                 changed = true;
@@ -7034,7 +7083,7 @@ Suggested language: "What you're describing is past the point where I should be 
 - Weekly recap: note whether the injury is trending. If it's been marked resolved or the athlete has said it's fine, don't bring it up.
 - A good coach tracks these proactively but also listens when the athlete says they're fine.
 
-SESSION SWAP: When recommending specific session modifications (not a whole-week reduction), add one entry per session to plan_action.session_swaps on your deliver_message call, e.g. [{day: "Mon", to: "40min easy bike"}]. Include multiple entries to modify several sessions at once. This immediately swaps those sessions in the athlete's plan. Use this instead of plan_action.lighter_week when you're making targeted changes to 1–2 specific sessions, not reducing the whole week.
+SESSION SWAP: When recommending specific session modifications, OR when the athlete asks to move a session to a different day, add one entry per changed day to plan_action.session_swaps on your deliver_message call, e.g. [{day: "Mon", to: "40min easy bike"}]. The "day" field is the day being changed; "to" is the full new session description for that day, including a day that currently has no session (e.g. moving Friday's tempo to Thursday: [{day: "friday", to: "rest"}, {day: "thursday", to: "Tempo 4mi"}] — this creates a Thursday entry if one doesn't already exist). Include multiple entries to modify or move several sessions at once. This immediately swaps/creates those sessions in the athlete's plan. Use this instead of plan_action.lighter_week when you're making targeted changes to 1–2 specific sessions or moving a session to a different day, not reducing the whole week.
 ${(() => {
   const injBP = (profile?.injury_body_part as string | null)?.toLowerCase() ?? null;
   const cadence = coachingSignals?.avgCadenceSpm ?? null;
@@ -8296,7 +8345,7 @@ FULL PLAN REQUESTS (ON injury hold): If the athlete asks to SEE the plan, schedu
 
 EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Handle it using the THIS WEEK SESSION SWAP rules below.
 
-WEEK-LEVEL PLAN CHANGES: Because the plan is day-agnostic, "swap days" requests don't apply. If the athlete asks to move, swap, or reschedule a session, gently redirect — the plan has no days assigned, so they can shift their run whenever works. Example: "Since the week is day-agnostic, just do the tempo whenever it fits — no need to swap." No [WEEK_OVERRIDE] or [SKIP_DAY] tags. However, if they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load, treat that as plan_action.lighter_week per the rules below.
+WEEK-LEVEL PLAN CHANGES: The weekly mileage target, long run, and quality session are day-agnostic — don't invent a day-by-day schedule from scratch. But if the athlete asks to move, swap, or reschedule a SPECIFIC session that's already tracked in THIS WEEK'S PLAN sessions (e.g. "can we move Thursday's run to Friday", "I want to run Thursday instead of Friday"), that's an actionable request — use plan_action.session_swaps per the THIS WEEK SESSION SWAP rules below, not a redirect. Confirm the move plainly (e.g. "Done — moved to Thursday.") only once the swap has actually been set. No [WEEK_OVERRIDE] or [SKIP_DAY] tags. If they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load instead of a specific day-move, treat that as plan_action.lighter_week per the rules below.
 
 RACE COURSE DATA: If the athlete provides course profile details for their race (total elevation gain, total descent, start altitude, or terrain type), save it immediately by appending at the end of your response:
 [RACE_COURSE_UPDATE:{"race_id":"<uuid>","elevation_gain_feet":<number>,"elevation_loss_feet":<number>,"race_altitude_ft":<number>,"trail_subtype":"<groomed|mixed|technical|highly_technical>"}]
@@ -8791,6 +8840,8 @@ BUBBLE 1: One sentence grounding them in where they are and where this is going 
 BUBBLE 2: How you're thinking about the next 1-2 weeks. Conversational, not a day-by-day schedule. ${weekBudgetExhausted ? `The week is essentially done — just orient them to next week's structure (weekly mileage, one quality session). Keep it brief.` : `Three things: what the weekly mileage target looks like this week, one quality session to slot in, and what the long run should be. Frame it as your thinking, not a prescription — "this week I'd aim for X miles, one quality session mid-week, and a longer easy run on the weekend." Invite them to push back: "Text me if anything needs adjusting."` }
 
 This is not a plan delivery. Dean calibrates every week based on what actually happens. The Sunday recap will be the primary touchpoint for week-to-week structure going forward.
+
+BREVITY: This is a lot for an athlete to absorb right after onboarding — 2 bubbles total, no restating anything already confirmed earlier in this conversation (training days, race name/timeline, injury details). Close with one short sentence on how check-ins work going forward (e.g. "I'll check in after your runs and send a full recap + next week's plan every Sunday") so they know what to expect — this is the one new piece of information to add, not a reason to lengthen the rest.
 ${weekMilesBudgetNote}
 
 ${weekBoundaryNote}

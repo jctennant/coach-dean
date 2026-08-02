@@ -7,7 +7,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { checkStravaAnalysisNumbers, buildStravaFactCorrection } from "@/lib/onboarding-fact-check";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { sendPoll, isPhotonProvider } from "@/lib/photon";
-import { GOAL_POLL, type AppPoll } from "@/lib/polls";
+import { GOAL_POLL, TRAINING_DAYS_POLL, type AppPoll } from "@/lib/polls";
 import { trackEvent } from "@/lib/track";
 import { calculateVDOTPaces, easyPaceRange, formatRaceDistance } from "@/lib/paces";
 import { getCheckoutPageUrl } from "@/lib/stripe";
@@ -18,6 +18,7 @@ import { computeWeekSessions } from "@/lib/training-plan";
 import { composeStrengthRoutine } from "@/lib/strength-library";
 import { splitIntoMessages } from "@/lib/message-split";
 import { normalizeEmDashes } from "@/lib/text-format";
+import { inferTrainingDaysFromActivities, type InferableActivity } from "@/lib/infer-training-days";
 
 export const maxDuration = 60;
 
@@ -533,6 +534,11 @@ async function handleConversation(
     // Injury intake: one focused follow-up probe, then deterministic completion.
     return handleInjuryIntake(user, message, mergedData, chatId);
   }
+  if (currentStage === "schedule_confirm") {
+    // Schedule/preferences checkpoint: confirm training days + plan preferences
+    // before generating the plan, then deterministic completion.
+    return handleScheduleConfirm(user, message, mergedData, chatId);
+  }
   // Falls through to goals stage (collect name + goal + race date + Strava).
 
   // ── Off-topic classifier ────────────────────────────────────────────────────
@@ -585,22 +591,15 @@ ${stravaContext}
 
 CONVERSATION FLOW:
 1. First message: intro + name + "what's going on or what are you working toward" in one question
-2. After name + goal established (and race dates confirmed): ask the plan check question — mandatory, see PLAN CHECK below
-3. After plan check is answered: ask for Strava
-4. After Strava connects: dedicated injury intake stage runs automatically — you don't need to ask about it
-5. Signal [READY] when name + goal + plan check answered + Strava connected
+2. After name + goal established (and race dates confirmed): ask for Strava
+3. After Strava connects: dedicated injury intake stage runs automatically — you don't need to ask about it
+4. Signal [READY] when name + goal + Strava connected (see PLAN CHECK below for the one exception)
 
-PLAN CHECK — MANDATORY STEP AFTER GOAL IS ESTABLISHED:
-Once you have the athlete's name and goal (all named race dates confirmed), ask this as a standalone question BEFORE Strava:
-"Are you following a training plan or working with a coach right now?"
-Do NOT skip this. Do NOT combine it with another question.
-
-When they answer YES: Ask what week of the plan they're on — that's the ONE question for this message. Example: "Got it — I work alongside it. What week are you on?" After they answer, offer to share that week's sessions (text it out or upload a PDF) and move to Strava on the next message.
-When they answer NO or uncertain: "No problem — once Strava connects I'll build the plan from your data." Move to Strava immediately.
-When they answer with injury context (e.g. "yeah I had a plan but the shin thing is messing it up"): acknowledge the plan status AND the injury signal, then move to Strava.
-
-EXISTING PLAN (athlete mentions Runna, TrainingPeaks, a coach-written plan, etc.):
-Dean works alongside their plan — no competing structure, no rebuilding. The plan check question makes this explicit and positions Dean correctly. When plan context is shared, acknowledge it and capture it — it informs post-run analysis framing.
+PLAN CHECK — passive by default, do NOT make this a dedicated question:
+Whether the athlete already has a training plan or coach usually comes up naturally on its own — "I'm on a Runna plan", "my coach has me doing...", "just running on my own", "trying to build mileage myself". Capture it whenever it's mentioned; don't ask a standalone "are you following a plan?" question, and never combine it with the goal or injury question either.
+Only ask directly, as its own short turn, if it's genuinely unclear after goal + Strava + injury context are known AND nothing in the conversation has implied an answer either way. Keep it to: "Are you following a training plan or working with a coach right now?"
+When they confirm an existing plan: ask what week they're on — offer to share that week's sessions (text it out or upload a PDF).
+EXISTING PLAN (athlete mentions Runna, TrainingPeaks, a coach-written plan, etc.): Dean works alongside their plan — no competing structure, no rebuilding. Acknowledge it naturally when it comes up; it informs post-run analysis framing.
 
 INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list. If you need multiple things, prioritize and ask the single most important one.
@@ -622,8 +621,8 @@ INJURY MENTIONS IN GOALS STAGE:
 Injury is the most important signal. When an athlete mentions an injury or physical issue, lead with it — treat it as the primary concern before asking anything else.
 
 STEP 1 — Is the athlete's goal itself about recovering from injury or returning to running?
-• YES (e.g. "I want to get back to running", "I've been sidelined for months", "I'm not really training right now"): Acknowledge the injury as the central challenge. Ask ONE specific question about it — where it hurts, during/after runs, or whether they've seen anyone. Then move to plan check. Do NOT mention Strava in this message.
-• NO (athlete has a race or fitness goal but mentions injury in passing): Acknowledge the injury FIRST with a specific coaching statement ("Shin soreness a week out from a race — let's sort that out before we do anything else."), then pivot to the plan check question. NEVER ask detailed injury follow-ups in the goals stage (during/after/how long) — that's injury intake's job after Strava. But DO surface the injury prominently; don't bury it after goal logistics.
+• YES (e.g. "I want to get back to running", "I've been sidelined for months", "I'm not really training right now"): Acknowledge the injury as the central challenge. Ask ONE specific question about it — where it hurts, during/after runs, or whether they've seen anyone. Do NOT mention Strava in this message — ask for it on the next one.
+• NO (athlete has a race or fitness goal but mentions injury in passing): Acknowledge the injury FIRST with a specific coaching statement ("Shin soreness a week out from a race — let's sort that out before we do anything else."), then move to asking for Strava. NEVER ask detailed injury follow-ups in the goals stage (during/after/how long) — that's injury intake's job after Strava. But DO surface the injury prominently; don't bury it after goal logistics.
 
 In ALL cases:
 - Injury acknowledgment must be concrete and specific, not generic. "Shin soreness close to race day needs a clear management plan" beats "that sounds tough."
@@ -633,7 +632,7 @@ In ALL cases:
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 EXCEPTION: For return_to_running or injury_recovery goals (athlete's primary goal is recovering from injury or getting back to running), ask ONE injury question BEFORE asking for Strava. Do NOT mention Strava in this message at all — that comes after the injury question is answered.
-Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs and add a coaching note to each one") — the system appends that line automatically right after the link, and it accurately describes both what's read and what's written back. Writing your own version will make it appear twice, and any wording that undersells it (e.g. "read your runs automatically" alone) will contradict the write-access grant the link actually requests — the athlete can see the OAuth scope screen. Just lead naturally into [STRAVA_LINK]; a short transition or nothing at all before the placeholder is fine. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
+Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs and add a coaching note to each one") — the system always appends that exact line after the link, and it accurately describes both what's read and what's written back. Any wording that undersells it (e.g. "read your runs automatically" alone) will contradict the write-access grant the link actually requests — the athlete can see the OAuth scope screen. Just lead naturally into [STRAVA_LINK] with a short transition or nothing at all. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -872,6 +871,13 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   let stravaMsg: string | null = null;
 
   if (wantsStravaLink && !mergedData.strava_connected) {
+    // Text in earlier paragraphs becomes its own message (unchanged). Text in
+    // the SAME paragraph as [STRAVA_LINK] is always discarded rather than
+    // prepended to the pitch — Claude is instructed not to write a pitch
+    // sentence there, but when it does anyway, keeping that text would
+    // duplicate the canonical line the system appends. Dropping it
+    // unconditionally makes the duplication structurally impossible instead
+    // of relying on Claude to follow that instruction correctly every time.
     const paragraphs = rawText.split(/\n{2,}/);
     const stravaParaIdx = paragraphs.findIndex(p => /\[STRAVA_LINK\]/i.test(p));
     const beforeStrava = paragraphs
@@ -880,14 +886,9 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
       .replace(/\[READY\]/gi, "")
       .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
       .trim();
-    const stravaParagraph = paragraphs[stravaParaIdx]
-      .replace(/\[STRAVA_LINK\]/gi, "")
-      .replace(/\[READY\]/gi, "")
-      .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
-      .trim();
     responseText = beforeStrava;
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    stravaMsg = `${stravaParagraph ? stravaParagraph + "\n\n" : ""}${writeUrl}\n\nI'll connect to Strava to read your runs and add a coaching note to each one.`;
+    stravaMsg = `${writeUrl}\n\nI'll connect to Strava to read your runs and add a coaching note to each one.`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -1006,13 +1007,15 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
       return NextResponse.json({ ok: true });
     }
 
-    // Save final data and complete onboarding
+    // Save final data
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
     if (responseText.trim()) {
       await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
     }
+    const scheduleResult = await maybeEnterScheduleConfirm(user, mergedData);
+    if (scheduleResult) return scheduleResult;
     await completeOnboarding(user, mergedData, chatId, { dashboardLinkSentInWrapUp: wantsDashboardLink });
     return NextResponse.json({ ok: true });
   }
@@ -1144,7 +1147,7 @@ Rules:
 - Only extract data clearly stated in the conversation. Do not infer or guess. Use null for anything not mentioned.
 - name: NEVER extract "Athlete" as the name — that is a transcript label, not the person's name. Only extract a name if the user explicitly stated it (e.g. "I'm Jake", "My name is Sarah").
 - goal: use "trail_race" for trail/mountain races that aren't standard road distances. Use standard buckets (5k, 10k, half_marathon, marathon) only for road races at those distances. If the athlete has no committed race — only aspirational talk — use "return_to_running" or "general_fitness", NOT the race distance. For triathlon goals, use null (we handle run-only coaching for triathletes).
-- has_existing_plan: true if the athlete explicitly confirms they are currently following a training plan or working with a coach (e.g. "yes, I'm on a Runna plan", "I have a coach", "yeah I'm following a program"). false if they explicitly say they have no plan or coach (e.g. "no, I'm just running on my own", "no plan", "no coach"). null if the plan check question hasn't been asked and answered yet — do NOT infer from context alone.
+- has_existing_plan: true if the athlete states or implies they are currently following a training plan or working with a coach, whether asked directly or mentioned naturally (e.g. "yes, I'm on a Runna plan", "I have a coach", "yeah I'm following a program", "my coach has me doing hill repeats"). false if they state or imply they have no plan or coach (e.g. "no, I'm just running on my own", "no plan", "just trying to build mileage myself"). null if there's no signal either way yet.
 - external_plan_description: capture a brief factual summary when the athlete describes their current external plan (source/name, current week, weekly mileage). E.g. "Runna 16-week half marathon plan, week 6, ~35mi/week". Null if no current plan or if they only said yes without describing it yet. Do NOT capture a plan Dean is going to build.
 - plan_current_week: the week number the athlete is currently on in their training plan (e.g. "I'm on week 8", "week 6 of my plan" → 8 or 6). Extract as a number. Null if not mentioned.
 - training_days: lowercase full names only. Ranges like "Tues-Thursday" expand to ALL days inclusive → ["tuesday","wednesday","thursday"]. ONLY extract when the athlete names specific day(s). A bare frequency ("3x a week", "three days a week") is NOT training_days — that goes in days_per_week instead. Do NOT guess or invent which specific days those runs fall on. Null unless specific days were actually named.
@@ -1259,7 +1262,7 @@ Rules:
           },
           terrain_type: { type: ["string", "null"], enum: ["road", "trail", "mixed", null], description: "Primary running terrain" },
           preferred_units: { type: ["string", "null"], enum: ["metric", "imperial", null], description: "Unit system the athlete prefers. 'metric' if they use km/min-per-km or write in non-English. 'imperial' if they reference miles. null if unclear." },
-          has_existing_plan: { type: ["boolean", "null"], description: "true if athlete confirms they have an existing plan or coach, false if they confirm they don't, null if plan check question hasn't been answered yet." },
+          has_existing_plan: { type: ["boolean", "null"], description: "true if athlete states or implies they have an existing plan or coach (asked directly or mentioned naturally), false if they state or imply they don't, null if there's no signal either way yet." },
           external_plan_description: { type: ["string", "null"], description: "Brief factual summary of athlete's current external plan: source/name, current week, weekly mileage. E.g. 'Runna 16-week HM plan, week 8, ~40mi/week'. Null if no current plan — NEVER capture a plan Dean is going to build." },
           plan_current_week: { type: ["number", "null"], description: "The week number the athlete is currently on in their training plan (e.g. 'I'm on week 8' → 8). Null if not mentioned." },
           other_notes: { type: ["string", "null"] },
@@ -1604,6 +1607,8 @@ async function handleInjuryIntake(
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
     await sendAndStore(user.id, user.phone_number, completionMsg, "onboarding");
+    const scheduleResult = await maybeEnterScheduleConfirm(user, mergedData);
+    if (scheduleResult) return scheduleResult;
     await completeOnboarding(user, mergedData, chatId);
     return NextResponse.json({ ok: true });
   }
@@ -1719,6 +1724,101 @@ Plain text, 1–2 sentences max.`;
     .update({ onboarding_data: updatedData as unknown as Json })
     .eq("id", user.id);
   await sendAndStore(user.id, user.phone_number, followUpText, "onboarding");
+  return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Schedule / plan-preferences checkpoint — confirm training days before the
+// plan is generated, instead of stating them (or not) buried inside the same
+// mega-message that also delivers the plan and strength routine.
+// ---------------------------------------------------------------------------
+
+/**
+ * Called right before completeOnboarding would otherwise fire. If schedule
+ * preferences haven't been confirmed yet, states the (inferred or already-known)
+ * training days, asks what the athlete wants out of the plan, transitions into
+ * the "schedule_confirm" stage, and returns a response the caller should return
+ * immediately. Returns null when the checkpoint is already satisfied, so the
+ * caller should proceed straight to completeOnboarding.
+ */
+async function maybeEnterScheduleConfirm(
+  user: { id: string; phone_number: string },
+  mergedData: Record<string, unknown>
+): Promise<NextResponse | null> {
+  if (mergedData.schedule_confirmed) return null;
+
+  // If the athlete already stated their training days explicitly during the normal
+  // conversation, that's already a real confirmation — don't add a redundant checkpoint
+  // turn on top of it. This checkpoint exists specifically for the case where days were
+  // never asked about at all and would otherwise be silently inferred from Strava (or left
+  // unknown) with no chance to correct them.
+  const existingDays = (mergedData.training_days as string[] | null) ?? null;
+  if (existingDays && existingDays.length > 0) return null;
+
+  const lookback = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: recentActs } = await supabase
+    .from("activities")
+    .select("start_date, activity_type")
+    .eq("user_id", user.id)
+    .gte("start_date", lookback)
+    .order("start_date", { ascending: false });
+  const inferredDays = inferTrainingDaysFromActivities(
+    (recentActs ?? []) as unknown as InferableActivity[],
+    (mergedData.timezone as string | null) ?? "America/New_York"
+  );
+
+  const dayList = inferredDays && inferredDays.length > 0
+    ? inferredDays.map((d) => d.slice(0, 3).replace(/^\w/, (c) => c.toUpperCase())).join("/")
+    : null;
+
+  const nextData: Record<string, unknown> = {
+    ...mergedData,
+    stage: "schedule_confirm",
+    ...(inferredDays ? { training_days: inferredDays } : {}),
+  };
+  await supabase.from("users")
+    .update({ onboarding_data: nextData as unknown as Json })
+    .eq("id", user.id);
+
+  if (dayList) {
+    if (isPhotonProvider()) {
+      await sendPollAndStore(user.id, user.phone_number, TRAINING_DAYS_POLL);
+      await sendAndStore(user.id, user.phone_number, "Anything specific you want out of the plan (extra rest days, cross-training, etc.)?", "onboarding");
+    } else {
+      await sendAndStore(user.id, user.phone_number, `Looks like you typically run ${dayList} — sound right, or want different days? Also let me know anything specific you want out of the plan.`, "onboarding");
+    }
+  } else {
+    await sendAndStore(user.id, user.phone_number, "What days of the week do you want to run, and anything specific you want out of the plan?", "onboarding");
+  }
+  return NextResponse.json({ ok: true });
+}
+
+async function handleScheduleConfirm(
+  user: { id: string; phone_number: string; name: string | null },
+  message: string,
+  data: Record<string, unknown>,
+  chatId?: string | null
+): Promise<NextResponse> {
+  const extracted = await extractFields([{ role: "user", content: message }]);
+  const mergedData: Record<string, unknown> = { ...data, schedule_confirmed: true };
+  for (const [k, v] of Object.entries(extracted)) {
+    if (v !== null && v !== undefined) {
+      if (Array.isArray(v) && (v as unknown[]).length === 0) continue;
+      mergedData[k] = v;
+    }
+  }
+
+  await insertConversation({
+    user_id: user.id,
+    role: "user",
+    content: message,
+    message_type: "user_message",
+  });
+
+  await supabase.from("users")
+    .update({ onboarding_data: mergedData as unknown as Json })
+    .eq("id", user.id);
+  await completeOnboarding(user, mergedData, chatId);
   return NextResponse.json({ ok: true });
 }
 
@@ -1892,7 +1992,7 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
   if (hrZones && avgMiles) {
     const highZ = hrZones.z3 + hrZones.z4 + hrZones.z5;
     if (highZ > 50) {
-      observation = `Your ${avgMiles} mi/week base is there — keeping the easy days truly easy is the main lever right now.`;
+      observation = `Your ${avgMiles} mi/week base is there, with a lot of that at higher effort than ideal.`;
     } else {
       observation = `Your aerobic base at ${avgMiles} mi/week is well-paced — good platform to build from.`;
     }
