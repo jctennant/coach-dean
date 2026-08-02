@@ -780,7 +780,7 @@ export default function Home() {
               },
               {
                 q: "Is my data private?",
-                a: "Your training data, pace information, and conversations with Coach Dean are used solely to power your coaching experience, nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is only used to pull your workout history into Coach Dean and optionally add a coaching note to each activity. You control the notes permission during setup. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
+                a: "Your training data, pace information, and conversations with Coach Dean are used solely to power your coaching experience, nothing else. We don't sell your data or share it with third parties. If you connect Strava, that access is only used to pull your workout history into Coach Dean so it can text you a coaching note after each run. You can request deletion of your data at any time by texting FEEDBACK: Delete my account.",
               },
             ].map(({ q, a }) => (
               <details key={q} className="group py-4">

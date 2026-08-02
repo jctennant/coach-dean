@@ -345,7 +345,7 @@ async function handleInboundMessage(
   const isStravaConnectionKeyword = /^strava connection$/i.test(body.trim());
   if (isStravaConnectionKeyword) {
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    const msg = `Here's a link to update your Strava connection:\n${writeUrl}\n\nOn the Strava screen, the "Upload activities" checkbox controls whether I add a coaching note to each run.`;
+    const msg = `Here's a link to update your Strava connection:\n${writeUrl}`;
     await Promise.all([
       sendSMS(senderPhone, msg),
       insertConversation({ user_id: user.id, role: "assistant", content: msg, message_type: "coach_response" }),

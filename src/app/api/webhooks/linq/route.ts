@@ -482,7 +482,7 @@ async function handleInboundMessage(
   const isStravaConnectionKeyword = /^strava connection$/i.test(body.trim());
   if (isStravaConnectionKeyword) {
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    await sendAndStore(user.id, senderPhone, `Here's a link to update your Strava connection:\n${writeUrl}\n\nOn the Strava screen, the "Upload activities" checkbox controls whether I add a coaching note to each run. Check it to enable, uncheck to remove.`, messageId);
+    await sendAndStore(user.id, senderPhone, `Here's a link to update your Strava connection:\n${writeUrl}`, messageId);
     return;
   }
 
@@ -492,11 +492,10 @@ async function handleInboundMessage(
   if (isStravaIntent) {
     if (user.strava_athlete_id) {
       const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-      await sendAndStore(user.id, senderPhone, `Your Strava is already connected. If you want to update your permissions (e.g. add or remove coaching notes on activities), tap here:\n${writeUrl}`, messageId);
+      await sendAndStore(user.id, senderPhone, `Your Strava is already connected. If you want to update your permissions, tap here:\n${writeUrl}`, messageId);
     } else {
       const stravaUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava?userId=${user.id}`;
-      const notesUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-      await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start tracking your runs:\n${stravaUrl}\n\nWant Dean to add a coaching note to each activity? Use this link instead:\n${notesUrl}`, messageId);
+      await sendAndStore(user.id, senderPhone, `Here's your Strava link — tap to connect and I'll start tracking your runs:\n${stravaUrl}`, messageId);
     }
     return;
   }

@@ -623,6 +623,7 @@ Injury is the most important signal. When an athlete mentions an injury or physi
 STEP 1 — Is the athlete's goal itself about recovering from injury or returning to running?
 • YES (e.g. "I want to get back to running", "I've been sidelined for months", "I'm not really training right now"): Acknowledge the injury as the central challenge. Ask ONE specific question about it — where it hurts, during/after runs, or whether they've seen anyone. Do NOT mention Strava in this message — ask for it on the next one.
 • NO (athlete has a race or fitness goal but mentions injury in passing): Acknowledge the injury FIRST with a specific coaching statement ("Shin soreness a week out from a race — let's sort that out before we do anything else."), then move to asking for Strava. NEVER ask detailed injury follow-ups in the goals stage (during/after/how long) — that's injury intake's job after Strava. But DO surface the injury prominently; don't bury it after goal logistics.
+  If the athlete also named a specific race in this same message, the injury acknowledgment does not replace the race-demand coaching insight (see DEMONSTRATING VALUE below) — fold both into one combined observation rather than dropping the race reaction entirely, e.g. "Shin soreness with four weeks to Teton Crest's climbing is worth sorting out first — that terrain punishes compromised legs." One sentence covering both beats two competing ones, but neither gets skipped.
 
 In ALL cases:
 - Injury acknowledgment must be concrete and specific, not generic. "Shin soreness close to race day needs a clear management plan" beats "that sounds tough."
@@ -632,7 +633,7 @@ In ALL cases:
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
 EXCEPTION: For return_to_running or injury_recovery goals (athlete's primary goal is recovering from injury or getting back to running), ask ONE injury question BEFORE asking for Strava. Do NOT mention Strava in this message at all — that comes after the injury question is answered.
-Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs and add a coaching note to each one") — the system always appends that exact line after the link, and it accurately describes both what's read and what's written back. Any wording that undersells it (e.g. "read your runs automatically" alone) will contradict the write-access grant the link actually requests — the athlete can see the OAuth scope screen. Just lead naturally into [STRAVA_LINK] with a short transition or nothing at all. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
+Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll read your runs and text you a coaching note after each one") — the system always appends that exact line after the link. Coaching notes are sent by SMS, not written back to the Strava activity itself — never say "add a note to your activity/Strava" or similar, since nothing posts back to Strava. Just lead naturally into [STRAVA_LINK] with a short transition or nothing at all. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -871,24 +872,32 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   let stravaMsg: string | null = null;
 
   if (wantsStravaLink && !mergedData.strava_connected) {
-    // Text in earlier paragraphs becomes its own message (unchanged). Text in
-    // the SAME paragraph as [STRAVA_LINK] is always discarded rather than
-    // prepended to the pitch — Claude is instructed not to write a pitch
-    // sentence there, but when it does anyway, keeping that text would
-    // duplicate the canonical line the system appends. Dropping it
-    // unconditionally makes the duplication structurally impossible instead
-    // of relying on Claude to follow that instruction correctly every time.
+    // Text in earlier paragraphs becomes its own message (unchanged) UNLESS it's
+    // Claude restating the Strava pitch as its own separate paragraph right
+    // before [STRAVA_LINK] (e.g. "I need to connect to Strava to read your
+    // runs and text you a coaching note." as one paragraph, then [STRAVA_LINK]
+    // as the next) — that still duplicates the canonical line the system
+    // appends below, just one paragraph earlier than the same-paragraph case
+    // this dedup was originally built for. Drop a paragraph immediately
+    // preceding the link if it reads like the pitch itself (mentions strava +
+    // reading runs/coaching notes), not just the paragraph containing the link.
     const paragraphs = rawText.split(/\n{2,}/);
     const stravaParaIdx = paragraphs.findIndex(p => /\[STRAVA_LINK\]/i.test(p));
+    const looksLikeStravaPitch = (p: string) =>
+      /strava/i.test(p) && /(read (your|every) run|coaching note|connect(ing)? (to |with )?strava)/i.test(p);
+    let beforeEnd = stravaParaIdx;
+    if (beforeEnd > 0 && looksLikeStravaPitch(paragraphs[beforeEnd - 1])) {
+      beforeEnd -= 1;
+    }
     const beforeStrava = paragraphs
-      .slice(0, stravaParaIdx)
+      .slice(0, beforeEnd)
       .join("\n\n")
       .replace(/\[READY\]/gi, "")
       .replace(/\[MODE:(?:FROM_SCRATCH|COMPLEMENT|NO_PLAN)\]/gi, "")
       .trim();
     responseText = beforeStrava;
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    stravaMsg = `${writeUrl}\n\nI'll connect to Strava to read your runs and add a coaching note to each one.`;
+    stravaMsg = `${writeUrl}\n\nI'll read your runs and text you a coaching note after each one.`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -1002,7 +1011,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
         })
         .eq("id", user.id);
       const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-      const pitch = `Before we kick off — I need Strava to coach you properly. I'll read every run and add a coaching note to each one. Takes two minutes:\n\n${writeUrl}`;
+      const pitch = `Before we kick off — I need Strava to coach you properly. I'll read every run and text you a coaching note after each one. Takes two minutes:\n\n${writeUrl}`;
       await sendAndStore(user.id, user.phone_number, pitch, "awaiting_strava");
       return NextResponse.json({ ok: true });
     }
@@ -2093,13 +2102,13 @@ async function handleStrava(
   // If asking about Strava — explain what it is and re-send the link
   const isAskingAboutStrava = /\b(what|what's|whats|how|why|tell me about|explain|never heard)\b/i.test(message);
   if (isAskingAboutStrava || (/strava/i.test(message) && message.includes("?"))) {
-    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run and add a coaching note to it.\n\n${writeUrl}`;
+    const reply = `Strava is a free app that tracks your runs via GPS — lots of runners use it. Once you connect it, I'll automatically read every run and text you a coaching note.\n\n${writeUrl}`;
     await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
     return NextResponse.json({ ok: true });
   }
 
   // Any other message while awaiting Strava — re-send the link
-  const reply = `Connect Strava so I can read your runs automatically and add a coaching note after each one:\n\n${writeUrl}`;
+  const reply = `Connect Strava so I can read your runs automatically and text you a coaching note after each one:\n\n${writeUrl}`;
   await sendAndStore(user.id, user.phone_number, reply, "awaiting_strava");
   return NextResponse.json({ ok: true });
 }

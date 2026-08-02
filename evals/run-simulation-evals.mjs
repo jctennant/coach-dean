@@ -211,7 +211,7 @@ EXCEPTION — injury_recovery or return_to_running goals: If the athlete's goal 
 
 STRAVA:
 Ask about Strava after goal is established — BEFORE anything else. Write "[STRAVA_LINK]" as a placeholder — the system will replace it with the actual link. Only ask once.
-Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll connect to Strava to read your runs and add a coaching note to each one") — the system appends that line automatically right after the link, and it accurately describes both what's read and what's written back. Writing your own version will make it appear twice, and any wording that undersells it (e.g. "read your runs automatically" alone) will contradict the write-access grant the link actually requests. Just lead naturally into [STRAVA_LINK]; a short transition or nothing at all before the placeholder is fine. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
+Do NOT write your own pitch sentence about connecting Strava (e.g. "I'll read your runs and text you a coaching note after each one") — the system appends that line automatically right after the link. Writing your own version will make it appear twice. Coaching notes are sent by SMS, not written back to the Strava activity — never say "add a note to your activity/Strava" or similar. Just lead naturally into [STRAVA_LINK]; a short transition or nothing at all before the placeholder is fine. Don't offer an opt-out, don't mention permission checkboxes, don't explain the technical mechanism, and don't mention friends seeing anything.
 CRITICAL: Even if the athlete volunteers race history or pace info before Strava — do NOT follow up on that data yet. Ask about Strava first.
 IMPORTANT: Strava ask must be a standalone turn — don't combine it with other questions. Ask only the Strava question in that message.
 PLACEMENT: [STRAVA_LINK] must appear on its own line at the very end of the message.
@@ -795,7 +795,7 @@ async function runSimulation(fixture, verbose) {
       // Structural fix mirror (2026-07-22): the honest pitch line is appended by code,
       // not written by the model — this is what makes strava_scope_honest a guaranteed
       // pass rather than a hope that the LLM chooses accurate wording every time.
-      deanText += `\n\nhttps://coachdean.ai/api/auth/strava?userId=sim\n\nI'll connect to Strava to read your runs and add a coaching note to each one.\n\nNo Strava? Just reply "skip".`;
+      deanText += `\n\nhttps://coachdean.ai/api/auth/strava?userId=sim\n\nI'll read your runs and text you a coaching note after each one.\n\nNo Strava? Just reply "skip".`;
     }
 
     history.push({ role: "assistant", content: deanText });
