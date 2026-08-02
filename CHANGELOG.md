@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-02 — Strava OAuth now requests read-only scope
+
+**Type:** Improvement
+**Reported by:** User feedback (follow-up to the same-day Strava write-back copy fix)
+**User feedback:** "yeah let's make sure the strava call is read only, whatever we need to see all activities"
+**Root cause:** `/api/auth/strava/write` requested `activity:write` in addition to read scopes, left over from the (now-removed) activity-annotation feature — but nothing in the app calls the Strava write API anymore.
+**Fix / Change:** Changed `/api/auth/strava/write`'s requested scope from `read,activity:read_all,activity:write` to `read,activity:read_all`, matching the existing (previously unused-in-practice) `/api/auth/strava` read-only route exactly. Kept the route path and all existing callers (onboarding, Linq/Photon Strava-reconnect flows) unchanged to avoid touching working links — only the OAuth scope requested changed. `strava/callback`'s `hasWriteScope` detection and `strava_write_enabled` storage are left in place (harmless — nothing reads that flag to gate an actual write anymore, and removing the column/detection is a separate cleanup not needed for this fix).
+**Files changed:** `src/app/api/auth/strava/write/route.ts`
+
 ## 2026-08-02 — Stopped promising a Strava write-back that was removed a month ago; fixed the pitch duplicating across paragraphs; race-insight instruction was still getting crowded out by injury
 
 **Type:** Bug Fix

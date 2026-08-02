@@ -1,11 +1,12 @@
 /**
  * GET /api/auth/strava/write?userId=<id>
- * Initiates a Strava re-auth flow that requests activity:write scope.
- * Same JS-redirect pattern as /api/auth/strava to correctly trigger
- * the Strava app via Universal Link on iOS.
- *
- * After granting, the existing /api/auth/strava/callback handler detects
- * activity:write in the returned scope and sets strava_write_enabled = true.
+ * Initiates the Strava OAuth flow. Despite the route name (kept to avoid
+ * touching existing links across onboarding/SMS reconnect flows), this now
+ * requests read-only scope, matching /api/auth/strava exactly — Coach Dean
+ * no longer writes anything back to Strava (the activity-annotation feature
+ * was removed; see CHANGELOG 2026-08-02), so there's no reason to request
+ * activity:write. Same JS-redirect pattern as /api/auth/strava to correctly
+ * trigger the Strava app via Universal Link on iOS.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
     client_id: process.env.STRAVA_CLIENT_ID!,
     response_type: "code",
     redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/callback`,
-    scope: "read,activity:read_all,activity:write",
+    scope: "read,activity:read_all",
     approval_prompt: "force",
     state: userId,
   });
