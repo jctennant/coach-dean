@@ -218,7 +218,7 @@ type ActivitySummary = {
   start_date: string;
 };
 
-function weekMonday(date: Date, timezone: string): string {
+export function weekMonday(date: Date, timezone: string): string {
   const local = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(date);
   const [y, m, d] = local.split("-").map(Number);
   const dayOfWeek = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun

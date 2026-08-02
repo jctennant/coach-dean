@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-02 — Infer training_days from Strava history at initial_plan time instead of leaving it empty for the account's lifetime
+
+**Type:** Bug Fix / Feature
+**Reported by:** Internal follow-up ("I think if the user in onboarding wants Dean to give them a plan we should make sure to set training days then, do we?")
+**User feedback:** N/A
+**Root cause:** Per the onboarding spec, `training_days` is only asked for explicitly when Strava has no data — the implied design intent was that Strava-connected athletes' schedules would be inferred from their activity history instead. That inference was never actually implemented anywhere in the codebase (confirmed by search — only two writers of `training_days` exist, both requiring the athlete to explicitly name specific days in conversation). The consequence, found while investigating the reminder-cadence bugs below: `computeArcWeekSkeleton()` (`training-plan.ts:1090`) returns `[]` outright when `training_days` is empty, so the plan generator has no day-by-day skeleton to build from — it falls back to Claude free-handing the week's schedule in prose, with session count defaulting to a hardcoded `4`/week guess rather than anything derived from the athlete's actual running frequency. A stale code comment (`route.ts` "schedule inferred from Strava frequency instead") described the intended behavior as if it already existed.
+**Fix / Change:** Added `inferTrainingDaysFromActivities()` (`src/lib/infer-training-days.ts`) — looks at an athlete's run activity over the last 4 weeks, groups by local weekday, and requires a weekday to appear in at least half the observed weeks (with at least 2 distinct weeks of history) before treating it as a standing training day. Returns `null` when the signal isn't there (too little or too inconsistent history) rather than guessing. Wired into the `initial_plan` trigger in `route.ts`: when `training_days` is empty, inference runs before `generateAndSaveFullPlan` — on success it's written to `training_profiles.training_days` and applied to the in-memory `profile` immediately so this same plan generation gets the real day-by-day skeleton (not just future weeks). When inference comes back null, `training_days` is left empty as before, but the initial plan message now explicitly asks the athlete which days they run, feeding into the existing `updated_training_days` profile-extraction path already used for casual schedule mentions.
+**Files changed:** `src/lib/infer-training-days.ts` (new), `src/lib/cross-training.ts` (exported `weekMonday` for reuse), `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/infer-training-days.test.ts` (new)
+
 ## 2026-08-02 — Cadence opt-in now asks which days when training_days is unknown, instead of the cron guessing
 
 **Type:** Bug Fix / Follow-up

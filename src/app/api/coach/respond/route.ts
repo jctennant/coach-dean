@@ -44,6 +44,7 @@ import { parseSessionMiles } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
+import { inferTrainingDaysFromActivities, type InferableActivity } from "@/lib/infer-training-days";
 import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
@@ -3114,6 +3115,27 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
       initialPlanArcConstraint = "\n\nATHLETE IS FOLLOWING THEIR OWN UPLOADED PLAN — do NOT invent a mileage arc, long run, or quality session; that data isn't generated for this athlete. Reference the ATHLETE'S UPLOADED TRAINING PLAN context elsewhere in this prompt instead, and confirm you'll coach alongside it (adjusting for injuries, fatigue, or missed sessions) rather than replacing it.";
     } else {
     const bCRacesForArc = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
+
+    // Strava-connected athletes are never asked to name their training days during
+    // onboarding (only non-Strava athletes are) — infer a standing schedule from their
+    // actual run history so the plan gets a real day-by-day skeleton instead of falling
+    // back to prose + a hardcoded 4/week guess. If the signal isn't there (too little or
+    // too inconsistent history), leave training_days empty and ask instead of guessing.
+    let askAboutTrainingDays = false;
+    if (!((profile?.training_days as string[] | null)?.length)) {
+      const inferredDays = inferTrainingDaysFromActivities(
+        recentActivities as unknown as InferableActivity[],
+        (user.timezone as string | null) ?? "America/New_York"
+      );
+      if (inferredDays) {
+        await supabase.from("training_profiles").update({ training_days: inferredDays }).eq("user_id", userId);
+        profile = { ...profile, training_days: inferredDays } as typeof profile;
+        console.log(`[initial_plan] inferred training_days from Strava history: ${inferredDays.join(", ")}`);
+      } else {
+        askAboutTrainingDays = true;
+      }
+    }
+
     await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, {
       bRaces: bCRacesForArc.length > 0 ? bCRacesForArc : undefined,
       resetToWeek1: true,
@@ -3171,9 +3193,10 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         }).eq("user_id", userId);
         console.log(`[initial_plan] mid-week onboard — sliced starter week: ${starterTotal}mi, long run ${arcLongRun}mi (arc week1 was ${arcState?.weekly_mileage_target}mi/${arcState?.weekly_long_run_miles}mi)`);
       } else {
-        // No explicit training_days on file (schedule inferred from Strava frequency
-        // instead) — computeArcWeekSkeleton can't assign day-level slots without them.
-        // Fall back to a plain numeric proration by days remaining in the week so the
+        // training_days still empty here — Strava history wasn't enough to infer a
+        // schedule (askAboutTrainingDays is set; see below) — computeArcWeekSkeleton
+        // can't assign day-level slots without them. Fall back to a plain numeric
+        // proration by days remaining in the week so the
         // stored total/long-run at least match what Dean is about to state, even without
         // a day-by-day breakdown.
         const daysToSundayForStarter = initLocalDow === 0 ? 0 : 7 - initLocalDow;
@@ -3260,6 +3283,9 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     })();
     if (arcLines.length > 0) {
       initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES:\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.\n\n${fullArcSummary ? `MILEAGE PROGRESSION: ${fullArcSummary}\nAt the end of your message, include one sentence summarizing the overall mileage arc so the athlete knows how their plan builds. Keep it brief and natural.` : ""}</arc_values>`;
+    }
+    if (askAboutTrainingDays) {
+      initialPlanArcConstraint += `\n\nNo standing training-day schedule is on file, and there wasn't enough recent run history to infer one. End your message by asking which specific days they usually run (or want to run) — this locks in a real day-by-day schedule for next week and lets reminders target the right days, instead of this week's plan being described only in general terms.`;
     }
     console.log("[initial_plan] arc pre-generated — longRun:", arcLongRun, "quality:", arcQuality, "target:", arcTarget);
     }
