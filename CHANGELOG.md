@@ -8,6 +8,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-02 — Shin/tibia injuries now get the actual stress-fracture screen, and fixed a literal example ("Snowbird") leaking into unrelated onboarding conversations
+
+**Type:** Bug Fix
+**Reported by:** Internal (found running `sim-shin-splint-trail-race` and `sim-injury-runner` after the diagnostic-question change below, to sanity-check conversation quality before pushing)
+**User feedback:** N/A
+**Root cause (2 distinct bugs, both found via eval comparison against the pre-change baseline):**
+1. The new goals-stage diagnostic question (below) asks a generic "where does it hurt / during or after" question for any injury, including shin/tibia. For shin/tibia specifically, `handleInjuryIntake`'s deterministic completion gate treats `injury_pain_character` as satisfied once the athlete volunteers enough free-text detail (diffuse vs. localized, rest pain) — which the generic question sometimes elicits by accident, silently skipping the dedicated stress-fracture screen that used to fire reliably post-Strava. Confirmed via `sim-shin-splint-trail-race`: baseline scored 9/10 with the red-flag screen explicitly asked; with only the generic question added, it dropped to 5/10 because the screen was never asked, just serendipitously satisfied by what the athlete happened to volunteer.
+2. Unrelated to the above: the `[READY]` synthesis instruction (`route.ts` ~line 708) contained a literal worked example — "Got it — Snowbird in 6 weeks, solid 25 miles/week base." — that Claude echoed close to verbatim in `sim-injury-runner` (a return-to-running persona with no race and no Strava mileage at all), producing a completion message referencing a race and mileage the athlete never mentioned. Pre-existing latent bug, not caused by today's other changes — it just surfaced during this eval pass.
+**Fix / Change:** (1) Added a SHIN/TIBIA INJURIES block requiring the goals-stage diagnostic question to be exactly the stress-fracture screen (diffuse-vs-localized + rest pain) whenever the body part is a shin/tibia, in both the return_to_running and race-goal-with-injury-mentioned branches — re-verified at 9/10 with the screen explicitly asked again. (2) Replaced the literal "Snowbird" example with a bracketed placeholder shape (`"[race] in [N] weeks, solid [X] miles/week base"`) and an explicit instruction not to copy any noun/number from the example — re-verified at 8/10 with no leaked race name. Mirrored both changes in `evals/run-simulation-evals.mjs`.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`
+
+## 2026-08-02 — Dean now asks a diagnostic question before pivoting to Strava when injury is mentioned alongside a race goal
+
+**Type:** Bug Fix / Improvement
+**Reported by:** User feedback (Jake, reviewing a live onboarding transcript)
+**User feedback:** "I don't think this is the right start to onboarding - I think he should diagnose / understand my issue first; or at least better explain while he needs strava data" — re: a transcript where Dean acknowledged shin splints in one sentence, then immediately dropped the Strava link with no diagnostic follow-up.
+**Root cause:** The STEP 1 "NO" branch of the goals-stage injury instructions (athlete has a race goal, injury mentioned in passing — the Teton Crest case) explicitly forbade asking any injury follow-up before Strava ("NEVER ask detailed injury follow-ups in the goals stage... that's injury intake's job after Strava"), unlike the sibling branch for return_to_running/injury_recovery goals, which already asks one diagnostic question first. This asymmetry meant an athlete whose *main* goal was injury recovery got a real diagnostic opener, but an athlete with a race goal who mentioned an injury in passing got skipped straight to a link — the opposite of what real coaching triage would do.
+**Fix / Change:** Brought the "NO" branch in line with the "YES" branch: Dean now acknowledges the injury (folded with the race-demand observation if a race was also named), then asks ONE diagnostic question (location, during/after runs) in that same message, and holds the Strava ask for the next turn. Full injury intake still runs after Strava connects as before — this is one opening question, not a duplicate workup, and downstream `handleInjuryIntake` is gated on field presence (not a fixed question sequence) so an early answer here just reduces later follow-ups instead of causing a repeat question. Updated the STRAVA section's EXCEPTION line and mirrored the change in `evals/run-simulation-evals.mjs`.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`
+
 ## 2026-08-02 — Strava link no longer drops in with zero transition after an injury/race observation
 
 **Type:** Bug Fix
