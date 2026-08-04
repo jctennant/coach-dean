@@ -551,8 +551,26 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
   const user = userResult.data as Record<string, unknown> | null;
   const profile = profileResult.data as Record<string, unknown> | null;
   if (!user || !profile) {
+    // This was a completely silent early exit — no logging existed on this path at all,
+    // and the whole function is only ever invoked from inside runAfter()'s fire-and-forget
+    // background block, so the caller never sees or checks this 404 either. Confirmed via
+    // a real production trace (2026-08-04): the only log line for an entire rebuild_plan
+    // invocation was "processCoachRequest started", nothing after — this is the first
+    // possible exit point after that line, so it's the leading suspect for where execution
+    // was actually stopping. Logging the distinction between "no row" and "query errored"
+    // (RLS, transient DB error, etc.) narrows this down instead of leaving both cases
+    // looking identical from outside.
+    console.error("[handleRebuildPlan] user or profile not found — aborting rebuild", {
+      userId,
+      userFound: !!user,
+      profileFound: !!profile,
+      userError: userResult.error,
+      profileError: profileResult.error,
+    });
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+
+  console.log(`[handleRebuildPlan] user+profile loaded — userId=${userId}, coaching_mode=${profile.coaching_mode}, hasStrava=${!!(user.strava_athlete_id as number | null)}`);
 
   const phoneNumber = user.phone_number as string;
   const hasStrava = !!(user.strava_athlete_id as number | null);
@@ -588,6 +606,7 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
     supabase.from("training_state").select("weekly_mileage_target, current_week, weekly_plan_sessions, weekly_long_run_miles, weekly_quality_session").eq("user_id", userId).single(),
     supabase.from("conversations").select("role, content, message_type").eq("user_id", userId).order("created_at", { ascending: false }).limit(20),
   ]);
+  console.log(`[handleRebuildPlan] second Promise.all resolved — activities=${(recentActsResult.data as unknown[] | null)?.length ?? "err"}, races=${upcomingRaces?.length ?? "err"}, state=${!!stateData}, conversations=${conversationsData?.length ?? "err"}`);
 
   let avgWeeklyMileage: number | null = null;
   const recentActs = recentActsResult.data;
