@@ -1273,28 +1273,38 @@ export function computeStarterWeekSkeleton(params: Parameters<typeof computeArcW
  * dates for the given week number, and write to training_state.weekly_plan_sessions.
  * Called at upload time (week 1) and on each Sunday recap to advance to the next week.
  */
+/**
+ * Returns whether real uploaded-plan session data was found and synced. Callers with
+ * coaching_mode 'complement' rely on this to detect the case where that mode is set but
+ * there's no actual plan to complement (e.g. a misclassified has_existing_plan extraction,
+ * or a verbal-only "I have a coach" signal that never came with real session data) — see the
+ * 2026-08-04 changelog: an athlete's coaching_mode was incorrectly set to 'complement' with
+ * zero uploaded plan data, and every plan_action.rebuild_plan / initial_plan call for that
+ * athlete silently no-op'd forever with nothing written and nothing logged, because this
+ * function returning void gave callers no way to tell "synced" apart from "nothing to sync."
+ */
 export async function syncWeekFromUploadedPlan(
   userId: string,
   weekNumber: number,
   timezone: string
-): Promise<void> {
+): Promise<boolean> {
   const { data: user } = await supabase
     .from("users")
     .select("onboarding_data")
     .eq("id", userId)
     .single();
 
-  if (!user) return;
+  if (!user) return false;
 
   const allWeeks = ((user.onboarding_data as Record<string, unknown> | null)
     ?.plan_sessions_all_weeks as UploadedPlanWeek[] | null) ?? [];
 
-  if (!allWeeks.length) return;
+  if (!allWeeks.length) return false;
 
   const sessions = computeWeekSessions(allWeeks, weekNumber, timezone);
   if (!sessions.length) {
     console.log(`[syncWeekFromUploadedPlan] no sessions found for week ${weekNumber} (plan has ${allWeeks.length} weeks)`);
-    return;
+    return false;
   }
 
   await supabase
@@ -1303,6 +1313,7 @@ export async function syncWeekFromUploadedPlan(
     .eq("user_id", userId);
 
   console.log(`[syncWeekFromUploadedPlan] wrote ${sessions.length} sessions for week ${weekNumber} to training_state`);
+  return true;
 }
 
 export async function syncWeekFromArc(userId: string, weekNum: number, timezone = "America/New_York"): Promise<void> {

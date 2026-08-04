@@ -582,11 +582,22 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
     const timezone = (user.timezone as string | null) ?? "America/New_York";
     const { data: stateRow } = await supabase.from("training_state").select("current_week").eq("user_id", userId).maybeSingle();
     const currentWeek = (stateRow?.current_week as number | null) ?? 1;
-    await syncWeekFromUploadedPlan(userId, currentWeek, timezone);
-    if (!dryRun && !silent) {
-      await sendSMS(phoneNumber, "You're following your own uploaded plan, so I don't build a separate one for you — I read and adjust yours instead. Text me an updated PDF or paste in changes anytime you want to swap it out.");
+    const syncedRealPlan = await syncWeekFromUploadedPlan(userId, currentWeek, timezone);
+    if (syncedRealPlan) {
+      if (!dryRun && !silent) {
+        await sendSMS(phoneNumber, "You're following your own uploaded plan, so I don't build a separate one for you — I read and adjust yours instead. Text me an updated PDF or paste in changes anytime you want to swap it out.");
+      }
+      return NextResponse.json({ ok: true, skipped: "complement_mode_no_rebuild" });
     }
-    return NextResponse.json({ ok: true, skipped: "complement_mode_no_rebuild" });
+    // coaching_mode is 'complement' but there's no actual uploaded plan on file — either a
+    // has_existing_plan extraction false-positive, or a verbal "I have a coach" signal that
+    // never came with real session data. Complementing nothing means this athlete would
+    // otherwise get permanently stuck with no plan at all (confirmed live on a real account,
+    // 2026-08-04: every rebuild_plan call silently no-op'd here forever). Log it — this is a
+    // data-quality signal worth knowing about even though the safe behavior is to fall
+    // through to normal generation below rather than leave the athlete with nothing.
+    console.error("[handleRebuildPlan] coaching_mode is 'complement' but no uploaded plan data exists — falling through to normal generation instead of leaving the athlete stuck", { userId });
+    void trackEvent(userId, "complement_mode_no_plan_data", { source: "handleRebuildPlan" });
   }
 
   // Fetch Strava activities, B/C races, training_state, and recent conversations in parallel.
@@ -3155,14 +3166,28 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   if (trigger === "initial_plan") {
     const { data: fpForArc } = await supabase.from("training_profiles").select("*").eq("user_id", userId).single();
     if (fpForArc) profile = fpForArc;
-    const isComplementForInitialPlan = (fpForArc as Record<string, unknown> | null)?.coaching_mode === 'complement';
+    let isComplementForInitialPlan = (fpForArc as Record<string, unknown> | null)?.coaching_mode === 'complement';
 
     if (isComplementForInitialPlan) {
       // Athlete uploaded their own plan (see plan/upload/route.ts) — don't generate a
       // competing arc into training_plans/training_state. Seed week 1 from their plan
       // instead so morning_plan can name today's specific uploaded session immediately.
       const timezone = (user.timezone as string | null) ?? "America/New_York";
-      await syncWeekFromUploadedPlan(userId, 1, timezone);
+      const syncedRealPlan = await syncWeekFromUploadedPlan(userId, 1, timezone);
+      if (!syncedRealPlan) {
+        // coaching_mode is 'complement' but there's no actual uploaded plan on file — either
+        // a has_existing_plan extraction false-positive, or a verbal "I have a coach" signal
+        // that never came with real session data. Falling through to normal arc generation
+        // below (same as handleRebuildPlan's identical guard) instead of sending this athlete
+        // an "ATHLETE IS FOLLOWING THEIR OWN UPLOADED PLAN" framing with nothing behind it and
+        // never generating training_plans/training_state at all (confirmed live on a real
+        // account, 2026-08-04).
+        console.error("[initial_plan] coaching_mode is 'complement' but no uploaded plan data exists — falling through to normal arc generation", { userId });
+        void trackEvent(userId, "complement_mode_no_plan_data", { source: "initial_plan" });
+        isComplementForInitialPlan = false;
+      }
+    }
+    if (isComplementForInitialPlan) {
       initialPlanArcConstraint = "\n\nATHLETE IS FOLLOWING THEIR OWN UPLOADED PLAN — do NOT invent a mileage arc, long run, or quality session; that data isn't generated for this athlete. Reference the ATHLETE'S UPLOADED TRAINING PLAN context elsewhere in this prompt instead, and confirm you'll coach alongside it (adjusting for injuries, fatigue, or missed sessions) rather than replacing it.";
     } else {
     const bCRacesForArc = upcomingRaces.filter(r => r.priority === "B" || r.priority === "C") as Array<{ race_date: string; race_name: string | null; priority: string }>;
