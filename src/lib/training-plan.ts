@@ -6,6 +6,26 @@ import type { Json } from "@/lib/database.types";
 import { composeStrengthRoutine } from "@/lib/strength-library";
 import { CROSS_TRAINING_ALTERNATIVES, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, DEFAULT_SAFE_MODALITIES } from "@/lib/exercise-library";
 import { estimateCurrentWeeklyMileage } from "@/lib/plan-validation";
+import type { PostgrestError } from "@supabase/supabase-js";
+
+/**
+ * Logs and captures a failed training_plans/training_state write from generateAndSaveFullPlan.
+ * These writes previously went unchecked entirely — a failure left the DB holding stale or
+ * partially-written plan data (e.g. a mileage target set but long_run/quality/sessions never
+ * updated) with no trace anywhere that anything had gone wrong, while the athlete-facing SMS
+ * still went out describing numbers that were never actually persisted (see the 2026-08-04
+ * changelog for a confirmed real-account instance of this). Intentionally non-throwing —
+ * callers keep going with whatever succeeded, matching this function's existing non-fatal
+ * handling for Haiku enrichment and the plan-ready SMS.
+ */
+async function reportPlanWriteError(context: string, userId: string, error: PostgrestError): Promise<void> {
+  console.error(`[generateAndSaveFullPlan] ${context} failed:`, error);
+  const { captureException } = await import("@sentry/nextjs");
+  captureException(new Error(`generateAndSaveFullPlan: ${context} failed: ${error.message}`), {
+    tags: { context },
+    extra: { userId, code: error.code, details: error.details },
+  });
+}
 
 /**
  * Compute training phase for a pre-generated plan arc, based on position
@@ -729,6 +749,19 @@ No other text.`,
   // preserved — the dashboard uses created_at to anchor week boundaries, and inserting
   // a new row on every rebuild shifts those boundaries, misattributing past activities
   // to the wrong week number.
+  //
+  // None of the writes below were previously error-checked — a failed insert/update here
+  // left training_plans/training_state holding stale or partially-written data (e.g. a
+  // mileage target set but long_run/quality/sessions left null) with the athlete-facing SMS
+  // still going out based on values that were never actually persisted, and nothing logged
+  // or alerted anyone. Confirmed against a real account: training_plans had zero rows and
+  // training_state showed the unsliced full-week target with an empty session list, while
+  // the athlete had been texted a correct, different, sliced partial-week plan (see the
+  // 2026-08-04 changelog). reportPlanWriteError logs + captures every failure below so this
+  // can't go silent again; it doesn't change control flow otherwise, matching the existing
+  // non-fatal handling already used for Haiku enrichment and the plan-ready SMS in this
+  // same function — the safer failure mode for an athlete mid-conversation is to keep going
+  // with whatever succeeded, not to throw and abort the whole response.
   if (!resetToWeek1) {
     const { data: existingPlan } = await supabase
       .from("training_plans")
@@ -738,30 +771,33 @@ No other text.`,
       .limit(1)
       .single();
     if (existingPlan) {
-      await supabase.from("training_plans").update({
+      const { error } = await supabase.from("training_plans").update({
         race_date: raceDate,
         goal,
         total_weeks: totalWeeks,
         weeks: planWeeks as unknown as Json,
         updated_at: new Date().toISOString(),
       }).eq("id", (existingPlan as { id: string }).id);
+      if (error) await reportPlanWriteError("training_plans update", userId, error);
     } else {
-      await supabase.from("training_plans").insert({
+      const { error } = await supabase.from("training_plans").insert({
         user_id: userId,
         race_date: raceDate,
         goal,
         total_weeks: totalWeeks,
         weeks: planWeeks as unknown as Json,
       });
+      if (error) await reportPlanWriteError("training_plans insert (rebuild, no existing row)", userId, error);
     }
   } else {
-    await supabase.from("training_plans").insert({
+    const { error } = await supabase.from("training_plans").insert({
       user_id: userId,
       race_date: raceDate,
       goal,
       total_weeks: totalWeeks,
       weeks: planWeeks as unknown as Json,
     });
+    if (error) await reportPlanWriteError("training_plans insert (resetToWeek1)", userId, error);
   }
 
   // Sync training_state: reset week counter if this is a new plan; sync mileage target.
@@ -782,7 +818,7 @@ No other text.`,
   // gets created instead of silently no-oping. Without this, the dashboard shows no weekly
   // target / long run / quality.
   if (resetToWeek1) {
-    await supabase.from("training_state").upsert({
+    const { error } = await supabase.from("training_state").upsert({
       user_id: userId,
       current_week: 1,
       ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
@@ -793,9 +829,10 @@ No other text.`,
       weekly_strength_routine_key: week1Strength.routineKey,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
+    if (error) await reportPlanWriteError("training_state upsert (resetToWeek1)", userId, error);
   } else if (week1Reset) {
     // Week-1 mid-plan rebuild: update mileage target + clear future sessions (preserve past).
-    await supabase.from("training_state").upsert({
+    const { error } = await supabase.from("training_state").upsert({
       user_id: userId,
       ...(week1MileageTarget != null ? { weekly_mileage_target: week1MileageTarget } : {}),
       weekly_plan_sessions: (preservedSessions ?? null) as unknown as Json,
@@ -805,6 +842,7 @@ No other text.`,
       weekly_strength_routine_key: week1Strength.routineKey,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
+    if (error) await reportPlanWriteError("training_state upsert (week1Reset)", userId, error);
   }
 
   // Reuse the existing dashboard token so old links remain valid.

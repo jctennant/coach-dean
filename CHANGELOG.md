@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-04 — generateAndSaveFullPlan's training_plans/training_state writes now error-check and report
+
+**Type:** Bug Fix
+**Reported by:** Internal (found auditing a real onboarding test conversation for training-day/schedule correctness)
+**User feedback:** N/A
+**Root cause:** Every DB write inside `generateAndSaveFullPlan` (the `training_plans` insert/update and the `training_state` upsert) was unchecked — no `{ error }` destructured, nothing logged, nothing captured. Confirmed against a real account: the athlete was texted a correct partial-week plan (10mi total, 5mi long run Saturday, quality Wed/Thu, sessions Mon/Wed/Thu/Sat) built from the pre-generated arc, but the arc itself never actually landed in the DB — `training_plans` had zero rows, and `training_state` held an inconsistent partial state (`weekly_mileage_target: 21` set, but `weekly_long_run_miles`, `weekly_quality_session` null and `weekly_plan_sessions` empty) that matched neither the full arc nor the sliced starter week the athlete was told about. Attempting to re-sync via `rebuild_plan` (silent) confirmed this is still happening live on production right now — the request returns `{"ok":true}` immediately (matching `runAfter`'s fire-and-forget background pattern) but `training_state`/`training_plans` never actually update, even after waiting over a minute. `runAfter` itself already wraps the background call in a try/catch + Sentry capture, so if `generateAndSaveFullPlan` is throwing, it should be visible there — that's the next thing to check, and needs Vercel/Sentry log access this pass didn't have.
+**Fix / Change:** Added `reportPlanWriteError()` and wired it into all four previously-unchecked writes (the two `training_plans` branches, the two `training_state` upsert branches) — logs to console and captures to Sentry with the write context, user ID, and Postgrest error code/details. Intentionally non-throwing, matching this function's existing non-fatal handling for Haiku enrichment and the plan-ready SMS — a failed write here shouldn't abort the rest of the athlete's response, it should just stop being invisible. Does not fix the underlying failure itself (root cause not yet identified — needs the Sentry check above); this only guarantees the next occurrence gets logged instead of silently vanishing.
+**Files changed:** `src/lib/training-plan.ts`
+
+---
+
 ## 2026-08-03 — Plan generation uses recent per-week mileage trend, not just the flat average
 
 **Type:** Bug Fix
