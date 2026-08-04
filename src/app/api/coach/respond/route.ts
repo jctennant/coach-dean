@@ -24,7 +24,7 @@ function capitalizeBodyPartForCard(bodyPart: string): string {
   if (spaced === "it band") return "IT band";
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
-import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, applyStructuredLongRun, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile, reconcilePlanComponents } from "@/lib/plan-validation";
+import { enforceVolumeCaps, deduplicateSessionLines, fixSessionDistanceErrors, fixSessionDayAbbreviations, countRunningSessions, WEEKLY_TOTAL_PATTERNS, applyStructuredWeeklyTotal, applyStructuredLongRun, computeWeekOneVolumeCap, computeLongRunCap, parsePaceStrToSecPerMile, reconcilePlanComponents, estimateCurrentWeeklyMileage } from "@/lib/plan-validation";
 import { messageClaimsUnsignaledPlanChange } from "@/lib/plan-action-check";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
 import { normalizeEmDashes } from "@/lib/text-format";
@@ -596,6 +596,27 @@ async function handleRebuildPlan(userId: string, dryRun: boolean, silent = false
     avgWeeklyMileage = Math.round((totalMiles / 8) * 10) / 10;
   }
 
+  // Per-week breakdown of the same activities, most-recent-completed-week first — feeds
+  // estimateCurrentWeeklyMileage so a rebuild request anchors to a real recent-rebuild trend
+  // instead of only the flat 8-week average above (see plan-validation.ts's doc comment).
+  // Calendar weeks, Monday boundaries UTC — same alignment as the Strava-connect callback's
+  // weekly breakdown, just recomputed fresh here since that snapshot is onboarding-time only.
+  let recentWeeksMiles: number[] | null = null;
+  if (recentActs && recentActs.length > 0) {
+    const dayOfWeekUTC = now.getUTCDay();
+    const daysSinceMondayUTC = (dayOfWeekUTC + 6) % 7;
+    const currentWeekStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysSinceMondayUTC);
+    const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+    const weeklyMilesArr = [0, 0, 0, 0, 0, 0, 0, 0];
+    for (const a of recentActs as Array<{ distance_meters: number; start_date: string }>) {
+      const runTime = new Date(a.start_date).getTime();
+      const weekIdx = runTime >= currentWeekStartMs ? 0 : Math.min(7, Math.ceil((currentWeekStartMs - runTime) / msPerWeek));
+      weeklyMilesArr[weekIdx] += a.distance_meters / 1609.34;
+    }
+    const last4Completed = weeklyMilesArr.slice(1, 5).map((m) => Math.round(m * 10) / 10);
+    if (last4Completed.some((m) => m > 0)) recentWeeksMiles = last4Completed;
+  }
+
   let bCRaces = (upcomingRaces ?? []) as Array<{ race_date: string; race_name: string | null; priority: string }>;
 
   // Sync B/C races from onboarding_data.other_races → races table.
@@ -740,14 +761,25 @@ Ignore mentions of specific workout types (tempo, intervals, hill repeats, cycli
     rebuildBase = existingTarget;
     console.log(`[handleRebuildPlan] content-only rebuild — anchoring to existing target: ${rebuildBase} mi/week`);
   } else if (avgWeeklyMileage !== null) {
+    // For an INCREASE/default rebuild, prefer the per-week trend read over the flat 8-week
+    // average — see plan-validation.ts's estimateCurrentWeeklyMileage doc comment. It only
+    // deviates from the flat average when there's an active injury on file and the most
+    // recent completed week clearly reads as a deliberate rebuild, so it's a no-op here
+    // otherwise. Left out of the DECREASE branch on purpose — that branch already takes the
+    // more conservative of avg/existing, and a decrease request shouldn't get bumped back up
+    // by a rebuild read.
+    const trendAvgWeeklyMileage = estimateCurrentWeeklyMileage(recentWeeksMiles, !!profile?.active_injury) ?? avgWeeklyMileage;
     const stravaBase = wantsDecrease
       ? Math.min(avgWeeklyMileage, existingTarget ?? avgWeeklyMileage)
-      : avgWeeklyMileage;
+      : trendAvgWeeklyMileage;
     // Use stated mileage as floor when it's materially higher than Strava (likely a sync gap).
     const statedFloor = statedMileage !== null && statedMileage > stravaBase * 1.5
       ? statedMileage
       : null;
     rebuildBase = statedFloor ?? stravaBase;
+    if (trendAvgWeeklyMileage !== avgWeeklyMileage) {
+      console.log(`[handleRebuildPlan] per-week trend read (${trendAvgWeeklyMileage} mi) differs from flat avg (${avgWeeklyMileage} mi) — using trend read as base`);
+    }
     if (statedFloor) {
       console.log(`[handleRebuildPlan] Strava avg (${avgWeeklyMileage} mi) significantly below stated mileage (${statedMileage} mi) — using stated as base`);
     }
@@ -3139,6 +3171,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     }
 
     await generateAndSaveFullPlan(userId, user.phone_number as string, profile, avgWeeklyMileage, {
+      recentWeeksMiles: (user.onboarding_data as Record<string, unknown> | null)?.strava_recent_weeks as number[] | null,
       bRaces: bCRacesForArc.length > 0 ? bCRacesForArc : undefined,
       resetToWeek1: true,
       wantsSpeedWork,
@@ -8346,6 +8379,8 @@ FULL PLAN REQUESTS (ON injury hold): If the athlete asks to SEE the plan, schedu
 EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Handle it using the THIS WEEK SESSION SWAP rules below.
 
 WEEK-LEVEL PLAN CHANGES: The weekly mileage target, long run, and quality session are day-agnostic — don't invent a day-by-day schedule from scratch. But if the athlete asks to move, swap, or reschedule a SPECIFIC session that's already tracked in THIS WEEK'S PLAN sessions (e.g. "can we move Thursday's run to Friday", "I want to run Thursday instead of Friday"), that's an actionable request — use plan_action.session_swaps per the THIS WEEK SESSION SWAP rules below, not a redirect. Confirm the move plainly (e.g. "Done — moved to Thursday.") only once the swap has actually been set. No [WEEK_OVERRIDE] or [SKIP_DAY] tags. If they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load instead of a specific day-move, treat that as plan_action.lighter_week per the rules below.
+
+WEEKLY TARGET INCREASE/DECREASE REQUEST: If the athlete asks to raise or lower this week's overall mileage target itself (e.g. "I'd like to go to 19 miles this week", "can we bump up the volume", "let's dial back the total") — this is NOT a session swap and NOT a lighter_week setback. Never compute or state a new day-by-day breakdown or a new weekly total yourself — you cannot safely apply the injury/layoff caps and long-run-percentage math that the plan generator does, and doing it free-hand is exactly how a session list stops summing to the stated total. Treat this the same as a FULL PLAN REBUILD below: acknowledge the request in 1-2 sentences without committing to a specific number, end with "Reply UPDATE PLAN to confirm," and do NOT set plan_action.rebuild_plan until they confirm. Once confirmed, the system regenerates this week's schedule (respecting the injury/long-run caps) and sends the real breakdown — your confirmation message after that point should stay conversational, not restate numbers from memory.
 
 RACE COURSE DATA: If the athlete provides course profile details for their race (total elevation gain, total descent, start altitude, or terrain type), save it immediately by appending at the end of your response:
 [RACE_COURSE_UPDATE:{"race_id":"<uuid>","elevation_gain_feet":<number>,"elevation_loss_feet":<number>,"race_altitude_ft":<number>,"trail_subtype":"<groomed|mixed|technical|highly_technical>"}]

@@ -5,6 +5,7 @@ import { sendSMS } from "@/lib/linq";
 import type { Json } from "@/lib/database.types";
 import { composeStrengthRoutine } from "@/lib/strength-library";
 import { CROSS_TRAINING_ALTERNATIVES, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, DEFAULT_SAFE_MODALITIES } from "@/lib/exercise-library";
+import { estimateCurrentWeeklyMileage } from "@/lib/plan-validation";
 
 /**
  * Compute training phase for a pre-generated plan arc, based on position
@@ -419,8 +420,17 @@ export async function generateAndSaveFullPlan(
   phoneNumber: string,
   profile: Record<string, unknown> | null,
   avgWeeklyMileage: number | null,
-  { prescribedWeek1Miles, bRaces, resetToWeek1 = true, week1Reset = false, preservedSessions, planReadyNote, wantsSpeedWork = false, otherNotes = null, anchorMonday }: {
+  { prescribedWeek1Miles, recentWeeksMiles, bRaces, resetToWeek1 = true, week1Reset = false, preservedSessions, planReadyNote, wantsSpeedWork = false, otherNotes = null, anchorMonday }: {
     prescribedWeek1Miles?: number;
+    /**
+     * Per-week mileage for the most recent completed weeks, most-recent first (same shape as
+     * onboarding_data.strava_recent_weeks). When present, feeds estimateCurrentWeeklyMileage
+     * instead of collapsing straight to the flat avgWeeklyMileage — see that function's doc
+     * comment for why a flat average can badly understate current capability for an athlete
+     * mid-rebuild after an injury pause. Ignored when prescribedWeek1Miles is set (an explicit
+     * caller-provided number always wins).
+     */
+    recentWeeksMiles?: number[] | null;
     bRaces?: Array<{ race_date: string; race_name: string | null; priority: string }>;
     /**
      * Whether to reset training_state.current_week to 1.
@@ -554,9 +564,14 @@ export async function generateAndSaveFullPlan(
   // Uses strict equality (not the ?? "beginner" default) so legacy profiles without a
   // fitness_level set are not affected.
   const isExplicitlyBeginner = (profile?.fitness_level as string | null) === "beginner";
-  const effectiveAvgMileage = isExplicitlyBeginner && avgWeeklyMileage != null && avgWeeklyMileage > noHistoryDefault
+  // Prefer the per-week trend read over the flat average when it's available — see
+  // estimateCurrentWeeklyMileage's doc comment. Falls back to avgWeeklyMileage when no
+  // per-week breakdown was passed in, or when the trend doesn't read as a deliberate
+  // rebuild (in which case the function returns the same flat average anyway).
+  const trendAdjustedAvgMileage = estimateCurrentWeeklyMileage(recentWeeksMiles, !!profile?.active_injury) ?? avgWeeklyMileage;
+  const effectiveAvgMileage = isExplicitlyBeginner && trendAdjustedAvgMileage != null && trendAdjustedAvgMileage > noHistoryDefault
     ? noHistoryDefault
-    : avgWeeklyMileage;
+    : trendAdjustedAvgMileage;
   const baseMileage = prescribedWeek1Miles
     ? Math.max(5, prescribedWeek1Miles)
     : Math.max(5, Math.round((effectiveAvgMileage ?? noHistoryDefault) * 2) / 2);

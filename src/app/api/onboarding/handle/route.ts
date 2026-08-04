@@ -135,21 +135,35 @@ export async function POST(request: Request) {
   }
 
   let result: NextResponse;
-  switch (step) {
-    case "onboarding":
-      result = await handleConversation(user, message, onboardingData, chatId);
-      break;
-    case "awaiting_strava":
-      result = await handleStrava(user, message, onboardingData, chatId);
-      break;
-    case "awaiting_timezone":
-      result = await handleTimezone({ ...user, onboarding_data: onboardingData }, message);
-      break;
-    case "awaiting_payment":
-      result = await handleAwaitingPayment(user);
-      break;
-    default:
-      result = NextResponse.json({ ok: true });
+  try {
+    switch (step) {
+      case "onboarding":
+        result = await handleConversation(user, message, onboardingData, chatId);
+        break;
+      case "awaiting_strava":
+        result = await handleStrava(user, message, onboardingData, chatId);
+        break;
+      case "awaiting_timezone":
+        result = await handleTimezone({ ...user, onboarding_data: onboardingData }, message);
+        break;
+      case "awaiting_payment":
+        result = await handleAwaitingPayment(user);
+        break;
+      default:
+        result = NextResponse.json({ ok: true });
+    }
+  } catch (err) {
+    // Previously unguarded: an uncaught throw here (e.g. sendSMS's non-2xx throw in
+    // src/lib/linq.ts) surfaced as a bare 500 with nothing logged beyond the Vercel function
+    // log, and no signal ever reached the athlete — a stage transition already written to
+    // onboarding_data by the handler before the throw could strand a conversation with no
+    // trace in `conversations` and no alert. Capture it so failures are actually visible.
+    console.error("[onboarding] unhandled error in POST handler:", err);
+    const { captureException } = await import("@sentry/nextjs");
+    captureException(err, { tags: { route: "onboarding/handle", step: step ?? "unknown" } });
+    keepTypingAlive = false;
+    if (dry_run) dryRunUsers.delete(userId);
+    return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 
   keepTypingAlive = false;
@@ -403,14 +417,14 @@ async function handleConversation(
     const avgElevFtPerRun = mergedData.strava_avg_elev_ft_per_run as number | null ?? null;
     const longestRunMiles = mergedData.strava_longest_run_miles as number | null ?? null;
     const avgRunsPerWeek = mergedData.strava_avg_runs_per_week as number | null ?? null;
-    const recent4Weeks = mergedData.strava_recent_4_weeks as number[] | null ?? null;
+    const recentWeeks = mergedData.strava_recent_weeks as number[] | null ?? null;
     const hrZonePct = mergedData.strava_hr_zone_pct as { z1: number; z2: number; z3: number; z4: number; z5: number } | null ?? null;
     const estimatedMaxHR = mergedData.strava_estimated_max_hr as number | null ?? null;
     const maxWeeklySpikePct = mergedData.strava_max_weekly_spike_pct as number | null ?? null;
     for (const n of [avgWeeklyMiles, avgElevFtPerRun, longestRunMiles, avgRunsPerWeek, estimatedMaxHR, maxWeeklySpikePct]) {
       if (n != null) stravaGroundTruthNumbers.push(n);
     }
-    if (recent4Weeks) stravaGroundTruthNumbers.push(...recent4Weeks.filter((m) => m > 0));
+    if (recentWeeks) stravaGroundTruthNumbers.push(...recentWeeks.filter((m) => m > 0));
     if (hrZonePct) stravaGroundTruthNumbers.push(hrZonePct.z1, hrZonePct.z2, hrZonePct.z3, hrZonePct.z4, hrZonePct.z5);
 
     // If Strava connected but all analytics are null, the activity import failed.
@@ -456,20 +470,20 @@ async function handleConversation(
         ? " Avg elevation/run: 0 ft (no vertical training in recent runs)."
         : "";
     // Show weekly progression oldest→newest so trend is readable (e.g. "22, 25, 28, 30")
-    const progressionLine = recent4Weeks && recent4Weeks.some(m => m > 0)
-      ? ` Weekly miles (oldest→newest): ${[...recent4Weeks].reverse().join(", ")}.`
+    const progressionLine = recentWeeks && recentWeeks.some(m => m > 0)
+      ? ` Weekly miles (oldest→newest): ${[...recentWeeks].reverse().join(", ")}.`
       : "";
     const hrZoneLine = hrZonePct
       ? ` HR zones (% of runs by avg HR): Z1 ${hrZonePct.z1}%, Z2 ${hrZonePct.z2}%, Z3 ${hrZonePct.z3}%, Z4 ${hrZonePct.z4}%, Z5 ${hrZonePct.z5}%.${estimatedMaxHR ? ` Est. max HR: ${estimatedMaxHR} bpm.` : ""}`
       : "";
     // Compute from/to context for the spike so Claude can cite actual numbers.
-    // recent4Weeks is [lastWeek, 2weeksAgo, 3weeksAgo, 4weeksAgo] (newest first).
+    // recentWeeks is [lastWeek, 2weeksAgo, ..., 8weeksAgo] (newest first).
     let spikeFromMi: number | null = null;
     let spikeToMi: number | null = null;
-    if (recent4Weeks && maxWeeklySpikePct != null && maxWeeklySpikePct >= 20) {
-      for (let i = 0; i < recent4Weeks.length - 1; i++) {
-        const older = recent4Weeks[i + 1];
-        const newer = recent4Weeks[i];
+    if (recentWeeks && maxWeeklySpikePct != null && maxWeeklySpikePct >= 20) {
+      for (let i = 0; i < recentWeeks.length - 1; i++) {
+        const older = recentWeeks[i + 1];
+        const newer = recentWeeks[i];
         if (older > 3) {
           const pct = Math.round(((newer - older) / older) * 100);
           if (pct === maxWeeklySpikePct) { spikeFromMi = older; spikeToMi = newer; break; }
@@ -885,8 +899,11 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
     // reading runs/coaching notes), not just the paragraph containing the link.
     const paragraphs = rawText.split(/\n{2,}/);
     const stravaParaIdx = paragraphs.findIndex(p => /\[STRAVA_LINK\]/i.test(p));
+    // Only flags text that duplicates the system's canonical pitch content (reading runs /
+    // coaching notes) — a bare "connect Strava" phrase is the expected short transition, not
+    // a duplicate, so it must not match here on its own.
     const looksLikeStravaPitch = (p: string) =>
-      /strava/i.test(p) && /(read (your|every) run|coaching note|connect(ing)? (to |with )?strava)/i.test(p);
+      /strava/i.test(p) && /(read (your|every) run|coaching note)/i.test(p);
     let beforeEnd = stravaParaIdx;
     if (beforeEnd > 0 && looksLikeStravaPitch(paragraphs[beforeEnd - 1])) {
       beforeEnd -= 1;
@@ -899,7 +916,40 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
       .trim();
     responseText = beforeStrava;
     const writeUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/strava/write?userId=${user.id}`;
-    stravaMsg = `${writeUrl}\n\nI'll read your runs and text you a coaching note after each one.`;
+
+    // The prompt tells Dean to place [STRAVA_LINK] "on its own line at the very end of the
+    // message" — following the instruction literally means the transition sentence and the
+    // token often land in the SAME paragraph (one blank-line-free block), e.g.
+    // "So I can see what's driving that shin soreness, connect Strava:\n[STRAVA_LINK]". The old
+    // logic here always dropped the entire paragraph containing the token, silently deleting
+    // any inline transition along with it — that's what produced a bare link with zero lead-in.
+    // Pull out just the text preceding the token within that paragraph and keep it.
+    const stravaPara = paragraphs[stravaParaIdx] ?? "";
+    const inlineTransition = stravaPara
+      .split(/\[STRAVA_LINK\]/i)[0]
+      .replace(/\[READY\]/gi, "")
+      .trim();
+    const hasUsableInlineTransition = !!inlineTransition && !looksLikeStravaPitch(inlineTransition);
+
+    // Structural guarantee, not a prompt rule: even with the paragraph-splitting fix above,
+    // Dean sometimes emits the token with nothing before it at all. Since we already have the
+    // athlete's injury/race context in mergedData at this point, supply a deterministic
+    // fallback transition instead of re-asking Claude to try harder.
+    let transition: string | null = null;
+    if (hasUsableInlineTransition) {
+      transition = inlineTransition.replace(/:?\s*$/, ":");
+    } else if (!beforeStrava) {
+      const injuryPart = mergedData.injury_body_part_current as string | null;
+      const raceName = mergedData.race_name as string | null;
+      transition = injuryPart
+        ? `So I can see what's actually driving that ${injuryPart} issue, connect Strava:`
+        : raceName
+        ? `So I can build your training around ${raceName}, connect Strava:`
+        : `So I can start reading your training, connect Strava:`;
+    }
+    stravaMsg = transition
+      ? `${transition}\n\n${writeUrl}\n\nI'll read your runs and text you a coaching note after each one.`
+      : `${writeUrl}\n\nI'll read your runs and text you a coaching note after each one.`;
   } else {
     responseText = rawText
       .replace(/\[READY\]/gi, "")
@@ -1782,15 +1832,15 @@ async function maybeEnterScheduleConfirm(
     ? inferredDays.map((d) => d.slice(0, 3).replace(/^\w/, (c) => c.toUpperCase())).join("/")
     : null;
 
-  const nextData: Record<string, unknown> = {
-    ...mergedData,
-    stage: "schedule_confirm",
-    ...(inferredDays ? { training_days: inferredDays } : {}),
-  };
-  await supabase.from("users")
-    .update({ onboarding_data: nextData as unknown as Json })
-    .eq("id", user.id);
-
+  // Send the checkpoint question BEFORE persisting the stage transition. sendAndStore calls
+  // sendSMS, which throws on a non-2xx response from the SMS provider — if the DB write landed
+  // first and that throw then propagated up through the unguarded POST handler, the athlete's
+  // onboarding_data would already show stage: "schedule_confirm" with no question ever sent or
+  // stored, silently stranding them (confirmed against a real stuck conversation: onboarding_data
+  // had advanced but conversations had no matching assistant row and no SMS ever arrived). Doing
+  // the send first means a failure here leaves the athlete back at the injury-intake stage they
+  // were actually just in, so a retried webhook delivery re-enters cleanly instead of orphaning
+  // the conversation in a stage the athlete was never told about.
   if (dayList) {
     if (isPhotonProvider()) {
       await sendPollAndStore(user.id, user.phone_number, TRAINING_DAYS_POLL);
@@ -1801,6 +1851,16 @@ async function maybeEnterScheduleConfirm(
   } else {
     await sendAndStore(user.id, user.phone_number, "What days of the week do you want to run, and anything specific you want out of the plan?", "onboarding");
   }
+
+  const nextData: Record<string, unknown> = {
+    ...mergedData,
+    stage: "schedule_confirm",
+    ...(inferredDays ? { training_days: inferredDays } : {}),
+  };
+  await supabase.from("users")
+    .update({ onboarding_data: nextData as unknown as Json })
+    .eq("id", user.id);
+
   return NextResponse.json({ ok: true });
 }
 

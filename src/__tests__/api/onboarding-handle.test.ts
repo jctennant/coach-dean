@@ -289,6 +289,51 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     expect(updateCalls.length).toBeGreaterThan(0);
   });
 
+  it("[STRAVA_LINK] with zero lead-in: injects a deterministic transition using known injury context", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
+
+    mockTables({
+      users: {
+        data: onboardingUser({
+          onboarding_data: { name: "Jake", goal: "trail_race", injury_body_part_current: "posterior shin" },
+        }),
+        error: null,
+      },
+      conversations: { data: [], error: null },
+    });
+
+    mockToolResponse("save_training_fields", {});
+    // Claude drops the link with no lead-in sentence at all (the reported bug).
+    mockLLMResponse("[STRAVA_LINK]");
+
+    await POST(makeRequest({ userId: "user-001", message: "It hurts sporadically during runs." }));
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const stravaMsg = smsCalls[0]?.[1] as string;
+    expect(stravaMsg).not.toContain("[STRAVA_LINK]");
+    expect(stravaMsg.toLowerCase()).toContain("posterior shin");
+    expect(stravaMsg).toContain("https://coachdean.ai/api/auth/strava");
+  });
+
+  it("[STRAVA_LINK] with an inline transition sharing its paragraph: preserves Dean's own lead-in instead of dropping it", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://coachdean.ai";
+
+    mockTables({
+      users: { data: onboardingUser(), error: null },
+      conversations: { data: [], error: null },
+    });
+
+    mockToolResponse("save_training_fields", {});
+    mockLLMResponse("So I can see what's actually driving that shin soreness, connect Strava:\n[STRAVA_LINK]");
+
+    await POST(makeRequest({ userId: "user-001", message: "It hurts sporadically during runs." }));
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const stravaMsg = smsCalls[0]?.[1] as string;
+    expect(stravaMsg).not.toContain("[STRAVA_LINK]");
+    expect(stravaMsg).toContain("So I can see what's actually driving that shin soreness, connect Strava:");
+  });
+
   it("dry_run mode: skips SMS but still writes conversations", async () => {
     mockTables({
       users: { data: onboardingUser(), error: null },

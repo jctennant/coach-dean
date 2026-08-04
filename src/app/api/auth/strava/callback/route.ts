@@ -185,13 +185,16 @@ export async function GET(request: Request) {
     );
   }
 
-  // Query 8 weeks of activity data from the DB (just synced above) for rich analytics.
-  const eightWeeksAgo = new Date(Date.now() - 56 * 24 * 60 * 60 * 1000).toISOString();
+  // Query activity data from the DB (just synced above) for rich analytics. Fetches 9 weeks
+  // back so that 8 full completed calendar weeks (weeks 1-8) are resolvable in the breakdown
+  // below — the 8th completed week wouldn't be fully covered by an 8-week-back fetch, since
+  // day 56 falls partway through it.
+  const nineWeeksAgo = new Date(Date.now() - 63 * 24 * 60 * 60 * 1000).toISOString();
   const { data: activities8w } = await supabase
     .from("activities")
     .select("distance_meters, moving_time_seconds, elevation_gain, average_heartrate, max_heartrate, start_date, activity_type, workout_type, activity_name")
     .eq("user_id", user.id)
-    .gte("start_date", eightWeeksAgo)
+    .gte("start_date", nineWeeksAgo)
     .order("start_date", { ascending: true });
 
   // Only count running activity types — exclude cycling, swimming, etc.
@@ -204,7 +207,8 @@ export async function GET(request: Request) {
   // Using calendar weeks avoids rolling-window misalignment: a Sunday evening connect
   // with a full Mon–Sat training week would otherwise put that whole week in slot 0
   // (excluded as "partial"), pulling in an older week instead.
-  // Week 0 = current (possibly partial) calendar week; weeks 1–4 = last 4 complete weeks.
+  // Week 0 = current (possibly partial) calendar week; weeks 1–8 = last 8 complete weeks
+  // (the fetch above goes back 9 weeks so week 8 is fully resolvable, not truncated).
   const now = Date.now();
   const nowDate = new Date(now);
   const dayOfWeekUTC = nowDate.getUTCDay(); // 0=Sun, 1=Mon...
@@ -216,7 +220,7 @@ export async function GET(request: Request) {
   );
   const msPerWeek = 7 * 24 * 60 * 60 * 1000;
 
-  const weeklyMilesArr: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
+  const weeklyMilesArr: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   for (const a of runs8w) {
     const runTime = new Date(a.start_date!).getTime();
     let weekIdx: number;
@@ -224,7 +228,7 @@ export async function GET(request: Request) {
       weekIdx = 0; // Current (possibly partial) calendar week
     } else {
       // ceil maps: [Mon-1 to Mon) → 1, [Mon-2 to Mon-1) → 2, etc.
-      weekIdx = Math.min(7, Math.ceil((currentWeekStartMs - runTime) / msPerWeek));
+      weekIdx = Math.min(8, Math.ceil((currentWeekStartMs - runTime) / msPerWeek));
     }
     weeklyMilesArr[weekIdx] += (a.distance_meters ?? 0) / 1609.34;
   }
@@ -259,10 +263,14 @@ export async function GET(request: Request) {
   const totalElevFt = runs8w.reduce((s, a) => s + (a.elevation_gain ?? 0) * 3.28084, 0);
   const avgElevFtPerRun = runs8w.length > 0 ? Math.round(totalElevFt / runs8w.length) : 0;
 
-  // Recent 4 completed weeks, most-recent first (weeks 1–4 from weeklyMilesArr).
+  // Recent 8 completed weeks, most-recent first (weeks 1–8 from weeklyMilesArr) — matches the
+  // "last 8 weeks" language already used in the post-connect SMS, and gives the plan generator
+  // (estimateCurrentWeeklyMileage) enough history to see a longer injury pause/rebuild than a
+  // 4-week window could (see the 2026-08-03 changelog on Jake's case, which only needed 4 weeks
+  // but flagged this as worth widening).
   // Round to 1 decimal for readability. Only store if we have meaningful data.
-  const recent4Weeks = weeklyMilesArr.slice(1, 5).map((m) => Math.round(m * 10) / 10);
-  const hasRecentData = recent4Weeks.some((m) => m > 0);
+  const recentWeeks = weeklyMilesArr.slice(1, 9).map((m) => Math.round(m * 10) / 10);
+  const hasRecentData = recentWeeks.some((m) => m > 0);
 
   // HR zone distribution — requires max_heartrate per activity.
   // Use estimateMaxHR to get a spike-filtered max, then bucket each run by avg HR %.
@@ -417,7 +425,7 @@ export async function GET(request: Request) {
   if (avgElevFtPerRun > 200) updatedOnboardingData.strava_avg_elev_ft_per_run = avgElevFtPerRun;
   if (longestRunMiles != null) updatedOnboardingData.strava_longest_run_miles = Math.round(longestRunMiles * 10) / 10;
   if (avgRunsPerWeek != null) updatedOnboardingData.strava_avg_runs_per_week = avgRunsPerWeek;
-  if (hasRecentData) updatedOnboardingData.strava_recent_4_weeks = recent4Weeks;
+  if (hasRecentData) updatedOnboardingData.strava_recent_weeks = recentWeeks;
 
   await supabase
     .from("users")

@@ -12,6 +12,7 @@ import {
   computeLongRunCap,
   parsePaceStrToSecPerMile,
   reconcilePlanComponents,
+  estimateCurrentWeeklyMileage,
 } from "@/lib/plan-validation";
 
 // ---------------------------------------------------------------------------
@@ -524,5 +525,40 @@ describe("parsePaceStrToSecPerMile", () => {
   it("returns null for unparseable or missing input", () => {
     expect(parsePaceStrToSecPerMile(null)).toBeNull();
     expect(parsePaceStrToSecPerMile("easy effort")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// estimateCurrentWeeklyMileage
+// ---------------------------------------------------------------------------
+
+describe("estimateCurrentWeeklyMileage", () => {
+  it("returns null when no weekly data is given", () => {
+    expect(estimateCurrentWeeklyMileage(null, true)).toBeNull();
+    expect(estimateCurrentWeeklyMileage([], true)).toBeNull();
+  });
+
+  it("anchors to the most recent week for an active-injury rebuild pattern (Jake's real case)", () => {
+    // [last week, 2 back, 3 back, 4 back] = [16.3, 9.7, 0, 6] — flat avg is 8, but the
+    // most recent completed week (16.3) is a clear rebuild off the 0mi rest week.
+    expect(estimateCurrentWeeklyMileage([16.3, 9.7, 0, 6], true)).toBe(16.3);
+  });
+
+  it("falls back to the flat average with no active injury, even with the same shape", () => {
+    expect(estimateCurrentWeeklyMileage([16.3, 9.7, 0, 6], false)).toBe(8);
+  });
+
+  it("falls back to the flat average for a volatile (non-rebuild) pattern", () => {
+    // Most recent week isn't meaningfully above the flat average — no clear rebuild signal.
+    expect(estimateCurrentWeeklyMileage([10, 12, 9, 11], true)).toBe(10.5);
+  });
+
+  it("falls back to the flat average for a steady decline despite active injury", () => {
+    expect(estimateCurrentWeeklyMileage([5, 10, 15, 20], true)).toBe(12.5);
+  });
+
+  it("handles a single week of data", () => {
+    expect(estimateCurrentWeeklyMileage([12], true)).toBe(12);
+    expect(estimateCurrentWeeklyMileage([12], false)).toBe(12);
   });
 });

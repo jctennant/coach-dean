@@ -471,6 +471,43 @@ export function computeWeekOneVolumeCap(
 }
 
 /**
+ * Estimate an athlete's current weekly mileage from a recent per-week breakdown, instead of
+ * collapsing it to a flat multi-week average. A flat average can badly understate current
+ * capability for an athlete recovering from a real injury: a rest week (0mi) and an early
+ * rebuilding week sitting alongside a strong most-recent week average out to a number well
+ * below what the athlete is actually running right now (e.g. weeks [16.3, 9.7, 0, 6] average
+ * to 8mi/wk, even though the most recent completed week was 16.3mi — see the 2026-08-03
+ * changelog: an athlete self-reporting "I did 16 miles last week" got handed an 8mi/wk plan
+ * because the flat average smoothed over the injury pause visible right there in the weekly
+ * numbers).
+ *
+ * `recentWeeksMiles` must be ordered most-recent-completed-week first (the same order Strava
+ * connect already stores it in onboarding_data.strava_recent_weeks). Only anchors to the
+ * most recent week when there's an active injury on file AND that week clearly reads as a
+ * deliberate rebuild (meaningfully above both the flat average and the weeks before it) —
+ * otherwise this returns the same flat average a plain mean would, so it never OVERRIDES a
+ * genuinely volatile or declining pattern with an optimistic single data point. The ongoing
+ * week-over-week ramp for weeks 2+ is still throttled separately by computeMileageArc's
+ * activeInjury build-factor cap — this function only decides where week 1 starts from.
+ */
+export function estimateCurrentWeeklyMileage(
+  recentWeeksMiles: number[] | null | undefined,
+  activeInjury: boolean
+): number | null {
+  const weeks = (recentWeeksMiles ?? []).filter((m): m is number => typeof m === "number" && !isNaN(m));
+  if (weeks.length === 0) return null;
+
+  const flatAvg = weeks.reduce((s, m) => s + m, 0) / weeks.length;
+  const mostRecent = weeks[0]!;
+  const priorWeeks = weeks.slice(1);
+  const priorAvg = priorWeeks.length > 0 ? priorWeeks.reduce((s, m) => s + m, 0) / priorWeeks.length : mostRecent;
+
+  const isRebuildingRamp = activeInjury && mostRecent > flatAvg && mostRecent > priorAvg * 1.15;
+
+  return Math.round((isRebuildingRamp ? mostRecent : flatAvg) * 10) / 10;
+}
+
+/**
  * Safe Week-1 long-run cap, in the athlete's mileage unit — mirrors the
  * "LONG RUN CAP — HARD LIMIT" `<rule>` in buildSystemPrompt (route.ts). Outside a real
  * layoff, this only asserts an explicit numeric long-run cap for the LOW VOLUME tier
