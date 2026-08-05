@@ -240,6 +240,9 @@ describe("Multi-race onboarding — extraction and data merging", () => {
                 { name: "Dipsea Race", date: "2026-07-12", priority: "B", goal: null }
               ],
               strava_connected: true,
+              // Injury intake precedes [READY] for every real athlete; completeOnboarding is
+              // now gated on it having run (maybeEnterInjuryIntake).
+              injury_intake_done: true,
             }
           }),
           error: null,

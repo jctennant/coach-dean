@@ -796,7 +796,7 @@ Required before signaling [READY] — for ALL athletes:
 - Athlete's name — ask in your FIRST message, combined with the training context question. Never address the athlete as "Athlete" or use a placeholder — if you don't have their name, you must ask.
 - Training goal (specific race/event name and type, or general fitness/consistency). If they have no committed race — only aspirational talk like "maybe someday" or "thinking about eventually" — their goal is return_to_running or general_fitness, NOT the race distance.
 - Strava — REQUIRED. Ask right after goal is established, BEFORE injury history or any other questions. Strava is the primary data source and answers fitness questions automatically. Do NOT offer a skip option.
-- Injury history — REQUIRED FOR ALL ATHLETES. Handled in a dedicated stage after Strava connects — do NOT ask about it here. If the athlete volunteers injury info, acknowledge it briefly and continue.
+- Injury history — REQUIRED FOR ALL ATHLETES. The full workup (body part, severity, when it flares, what they're doing for it) runs in a dedicated stage after Strava connects, so do NOT work through it here. The one exception is the single diagnostic question described under INJURY MENTIONS IN GOALS STAGE below, asked when the athlete raises an injury themselves.
 
 Additional required fields by situation:
 - Race date — required for any named race goal. MANDATORY web_search before stating any date.
@@ -804,14 +804,13 @@ Additional required fields by situation:
 - Goal finish time (mile/5k/10k only): pacing depends entirely on this — ask directly once goal type is confirmed.
 - Race goal for trail/mountain races: ask once the race is confirmed — "Are you racing to finish, or is there a time or placement you're targeting?" Don't assume — finishing a trail race and racing competitively require very different training.
 - Prior race experience (trail/mountain races): "Have you run [race name] before?" — one question, ask naturally. Course familiarity changes what to emphasize in training and sets realistic expectations.
-- Training days per week: ask if Strava has no data — "How many days a week are you looking to train?" (Don't ask which specific days — the athlete chooses their own schedule. Plans are day-agnostic.)
+- Training days per week: ask ONLY if Strava has no data — "How many days a week are you looking to train?" With Strava connected, the standing weekday pattern is inferred from their history and confirmed in a dedicated checkpoint after this stage, so don't ask about it here.
 
 Optional (collect passively if mentioned — do NOT ask for these):
 - Fitness baseline (pace/PR): Strava provides this automatically. Only ask if Strava has no usable race data.
 - Current weekly mileage: Strava provides this. Only ask if Strava has no data.
 - Strength & cross-training: extract if mentioned naturally.
 - Terrain type and training tools: extract passively from context.
-- Training days: do NOT ask. Plans are day-agnostic.
 - Goal finish time for longer races (half marathon, marathon, trail)
 - Other races this season (B/C tune-up races)
 
@@ -841,7 +840,7 @@ INSTRUCTIONS:
 - When the athlete tells you their name for the first time, acknowledge it warmly at the start of your response — e.g. "Jake!" or "Hey Jake —" before continuing. Do NOT use "Nice to meet you" or any formal first-meeting phrase. Just use the name naturally.
 - React to a race or goal with ONE concrete coaching observation — NOT generic praise, NOT a race description. Banned phrases (hard errors): "great choice!", "exciting challenge!", "big commitment!", "that sounds like a challenging", "that sounds like an exciting", "what an exciting", "sounds like a great goal", "that's exciting". A coaching observation names a specific training demand: "Snowbird's vertical is the whole race — climbing legs matter more than pacing there." Name the actual demand, not your opinion of the goal.
 - If they ask a coaching question, answer it briefly, then continue naturally.
-- Training days: do NOT ask which days of the week they run. Plans are day-agnostic — the athlete picks their own days. If they mention a weekly count (e.g. "5 days a week"), acknowledge it but don't follow up with "which days".
+- Training days: don't ask which days of the week they run — that's confirmed in a later checkpoint from their Strava history. If they mention a weekly count (e.g. "5 days a week") or specific days, capture it and move on; don't follow up.
 ${(mergedData.preferred_units as string | null) === "metric" ? "- UNITS: This athlete prefers metric — use km for distances and min/km for paces in all messages.\n" : ""}
 ${isFirstResponse
   ? `- This is your FIRST message. Use this exact opening, verbatim, unless the athlete's message already states their name or goal (in which case adapt it minimally to acknowledge what they said instead of ignoring it): "Hey! I'm Coach Dean. I read your Strava runs and send a note after each one: what it means for your training, and any early warning signs to watch for. I can also build and adapt a plan around a race, injury recovery, or general fitness.\n\nWhat's your name, and what are you working toward?" Keep the intro and the question as two separate paragraphs, separated by a blank line — they're sent as two separate texts. Do NOT ask name and goal as two separate questions — one question, in its own paragraph. Do NOT reference specific tools like Runna or TrainingPeaks. Do NOT say "SMS running coach" — say "AI running coach".`
@@ -927,13 +926,12 @@ NEVER SEND STANDALONE HOLDING MESSAGES:
 After searching: if the athlete stated a specific date (day + month) and the search result is within 2 days of it, use the athlete's stated date — web results frequently have minor calendar errors, and athletes are generally right about their own races. Only override the athlete's specific date if the search shows a clearly different week or month; in that case note it (e.g. "I found it listed as [search date] — does that sound right?"). Never silently override a specific athlete-provided date with a search result that differs by just 1–2 days.
 
 SIGNALING READY:
-READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these four items:
+READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these three items:
 1. Name ✓
 2. Goal (+ race date if a named race) ✓
-3. Plan check answered ✓ (shown as "Training context: has existing plan" or "no existing plan" under WHAT YOU ALREADY KNOW)
-4. Strava connected ✓ (shown as "STRAVA: Connected" in the context above)
+3. Strava connected ✓ (shown as "STRAVA: Connected" in the context above)
 
-Injury history is collected in a dedicated injury intake stage AFTER Strava connects — do NOT wait for it here.
+Injury history is collected in a dedicated injury intake stage AFTER Strava connects — do NOT wait for it here. Whether they already have a plan or coach is captured passively (see PLAN CHECK) and is NOT required for [READY] — never hold [READY] waiting on it.
 
 If all three are present: signal [READY] in THIS message. Do not ask ANY follow-up question. Write a synthesis wrap-up that references THIS athlete's actual race (or goal) and timeline, and THIS conversation's own details — never a race, mileage, or detail from an example. Example shape only, do not copy any specific noun or number from it: "Got it — [race] in [N] weeks, solid [X] miles/week base. First coaching note lands after your next run." Keep it to 1–2 sentences.
 
@@ -1297,6 +1295,8 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
     if (responseText.trim()) {
       await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
     }
+    const injuryResult = await maybeEnterInjuryIntake(user, mergedData);
+    if (injuryResult) return injuryResult;
     const scheduleResult = await maybeEnterScheduleConfirm(user, mergedData);
     if (scheduleResult) return scheduleResult;
     await completeOnboarding(user, mergedData, chatId, { dashboardLinkSentInWrapUp: wantsDashboardLink });
@@ -1876,6 +1876,9 @@ async function handleInjuryIntake(
   if (shouldComplete) {
     const timezone = (mergedData.timezone as string | null) ?? "America/New_York";
     const completionMsg = await buildSynthesisMessage(mergedData, timezone, message);
+    // Tracked so the [READY] path can tell "injury intake ran" from "injury intake was
+    // never reached" — see maybeEnterInjuryIntake.
+    mergedData.injury_intake_done = true;
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
@@ -1997,6 +2000,57 @@ Plain text, 1–2 sentences max.`;
     .update({ onboarding_data: updatedData as unknown as Json })
     .eq("id", user.id);
   await sendAndStore(user.id, user.phone_number, followUpText, "onboarding");
+  return NextResponse.json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
+// Injury-intake gate — injury history is required for ALL athletes, so enforce it
+// in code rather than only in prompt text.
+// ---------------------------------------------------------------------------
+
+/**
+ * Called on the [READY] path, before onboarding can complete. Injury history is documented
+ * as required for every athlete, but nothing enforced it here: the goals-stage prompt is
+ * told injury is handled by a dedicated stage after Strava connects, and that stage is
+ * entered by handleDataAnalysis. If handleDataAnalysis throws before it writes
+ * `stage: "injury_intake"`, the next inbound message falls through to the goals stage,
+ * which sees Strava connected and can fire [READY] immediately — completing onboarding with
+ * no injury data at all, and no error anywhere.
+ *
+ * Returns a response the caller should return immediately when intake still needs to run,
+ * or null when it's already satisfied.
+ */
+async function maybeEnterInjuryIntake(
+  user: { id: string; phone_number: string },
+  mergedData: Record<string, unknown>
+): Promise<NextResponse | null> {
+  if (mergedData.injury_intake_done) return null;
+  // Any injury information on file means the athlete has actually been asked and answered
+  // (these fields are only ever populated from something they said), so don't re-ask.
+  const hasInjurySignal = !!(
+    mergedData.injury_history ||
+    mergedData.current_niggles ||
+    mergedData.injury_notes ||
+    mergedData.injury_body_part_current
+  );
+  if (hasInjurySignal) return null;
+
+  // Send before persisting the stage transition, for the same reason maybeEnterScheduleConfirm
+  // does: a send failure here leaves the athlete in the stage they were actually just in,
+  // rather than stranded in one they were never told about.
+  await sendAndStore(
+    user.id,
+    user.phone_number,
+    "One more thing before I build this. Has injury ever been a factor for you, or anything you're managing right now? That affects how I set up the plan.",
+    "onboarding"
+  );
+
+  const nextData: Record<string, unknown> = { ...mergedData, stage: "injury_intake" };
+  await supabase.from("users")
+    .update({ onboarding_data: nextData as unknown as Json })
+    .eq("id", user.id);
+
+  void trackEvent(user.id, "onboarding_injury_intake_gate_fired", {});
   return NextResponse.json({ ok: true });
 }
 

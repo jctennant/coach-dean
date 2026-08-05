@@ -51,6 +51,7 @@ import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
 import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, getRehabData, buildTimelinePromptText, getRecoveryEstimate } from "@/lib/exercise-library";
 import { classifyIntent } from "@/lib/intent-classifier";
+import { buildCadenceOffer, isCadenceOffer, parseCadenceReply } from "@/lib/cadence-offer";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
 import { signPlanToken } from "@/lib/session-token";
@@ -1866,6 +1867,49 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
       const extractionInput = burstMessages.length > 1
         ? burstMessages.map(m => m.content).join("\n")
         : latestMsg.content;
+
+      // CADENCE OFFER REPLY — deterministic, ahead of the classifier.
+      // The initial_plan close asks "Reply YES to lock this in, or MORNING / NIGHT if you
+      // also want a reminder on your training days." classifyIntent only ever sees the
+      // message text with no conversation context, so a bare "morning" reads as `general`
+      // with low confidence and never reaches the cadence short-circuit below — the
+      // question would be asked deterministically and then answered by nobody. Pinning it
+      // to "the previous assistant message was that offer" makes the answer as reliable as
+      // the question.
+      const lastAssistantForCadence = [...recentMessages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      if (lastAssistantForCadence && isCadenceOffer(lastAssistantForCadence.content as string)) {
+        const chosen = parseCadenceReply(latestMsg.content);
+        if (chosen) {
+          const hasDays = Array.isArray(profile?.training_days) && (profile!.training_days as string[]).length > 0;
+          // Same "don't guess which days" handling as the cadence short-circuit below —
+          // training_days is routinely empty for Strava-connected athletes, and the
+          // reminder crons fall back to every weekday until it's known.
+          const confirmMsg = chosen === "morning_reminders"
+            ? hasDays
+              ? "Done — I'll text you each morning on your training days with what's on."
+              : "Done — I'll text you each morning. Which days do you want it, every day or just your run days?"
+            : hasDays
+              ? "Done — I'll text you the night before with what's coming up."
+              : "Done — I'll text you the night before. Which days do you want it, every day or just your run days?";
+          const cadenceChatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+          if (cadenceChatId) await startTyping(cadenceChatId);
+          if (!dry_run) {
+            await sendSMS(user.phone_number as string, confirmMsg);
+            await insertConversation({ user_id: userId, role: "assistant", content: confirmMsg, message_type: "coach_response" });
+            const { error } = await supabase
+              .from("training_profiles")
+              .update({ proactive_cadence: chosen })
+              .eq("user_id", userId);
+            if (error) console.error("[coach/respond] proactive_cadence update failed:", error);
+            else void trackEvent(userId, "cadence_changed", { proactive_cadence: chosen, source: "initial_plan_offer" });
+          }
+          return NextResponse.json({ ok: true, message: confirmMsg, dry_run: !!dry_run });
+        }
+        // No explicit MORNING/NIGHT — "YES" is confirming the plan, not choosing a cadence.
+        // Fall through to normal coaching so it gets a real reply.
+      }
 
       // Run profile extraction and intent classification in parallel — both are Haiku calls
       const injuryCtx = {
@@ -4558,11 +4602,16 @@ OUTPUT CONTRACT:
     // stat this closer was written against). A concrete yes/no plus one first action
     // gives them a low-friction way to confirm and removes the "what do I even do
     // today" gap for athletes coming back from a layoff or injury.
+    //
+    // This bubble now also carries the "how we'll work together" close (post-run notes +
+    // Sunday recap, and the optional daily reminder) — see src/lib/cadence-offer.ts for
+    // why that moved out of the initial_plan prompt and into deterministic code.
     const hasActiveInjuryOnClose = !!(profile?.active_injury);
     const closingBodyPart = (profile?.injury_body_part as string | null)?.replace(/_/g, " ") ?? null;
-    const closingMsg = hasActiveInjuryOnClose
-      ? `Reply YES to lock this in, or tell me what's off. First run: keep it easy${closingBodyPart ? ` and stop if the ${closingBodyPart} flares up` : ""} — text me how it felt either way.`
-      : "Reply YES to lock this in, or tell me what to change.";
+    const closingMsg = buildCadenceOffer({
+      activeInjury: hasActiveInjuryOnClose,
+      bodyPart: closingBodyPart,
+    });
     if (!dry_run) {
       if (chatId) await startTyping(chatId);
       await new Promise((r) => setTimeout(r, 1500));
@@ -8920,7 +8969,7 @@ BUBBLE 2: How you're thinking about the next 1-2 weeks. Conversational, not a da
 
 This is not a plan delivery. Dean calibrates every week based on what actually happens. The Sunday recap will be the primary touchpoint for week-to-week structure going forward.
 
-BREVITY: This is a lot for an athlete to absorb right after onboarding — 2 bubbles total, no restating anything already confirmed earlier in this conversation (training days, race name/timeline, injury details). Close with one short sentence on how check-ins work going forward (e.g. "I'll check in after your runs and send a full recap + next week's plan every Sunday") so they know what to expect — this is the one new piece of information to add, not a reason to lengthen the rest.
+BREVITY: This is a lot for an athlete to absorb right after onboarding — 2 bubbles total, no restating anything already confirmed earlier in this conversation (training days, race name/timeline, injury details). Do NOT explain how check-ins or reminders work, and do not close with "I'll check in after your runs" or similar — a separate message sent right after yours covers that verbatim, so saying it here just duplicates it.
 ${weekMilesBudgetNote}
 
 ${weekBoundaryNote}

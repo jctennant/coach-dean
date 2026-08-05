@@ -209,7 +209,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
   it("[READY] signal with no training_days known: enters schedule_confirm checkpoint instead of completing onboarding", async () => {
     mockTables({
-      users: { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true } }), error: null },
+      users: { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true, injury_intake_done: true } }), error: null },
       conversations: { data: [], error: null },
       activities: { data: [], error: null }, // no history → inference returns null
       races: { data: [], error: null },
@@ -633,6 +633,7 @@ describe("POST /api/onboarding/handle — current_week seeded from external_plan
         has_existing_plan: externalPlanDescription !== null,
         wants_plan: externalPlanDescription === null,
         strava_connected: true, // required to pass the Strava gate before completeOnboarding
+        injury_intake_done: true, // required to pass the injury-intake gate (maybeEnterInjuryIntake)
         ...(externalPlanDescription ? { external_plan_description: externalPlanDescription } : {}),
       },
     });
@@ -641,6 +642,8 @@ describe("POST /api/onboarding/handle — current_week seeded from external_plan
     const tables: Record<string, { data: unknown; error: unknown } | Array<{ data: unknown; error: unknown }>> = {
       users: [
         { data: userData, error: null },
+        // POST processing-lock write (onboarding_data + processing_lock_at)
+        { data: null, error: null },
         // isReady onboarding_data persist (line 806)
         { data: { onboarding_data: userData.onboarding_data }, error: null },
         // fresh user fetch inside completeOnboarding (line 1719)
@@ -867,5 +870,78 @@ describe("POST /api/onboarding/handle — off-topic questions in non-goals stage
 
     const textSent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
     expect(textSent).toContain("Nothing you log is shared");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Injury-intake gate on the [READY] path
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboarding/handle — injury intake is required before completion", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("routes [READY] into injury intake when the stage never ran", async () => {
+    // handleDataAnalysis normally writes stage: "injury_intake" after Strava connects. If it
+    // throws first, the next message falls through to the goals stage, which sees Strava
+    // connected and fires [READY] — completing onboarding with no injury data at all.
+    mockTables({
+      users: [
+        { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true } }), error: null },
+        { data: null, error: null }, // processing-lock write
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k" });
+    mockLLMResponse("Great, that's everything I need.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const lastText = smsCalls[smsCalls.length - 1]?.[1] as string;
+    expect(lastText).toContain("Has injury ever been a factor");
+
+    // Must not have completed onboarding
+    const tables = (supabase.from as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]);
+    expect(tables).not.toContain("training_state");
+  });
+
+  it("does not re-ask when injury information is already on file", async () => {
+    mockTables({
+      users: [
+        {
+          data: onboardingUser({
+            onboarding_data: {
+              goal: "5k",
+              strava_connected: true,
+              training_days: ["tuesday", "thursday", "saturday"],
+              current_niggles: "left shin gets sore after long runs",
+            },
+          }),
+          error: null,
+        },
+        { data: null, error: null }, // processing-lock write
+        { data: { onboarding_data: {} }, error: null }, // isReady persist
+        { data: { onboarding_data: {} }, error: null }, // fresh fetch in completeOnboarding
+        { data: { billing_enabled: false, reverse_trial_enabled: false, dashboard_token: null, phone_number: "+12025551234" }, error: null },
+        { data: [{ id: "user-001" }], error: null }, // update guard
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null },
+      races: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k" });
+    mockLLMResponse("Great, that's everything I need.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const allText = smsCalls.map((c: unknown[]) => c[1] as string).join(" ");
+    expect(allText).not.toContain("Has injury ever been a factor");
+    // Onboarding proceeded to completion
+    const tables = (supabase.from as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]);
+    expect(tables).toContain("training_state");
   });
 });
