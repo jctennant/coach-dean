@@ -44,7 +44,7 @@ import { parseSessionMiles } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
-import { inferTrainingDaysFromActivities, type InferableActivity } from "@/lib/infer-training-days";
+import { inferTrainingDaysFromActivities, deriveTrainingDaysFallback, type InferableActivity, type TrainingDaysFallback } from "@/lib/infer-training-days";
 import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
@@ -3241,8 +3241,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // actual run history so the plan gets a real day-by-day skeleton instead of falling
     // back to prose + a hardcoded 4/week guess. If the signal isn't there (too little or
     // too inconsistent history), leave training_days empty and ask instead of guessing.
-    let askAboutTrainingDays = false;
     let inferredTrainingDaysForConfirmation: string[] | null = null;
+    let assumedTrainingDays: TrainingDaysFallback | null = null;
     if (!((profile?.training_days as string[] | null)?.length)) {
       const inferredDays = inferTrainingDaysFromActivities(
         recentActivities as unknown as InferableActivity[],
@@ -3254,7 +3254,29 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         inferredTrainingDaysForConfirmation = inferredDays;
         console.log(`[initial_plan] inferred training_days from Strava history: ${inferredDays.join(", ")}`);
       } else {
-        askAboutTrainingDays = true;
+        // Inference is deliberately strict, so it returns null for exactly the athletes who
+        // most need a schedule — mid-rebuild, one week of Strava history, irregular days.
+        // Leaving training_days empty here was never neutral: computeArcWeekSkeleton returns
+        // [] for an empty list, so the athlete's first week lost its day-by-day breakdown and
+        // fell back to free-hand prose with a hardcoded 4/week guess, and the reminder crons
+        // had nothing to gate on. Assume a sensible schedule instead, built from whatever
+        // weak history exists, and have Dean state it for confirmation.
+        assumedTrainingDays = deriveTrainingDaysFallback({
+          activities: recentActivities as unknown as InferableActivity[],
+          timezone: (user.timezone as string | null) ?? "America/New_York",
+          daysPerWeek: (profile?.days_per_week as number | null) ?? null,
+        });
+        const { error: assumedErr } = await supabase
+          .from("training_profiles")
+          .update({ training_days: assumedTrainingDays.days })
+          .eq("user_id", userId);
+        if (assumedErr) console.error("[initial_plan] assumed training_days write failed:", assumedErr);
+        profile = { ...profile, training_days: assumedTrainingDays.days } as typeof profile;
+        console.log(`[initial_plan] assumed training_days (${assumedTrainingDays.source}): ${assumedTrainingDays.days.join(", ")}`);
+        void trackEvent(userId, "training_days_assumed", {
+          source: assumedTrainingDays.source,
+          days: assumedTrainingDays.days.length,
+        });
       }
     }
 
@@ -3316,10 +3338,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         }).eq("user_id", userId);
         console.log(`[initial_plan] mid-week onboard — sliced starter week: ${starterTotal}mi, long run ${arcLongRun}mi (arc week1 was ${arcState?.weekly_mileage_target}mi/${arcState?.weekly_long_run_miles}mi)`);
       } else {
-        // training_days still empty here — Strava history wasn't enough to infer a
-        // schedule (askAboutTrainingDays is set; see below) — computeArcWeekSkeleton
-        // can't assign day-level slots without them. Fall back to a plain numeric
-        // proration by days remaining in the week so the
+        // Defensive only. training_days is now always populated by this point — real,
+        // inferred, or assumed by deriveTrainingDaysFallback — so computeArcWeekSkeleton
+        // should always have day-level slots to assign. Kept because the skeleton can still
+        // return [] for other reasons (e.g. no days left before Sunday on a late-week
+        // onboard). Falls back to a plain numeric proration by days remaining in the week so the
         // stored total/long-run at least match what Dean is about to state, even without
         // a day-by-day breakdown.
         const daysToSundayForStarter = initLocalDow === 0 ? 0 : 7 - initLocalDow;
@@ -3407,8 +3430,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     if (arcLines.length > 0) {
       initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES:\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.\n\n${fullArcSummary ? `MILEAGE PROGRESSION: ${fullArcSummary}\nAt the end of your message, include one sentence summarizing the overall mileage arc so the athlete knows how their plan builds. Keep it brief and natural.` : ""}</arc_values>`;
     }
-    if (askAboutTrainingDays) {
-      initialPlanArcConstraint += `\n\nNo standing training-day schedule is on file, and there wasn't enough recent run history to infer one. End your message by asking which specific days they usually run (or want to run) — this locks in a real day-by-day schedule for next week and lets reminders target the right days, instead of this week's plan being described only in general terms.`;
+    if (assumedTrainingDays) {
+      const dayList = assumedTrainingDays.days.map(d => d.slice(0, 3).replace(/^\w/, c => c.toUpperCase())).join("/");
+      initialPlanArcConstraint += assumedTrainingDays.source === "template"
+        ? `\n\nNo standing training-day schedule is on file and there wasn't enough run history to infer one, so this week's plan is built around an assumed schedule: ${dayList}. State those days plainly and ask them to confirm or send different ones — e.g. "I've set you up on ${dayList} for now — want different days?". One short question, not a paragraph. Do NOT present the days as something you observed in their history; you're proposing them.`
+        : `\n\nNo standing training-day schedule is on file, so this week's plan is built around ${dayList}, drawn from the days they've actually been running. State those days and invite a correction in one short clause — e.g. "I've got you on ${dayList} — let me know if you want different days". Do not make it a separate paragraph.`;
     }
     if (inferredTrainingDaysForConfirmation) {
       initialPlanArcConstraint += `\n\nNo standing training-day schedule was on file, so it was inferred from their recent run history: ${inferredTrainingDaysForConfirmation.join(", ")}. This week's plan is already built around those days, but state the inferred days explicitly and briefly invite a correction if it's wrong (e.g. "Looks like you typically run ${inferredTrainingDaysForConfirmation.join("/")} — I'll build around that, let me know if you want different days"). Keep it to one short clause, not a separate question.`;

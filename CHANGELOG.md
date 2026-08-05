@@ -8,6 +8,19 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-04 — Athletes with thin Strava history now get a real day-by-day first week instead of prose
+
+**Type:** Bug Fix
+**Reported by:** Jake ("let's take care of the training days hole with a smart back-up")
+**User feedback:** N/A — flagged as a known gap in the entry below, now closed.
+**Root cause:** `inferTrainingDaysFromActivities` is deliberately strict — it needs 2+ distinct weeks of history and a weekday present in at least half of them, and returns null otherwise so the caller can ask rather than guess. The problem is *who* it returns null for: someone rebuilding after a layoff, someone who connected Strava with one week of runs, someone whose days genuinely move around. For them `training_days` stayed `[]`, and empty was never a neutral outcome — `computeArcWeekSkeleton` returns `[]` for an empty list, so the athlete's first week lost its day-by-day breakdown entirely and fell back to free-hand prose with a hardcoded 4/week guess, `weekly_plan_sessions` was never populated, and the reminder crons had nothing to gate on. `initial_plan` set `askAboutTrainingDays` and asked at the end of the message, so it self-healed only if the athlete answered — and the athletes most likely to hit this are the ones with the least to say about a standing schedule.
+**Fix / Change:** Added `deriveTrainingDaysFallback()` to `infer-training-days.ts` — never returns null, and is used by `initial_plan` when strict inference declines. It prefers the athlete's real (if weak) pattern, ranking weekdays by how often they actually ran on them, then tops up from a spacing-aware template. The templates are built against what `computeArcWeekSkeleton` does with them rather than to look tidy: Sunday appears in every one (the skeleton picks the long-run day Sun > Sat > last, so omitting the weekend would strand the long run on a weekday), and the others avoid sitting adjacent to Sunday because the skeleton's quality-day pick prefers a day more than one off the long run.
+Sizing is taken from the **busiest single observed week**, measured in distinct weekdays run — not `runs / weeksObserved`. The lookback window clips whichever weeks sit at its edges and a partial week counts as a whole one in that denominator, so six runs falling either side of a Monday reads as three days a week: half the athlete's real frequency, in the direction that hurts, since the number becomes the week's session count. `days_per_week` is consulted only when there's no run history at all, because `completeOnboarding` defaults it to 4 whether or not the athlete ever gave a number, so a stated 4 and an unstated one are indistinguishable.
+The result is written to `training_profiles.training_days` (error-checked) and `initial_plan` now always states the days and asks for a correction — with different wording depending on provenance, so a template-derived schedule is presented as a proposal ("I've set you up on Mon/Wed/Fri/Sun for now — want different days?") and never as something observed in their history. Emits `training_days_assumed` with the source. `askAboutTrainingDays` and its "described only in general terms" prompt branch are gone; the numeric-proration branch in the starter-week slice is kept as a defensive path but is now documented as unreachable via empty `training_days`.
+**Files changed:** `src/lib/infer-training-days.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/training-days-fallback.test.ts` (new, 13 tests, clock pinned so weekday assertions don't drift with the calendar)
+
+---
+
 ## 2026-08-04 — Complement mode is upload-only; a missing initial_plan now self-heals; cadence copy reworded
 
 **Type:** Bug Fix / Improvement
