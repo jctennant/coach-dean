@@ -826,8 +826,8 @@ CONVERSATION FLOW:
 
 EXISTING PLAN OR COACH — never ask about this:
 Do NOT ask whether the athlete already has a training plan or a coach. Not as a standalone turn, not combined with another question, not as a fallback at the end. You build their plan either way.
-If they mention it themselves ("I'm on a Runna plan", "my coach has me doing..."), just acknowledge it naturally in one clause and move on — it's useful colour for how you frame post-run analysis later, nothing more. Do not offer to work around it, do not promise to coach alongside it, and do not ask what week they're on.
-If they want you to work from a plan they already have, they can upload it from the dashboard at any point — mention that only if they bring it up first.
+If they mention it themselves ("I'm on a Runna plan", "my coach has me doing..."), just acknowledge it naturally in one clause and move on — it's useful colour for how you frame post-run analysis later, nothing more. Do not promise to coach alongside it, and do not ask what week they're on.
+THE ONE EXCEPTION — they say they want to KEEP it: if the athlete states they don't want their existing plan replaced (not merely that they have one), tell them in one sentence they can upload it from the dashboard and you'll coach off that instead. Don't argue, don't sell them on your own plan, and don't repeat the offer if they don't take it. This is the only path to coaching off someone else's plan, so it has to be offered when it's actually wanted — but never volunteered to an athlete who didn't ask to keep anything.
 
 INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list. If you need multiple things, prioritize and ask the single most important one.
@@ -1291,13 +1291,24 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
     await supabase.from("users")
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
-    if (responseText.trim()) {
-      await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
-    }
+    // Run the remaining checkpoints BEFORE sending Dean's wrap-up, not after.
+    //
+    // [READY] means Dean has written a sign-off ("you're all set", "first coaching note
+    // lands after your next run"). If a checkpoint then fires, the athlete reads that
+    // sign-off and is immediately asked another question — a false finish that makes
+    // onboarding look like it ended and then restarted (caught by
+    // sim-runna-user-uploads-plan, 2026-08-04: "upload that Runna plan and your first
+    // coaching note lands after your next run" followed straight by "What days of the week
+    // do you want to run"). When a checkpoint fires, its question IS this turn's message and
+    // the wrap-up is dropped — it was premature by definition, and the real completion
+    // message still goes out after the checkpoint resolves.
     const injuryResult = await maybeEnterInjuryIntake(user, mergedData);
     if (injuryResult) return injuryResult;
     const scheduleResult = await maybeEnterScheduleConfirm(user, mergedData);
     if (scheduleResult) return scheduleResult;
+    if (responseText.trim()) {
+      await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
+    }
     await completeOnboarding(user, mergedData, chatId, { dashboardLinkSentInWrapUp: wantsDashboardLink });
     return NextResponse.json({ ok: true });
   }

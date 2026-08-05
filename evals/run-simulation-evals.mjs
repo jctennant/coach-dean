@@ -185,8 +185,10 @@ Everyone gets the same core intake. The order is roughly:
 3. After Strava connects: a dedicated stage handles training analysis and injury intake automatically — you don't need to ask about it.
 4. Signal [READY] when name + goal + Strava are confirmed (injury handled in dedicated stage).
 
-EXISTING PLAN (athlete mentions Runna, TrainingPeaks, a coach-written plan, etc.):
-Dean works alongside their plan — no competing structure, no rebuilding. Never ask "are you working from a training plan?" as a standalone question. If they volunteer it, acknowledge briefly and continue. Plan context is captured passively and informs how Dean frames coaching.
+EXISTING PLAN OR COACH — never ask about this:
+Do NOT ask whether the athlete already has a training plan or a coach. Not as a standalone turn, not combined with another question, not as a fallback at the end. You build their plan either way.
+If they mention it themselves, acknowledge it in one clause and move on. Do not promise to coach alongside it, and do not ask what week they're on.
+THE ONE EXCEPTION — they say they want to KEEP it: if the athlete states they don't want their existing plan replaced (not merely that they have one), tell them in one sentence they can upload it from the dashboard and you'll coach off that instead. Don't argue, don't sell them on your own plan, and don't repeat the offer if they don't take it.
 
 INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list. If you need multiple things, prioritize and ask the single most important one.
@@ -810,6 +812,19 @@ async function runSimulation(fixture, verbose) {
       // Final extraction
       const extracted = await extractFields(history, today);
       collected = mergeCollected(collected, extracted);
+
+      // Mirrors the [READY] ordering in handleConversation: the checkpoints run BEFORE the
+      // wrap-up is sent, and when one fires the wrap-up is dropped rather than sent ahead of
+      // it. Without this the runner reproduces the false finish the fix removed (a sign-off
+      // followed immediately by "what days do you want to run"), so the fixture would keep
+      // scoring it as a flow bug that no longer exists in production.
+      const scheduleWillFire =
+        !collected.schedule_confirmed &&
+        !(Array.isArray(collected.training_days) && collected.training_days.length > 0);
+      if (scheduleWillFire) {
+        const dropped = history.pop(); // the premature wrap-up
+        if (verbose) console.log(`\n  (wrap-up suppressed — schedule checkpoint fires first): ${dropped?.content?.slice(0, 80)}...`);
+      }
       collected = await maybeRunScheduleConfirm(collected, history, persona, today, verbose);
       readyFired = true;
       break;

@@ -184,7 +184,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     mockTables({
       users: [
         // Mode already resolved via earlier [MODE:FROM_SCRATCH] tag, persisted in onboarding_data
-        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"], has_existing_plan: false, wants_plan: true, strava_connected: true } }), error: null },
+        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"], has_existing_plan: false, wants_plan: true, strava_connected: true, injury_intake_done: true } }), error: null },
+        { data: null, error: null },  // POST processing-lock write
         { data: { dashboard_token: "tok-abc" }, error: null },  // for completeOnboarding user lookup
       ],
       conversations: { data: [], error: null },
@@ -200,7 +201,9 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
     await POST(makeRequest({ userId: "user-001", message: "NYC, Monday Wednesday Friday" }));
 
-    // [READY] should be stripped from the sent SMS
+    // [READY] should be stripped from the sent SMS. The wrap-up only goes out when no
+    // checkpoint intercepts — training_days and injury intake are both already satisfied
+    // here, so this is the straight-to-completion path.
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
     const textSent = smsCalls[0]?.[1] as string;
     expect(textSent).not.toContain("[READY]");
@@ -943,5 +946,39 @@ describe("POST /api/onboarding/handle — injury intake is required before compl
     // Onboarding proceeded to completion
     const tables = (supabase.from as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]);
     expect(tables).toContain("training_state");
+  });
+});
+
+describe("POST /api/onboarding/handle — no false finish before a checkpoint", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("suppresses the [READY] wrap-up when the schedule checkpoint still has to fire", async () => {
+    // [READY] means Dean wrote a sign-off. Sending it and THEN asking a checkpoint question
+    // reads as onboarding finishing and restarting — caught by sim-runna-user-uploads-plan:
+    // "...your first coaching note lands after your next run" followed immediately by
+    // "What days of the week do you want to run".
+    mockTables({
+      users: [
+        {
+          data: onboardingUser({
+            onboarding_data: { goal: "5k", strava_connected: true, injury_intake_done: true },
+          }),
+          error: null,
+        },
+        { data: null, error: null }, // processing-lock write
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null }, // no history → inference returns null
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: null });
+    mockLLMResponse("You're all set — first coaching note lands after your next run.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+    // The sign-off must not have gone out ahead of the question
+    expect(sent.some((t) => t.includes("You're all set"))).toBe(false);
+    expect(sent.some((t) => t.includes("days of the week"))).toBe(true);
   });
 });

@@ -8,6 +8,25 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-04 — Upload offer restored for athletes who want to keep their plan; no more false finish before a checkpoint; three known bugs documented
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (ran three simulation evals against the reliability-pass branch)
+**User feedback:** "Okay, why don't you pick two or three evals and run those" → "let's tackle those"
+**Root cause:** Ran `sim-pricing-question`, `sim-shin-splint-trail-race` and `sim-runna-user-uploads-plan`, A/B'd against baseline `ee720b84` in a git worktree so the numbers were attributable rather than guessed. Results: pricing 9/10 (the off-topic move working — Marcus's 25-character "is this free or does it cost money?" would have been skipped entirely by the old `length < 50` pre-filter); shin-splint 5→6 with both surviving complaints identical in baseline and one baseline complaint fixed; runna 6→5. Three things came out of it:
+1. **`sim-runna-user-uploads-plan` was testing the contract we deliberately deleted.** Its notes required "the tone should be 'I'll work alongside your Runna plan'" — exactly what the upload-only change forbids — and made `has_existing_plan: true` a required field when it now drives nothing.
+2. **The upload escape hatch went missing for the athlete who needs it.** Upload-only makes the dashboard PDF path *more* important, not less, but the new prompt said to mention it "only if they bring it up first" — ambiguous about whether "it" meant the upload or the plan. Chris says outright he doesn't want Runna replaced and was never told the one thing that would have honoured that. (Also absent in baseline, so not caused by removing PLAN CHECK.)
+3. **A false finish before the checkpoints.** `[READY]` means Dean has written a sign-off, and `handleConversation` sent it *before* running `maybeEnterInjuryIntake`/`maybeEnterScheduleConfirm` — so the athlete read "upload that Runna plan and your first coaching note lands after your next run" and was immediately asked "What days of the week do you want to run?". Onboarding appeared to end and restart.
+**Fix / Change:**
+- Added the one exception to the never-ask rule: when an athlete states they want to **keep** their existing plan (not merely that they have one), Dean offers the dashboard upload once, in one sentence, without arguing or re-pitching, and doesn't repeat it. Mirrored in `run-simulation-evals.mjs`.
+- Checkpoints now run **before** the wrap-up is sent, and when one fires the wrap-up is dropped rather than sent ahead of it — it was premature by definition, and the real completion message still goes out once the checkpoint resolves. Mirrored in the runner (which otherwise reproduces the false finish and would keep scoring a flow bug that no longer exists). New test pins the ordering.
+- Rewrote the fixture's `notes` to the new contract per CLAUDE.md's "update ground_truth when you change intentional behavior" — explicitly flagged as CONTRACT CHANGED so a future reader doesn't take it for the old one, with `has_existing_plan` dropped from required fields and the upload offer added as a real criterion. Re-ran: **5/10 → 9/10**, judge confirming "acknowledged the Runna plan in one clause without asking what week Chris was on, offered the dashboard PDF upload exactly once... never re-pitched or argued".
+- Added `docs/known-issues.md` for three bugs found but deliberately not fixed: race-date verification overriding correct athlete-stated dates (high severity — one run silently moved Oct 19 → Oct 4 and computed the arc off it), Haiku extraction dropping explicitly-stated `training_days`/`has_existing_plan`, and Strava being asked at turn 5–6 instead of 2–3. All three reproduce on baseline `ee720b84`, so none are regressions from this branch. Follows the `docs/crons.md` precedent — `gh` isn't installed, and a traced bug with no repo trace gets rediscovered the expensive way.
+**Honest note on the numbers:** a second run of the updated runna fixture scored 6/10, not 9 — same code, failing instead on the race-date bug above (Oct 19 → Oct 4). The things this commit changed passed both times; the variance is entirely issue #1. Single LLM-judged runs move ±1 and shouldn't be quoted as a result on their own.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`, `evals/fixtures/simulation/sim-runna-user-uploads-plan.json`, `docs/known-issues.md` (new), `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-08-04 — Athletes with thin Strava history now get a real day-by-day first week instead of prose
 
 **Type:** Bug Fix

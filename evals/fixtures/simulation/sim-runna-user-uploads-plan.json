@@ -1,6 +1,6 @@
 {
   "id": "sim-runna-user-uploads-plan",
-  "description": "Athlete is mid-Runna plan and doesn't want Dean to build one — wants to upload via dashboard. Tests that Dean acknowledges the existing plan, mentions the upload option, does NOT offer to rebuild, and still reaches [READY].",
+  "description": "Athlete is mid-Runna plan and says he doesn't want it replaced. Tests that Dean never asks about an existing plan unprompted, acknowledges it in one clause when volunteered, and — because the athlete explicitly wants to KEEP it — offers the dashboard upload exactly once, without arguing or selling his own plan.",
   "category": "simulation",
   "persona": {
     "name": "Chris",
@@ -14,7 +14,6 @@
       "race_date": "2026-10-19",
       "training_days": ["tuesday", "thursday", "saturday", "sunday"],
       "timezone": "America/Los_Angeles",
-      "has_existing_plan": true,
       "external_plan_description": "Runna 16-week half marathon plan, week 6, ~35mi/week",
       "strava_connected": false,
       "easy_pace": "9:30"
@@ -23,9 +22,9 @@
   "today": "2026-04-15",
   "max_turns": 12,
   "evaluation_criteria": {
-    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone", "has_existing_plan"],
+    "required_fields": ["name", "goal", "race_name", "race_date", "training_days", "timezone"],
     "goal_should_be": "half_marathon",
     "target_turns": 8,
-    "notes": "Chris has an existing Runna plan and does NOT want it replaced. Dean must: (1) acknowledge the existing plan and NOT try to build a new one, (2) mention that Chris can upload the plan PDF via the dashboard, (3) still collect race name, race date, training days, fitness baseline, timezone before [READY]. Dean should NOT interrogate Chris as if building a plan from scratch — the tone should be 'I'll work alongside your Runna plan'. has_existing_plan must be true in extracted fields. external_plan_description should capture the Runna plan details."
+    "notes": "CONTRACT CHANGED 2026-08-04 — complement mode is now upload-only. Dean no longer offers to 'coach alongside' a plan described in conversation; coaching_mode is set solely by an actual PDF upload, because deriving it from a Haiku-extracted conversational signal silently stalled plan generation for an athlete who never uploaded anything. Judge against the new contract, NOT the old one. Dean must: (1) NEVER ask whether Chris has a plan or coach — not standalone, not combined, not as a fallback; (2) acknowledge the Runna plan in ONE clause when Chris volunteers it, without promising to work alongside it and without asking what week he's on; (3) because Chris explicitly says he does not want it replaced, offer the dashboard PDF upload exactly once, in one sentence, as the way Dean can coach off Runna instead — this is the only remaining path to complement mode, so failing to offer it here is a real miss; (4) NOT argue, re-pitch his own plan, or repeat the upload offer if Chris doesn't take it; (5) still collect race name, race date, training days, fitness baseline and timezone before [READY]. `has_existing_plan` is deliberately NOT a required field any more — it is still extracted as framing colour but drives nothing, so do not fail the run on it. `external_plan_description` should still capture the Runna details. Dean building his own plan for Chris is NOT a failure unless Chris asked to keep Runna and was ignored."
   }
 }
