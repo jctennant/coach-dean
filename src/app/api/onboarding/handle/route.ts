@@ -822,13 +822,12 @@ CONVERSATION FLOW:
 1. First message: intro + name + "what's going on or what are you working toward" in one question
 2. After name + goal established (and race dates confirmed): ask for Strava
 3. After Strava connects: dedicated injury intake stage runs automatically — you don't need to ask about it
-4. Signal [READY] when name + goal + Strava connected (see PLAN CHECK below for the one exception)
+4. Signal [READY] when name + goal + Strava connected
 
-PLAN CHECK — passive by default, do NOT make this a dedicated question:
-Whether the athlete already has a training plan or coach usually comes up naturally on its own — "I'm on a Runna plan", "my coach has me doing...", "just running on my own", "trying to build mileage myself". Capture it whenever it's mentioned; don't ask a standalone "are you following a plan?" question, and never combine it with the goal or injury question either.
-Only ask directly, as its own short turn, if it's genuinely unclear after goal + Strava + injury context are known AND nothing in the conversation has implied an answer either way. Keep it to: "Are you following a training plan or working with a coach right now?"
-When they confirm an existing plan: ask what week they're on — offer to share that week's sessions (text it out or upload a PDF).
-EXISTING PLAN (athlete mentions Runna, TrainingPeaks, a coach-written plan, etc.): Dean works alongside their plan — no competing structure, no rebuilding. Acknowledge it naturally when it comes up; it informs post-run analysis framing.
+EXISTING PLAN OR COACH — never ask about this:
+Do NOT ask whether the athlete already has a training plan or a coach. Not as a standalone turn, not combined with another question, not as a fallback at the end. You build their plan either way.
+If they mention it themselves ("I'm on a Runna plan", "my coach has me doing..."), just acknowledge it naturally in one clause and move on — it's useful colour for how you frame post-run analysis later, nothing more. Do not offer to work around it, do not promise to coach alongside it, and do not ask what week they're on.
+If they want you to work from a plan they already have, they can upload it from the dashboard at any point — mention that only if they bring it up first.
 
 INSTRUCTIONS:
 - Ask ONE question per message. Not two, not a list. If you need multiple things, prioritize and ask the single most important one.
@@ -931,7 +930,7 @@ READY CHECK — do this before every reply: scan WHAT YOU ALREADY KNOW for these
 2. Goal (+ race date if a named race) ✓
 3. Strava connected ✓ (shown as "STRAVA: Connected" in the context above)
 
-Injury history is collected in a dedicated injury intake stage AFTER Strava connects — do NOT wait for it here. Whether they already have a plan or coach is captured passively (see PLAN CHECK) and is NOT required for [READY] — never hold [READY] waiting on it.
+Injury history is collected in a dedicated injury intake stage AFTER Strava connects — do NOT wait for it here. Whether they already have a plan or coach is NOT a required field and is never asked about — never hold [READY] waiting on it.
 
 If all three are present: signal [READY] in THIS message. Do not ask ANY follow-up question. Write a synthesis wrap-up that references THIS athlete's actual race (or goal) and timeline, and THIS conversation's own details — never a race, mileage, or detail from an example. Example shape only, do not copy any specific noun or number from it: "Got it — [race] in [N] weeks, solid [X] miles/week base. First coaching note lands after your next run." Keep it to 1–2 sentences.
 
@@ -2788,7 +2787,6 @@ async function completeOnboarding(
 
   const trainingTools = (data.training_tools as string[] | null) || [];
   const terrainType = (data.terrain_type as string | null) || null;
-  const hasExistingPlan = !!(data.has_existing_plan as boolean | null); // context only — affects framing in initial_plan
   const externalPlanDescription = (data.external_plan_description as string | null) || null;
   const crossTrainingActivities = (data.cross_training_activities as string[] | null) || (data.crosstraining_tools as string[] | null) || [];
   // Combine injury history + current niggles into injury_notes if not already set
@@ -2881,7 +2879,14 @@ async function completeOnboarding(
         // Athletes who uploaded their own plan stay in "complement" mode — Dean reads and
         // adjusts their plan instead of generating a competing one. See plan/upload/route.ts,
         // which also writes this once a plan is uploaded after onboarding is already complete.
-        coaching_mode: (data.plan_uploaded === true || data.has_existing_plan === true) ? 'complement' : 'adaptive',
+        // Complement mode is set ONLY by an actual plan upload (plan/upload/route.ts writes
+        // both plan_uploaded and coaching_mode itself; this covers an upload that happened
+        // mid-onboarding, before this row existed). It used to also key off
+        // has_existing_plan — a conversational signal extracted by Haiku — which is how an
+        // athlete who never uploaded anything ended up in complement mode with no session
+        // data, silently stalling plan generation permanently (2026-08-04). A mode that
+        // requires real uploaded sessions must only be set by the act that produces them.
+        coaching_mode: (data.plan_uploaded === true) ? 'complement' : 'adaptive',
         ...(((data.avg_sleep_hours as number | null) != null) ? { avg_sleep_hours: data.avg_sleep_hours as number } : {}),
         ...(strengthRoutine ? { dashboard_insights: { strength_recovery: strengthRoutine } as unknown as Json } : {}),
         updated_at: new Date().toISOString(),

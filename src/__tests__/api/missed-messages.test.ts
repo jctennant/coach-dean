@@ -114,12 +114,14 @@ describe("GET /api/cron/missed-messages — stranded-athlete recovery", () => {
     });
   });
 
-  it("still routes fully-onboarded users to coach/respond", async () => {
+  it("still routes fully-onboarded users with a plan to coach/respond as user_message", async () => {
     mockTables({
       conversations: [
         { data: [{ user_id: "user-002", created_at: TEN_MIN_AGO, content: "ran 6 today" }], error: null },
-        { data: null, error: null },
+        { data: null, error: null }, // reply check
+        { data: { id: "m1" }, error: null }, // an initial_plan message exists
       ],
+      training_plans: { data: { id: "p1" }, error: null },
       users: {
         data: [
           {
@@ -128,6 +130,7 @@ describe("GET /api/cron/missed-messages — stranded-athlete recovery", () => {
             onboarding_step: null,
             messaging_opted_out: false,
             linq_chat_id: null,
+            created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
           },
         ],
         error: null,
@@ -139,6 +142,69 @@ describe("GET /api/cron/missed-messages — stranded-athlete recovery", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://coachdean.ai/api/coach/respond");
     expect(JSON.parse(init.body)).toEqual({ userId: "user-002", trigger: "user_message" });
+  });
+
+  it("re-fires initial_plan for a just-onboarded athlete whose plan never arrived", async () => {
+    // completeOnboarding fires initial_plan fire-and-forget, and coach/respond returns 200
+    // before doing any work — so a throw in there leaves the athlete onboarded, silent, and
+    // planless. Recovering them as "user_message" would un-hang them without a plan.
+    mockTables({
+      conversations: [
+        { data: [{ user_id: "user-005", created_at: TEN_MIN_AGO, content: "mon/wed/fri works" }], error: null },
+        { data: null, error: null }, // reply check — nothing
+        { data: null, error: null }, // no initial_plan message
+      ],
+      training_plans: { data: null, error: null }, // no stored arc
+      users: {
+        data: [
+          {
+            id: "user-005",
+            phone_number: "+12025556666",
+            onboarding_step: null,
+            messaging_opted_out: false,
+            linq_chat_id: null,
+            created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    await GET(cronRequest());
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://coachdean.ai/api/coach/respond");
+    expect(JSON.parse(init.body)).toEqual({ userId: "user-005", trigger: "initial_plan" });
+  });
+
+  it("never re-fires initial_plan at an established account with no stored arc", async () => {
+    // Accounts predating training_plans rows legitimately have none — re-firing initial_plan
+    // at them would blow away a working athlete's week with a fresh week-1 plan.
+    mockTables({
+      conversations: [
+        { data: [{ user_id: "user-006", created_at: TEN_MIN_AGO, content: "how's my week look" }], error: null },
+        { data: null, error: null },
+      ],
+      training_plans: { data: null, error: null },
+      users: {
+        data: [
+          {
+            id: "user-006",
+            phone_number: "+12025555555",
+            onboarding_step: null,
+            messaging_opted_out: false,
+            linq_chat_id: null,
+            created_at: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        error: null,
+      },
+    });
+
+    await GET(cronRequest());
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body).trigger).toBe("user_message");
   });
 
   it("skips awaiting_payment — its handler only re-sends a link the athlete already ignored", async () => {

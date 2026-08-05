@@ -4,9 +4,9 @@ import { buildCadenceOffer, isCadenceOffer, parseCadenceReply } from "@/lib/cade
 describe("buildCadenceOffer", () => {
   it("states both always-on touchpoints and offers the optional reminder", () => {
     const msg = buildCadenceOffer({ activeInjury: false });
-    expect(msg).toContain("after every run");
+    expect(msg).toContain("after each run");
     expect(msg).toContain("every Sunday");
-    expect(msg).toContain("MORNING / NIGHT");
+    expect(msg).toContain("MORNING or EVENING");
   });
 
   it("adds the first-run caution for an active injury, naming the body part", () => {
@@ -37,7 +37,8 @@ describe("parseCadenceReply", () => {
     expect(parseCadenceReply("yes, morning would be great")).toBe("morning_reminders");
   });
 
-  it("reads NIGHT", () => {
+  it("reads EVENING", () => {
+    expect(parseCadenceReply("EVENING")).toBe("nightly_reminders");
     expect(parseCadenceReply("NIGHT")).toBe("nightly_reminders");
     expect(parseCadenceReply("night before is better for me")).toBe("nightly_reminders");
     expect(parseCadenceReply("evening")).toBe("nightly_reminders");

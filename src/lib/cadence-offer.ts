@@ -23,11 +23,14 @@ export function buildCadenceOffer(opts: {
   const injuryLine = activeInjury
     ? ` First run: keep it easy${bodyPart ? ` and stop if the ${bodyPart} flares up` : ""} — text me how it felt either way.`
     : "";
+  // "By default" is load-bearing: it tells the athlete the two always-on touchpoints are
+  // already set up and need no action from them, so the reminder question reads as an
+  // optional extra rather than a setup step they have to complete.
   return (
-    "Here's how we'll work together: I'll text you a coaching note after every run, " +
-    "and every Sunday a recap plus the week ahead." +
+    "By default I'll send you a note after each run, plus a recap and the week ahead every Sunday." +
     injuryLine +
-    "\n\nReply YES to lock this in, or MORNING / NIGHT if you also want a reminder on your training days."
+    "\n\nIf you want, I can also send a morning or evening reminder on your training days — " +
+    "reply MORNING or EVENING. Otherwise reply YES and you're all set."
   );
 }
 
@@ -38,7 +41,7 @@ export function buildCadenceOffer(opts: {
  * answer to this question.
  */
 export function isCadenceOffer(content: string): boolean {
-  return /Reply YES to lock this in, or MORNING \/ NIGHT/i.test(content);
+  return /reply MORNING or EVENING/i.test(content);
 }
 
 /**

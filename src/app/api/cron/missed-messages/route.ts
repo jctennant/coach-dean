@@ -13,6 +13,11 @@ const WINDOW_MIN_MINUTES = 3;  // ignore very recent messages (still processing)
 // it would just repeat a message the athlete already chose not to act on.
 const RECOVERABLE_ONBOARDING_STEPS = new Set(["onboarding", "awaiting_strava", "awaiting_timezone"]);
 
+// How recently an account must have been created for a missing plan to be treated as a
+// failed initial_plan rather than normal state. Accounts predating training_plans rows
+// legitimately have none, and must never be re-fired at.
+const MISSING_PLAN_MAX_ACCOUNT_AGE_DAYS = 7;
+
 /**
  * GET /api/cron/missed-messages
  * Safety net for unanswered user messages. Runs every 30 minutes.
@@ -86,7 +91,7 @@ export async function GET(request: Request) {
   // they're routed to onboarding/handle below instead of coach/respond.
   let usersQuery = supabase
     .from("users")
-    .select("id, phone_number, onboarding_step, messaging_opted_out, linq_chat_id")
+    .select("id, phone_number, onboarding_step, messaging_opted_out, linq_chat_id, created_at")
     .in("id", userIds)
     .eq("messaging_opted_out", false);
 
@@ -130,6 +135,43 @@ export async function GET(request: Request) {
     // which re-reads state.
     if (isOnboarding && !lastUserMsg) continue;
 
+    // A just-onboarded athlete whose plan never arrived needs initial_plan, not a chat reply.
+    //
+    // completeOnboarding fires initial_plan through runAfter → fetch(coach/respond), and
+    // coach/respond returns 200 immediately and does all its work inside its own runAfter —
+    // so the fetch succeeding proves nothing about whether a plan was generated or sent.
+    // Anything that throws in there is logged and Sentry'd, onboarding_step is already null,
+    // and the athlete just gets silence (handleScheduleConfirm sends no message of its own,
+    // so their last exchange is the schedule answer). Without this branch the athlete was
+    // still recovered — but as trigger: "user_message", which un-hangs them with a
+    // conversational reply while leaving them with no plan and Dean reading empty state.
+    let recoveryTrigger: "user_message" | "initial_plan" = "user_message";
+    if (!isOnboarding) {
+      const accountAgeDays = user.created_at
+        ? (now.getTime() - new Date(user.created_at as string).getTime()) / (1000 * 60 * 60 * 24)
+        : Infinity;
+      if (accountAgeDays <= MISSING_PLAN_MAX_ACCOUNT_AGE_DAYS) {
+        const [{ data: planRow }, { data: planMsg }] = await Promise.all([
+          supabase.from("training_plans").select("id").eq("user_id", user.id).limit(1).maybeSingle(),
+          supabase
+            .from("conversations")
+            .select("id")
+            .eq("user_id", user.id)
+            .eq("message_type", "initial_plan")
+            .limit(1)
+            .maybeSingle(),
+        ]);
+        // Neither the stored arc nor any delivered plan message exists — initial_plan
+        // never completed. Both are checked because they fail independently: the arc can
+        // be written and the SMS still die, or vice versa.
+        if (!planRow && !planMsg) {
+          recoveryTrigger = "initial_plan";
+          console.warn(`[missed-messages] user ${user.id} is onboarded with no plan — re-firing initial_plan`);
+          void trackEvent(user.id, "initial_plan_missing_recovered", {});
+        }
+      }
+    }
+
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
     const target = isOnboarding
       ? {
@@ -145,13 +187,13 @@ export async function GET(request: Request) {
           url: `${appUrl}/api/coach/respond`,
           body: {
             userId: user.id,
-            trigger: "user_message",
+            trigger: recoveryTrigger,
             ...(user.linq_chat_id ? { chatId: user.linq_chat_id } : {}),
           },
         };
 
     console.log(
-      `[missed-messages] re-firing ${isOnboarding ? `onboarding/handle (step: ${step})` : "coach/respond"} for user ${user.id} (last msg: ${lastUserMsgAt})`
+      `[missed-messages] re-firing ${isOnboarding ? `onboarding/handle (step: ${step})` : `coach/respond (${recoveryTrigger})`} for user ${user.id} (last msg: ${lastUserMsgAt})`
     );
     try {
       const resp = await fetch(target.url, {
