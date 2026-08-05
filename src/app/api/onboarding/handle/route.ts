@@ -121,6 +121,36 @@ export async function POST(request: Request) {
   const step = user.onboarding_step as string | null;
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
 
+  // Content-based dedup: if the exact same text body arrived from this user within the
+  // last 60 seconds, it's a duplicate send (e.g. a client-side retry after a slow onboarding
+  // turn — the injury-intake completion branch alone can run 2+ serial Claude calls before
+  // responding). Unlike the Linq webhook (which has this same guard), each sub-handler here
+  // inserts its own user-message row mid-flow rather than centrally in POST, so this checks
+  // for an existing matching row up front instead of insert-then-check — sufficient for the
+  // observed failure mode (duplicates ~15-20s apart, not truly simultaneous), where the first
+  // request's insert has already landed by the time the retry arrives. Without this, two
+  // concurrent passes through the same stage (e.g. handleInjuryIntake's completion branch)
+  // can race on the same onboarding_data write, and a failure in the second pass leaves the
+  // athlete stranded after the first pass's message with no further reply (confirmed via a
+  // real stuck test conversation, 2026-08-04: duplicate inbound rows for every turn, with the
+  // final duplicate pair producing an advice message and then silence).
+  if (message) {
+    const dedupCutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data: recentSame } = await supabase
+      .from("conversations")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("role", "user")
+      .eq("content", message)
+      .gte("created_at", dedupCutoff)
+      .limit(1);
+    if (recentSame && recentSame.length > 0) {
+      console.log("[onboarding] content-dedup: same body within 60s, skipping:", userId);
+      if (dry_run) dryRunUsers.delete(userId);
+      return NextResponse.json({ ok: true });
+    }
+  }
+
   // Typing keep-alive loop for long-running LLM calls
   let keepTypingAlive = false;
   if (chatId && !dry_run) {

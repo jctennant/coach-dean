@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-04 — Onboarding: duplicate inbound message could strand an athlete mid injury-intake with no follow-up
+
+**Type:** Bug Fix
+**Reported by:** Jake, testing onboarding directly ("Coach Dean Test" conversation)
+**User feedback:** "feels like Dean left me hanging (he should always be asking another question in onboarding or giving me my plan)" — pasted a transcript where Dean gave shin-injury advice ("Before your next run, also reduce intensity for the next few days and ice if tender to touch...") and then never sent anything else — no follow-up question, no plan, no `[READY]`.
+**Root cause:** `/api/onboarding/handle` has no protection against a duplicate inbound delivery of the same message — unlike `/api/webhooks/linq`, which already content-dedups (60s window) for exactly this reason per the 2026-07-22 changelog. Traced against the real stuck account: every user message in the conversation was stored twice in `conversations`, 15-25 seconds apart, consistent with the test tool retrying after a slow response (the injury-intake completion branch alone can run 2+ serial Claude calls). On the final turn, the slow first request was still mid-flight (already past `sendAndStore`'s injury-advice message) when the duplicate retry arrived and re-entered `handleInjuryIntake` for the same content — the resulting race left `training_profiles`/`training_state`/`training_plans` never created and `onboarding_data.stage` stuck at `"injury_intake"`, with only the advice message ever sent. `handleConversation` and other onboarding sub-handlers insert their own user-message row mid-flow rather than centrally, and none of them had a guard against processing the same inbound text twice.
+**Fix / Change:** Added the same content-based dedup check used by the Linq webhook to the top of `/api/onboarding/handle`'s `POST` handler (before dispatching to any stage handler): if the exact same text body arrived from this user within the last 60 seconds, skip processing and return `{ok: true}` immediately. This is a select-then-check (not insert-then-check like the webhook's version, since the user-message insert happens later inside each sub-handler) — sufficient for the observed pattern of duplicates 15-25s apart, since the first request's insert has already landed by the time a retry arrives. Manually confirmed the fix locally by replaying the exact failing turn against the stuck test account — it now completes cleanly through to the schedule-confirm follow-up question.
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/multi-race-onboarding.test.ts` (one test's `conversations` mock needed to become an ordered array — the new dedup select and the existing conversation-history fetch both query `conversations`, and returning the same canned non-empty array for both caused a false-positive dedup)
+
+---
+
 ## 2026-08-04 — Root cause found: coaching_mode='complement' with no uploaded plan permanently stalls plan generation
 
 **Type:** Bug Fix

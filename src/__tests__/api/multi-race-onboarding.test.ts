@@ -169,14 +169,17 @@ describe("Multi-race onboarding — extraction and data merging", () => {
         }),
         error: null,
       },
-      conversations: {
-        data: [
-          { role: "assistant", content: "What's your goal race?" },
-          { role: "user", content: "Boston Marathon in April" },
-          { role: "assistant", content: "Got it — Boston in April! Which days work best?" },
-        ],
-        error: null,
-      },
+      conversations: [
+        { data: [], error: null }, // content-dedup check in POST — no matching recent inbound message
+        {
+          data: [
+            { role: "assistant", content: "What's your goal race?" },
+            { role: "user", content: "Boston Marathon in April" },
+            { role: "assistant", content: "Got it — Boston in April! Which days work best?" },
+          ],
+          error: null,
+        },
+      ],
     });
 
     // Extract-first: Haiku extraction first
