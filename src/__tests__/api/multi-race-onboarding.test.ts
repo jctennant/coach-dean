@@ -60,7 +60,7 @@ function chain(response: { data: unknown; error: unknown }) {
   const c: Record<string, unknown> = {};
   const methods = [
     "select", "insert", "update", "upsert", "delete",
-    "eq", "neq", "is", "not", "gte", "lte", "in", "or", "order", "limit",
+    "eq", "neq", "is", "not", "gt", "lt", "gte", "lte", "in", "or", "order", "limit",
   ];
   for (const m of methods) c[m] = vi.fn().mockReturnValue(c);
   c["single"] = vi.fn().mockResolvedValue(response);
@@ -244,6 +244,7 @@ describe("Multi-race onboarding — extraction and data merging", () => {
           }),
           error: null,
         },
+        { data: null, error: null },  // POST processing-lock write (onboarding_data + processing_lock_at)
         { data: { onboarding_data: {} }, error: null },  // isReady update (line 806) — onboarding_data persist
         { data: { onboarding_data: {} }, error: null },  // fresh user fetch in completeOnboarding (line 1719)
         { data: { billing_enabled: false, reverse_trial_enabled: false, dashboard_token: null, phone_number: "+12025551234" }, error: null },  // billing check (line 1820)

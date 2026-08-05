@@ -25,13 +25,45 @@ export const maxDuration = 60;
 // Tracks userIds currently in a dry_run onboarding request.
 const dryRunUsers = new Set<string>();
 
+// Tracks userIds whose inbound message row already exists in `conversations` and must
+// not be inserted again by a stage handler. Set for watchdog re-dispatches (`retry`),
+// where the row was stored by the original, failed pass. Follows the same
+// module-level-set pattern as dryRunUsers so the flag doesn't have to be threaded
+// through every handler signature (handleDataAnalysis is called by handleConversation,
+// not by POST, so a parameter would have to pass through two layers).
+const skipInboundInsertUsers = new Set<string>();
 
+// How long a request holds the "currently processing this user" lock. Only consulted
+// when an identical message body arrives inside the dedup window, so a lock left behind
+// by a crashed request can never suppress anything but a duplicate of that same message.
+const PROCESSING_LOCK_MS = 90_000;
 
 interface OnboardingRequest {
   userId: string;
   message: string;
   chatId?: string | null;
   dry_run?: boolean;
+  /**
+   * Set by /api/cron/missed-messages when re-dispatching a turn that produced no reply.
+   * Skips content dedup (the original inbound row is minutes old and would otherwise be
+   * seen as evidence the message was handled) and suppresses the duplicate inbound insert.
+   */
+  retry?: boolean;
+}
+
+/**
+ * Store this turn's inbound message, unless it's already stored (watchdog re-dispatch).
+ * Every stage handler stores its own inbound row mid-flow rather than centrally in POST,
+ * so this is the single place that decision is made.
+ */
+async function insertInboundMessage(userId: string, content: string): Promise<void> {
+  if (skipInboundInsertUsers.has(userId)) return;
+  await insertConversation({
+    user_id: userId,
+    role: "user",
+    content,
+    message_type: "user_message",
+  });
 }
 
 
@@ -104,8 +136,14 @@ async function sendPollAndStore(userId: string, phone: string, poll: AppPoll): P
  *   "awaiting_payment"  → payment link re-send
  */
 export async function POST(request: Request) {
-  const { userId, message, chatId, dry_run = false }: OnboardingRequest = await request.json();
+  const { userId, message, chatId, dry_run = false, retry = false }: OnboardingRequest = await request.json();
   if (dry_run) dryRunUsers.add(userId);
+  if (retry) skipInboundInsertUsers.add(userId);
+
+  const cleanup = () => {
+    if (dry_run) dryRunUsers.delete(userId);
+    if (retry) skipInboundInsertUsers.delete(userId);
+  };
 
   const { data: user, error: userError } = await supabase
     .from("users")
@@ -114,41 +152,90 @@ export async function POST(request: Request) {
     .single();
 
   if (userError || !user) {
-    if (dry_run) dryRunUsers.delete(userId);
+    cleanup();
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
   const step = user.onboarding_step as string | null;
   const onboardingData = (user.onboarding_data as Record<string, unknown>) || {};
 
-  // Content-based dedup: if the exact same text body arrived from this user within the
-  // last 60 seconds, it's a duplicate send (e.g. a client-side retry after a slow onboarding
+  // Content-based dedup: if the exact same text body arrived from this user within the last
+  // 60 seconds, it may be a duplicate send (e.g. a client-side retry after a slow onboarding
   // turn — the injury-intake completion branch alone can run 2+ serial Claude calls before
-  // responding). Unlike the Linq webhook (which has this same guard), each sub-handler here
-  // inserts its own user-message row mid-flow rather than centrally in POST, so this checks
-  // for an existing matching row up front instead of insert-then-check — sufficient for the
-  // observed failure mode (duplicates ~15-20s apart, not truly simultaneous), where the first
-  // request's insert has already landed by the time the retry arrives. Without this, two
-  // concurrent passes through the same stage (e.g. handleInjuryIntake's completion branch)
-  // can race on the same onboarding_data write, and a failure in the second pass leaves the
-  // athlete stranded after the first pass's message with no further reply (confirmed via a
-  // real stuck test conversation, 2026-08-04: duplicate inbound rows for every turn, with the
-  // final duplicate pair producing an advice message and then silence).
-  if (message) {
+  // responding). Two concurrent passes through the same stage race on the same
+  // onboarding_data write, and a failure in the second pass leaves the athlete stranded after
+  // the first pass's message with no further reply (confirmed via a real stuck test
+  // conversation, 2026-08-04).
+  //
+  // A matching inbound row is NOT sufficient evidence on its own, which is what the first
+  // version of this guard assumed. Each sub-handler inserts its inbound row *before* doing
+  // its work (handleInjuryIntake stores it, then calls Haiku), so a pass that threw partway
+  // through — a 529, a timeout, an SMS-provider non-2xx — leaves the row behind with no
+  // reply ever sent. Skipping on the row alone turned every such retry into permanent
+  // silence: the exact failure this guard exists to prevent.
+  //
+  // So skip only when there's positive evidence the first pass is alive or succeeded:
+  //   - an assistant reply landed after that inbound row (it completed — a true duplicate), or
+  //   - the processing lock below is still held (it's in flight right now).
+  // Otherwise fall through and re-process, which is how a failed turn recovers.
+  if (message && !retry) {
     const dedupCutoff = new Date(Date.now() - 60_000).toISOString();
     const { data: recentSame } = await supabase
       .from("conversations")
-      .select("id")
+      .select("id, created_at")
       .eq("user_id", userId)
       .eq("role", "user")
       .eq("content", message)
       .gte("created_at", dedupCutoff)
+      .order("created_at", { ascending: false })
       .limit(1);
-    if (recentSame && recentSame.length > 0) {
-      console.log("[onboarding] content-dedup: same body within 60s, skipping:", userId);
-      if (dry_run) dryRunUsers.delete(userId);
-      return NextResponse.json({ ok: true });
+
+    const priorInbound = recentSame?.[0];
+    if (priorInbound?.created_at) {
+      const { data: replyRows } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("role", "assistant")
+        .gt("created_at", priorInbound.created_at as string)
+        .limit(1);
+      const alreadyAnswered = !!replyRows && replyRows.length > 0;
+
+      const lockAt = onboardingData.processing_lock_at as string | undefined;
+      const lockHeld = !!lockAt && Date.now() - Date.parse(lockAt) < PROCESSING_LOCK_MS;
+
+      if (alreadyAnswered || lockHeld) {
+        console.log(
+          `[onboarding] content-dedup: same body within 60s (${alreadyAnswered ? "already answered" : "lock held"}), skipping:`,
+          userId
+        );
+        cleanup();
+        return NextResponse.json({ ok: true });
+      }
+      console.warn(
+        "[onboarding] duplicate inbound body within 60s but no reply and no lock — prior pass failed, re-processing:",
+        userId
+      );
+      void trackEvent(userId, "onboarding_failed_turn_reprocessed", { step: step ?? "unknown" });
     }
+  }
+
+  // Take the processing lock so a genuinely simultaneous duplicate (both requests in flight
+  // before either has sent anything) is suppressed by the check above. Written into the
+  // in-memory copy too, so the handler's own onboarding_data write carries it forward rather
+  // than clobbering it. Never explicitly released — it's timestamped, and the only thing a
+  // stale lock can suppress is a duplicate of the same message within PROCESSING_LOCK_MS.
+  //
+  // Only the "onboarding" step needs it: that's where a turn runs several serial LLM calls
+  // and multiple onboarding_data writes that two concurrent passes can interleave. The other
+  // steps answer with a canned message fast enough that the alreadyAnswered check above
+  // covers them, and they'd otherwise pay a DB write per turn for nothing.
+  if (message && !retry && !dry_run && step === "onboarding") {
+    onboardingData.processing_lock_at = new Date().toISOString();
+    await supabase
+      .from("users")
+      .update({ onboarding_data: onboardingData as unknown as Json })
+      .eq("id", userId);
   }
 
   // Typing keep-alive loop for long-running LLM calls
@@ -166,9 +253,50 @@ export async function POST(request: Request) {
 
   let result: NextResponse;
   try {
+    // Conversation history is loaded once here and passed down, rather than re-queried by
+    // each handler — the off-topic classifier below and handleConversation both need it.
+    const { data: historyRows } = await supabase
+      .from("conversations")
+      .select("role, content")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    const historyAsc = (historyRows ?? [])
+      .reverse()
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
+    // On a watchdog re-dispatch the inbound row is already stored, so it's the last entry in
+    // history. Drop it — handlers append the current message themselves, and leaving it would
+    // send Claude the same user turn twice (and break the isFirstResponse check).
+    const last = historyAsc[historyAsc.length - 1];
+    const history = last && last.role === "user" && last.content === message
+      ? historyAsc.slice(0, -1)
+      : historyAsc;
+
+    // ── Off-topic classifier — every stage, not just goals ────────────────────────
+    // Runs ahead of stage dispatch so a tangent ("how much does this cost?") gets an
+    // answer plus a redirect in ALL stages. It used to live inside handleConversation,
+    // after the stage dispatch, so injury_intake / schedule_confirm / awaiting_strava had
+    // no off-topic handling at all: handleScheduleConfirm treated ANY inbound message as
+    // schedule confirmation and completed onboarding without answering, handleInjuryIntake
+    // fed the question to an extractor and asked its next question over the top of it, and
+    // handleStrava replied to everything by re-sending the link.
+    // Skipped under dry_run: those runs exist to force a specific turn through a specific
+    // stage handler (evals, admin replay), and an interception would make that
+    // non-deterministic.
+    const stage = stageContextFor(step, onboardingData, history);
+    if (message && stage && !dry_run) {
+      const isOffTopic = await classifyOffTopic(message, stage.goal, history);
+      if (isOffTopic) {
+        result = await handleOffTopicMessage(user, message, stage.redirect, history);
+        keepTypingAlive = false;
+        cleanup();
+        return result;
+      }
+    }
+
     switch (step) {
       case "onboarding":
-        result = await handleConversation(user, message, onboardingData, chatId);
+        result = await handleConversation(user, message, onboardingData, chatId, history);
         break;
       case "awaiting_strava":
         result = await handleStrava(user, message, onboardingData, chatId);
@@ -192,12 +320,12 @@ export async function POST(request: Request) {
     const { captureException } = await import("@sentry/nextjs");
     captureException(err, { tags: { route: "onboarding/handle", step: step ?? "unknown" } });
     keepTypingAlive = false;
-    if (dry_run) dryRunUsers.delete(userId);
+    cleanup();
     return NextResponse.json({ error: "internal error" }, { status: 500 });
   }
 
   keepTypingAlive = false;
-  if (dry_run) dryRunUsers.delete(userId);
+  cleanup();
   return result;
 }
 
@@ -253,12 +381,17 @@ const VALID_GOAL_BUCKETS = new Set([
  */
 
 // ---------------------------------------------------------------------------
-// Off-topic classifier + handler (goals stage only)
+// Off-topic classifier + handler (all stages — dispatched from POST)
 // ---------------------------------------------------------------------------
 
 // Keywords that strongly indicate an on-topic onboarding message.
 // If any match, skip the classifier LLM call entirely.
 const ONBOARDING_KEYWORDS = /\b(race|run|running|marathon|strava|injury|goal|train|training|week|pace|mile|km|5k|10k|half|plan|fatigue|sleep|coach|workout|hurt|pain|knee|achilles|hamstring|shin|hip|calf|plantar|itb|it band|mileage|base|speed|tempo|interval|easy|long run|trail|ultra|fitness|PR|personal record|finish|time goal|taper|build|connect|app|account|skip|yes|no|sure|ok|got it|sounds good|makes sense)\b/i;
+
+// Leading words that make a message a question even without a question mark —
+// SMS punctuation is unreliable and "how much does this cost" is the single most
+// common tangent in onboarding.
+const QUESTION_OPENERS = /^\s*(what|what's|whats|how|how's|why|when|where|who|which|can|could|do|does|did|is|are|will|would|should|am|any)\b/i;
 
 async function classifyOffTopic(
   message: string,
@@ -267,12 +400,17 @@ async function classifyOffTopic(
 ): Promise<boolean> {
   // System triggers are always on-topic
   if (/^\(strava/.test(message)) return false;
-  // No question mark → almost certainly a direct answer, skip LLM
-  if (!/\?/.test(message)) return false;
+  // Neither a question mark nor a question-leading word → a direct answer, skip LLM.
+  // The bare "must contain ?" test this replaces let every unpunctuated question through
+  // as on-topic, which is how "how much does this cost" reached handleScheduleConfirm and
+  // silently completed onboarding instead of being answered.
+  if (!/\?/.test(message) && !QUESTION_OPENERS.test(message)) return false;
   // Contains training/running keywords → on-topic, skip LLM
   if (ONBOARDING_KEYWORDS.test(message)) return false;
-  // Very short questions are likely direct responses, not tangents
-  if (message.trim().length < 50) return false;
+  // Note: there is deliberately no minimum-length skip here. The old `length < 50` rule
+  // exempted almost every real tangent ("how much is this?", "is my data private?") on the
+  // theory that short questions are direct responses — but short direct responses are
+  // already caught by the keyword test above.
 
   const lastAssistantMsg = [...history].reverse().find(m => m.role === "assistant")?.content ?? "";
 
@@ -300,20 +438,85 @@ OFF_TOPIC: general questions (gear recommendations, nutrition science, app funct
   return verdict === "OFF_TOPIC";
 }
 
+/**
+ * What the current stage is trying to collect, and the exact line used to steer an
+ * off-topic athlete back to it. Returns null for stages where a tangent shouldn't be
+ * intercepted (awaiting_payment is a billing gate with a single canned reply; a null
+ * step means onboarding is already finished and coach/respond owns the conversation).
+ *
+ * The redirect defaults to re-asking Dean's own last question verbatim, so the athlete
+ * is pointed back at the actual pending question rather than a generic stage summary.
+ */
+function stageContextFor(
+  step: string | null,
+  data: Record<string, unknown>,
+  history: Array<{ role: "user" | "assistant"; content: string }>
+): { goal: string; redirect: string } | null {
+  // Dean's most recent question, used as the redirect wherever one exists.
+  const lastAssistant = [...history].reverse().find((m) => m.role === "assistant")?.content ?? "";
+  const questions = lastAssistant.match(/[^.!?\n]+\?/g);
+  const lastQuestion = questions?.[questions.length - 1]?.trim() ?? null;
+
+  const withFallback = (goal: string, fallback: string) => ({
+    goal,
+    redirect: lastQuestion ?? fallback,
+  });
+
+  if (step === "awaiting_strava") {
+    return {
+      goal: "get the athlete to connect Strava",
+      // Deliberately not lastQuestion — the pending action is a link that's already above,
+      // and re-asking a question Dean phrased differently reads as if it wasn't sent.
+      redirect: "To keep going I need to connect to Strava — the link's just above.",
+    };
+  }
+  if (step === "awaiting_timezone") {
+    return withFallback(
+      "get the athlete's city or state so reminders fire at the right local time",
+      "What city or state are you in?"
+    );
+  }
+  if (step !== "onboarding") return null;
+
+  const stage = data.stage as string | undefined;
+  if (stage === "injury_intake") {
+    return withFallback(
+      "collect injury details — body part, severity, and when the pain flares",
+      "Back to the injury for a second — how limiting is it right now?"
+    );
+  }
+  if (stage === "schedule_confirm") {
+    return withFallback(
+      "confirm which days the athlete trains and what they want out of the plan",
+      "What days of the week do you want to run?"
+    );
+  }
+  // Goals stage.
+  if (!data.name) {
+    return withFallback(
+      "collect the athlete's name and what they're training for",
+      "What's your name, and what are you working toward?"
+    );
+  }
+  if (!data.goal) {
+    return withFallback("confirm the athlete's training goal", "What race or goal are you training for?");
+  }
+  if (!data.strava_connected) {
+    return {
+      goal: "get the athlete to connect Strava",
+      redirect: "To keep going I need to connect to Strava — the link's just above.",
+    };
+  }
+  return withFallback("wrap up and signal ready", "Ready to lock this in whenever you are.");
+}
+
 async function handleOffTopicMessage(
   user: { id: string; phone_number: string; name: string | null },
   message: string,
-  data: Record<string, unknown>,
-  stageGoal: string,
-  history: Array<{ role: "user" | "assistant"; content: string }>,
-  chatId?: string | null
+  redirectLine: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>
 ): Promise<NextResponse> {
-  void chatId;
-  const firstName = ((data.name as string | null) ?? user.name ?? "").split(" ")[0] || null;
-  const redirectLine = stageGoal.includes("name") ? "What's your name, and what are you training for?"
-    : stageGoal.includes("goal") ? "What race or goal are you training for?"
-    : stageGoal.includes("Strava") ? "To keep going I need to connect to Strava — the link's just above."
-    : "Ready to lock this in whenever you are.";
+  const firstName = (user.name ?? "").split(" ")[0] || null;
 
   const response = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
@@ -336,10 +539,13 @@ Rules:
     .join("")
     .trim() || `${redirectLine}`;
 
-  await insertConversation([
-    { user_id: user.id, role: "user", content: message, message_type: "user_message" },
-    { user_id: user.id, role: "assistant", content: text, message_type: "onboarding" },
-  ]);
+  await insertInboundMessage(user.id, message);
+  await insertConversation({
+    user_id: user.id,
+    role: "assistant",
+    content: text,
+    message_type: "onboarding",
+  });
   if (!dryRunUsers.has(user.id)) await sendSMS(user.phone_number, text);
   return NextResponse.json({ ok: true });
 }
@@ -348,20 +554,11 @@ async function handleConversation(
   user: { id: string; phone_number: string; name: string | null },
   message: string,
   onboardingData: Record<string, unknown>,
-  chatId?: string | null
+  chatId: string | null | undefined,
+  // Loaded once in POST (the off-topic classifier needs it too), oldest-first, with this
+  // turn's inbound message excluded.
+  history: Array<{ role: "user" | "assistant"; content: string }>
 ): Promise<NextResponse> {
-  // Load conversation history (last 30 messages, oldest-first)
-  const { data: historyRows } = await supabase
-    .from("conversations")
-    .select("role, content")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(30);
-
-  const history = (historyRows ?? [])
-    .reverse()
-    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
-
   // True if Dean has never replied yet in this onboarding conversation
   const isFirstResponse = !history.some((m) => m.role === "assistant");
 
@@ -584,20 +781,9 @@ async function handleConversation(
     return handleScheduleConfirm(user, message, mergedData, chatId);
   }
   // Falls through to goals stage (collect name + goal + race date + Strava).
+  // Off-topic tangents were already intercepted in POST, ahead of this dispatch.
 
-  // ── Off-topic classifier ────────────────────────────────────────────────────
-  // Cheap Haiku call to detect tangential questions so the goals-stage Sonnet
-  // prompt can answer them naturally without confusing state advancement.
-  const stageGoal = !mergedData.name ? "collect the athlete's name and what they're training for"
-    : !mergedData.goal ? "confirm the athlete's training goal"
-    : !mergedData.strava_connected ? "get the athlete to connect Strava"
-    : "wrap up and signal ready";
-  const isOffTopic = await classifyOffTopic(message, stageGoal, history);
-  if (isOffTopic) {
-    return handleOffTopicMessage(user, message, mergedData, stageGoal, history, chatId);
-  }
-
-  const systemPrompt = `${!isFirstResponse ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.
+  const systemPrompt =`${!isFirstResponse ? `This is an ongoing conversation. You already introduced yourself — continue naturally without re-introducing or using first-meeting phrases.
 
 ` : ""}You are Coach Dean, an AI running coach onboarding a new athlete entirely over SMS text messages.
 
@@ -1057,21 +1243,27 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   // history.
 
   // Store user's inbound message
-  await insertConversation({
-    user_id: user.id,
-    role: "user",
-    content: message,
-    message_type: "user_message",
-  });
+  await insertInboundMessage(user.id, message);
 
   // Empty-response guard: if the model returned no text (or only [READY]/placeholders
   // that were stripped away), sending an empty SMS would leave the athlete staring
   // at silence — the exact failure pattern reported when a 5K time came in and Dean
-  // went quiet. Fall back to a short acknowledgment so the conversation never stalls.
+  // went quiet.
+  //
+  // The fallback must be a QUESTION, not an acknowledgment. This used to send
+  // "Got it — one sec." — a standalone holding message, which is precisely what the
+  // prompt's own NEVER SEND STANDALONE HOLDING MESSAGES rule forbids, and for the same
+  // reason: there is no async loop, so nothing follows it. The athlete gets a message
+  // that promises a reply that can never come, and the conversation stalls anyway — the
+  // guard converted a silent dead end into a talkative one. Re-ask the current stage's
+  // question instead, so the turn always ends with something the athlete can answer.
   const cleanedResponse = responseText.trim();
   if (!cleanedResponse && !stravaMsg) {
-    console.warn("[onboarding] empty responseText after cleanup — sending fallback ack");
-    responseText = "Got it — one sec.";
+    console.warn("[onboarding] empty responseText after cleanup — re-asking the pending question");
+    void trackEvent(user.id, "onboarding_empty_response_fallback", { stage: (mergedData.stage as string) ?? "goals" });
+    responseText =
+      stageContextFor("onboarding", mergedData, history)?.redirect ??
+      "What's your name, and what are you working toward?";
   }
 
   if (isReady) {
@@ -1564,12 +1756,7 @@ ${injuryAlreadyCollected ? `- HR ZONES: Do not lead with or headline HR zone ana
     ...(injuryAlreadyCollected ? { injury_follow_up_sent: true } : {}),
   };
 
-  await insertConversation({
-    user_id: user.id,
-    role: "user",
-    content: "(strava connected)",
-    message_type: "user_message",
-  });
+  await insertInboundMessage(user.id, "(strava connected)");
 
   await supabase.from("users")
     .update({ onboarding_data: updatedData as unknown as Json })
@@ -1605,12 +1792,7 @@ async function handleInjuryIntake(
   }
 
   // Store user message
-  await insertConversation({
-    user_id: user.id,
-    role: "user",
-    content: message,
-    message_type: "user_message",
-  });
+  await insertInboundMessage(user.id, message);
 
   // Detect "no injury" responses
   // Allows one inserted qualifier word ("no current issues", "no major injuries") rather
@@ -1909,12 +2091,7 @@ async function handleScheduleConfirm(
     }
   }
 
-  await insertConversation({
-    user_id: user.id,
-    role: "user",
-    content: message,
-    message_type: "user_message",
-  });
+  await insertInboundMessage(user.id, message);
 
   await supabase.from("users")
     .update({ onboarding_data: mergedData as unknown as Json })
@@ -2678,12 +2855,41 @@ async function completeOnboarding(
     ),
   ]);
 
+  // A failure here is terminal for the athlete: no profile means no plan, and both
+  // branches below return without sending anything, leaving onboarding_step stuck on
+  // "onboarding" with the athlete's last message unanswered. It used to be a bare
+  // console.error, so it was invisible — the same class of unchecked write that hid the
+  // generateAndSaveFullPlan failure for three separate investigation passes (2026-08-04).
+  // Report it, and hand the athlete back a real message instead of silence — their next
+  // reply re-enters this stage and retries the upsert.
+  const reportCompletionFailure = async (write: string, error: unknown) => {
+    console.error(`[onboarding] ${write} upsert failed:`, error);
+    void trackEvent(user.id, "onboarding_completion_write_failed", { write });
+    const { captureException } = await import("@sentry/nextjs");
+    captureException(error instanceof Error ? error : new Error(`${write} upsert failed`), {
+      tags: { route: "onboarding/handle", write },
+      extra: { userId: user.id, error },
+    });
+    const { data: u } = await supabase
+      .from("users")
+      .select("phone_number")
+      .eq("id", user.id)
+      .single();
+    if (u?.phone_number) {
+      await sendAndStore(
+        user.id,
+        u.phone_number as string,
+        "Something broke on my end putting your plan together. Give me a nudge in a minute and I'll pick it right back up.",
+        "onboarding"
+      );
+    }
+  };
   if (profileResult.error) {
-    console.error("[onboarding] training_profiles upsert failed:", profileResult.error);
+    await reportCompletionFailure("training_profiles", profileResult.error);
     return;
   }
   if (stateResult.error) {
-    console.error("[onboarding] training_state upsert failed:", stateResult.error);
+    await reportCompletionFailure("training_state", stateResult.error);
     return;
   }
 
