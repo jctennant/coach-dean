@@ -8,6 +8,40 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-06 — Mid-onboarding athletes get the same short post-run message as everyone else, plus the question they still owe
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "A bit confused why Dean keeps sending these long messages after I run or bike, I thought we had updated it to be something like how much mileage, how much for the week, and one other short comment?" — with two examples, both paragraph-length recaps restating distance/pace/HR/elevation and closing "Looking forward to helping you build safely toward the Teton Crest Trail!"
+
+**Root cause:** The short post-run format (deterministic mileage line 1 + optional one-sentence line 2, `[NO_REPLY]` by default) is enforced by the `post_run` OUTPUT CONTRACT in `coach/respond/route.ts`. It only ever applied to the `post_run` trigger. Jake's test account has `onboarding_step: "onboarding"`, so `webhooks/strava/route.ts` routes its activities to `post_run_onboarding` — a separate lightweight early-exit handler with its own much older prompt: *"React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable)"* + *"close with a short forward-looking line."* That prompt produced exactly the observed messages. It also never sent the deterministic mileage line at all, which is why the examples have no stats line — the tell that they didn't come through the `post_run` path.
+
+Separately, the handler's own doc comment claimed it *"re-asks the current onboarding question so the user knows to reply and finish setup"*, while the code said `"Do NOT ask any question"`. The behavior had been inverted at some point and the comment left behind. Jake's account has been stuck at the `schedule_confirm` stage since 2026-08-05 with an unanswered checkpoint question, logging activities the whole time and being congratulated on each one.
+
+**Fix / Change:**
+- `handlePostRunOnboarding` now composes the same two-part message as `post_run`: line 1 from `buildPostRunMileageLine` / `computeWeekActivityTotals` (computed from activity rows, never LLM-authored), line 2 an optional single sentence under a trimmed-down copy of the `post_run` OUTPUT CONTRACT — injury check-in or a genuine standout only, `[NO_REPLY]` otherwise, generic praise and "Looking forward to…" sign-offs named as forbidden.
+- When onboarding is still blocked on a question, it's appended verbatim as a third part. Verbatim rather than handed to Claude, so it can't be paraphrased into something the athlete already answered. Suppressed if the previous post-activity message already carried it, so three runs in a week don't produce three identical asks.
+- New `src/lib/onboarding-pending.ts` holds the stage → pending-question mapping. `onboarding/handle`'s `stageContextFor` (off-topic redirect) and `coach/respond`'s nudge both read from it — this mapping previously existed only inside `stageContextFor`, and the alternative was a second hand-maintained copy that would drift.
+- `awaiting_strava` / `goals_strava` deliberately never nudge: the pending action there is a link the athlete already has, and repeating the sentence without it is worse than silence.
+
+**Files changed:** `src/lib/onboarding-pending.ts` (new), `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/lib/onboarding-pending.test.ts` (new), `src/__tests__/api/coach-respond.test.ts`
+
+---
+
+## KNOWN BUG (not fixed) — 2026-08-06 — an onboarding turn failed silently and the recovery cron never caught it
+
+**Type:** Bug (open)
+**Reported by:** Jake
+**User feedback:** "Dean didn't actually respond to my message about my shin feeling 2/10"
+
+**What was observed:** Jake sent *"Shin felt decent, 2/10 initially and then got a bit better at the end"* at 2026-08-06 14:10:54 UTC. The inbound row is in `conversations`. No assistant row was ever written, no SMS sent, and `onboarding_data` was not mutated (no `schedule_confirmed`, no `processing_lock_at`) — so the turn failed somewhere between dispatch and any handler's first write. The user is at `onboarding_step: "onboarding"`, `stage: "schedule_confirm"`, so it would have gone through the off-topic classifier (a shin update is off-topic relative to "confirm your schedule") into `handleOffTopicMessage`. A throw in either — the outer `try/catch` in `onboarding/handle`'s POST returns a bare 500 and sends nothing — matches every observed symptom.
+
+**Why nothing recovered it:** `/api/cron/missed-messages` exists for exactly this and covers `onboarding_step: "onboarding"` with `retry: true`. It never fired for this message, which was still unanswered 9.5 hours later — long past the cron's 3–90 minute window, so it is now permanently unrecoverable. Two candidates, neither verifiable from the repo: the job is paused/not scheduled on cron-job.org (the dashboard is the live config; `docs/crons.md` is only the declared record, and this exact class of drift is why that file exists), or prod's `RESTRICT_TO_PHONES` doesn't contain the test number (the cron is ⛔-gated, and `.env.local` has `+15107084020`, which does match — but prod's value was not checked).
+
+**Next step:** verify the `missed-messages` job is live on cron-job.org and that prod's `RESTRICT_TO_PHONES` includes the numbers being tested, before treating the silent-turn failure itself as the primary bug. The safety net not firing is the more serious of the two — the handler throw is expected to happen occasionally and is precisely what the cron exists to absorb.
+
+---
+
 ## 2026-08-04 — Upload offer restored for athletes who want to keep their plan; no more false finish before a checkpoint; three known bugs documented
 
 **Type:** Bug Fix / Improvement

@@ -44,6 +44,7 @@ import { parseSessionMiles } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
+import { onboardingNudgeQuestion } from "@/lib/onboarding-pending";
 import { inferTrainingDaysFromActivities, deriveTrainingDaysFallback, type InferableActivity, type TrainingDaysFallback } from "@/lib/infer-training-days";
 import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
@@ -1110,8 +1111,17 @@ async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextR
 
 /**
  * Handles a Strava activity event for a user who hasn't finished onboarding yet.
- * Sends a brief, warm reaction to the run, then re-asks the current onboarding question
- * so the user knows to reply and finish setup.
+ *
+ * Structurally the same message the fully-onboarded post_run path sends: a deterministic
+ * mileage line computed from activity rows, plus an optional one-sentence reaction from Dean.
+ * It used to be a separate chatty prompt ("react warmly in 1-2 sentences, be specific about
+ * distance and pace, close with a forward-looking line"), which is why mid-onboarding athletes
+ * got paragraph-length recaps restating distance/pace/HR while onboarded athletes got two
+ * lines — the post_run OUTPUT CONTRACT was never applied here.
+ *
+ * The one thing this path adds over post_run: when onboarding is still blocked on a question,
+ * it gets appended, so an athlete who's been logging runs without finishing setup is reminded
+ * what's outstanding instead of being congratulated indefinitely.
  */
 async function handlePostRunOnboarding(
   userId: string,
@@ -1122,7 +1132,7 @@ async function handlePostRunOnboarding(
   const [userResult, activityResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id, phone_number, name, onboarding_step, onboarding_data, linq_chat_id, messaging_opted_out")
+      .select("id, phone_number, name, onboarding_step, onboarding_data, linq_chat_id, messaging_opted_out, timezone")
       .eq("id", userId)
       .single(),
     activityId
@@ -1148,12 +1158,49 @@ async function handlePostRunOnboarding(
     ? `\n\nALREADY COLLECTED (do NOT re-ask for any of these — the athlete has told you already):\n${JSON.stringify(collectedData, null, 2)}`
     : "";
 
-  const closingInstruction =
-    "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
-
   const onbIsMetric = (collectedData.preferred_units as string | undefined) === "metric";
-  const unitsLine = onbIsMetric ? ` Use km and min/km for all distances and paces.` : " Use miles and min/mile for all distances and paces.";
-  const systemPrompt = `You are Coach Dean, an AI running coach. A user just finished a run but hasn't finished setting up their coaching profile yet. React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable). Keep the whole message under 4 sentences. No lists, no markdown, no bullet points.${unitsLine}${collectedSummary}\n\n${closingInstruction}`;
+  const onbTimezone = (user.timezone as string | null) || "America/New_York";
+
+  // Conversation history serves two purposes here: the nudge needs Dean's last question and
+  // his recent sends (to avoid repeating the same unanswered ask run after run), and Claude
+  // needs to see whether an injury/niggle is live before deciding to check in on it.
+  const { data: onbHistoryRows } = await supabase
+    .from("conversations")
+    .select("role, content, message_type")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  const onbHistoryDesc = (onbHistoryRows ?? []) as Array<{ role: string; content: string | null; message_type: string | null }>;
+  const onbHistory = [...onbHistoryDesc]
+    .reverse()
+    .map((m) => ({ role: m.role as "user" | "assistant", content: (m.content as string) || "" }));
+  // Only prior post-activity sends count as "already nudged" — the onboarding message that
+  // originally asked the question is the normal starting state, not evidence of a repeat.
+  const onbRecentPostActivity = onbHistoryDesc
+    .filter((m) => m.role === "assistant" && m.message_type === "post_run")
+    .map((m) => (m.content as string) || "")
+    .filter(Boolean);
+
+  // The onboarding question still outstanding, if any — appended verbatim below rather than
+  // handed to Claude, so it can't be paraphrased into a question the athlete already answered.
+  const nudgeQuestion = onboardingNudgeQuestion(
+    user.onboarding_step as string | null,
+    collectedData,
+    onbHistory,
+    onbRecentPostActivity
+  );
+
+  const unitsLine = onbIsMetric ? " Use km and min/km for all distances and paces." : " Use miles and min/mile for all distances and paces.";
+  const systemPrompt = `You are Coach Dean, an AI running coach. An athlete who hasn't finished setting up their profile yet just logged an activity.${unitsLine}${collectedSummary}
+
+OUTPUT CONTRACT — read this last, check before sending:
+1. YOUR MESSAGE IS ONLY AN OPTIONAL SECOND LINE. The activity and this week's mileage-by-category are already sent automatically as a separate first message, computed directly from Strava data — do NOT restate, estimate, or recompute distance, pace, or weekly mileage yourself.
+2. Your one job is to decide whether a second line is warranted, and if so, write ONE short sentence — nothing more. It's either (a) a check-in on how an injury or niggle they've mentioned is doing, or (b) a genuinely standout observation about this specific activity. Do not manufacture an observation to fill the line.
+3. MOST ACTIVITIES GET NO SECOND LINE. If neither applies, reply with exactly [NO_REPLY]. Sending only the mileage line is the correct, common outcome.
+4. NO GENERIC PRAISE ("Nice work!", "Solid effort!"), no forward-looking sign-offs ("Looking forward to...", "Let's keep building"), no effort corrections, no HR/zone lectures.
+5. DO NOT ask an onboarding question or ask them to finish setup — that's appended separately.
+
+Plain text only. No lists, no markdown.`;
 
   const activityDetails = activity
     ? {
@@ -1194,7 +1241,33 @@ async function handlePostRunOnboarding(
     .map((b) => (b as { type: "text"; text: string }).text.trim())
     .join(" ")
     .trim();
-  const coachMessage = normalizeEmDashes(stripReasoningPreamble(rawOnboardingMsg));
+  const onbLine2Raw = normalizeEmDashes(stripReasoningPreamble(rawOnboardingMsg)).trim();
+  const onbLine2 = onbLine2Raw === "[NO_REPLY]" ? "" : onbLine2Raw;
+
+  // Line 1 is deterministic, exactly as in the post_run path — this week's totals come from
+  // activity rows, not from anything Claude wrote. Activities are fetched for the whole
+  // trailing week so computeWeekActivityTotals can bucket them by category.
+  const onbWeekLookback = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: onbWeekActivities } = await supabase
+    .from("activities")
+    .select("activity_type, distance_meters, start_date")
+    .eq("user_id", userId)
+    .gte("start_date", onbWeekLookback)
+    .order("start_date", { ascending: false });
+  const onbWeekTotals = computeWeekActivityTotals(
+    (onbWeekActivities ?? []) as Array<{ activity_type: string | null; distance_meters: number | null; start_date: string }>,
+    onbTimezone
+  );
+  const onbLine1 = buildPostRunMileageLine(
+    (activity?.activity_type as string | null) ?? null,
+    (activity?.distance_meters as number | null) ?? null,
+    onbWeekTotals,
+    onbIsMetric
+  );
+
+  const coachMessage = [onbLine1, onbLine2, nudgeQuestion]
+    .filter((part): part is string => !!part && part.length > 0)
+    .join("\n\n");
 
   if (dryRun) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 

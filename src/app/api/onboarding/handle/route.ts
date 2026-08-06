@@ -19,6 +19,7 @@ import { composeStrengthRoutine } from "@/lib/strength-library";
 import { splitIntoMessages } from "@/lib/message-split";
 import { normalizeEmDashes } from "@/lib/text-format";
 import { inferTrainingDaysFromActivities, type InferableActivity } from "@/lib/infer-training-days";
+import { pendingOnboarding, lastQuestionAsked } from "@/lib/onboarding-pending";
 
 export const maxDuration = 60;
 
@@ -452,62 +453,17 @@ function stageContextFor(
   data: Record<string, unknown>,
   history: Array<{ role: "user" | "assistant"; content: string }>
 ): { goal: string; redirect: string } | null {
-  // Dean's most recent question, used as the redirect wherever one exists.
-  const lastAssistant = [...history].reverse().find((m) => m.role === "assistant")?.content ?? "";
-  const questions = lastAssistant.match(/[^.!?\n]+\?/g);
-  const lastQuestion = questions?.[questions.length - 1]?.trim() ?? null;
+  // Stage -> pending-question mapping lives in src/lib/onboarding-pending.ts because
+  // coach/respond's post_run_onboarding path needs the same answer (see the nudge it appends
+  // to a mid-onboarding athlete's post-activity message). Two copies drifted before.
+  const pending = pendingOnboarding(step, data);
+  if (!pending) return null;
 
-  const withFallback = (goal: string, fallback: string) => ({
-    goal,
-    redirect: lastQuestion ?? fallback,
-  });
-
-  if (step === "awaiting_strava") {
-    return {
-      goal: "get the athlete to connect Strava",
-      // Deliberately not lastQuestion — the pending action is a link that's already above,
-      // and re-asking a question Dean phrased differently reads as if it wasn't sent.
-      redirect: "To keep going I need to connect to Strava — the link's just above.",
-    };
-  }
-  if (step === "awaiting_timezone") {
-    return withFallback(
-      "get the athlete's city or state so reminders fire at the right local time",
-      "What city or state are you in?"
-    );
-  }
-  if (step !== "onboarding") return null;
-
-  const stage = data.stage as string | undefined;
-  if (stage === "injury_intake") {
-    return withFallback(
-      "collect injury details — body part, severity, and when the pain flares",
-      "Back to the injury for a second — how limiting is it right now?"
-    );
-  }
-  if (stage === "schedule_confirm") {
-    return withFallback(
-      "confirm which days the athlete trains and what they want out of the plan",
-      "What days of the week do you want to run?"
-    );
-  }
-  // Goals stage.
-  if (!data.name) {
-    return withFallback(
-      "collect the athlete's name and what they're training for",
-      "What's your name, and what are you working toward?"
-    );
-  }
-  if (!data.goal) {
-    return withFallback("confirm the athlete's training goal", "What race or goal are you training for?");
-  }
-  if (!data.strava_connected) {
-    return {
-      goal: "get the athlete to connect Strava",
-      redirect: "To keep going I need to connect to Strava — the link's just above.",
-    };
-  }
-  return withFallback("wrap up and signal ready", "Ready to lock this in whenever you are.");
+  // Strava's pending action is a link that's already above, so the redirect deliberately
+  // ignores Dean's last question — re-asking it in different words reads as if it wasn't sent.
+  const useLastQuestion = pending.stage !== "awaiting_strava" && pending.stage !== "goals_strava";
+  const redirect = (useLastQuestion ? lastQuestionAsked(history) : null) ?? pending.fallbackQuestion;
+  return { goal: pending.goal, redirect };
 }
 
 async function handleOffTopicMessage(
