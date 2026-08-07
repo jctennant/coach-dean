@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation, insertConversationReturningId } from "@/lib/conversations";
+import { findPriorInboundDelivery } from "@/lib/inbound-dedup";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
 import { trackEvent } from "@/lib/track";
@@ -244,7 +245,7 @@ async function handleInboundMessage(
     ).eq("id", newUser.id);
 
     const messageBody = cleanBody || "";
-    await insertConversation({
+    const { id: newUserMsgId } = await insertConversationReturningId({
       user_id: newUser.id,
       role: "user",
       content: messageBody,
@@ -255,7 +256,7 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: newUser.id, message: messageBody, chatId }),
+      body: JSON.stringify({ userId: newUser.id, message: messageBody, chatId, inboundConversationId: newUserMsgId ?? null }),
     });
     return;
   }
@@ -270,25 +271,17 @@ async function handleInboundMessage(
 
   const messageBody = body || (hasAttachment ? "[Attachment received]" : "");
 
-  // Content dedup within 60s
-  if (body) {
-    const contentCutoff = new Date(Date.now() - 60_000).toISOString();
-    const { data: recentSame } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("role", "user")
-      .eq("content", messageBody)
-      .gte("created_at", contentCutoff)
-      .limit(1)
-      .maybeSingle();
-    if (recentSame) {
-      console.log("[photon-webhook] content-dedup: same body within 60s, skipping:", user.id);
-      return;
-    }
-  }
-
-  const { id: storedMsgId } = await insertConversationReturningId({
+  // Content dedup within 60s. Insert-first, then check — matching linq/route.ts, which
+  // moved off select-then-insert because two near-simultaneous deliveries of the same body
+  // could both pass the "does a matching row exist" check before either had written its
+  // row, producing two replies (observed in production, 2026-07-22). Whichever insert
+  // commits second always sees the first one's row, and the (created_at, id) tie-break
+  // inside findPriorInboundDelivery settles a same-millisecond commit.
+  //
+  // Skipping requires the earlier delivery to have been *answered*. A row whose pass died
+  // before replying is not evidence of anything, and treating it as a duplicate turns the
+  // re-delivery that would have recovered it into permanent silence (see inbound-dedup.ts).
+  const { id: storedMsgId, created_at: storedCreatedAt } = await insertConversationReturningId({
     user_id: user.id,
     role: "user",
     content: messageBody,
@@ -296,6 +289,26 @@ async function handleInboundMessage(
     external_message_id: messageId,
   });
   const storedMsg = storedMsgId ? { id: storedMsgId } : null;
+
+  if (body && storedMsgId && storedCreatedAt) {
+    const prior = await findPriorInboundDelivery({
+      userId: user.id,
+      content: messageBody,
+      excludeConversationId: storedMsgId,
+      before: { createdAt: storedCreatedAt, id: storedMsgId },
+    });
+
+    if (prior?.answered) {
+      console.log("[photon-webhook] content-dedup: same body within 60s, already answered, skipping:", user.id);
+      return;
+    }
+    if (prior) {
+      console.warn(
+        "[photon-webhook] duplicate inbound body within 60s but no reply — prior delivery failed, re-processing:",
+        user.id
+      );
+    }
+  }
 
   // FEEDBACK / REFUND intercept
   const isFeedback = /^FEEDBACK\b/i.test(body);
@@ -336,7 +349,7 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user.id, message: messageBody, chatId }),
+      body: JSON.stringify({ userId: user.id, message: messageBody, chatId, inboundConversationId: storedMsg?.id ?? null }),
     });
     return;
   }

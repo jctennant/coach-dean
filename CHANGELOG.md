@@ -8,6 +8,53 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-07 — A 90-second-old processing lock was silently swallowing the athlete's next onboarding message
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "hmm, seems like the dedup is making Dean not respond" — Dean asked *"Is it a general ache along the shin, or one specific painful spot? And does it hurt even when you're just walking around, or only during runs?"*, Jake answered *"General soreness / pain. I feel it a little bit when walking, but mainly intermittent annoyance pain while running. Not super painful but there."*, and nothing came back. Logs ended at `[photon-webhook] onboarding debounce: waiting 10s for user 45dbcdd0…` with no handler output after it.
+
+**Root cause:** Two independently-reasonable pieces of the dedup path combined into a per-user mute button.
+
+`onboarding/handle`'s content-dedup guard (added 2026-08-04) looks for an inbound row with the same body inside 60s, then decides whether to skip based on positive evidence the first pass is alive or done: an assistant reply after that row, or a held processing lock. Its comment states the assumption it rests on — *"Each sub-handler inserts its inbound row before doing its work"* — i.e. that inbound rows are only ever written by this route. That has not been true since the SMS webhooks were written: **both `webhooks/photon` and `webhooks/linq` insert the inbound row themselves, before dispatching to `onboarding/handle`.** So every webhook-driven turn found a "prior" inbound row that was in fact its own, and the entire skip decision collapsed onto the lock.
+
+The lock, in turn, was a bare per-user timestamp with a 90s TTL, `onboarding_data.processing_lock_at`. Its comment claimed *"the only thing a stale lock can suppress is a duplicate of the same message"* — true only under the same false assumption. Nothing recorded which message it was taken for.
+
+Confirmed against the live rows for the affected user:
+
+| time (UTC) | event |
+|---|---|
+| 00:34:47 | previous turn takes the lock (`processing_lock_at: 00:34:47.634Z`) |
+| 00:35:03 | previous turn replies (the shin question) |
+| 00:35:42 | Jake's answer arrives; photon-webhook stores the inbound row, waits 10s |
+| ~00:35:53 | `onboarding/handle` matches Jake's own row, sees no reply after it, reads the 66s-old lock as "in flight", returns `{ok:true}` — silently |
+
+66s < 90s, so the message died. `processing_lock_at` in the DB was still `00:34:47`, proving the route returned before it ever took its own lock. Any onboarding reply arriving within 90s of the previous turn was being dropped — which is most of them, since that's just a person answering promptly.
+
+Same evidence also showed **every webhook-driven onboarding message was being written to `conversations` twice** (once by the webhook, once by the stage handler) — visible as duplicate `"Hi there!"` and `"Jake, and Teton Crest Trail…"` rows. Dean and the Haiku extractor both read that history.
+
+The `[onboarding] duplicate inbound body within 60s but no reply and no lock — prior pass failed, re-processing` warning that also appeared in Jake's logs is the benign half of the same defect: with the self-match, that branch fired on ordinary first-time messages, so the log line has been meaningless (and the failed-turn recovery it names had effectively been running on every turn).
+
+**Fix / Change:**
+- New `inboundConversationId` field on the `onboarding/handle` request. Both webhooks now pass the `conversations.id` they just inserted (new-user paths switched to `insertConversationReturningId` to have one), and the dedup select excludes it. A webhook turn can no longer match itself, so the guard is back to firing only on genuine duplicate deliveries.
+- Same field marks the inbound row as already stored, reusing the existing `skipInboundInsertUsers` mechanism that `retry` uses — ends the double-write into conversation history.
+- The lock is now message-scoped: `processing_lock_for` holds a sha256 fingerprint of the body, and `lockHeld` requires it to match. A lock left behind by a different message is inert regardless of age, which is what the original comment already claimed was true. This also makes existing stale locks in prod harmless on deploy — no `processing_lock_for` means no match.
+- Regression test pins the exact failure: fresh message + 66s-old lock from a *different* message + `inboundConversationId` set ⇒ Dean answers.
+
+**Same flaw one layer up, also fixed (Jake: "yeah fix the webhook dedup too"):** the webhooks' own 60s content-dedup skipped on the matching row alone, with no check that a reply was ever sent — exactly the flaw `onboarding/handle`'s guard was rewritten to avoid on 2026-08-04. If a first delivery threw before replying, a re-delivery of the same body inside 60s was dropped at the webhook and never reached a handler. Both now require the earlier delivery to have been *answered* before skipping.
+
+Falling through instead of skipping is safe because the in-flight case is already covered downstream, twice: the debounce's latest-message check means whichever delivery's row is newest proceeds and the rest bail, and for onboarding the (now message-scoped) processing lock catches a second delivery arriving after the first has already passed that check.
+
+Rather than a fourth bespoke copy of the same query, this is now **`src/lib/inbound-dedup.ts`** — `findPriorInboundDelivery` returns the prior row *and* whether it was answered, leaving the skip decision to the caller (`onboarding/handle` combines it with its lock; the webhooks use `answered` alone). All three call sites had drifted apart, most importantly on exactly this point. Per CLAUDE.md's rule on the third variant of "scan recent messages for pattern X".
+
+Photon's copy also still used select-then-insert, which linq moved off in 2026-07-22 after two near-simultaneous deliveries both passed the "does a matching row exist" check and produced two replies. It's now insert-first with the same `(created_at, id)` tie-break, folded into the shared helper.
+
+**Test-mock bug found while adding coverage:** `linq-webhook.test.ts`'s chain stub had no `gt`, so the reply-lookup threw, `runAfter` swallowed it, and a `not.toHaveBeenCalled` assertion passed for the wrong reason. Added `gt`/`lt`. Both new webhook tests were verified to fail against the pre-fix behavior.
+
+**Files changed:** `src/lib/inbound-dedup.ts` (new), `src/app/api/onboarding/handle/route.ts`, `src/app/api/webhooks/photon/route.ts`, `src/app/api/webhooks/linq/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`, `src/__tests__/api/linq-webhook.test.ts`
+
+---
+
 ## 2026-08-06 — Shorter onboarding first message, Strava sentence removed
 
 **Type:** Improvement

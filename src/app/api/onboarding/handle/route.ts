@@ -20,6 +20,8 @@ import { splitIntoMessages } from "@/lib/message-split";
 import { normalizeEmDashes } from "@/lib/text-format";
 import { inferTrainingDaysFromActivities, type InferableActivity } from "@/lib/infer-training-days";
 import { pendingOnboarding, lastQuestionAsked } from "@/lib/onboarding-pending";
+import { findPriorInboundDelivery } from "@/lib/inbound-dedup";
+import crypto from "crypto";
 
 export const maxDuration = 60;
 
@@ -28,22 +30,38 @@ const dryRunUsers = new Set<string>();
 
 // Tracks userIds whose inbound message row already exists in `conversations` and must
 // not be inserted again by a stage handler. Set for watchdog re-dispatches (`retry`),
-// where the row was stored by the original, failed pass. Follows the same
-// module-level-set pattern as dryRunUsers so the flag doesn't have to be threaded
-// through every handler signature (handleDataAnalysis is called by handleConversation,
-// not by POST, so a parameter would have to pass through two layers).
+// where the row was stored by the original, failed pass, and for webhook dispatches that
+// pass `inboundConversationId` (both linq and photon store the row before dispatching, so
+// without this every webhook-driven turn wrote the athlete's message to history twice).
+// Follows the same module-level-set pattern as dryRunUsers so the flag doesn't have to be
+// threaded through every handler signature (handleDataAnalysis is called by
+// handleConversation, not by POST, so a parameter would have to pass through two layers).
 const skipInboundInsertUsers = new Set<string>();
 
-// How long a request holds the "currently processing this user" lock. Only consulted
-// when an identical message body arrives inside the dedup window, so a lock left behind
-// by a crashed request can never suppress anything but a duplicate of that same message.
+// How long a request holds the "currently processing this user" lock. Only consulted when
+// an identical message body arrives inside the dedup window AND the lock was taken for
+// that same body, so a lock left behind by a crashed request can never suppress anything
+// but a duplicate of the message it was taken for.
 const PROCESSING_LOCK_MS = 90_000;
+
+// The lock records which message it was taken for. Bodies can be long; a stable short
+// fingerprint is enough to answer "is the in-flight pass working on this same message?"
+function lockFingerprint(message: string): string {
+  return crypto.createHash("sha256").update(message).digest("hex").slice(0, 16);
+}
 
 interface OnboardingRequest {
   userId: string;
   message: string;
   chatId?: string | null;
   dry_run?: boolean;
+  /**
+   * The `conversations.id` of the inbound row the caller already stored for this exact
+   * message. Both SMS webhooks insert the row before dispatching here; without this the
+   * content-dedup guard below sees that row and concludes a *prior* delivery of the same
+   * body already happened, when in fact it's this turn's own row.
+   */
+  inboundConversationId?: string | null;
   /**
    * Set by /api/cron/missed-messages when re-dispatching a turn that produced no reply.
    * Skips content dedup (the original inbound row is minutes old and would otherwise be
@@ -137,13 +155,15 @@ async function sendPollAndStore(userId: string, phone: string, poll: AppPoll): P
  *   "awaiting_payment"  → payment link re-send
  */
 export async function POST(request: Request) {
-  const { userId, message, chatId, dry_run = false, retry = false }: OnboardingRequest = await request.json();
+  const { userId, message, chatId, dry_run = false, retry = false, inboundConversationId = null }: OnboardingRequest =
+    await request.json();
+  const inboundAlreadyStored = retry || !!inboundConversationId;
   if (dry_run) dryRunUsers.add(userId);
-  if (retry) skipInboundInsertUsers.add(userId);
+  if (inboundAlreadyStored) skipInboundInsertUsers.add(userId);
 
   const cleanup = () => {
     if (dry_run) dryRunUsers.delete(userId);
-    if (retry) skipInboundInsertUsers.delete(userId);
+    if (inboundAlreadyStored) skipInboundInsertUsers.delete(userId);
   };
 
   const { data: user, error: userError } = await supabase
@@ -177,33 +197,31 @@ export async function POST(request: Request) {
   //
   // So skip only when there's positive evidence the first pass is alive or succeeded:
   //   - an assistant reply landed after that inbound row (it completed — a true duplicate), or
-  //   - the processing lock below is still held (it's in flight right now).
+  //   - the processing lock below is still held *for this same message* (in flight now).
   // Otherwise fall through and re-process, which is how a failed turn recovers.
+  //
+  // The row this turn's own caller stored is excluded by id. Both SMS webhooks insert the
+  // inbound row before dispatching here, so without that exclusion every webhook-driven
+  // turn matched itself, and the decision collapsed onto the lock alone — which is how a
+  // 90s-old lock from the *previous* message silently swallowed the next one (2026-08-06).
   if (message && !retry) {
-    const dedupCutoff = new Date(Date.now() - 60_000).toISOString();
-    const { data: recentSame } = await supabase
-      .from("conversations")
-      .select("id, created_at")
-      .eq("user_id", userId)
-      .eq("role", "user")
-      .eq("content", message)
-      .gte("created_at", dedupCutoff)
-      .order("created_at", { ascending: false })
-      .limit(1);
+    const priorInbound = await findPriorInboundDelivery({
+      userId,
+      content: message,
+      excludeConversationId: inboundConversationId,
+    });
 
-    const priorInbound = recentSame?.[0];
-    if (priorInbound?.created_at) {
-      const { data: replyRows } = await supabase
-        .from("conversations")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("role", "assistant")
-        .gt("created_at", priorInbound.created_at as string)
-        .limit(1);
-      const alreadyAnswered = !!replyRows && replyRows.length > 0;
+    if (priorInbound) {
+      const alreadyAnswered = priorInbound.answered;
 
       const lockAt = onboardingData.processing_lock_at as string | undefined;
-      const lockHeld = !!lockAt && Date.now() - Date.parse(lockAt) < PROCESSING_LOCK_MS;
+      const lockFor = onboardingData.processing_lock_for as string | undefined;
+      // A lock only speaks for the message it was taken for. Without the fingerprint check
+      // it's a per-user mute button that any turn can leave armed for 90 seconds.
+      const lockHeld =
+        !!lockAt &&
+        Date.now() - Date.parse(lockAt) < PROCESSING_LOCK_MS &&
+        lockFor === lockFingerprint(message);
 
       if (alreadyAnswered || lockHeld) {
         console.log(
@@ -224,8 +242,9 @@ export async function POST(request: Request) {
   // Take the processing lock so a genuinely simultaneous duplicate (both requests in flight
   // before either has sent anything) is suppressed by the check above. Written into the
   // in-memory copy too, so the handler's own onboarding_data write carries it forward rather
-  // than clobbering it. Never explicitly released — it's timestamped, and the only thing a
-  // stale lock can suppress is a duplicate of the same message within PROCESSING_LOCK_MS.
+  // than clobbering it. Never explicitly released — it's timestamped and fingerprinted with
+  // the message it was taken for, so the only thing a stale lock can suppress is a duplicate
+  // of that same message within PROCESSING_LOCK_MS.
   //
   // Only the "onboarding" step needs it: that's where a turn runs several serial LLM calls
   // and multiple onboarding_data writes that two concurrent passes can interleave. The other
@@ -233,6 +252,7 @@ export async function POST(request: Request) {
   // covers them, and they'd otherwise pay a DB write per turn for nothing.
   if (message && !retry && !dry_run && step === "onboarding") {
     onboardingData.processing_lock_at = new Date().toISOString();
+    onboardingData.processing_lock_for = lockFingerprint(message);
     await supabase
       .from("users")
       .update({ onboarding_data: onboardingData as unknown as Json })
