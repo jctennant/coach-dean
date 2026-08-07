@@ -1947,3 +1947,115 @@ describe("coach/respond — plan_action structured dispatch", () => {
     expect(events).toContain("plan_action_unsignaled_change");
   });
 });
+
+describe("coach/respond — post_run_onboarding message shape", () => {
+  /**
+   * Mid-onboarding athletes used to get a chatty paragraph from a separate prompt that never
+   * had the post_run OUTPUT CONTRACT applied to it (distance/pace/HR restated in prose, plus a
+   * "Looking forward to..." sign-off). These assert the shape it sends now: a deterministic
+   * mileage line, an optional one-sentence reaction, and the outstanding onboarding question.
+   */
+  const ONBOARDING_USER = {
+    id: "user-onb",
+    phone_number: "+12025550009",
+    name: "Jake",
+    onboarding_step: "onboarding",
+    onboarding_data: { stage: "schedule_confirm", name: "Jake", goal: "trail_race" },
+    linq_chat_id: "chat-onb",
+    messaging_opted_out: false,
+    timezone: "America/Denver",
+  };
+
+  const TODAY = new Date().toISOString();
+
+  function setupOnboardingSupabase(conversations: Array<Record<string, unknown>>) {
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: ONBOARDING_USER, error: null });
+      if (table === "conversations") return makeChain({ data: conversations, error: null });
+      if (table === "activities") {
+        // Two different activities queries run on this path: a .single() lookup for the
+        // activity that triggered the webhook, and an awaited range query for the week's
+        // totals. They need different shapes from the same chain.
+        const chain = makeChain({
+          data: [{ activity_type: "Run", distance_meters: 8690, start_date: TODAY }],
+          error: null,
+        }) as Record<string, unknown>;
+        chain.single = vi.fn().mockResolvedValue({
+          data: { activity_type: "Run", distance_meters: 8690, moving_time_seconds: 2800, average_heartrate: 151, average_pace: "8:45", elevation_gain: 100 },
+          error: null,
+        });
+        return chain;
+      }
+      return makeChain({ data: null, error: null });
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("leads with the deterministic mileage line and appends the outstanding onboarding question", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "How's the shin feeling after that one?" }],
+    });
+    setupOnboardingSupabase([
+      { role: "assistant", content: "Looks like you typically run Wed/Fri — sound right, or want different days?", message_type: "onboarding" },
+    ]);
+
+    const req = mockRequest({ userId: "user-onb", trigger: "post_run_onboarding", activityId: 555, dry_run: true });
+    const res = await POST(req) as unknown as { data: { message: string } };
+
+    const lines = res.data.message.split("\n\n");
+    expect(lines[0]).toMatch(/^5\.4mi run today\./);
+    expect(lines[1]).toBe("How's the shin feeling after that one?");
+    expect(lines[2]).toBe("Looks like you typically run Wed/Fri — sound right, or want different days?");
+  });
+
+  it("sends only the mileage line and the question when Claude returns [NO_REPLY]", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "[NO_REPLY]" }],
+    });
+    setupOnboardingSupabase([
+      { role: "assistant", content: "Looks like you typically run Wed/Fri — sound right, or want different days?", message_type: "onboarding" },
+    ]);
+
+    const req = mockRequest({ userId: "user-onb", trigger: "post_run_onboarding", activityId: 555, dry_run: true });
+    const res = await POST(req) as unknown as { data: { message: string } };
+
+    expect(res.data.message).not.toMatch(/NO_REPLY/);
+    expect(res.data.message.split("\n\n")).toHaveLength(2);
+    expect(res.data.message).toContain("Looks like you typically run Wed/Fri");
+  });
+
+  it("does not re-append a question the previous message already asked", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "[NO_REPLY]" }],
+    });
+    setupOnboardingSupabase([
+      { role: "assistant", content: "4mi run today. 12mi running this week.\n\nLooks like you typically run Wed/Fri — sound right, or want different days?", message_type: "post_run" },
+      { role: "assistant", content: "Looks like you typically run Wed/Fri — sound right, or want different days?", message_type: "onboarding" },
+    ]);
+
+    const req = mockRequest({ userId: "user-onb", trigger: "post_run_onboarding", activityId: 555, dry_run: true });
+    const res = await POST(req) as unknown as { data: { message: string } };
+
+    expect(res.data.message).not.toContain("sound right");
+    expect(res.data.message.split("\n\n")).toHaveLength(1);
+  });
+
+  it("instructs Claude that line 1 is already sent and forbids the old sign-off shape", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "[NO_REPLY]" }],
+    });
+    setupOnboardingSupabase([]);
+
+    const req = mockRequest({ userId: "user-onb", trigger: "post_run_onboarding", activityId: 555, dry_run: true });
+    await POST(req);
+
+    const prompt = systemText((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls[0][0].system);
+    expect(prompt).toContain("ONLY AN OPTIONAL SECOND LINE");
+    expect(prompt).toContain("[NO_REPLY]");
+    expect(prompt).toMatch(/Looking forward to/); // named as a forbidden sign-off
+  });
+});

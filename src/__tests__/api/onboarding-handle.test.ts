@@ -54,7 +54,7 @@ function chain(response: { data: unknown; error: unknown }) {
   const c: Record<string, unknown> = {};
   const methods = [
     "select", "insert", "update", "upsert", "delete",
-    "eq", "neq", "is", "not", "gte", "lte", "in", "or", "order", "limit",
+    "eq", "neq", "is", "not", "gt", "lt", "gte", "lte", "in", "or", "order", "limit",
   ];
   for (const m of methods) c[m] = vi.fn().mockReturnValue(c);
   c["single"] = vi.fn().mockResolvedValue(response);
@@ -184,7 +184,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     mockTables({
       users: [
         // Mode already resolved via earlier [MODE:FROM_SCRATCH] tag, persisted in onboarding_data
-        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"], has_existing_plan: false, wants_plan: true, strava_connected: true } }), error: null },
+        { data: onboardingUser({ onboarding_data: { goal: "5k", training_days: ["tuesday", "thursday", "saturday"], has_existing_plan: false, wants_plan: true, strava_connected: true, injury_intake_done: true } }), error: null },
+        { data: null, error: null },  // POST processing-lock write
         { data: { dashboard_token: "tok-abc" }, error: null },  // for completeOnboarding user lookup
       ],
       conversations: { data: [], error: null },
@@ -200,7 +201,9 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
     await POST(makeRequest({ userId: "user-001", message: "NYC, Monday Wednesday Friday" }));
 
-    // [READY] should be stripped from the sent SMS
+    // [READY] should be stripped from the sent SMS. The wrap-up only goes out when no
+    // checkpoint intercepts — training_days and injury intake are both already satisfied
+    // here, so this is the straight-to-completion path.
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
     const textSent = smsCalls[0]?.[1] as string;
     expect(textSent).not.toContain("[READY]");
@@ -209,7 +212,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
 
   it("[READY] signal with no training_days known: enters schedule_confirm checkpoint instead of completing onboarding", async () => {
     mockTables({
-      users: { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true } }), error: null },
+      users: { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true, injury_intake_done: true } }), error: null },
       conversations: { data: [], error: null },
       activities: { data: [], error: null }, // no history → inference returns null
       races: { data: [], error: null },
@@ -401,6 +404,11 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       conversations: { data: [], error: null },
     });
 
+    // Off-topic classifier (Haiku) now runs in POST for any question-shaped message that
+    // has no on-topic keyword — "So when exactly is Boston?" has none, and the old
+    // `length < 50` skip that used to exempt it was removed so short tangents like
+    // "how much does this cost?" get classified too.
+    mockLLMResponse("ON_TOPIC");
     // Extract-first ordering: extraction runs first. Returns null for race_date so
     // needsRaceDateLookup stays true and the pre-search fires for the stored race_name.
     mockToolResponse("save_training_fields", { race_date: null });
@@ -416,8 +424,8 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
       "+12025551234",
       expect.stringContaining("April 20, 2026")
     );
-    // 3 LLM calls total: extraction + pre-search + Sonnet
-    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(3);
+    // 4 LLM calls total: off-topic classifier + extraction + pre-search + Sonnet
+    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(4);
   });
 
   it("existing plan: has_existing_plan persists across turns without the tag re-firing", async () => {
@@ -628,6 +636,7 @@ describe("POST /api/onboarding/handle — current_week seeded from external_plan
         has_existing_plan: externalPlanDescription !== null,
         wants_plan: externalPlanDescription === null,
         strava_connected: true, // required to pass the Strava gate before completeOnboarding
+        injury_intake_done: true, // required to pass the injury-intake gate (maybeEnterInjuryIntake)
         ...(externalPlanDescription ? { external_plan_description: externalPlanDescription } : {}),
       },
     });
@@ -636,6 +645,8 @@ describe("POST /api/onboarding/handle — current_week seeded from external_plan
     const tables: Record<string, { data: unknown; error: unknown } | Array<{ data: unknown; error: unknown }>> = {
       users: [
         { data: userData, error: null },
+        // POST processing-lock write (onboarding_data + processing_lock_at)
+        { data: null, error: null },
         // isReady onboarding_data persist (line 806)
         { data: { onboarding_data: userData.onboarding_data }, error: null },
         // fresh user fetch inside completeOnboarding (line 1719)
@@ -718,5 +729,256 @@ describe("POST /api/onboarding/handle — current_week seeded from external_plan
 
     const stateWrite = stateUpserts.find(u => u.current_week != null);
     expect(stateWrite?.current_week).toBe(12);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inbound dedup — must distinguish "already handled" from "prior pass failed"
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboarding/handle — duplicate inbound handling", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("skips a duplicate whose first pass already replied", async () => {
+    mockTables({
+      users: { data: onboardingUser(), error: null },
+      conversations: [
+        // dedup select: matching inbound row from 20s ago
+        { data: [{ id: "c1", created_at: "2026-08-04T12:00:00Z" }], error: null },
+        // reply check: an assistant message landed after it → genuinely handled
+        { data: [{ id: "a1" }], error: null },
+      ],
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "shin has been sore for two weeks" }));
+
+    expect(sendSMS).not.toHaveBeenCalled();
+    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it("skips a duplicate while the first pass still holds the processing lock", async () => {
+    mockTables({
+      users: {
+        data: onboardingUser({
+          onboarding_data: { processing_lock_at: new Date().toISOString() },
+        }),
+        error: null,
+      },
+      conversations: [
+        { data: [{ id: "c1", created_at: "2026-08-04T12:00:00Z" }], error: null },
+        { data: [], error: null }, // no reply yet — but the lock says it's in flight
+      ],
+    });
+
+    await POST(makeRequest({ userId: "user-001", message: "shin has been sore for two weeks" }));
+
+    expect(sendSMS).not.toHaveBeenCalled();
+    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it("re-processes a duplicate whose first pass died before replying", async () => {
+    // The regression this guards: the original dedup skipped on the inbound row alone.
+    // Handlers store that row before doing their work, so a pass that threw partway through
+    // left the row behind with no reply — and every retry was then silently dropped,
+    // stranding the athlete permanently. No reply and no live lock means retry.
+    mockTables({
+      users: [
+        { data: onboardingUser({ onboarding_data: { name: "Jake" } }), error: null },
+        { data: null, error: null }, // processing-lock write
+      ],
+      conversations: [
+        { data: [{ id: "c1", created_at: "2026-08-04T12:00:00Z" }], error: null },
+        { data: [], error: null }, // no assistant reply — prior pass failed
+        { data: [], error: null }, // history
+      ],
+    });
+    mockToolResponse("save_training_fields", { goal: "marathon" });
+    mockLLMResponse("Marathon it is. What's the race?");
+
+    await POST(makeRequest({ userId: "user-001", message: "training for a marathon" }));
+
+    expect(sendSMS).toHaveBeenCalledWith("+12025551234", expect.stringContaining("Marathon it is"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Off-topic handling outside the goals stage
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboarding/handle — off-topic questions in non-goals stages", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("answers a pricing question during schedule_confirm instead of completing onboarding", async () => {
+    // handleScheduleConfirm treats any inbound message as confirmation and runs
+    // completeOnboarding, so before off-topic classification moved into POST an unanswered
+    // question here silently produced a plan instead of a reply.
+    mockTables({
+      users: [
+        {
+          data: onboardingUser({
+            onboarding_data: {
+              name: "Jake",
+              goal: "marathon",
+              strava_connected: true,
+              stage: "schedule_confirm",
+            },
+          }),
+          error: null,
+        },
+        { data: null, error: null }, // processing-lock write
+      ],
+      conversations: [
+        { data: [], error: null }, // dedup: no prior inbound
+        {
+          data: [
+            {
+              role: "assistant",
+              content: "Looks like you typically run Mon/Wed/Fri — sound right, or want different days?",
+            },
+          ],
+          error: null,
+        },
+      ],
+      training_profiles: { data: null, error: null },
+      training_state: { data: null, error: null },
+    });
+    mockLLMResponse("OFF_TOPIC");
+    mockLLMResponse(
+      "There's a free 7-day trial, then it's a paid subscription. Looks like you typically run Mon/Wed/Fri — sound right, or want different days?"
+    );
+
+    await POST(makeRequest({ userId: "user-001", message: "how much does this cost" }));
+
+    expect(sendSMS).toHaveBeenCalledWith("+12025551234", expect.stringContaining("7-day trial"));
+    // Onboarding must NOT have been completed off the back of a question
+    const tables = (supabase.from as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]);
+    expect(tables).not.toContain("training_profiles");
+    expect(tables).not.toContain("training_state");
+  });
+
+  it("answers an off-topic question during awaiting_strava instead of re-sending the link", async () => {
+    mockTables({
+      users: { data: onboardingUser({ onboarding_step: "awaiting_strava" }), error: null },
+      conversations: [
+        { data: [], error: null }, // dedup
+        { data: [], error: null }, // history
+      ],
+    });
+    mockLLMResponse("OFF_TOPIC");
+    mockLLMResponse(
+      "Nothing you log is shared with anyone else. To keep going I need to connect to Strava — the link's just above."
+    );
+
+    await POST(makeRequest({ userId: "user-001", message: "who else can see my data" }));
+
+    const textSent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(textSent).toContain("Nothing you log is shared");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Injury-intake gate on the [READY] path
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboarding/handle — injury intake is required before completion", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("routes [READY] into injury intake when the stage never ran", async () => {
+    // handleDataAnalysis normally writes stage: "injury_intake" after Strava connects. If it
+    // throws first, the next message falls through to the goals stage, which sees Strava
+    // connected and fires [READY] — completing onboarding with no injury data at all.
+    mockTables({
+      users: [
+        { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true } }), error: null },
+        { data: null, error: null }, // processing-lock write
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k" });
+    mockLLMResponse("Great, that's everything I need.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const lastText = smsCalls[smsCalls.length - 1]?.[1] as string;
+    expect(lastText).toContain("Has injury ever been a factor");
+
+    // Must not have completed onboarding
+    const tables = (supabase.from as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]);
+    expect(tables).not.toContain("training_state");
+  });
+
+  it("does not re-ask when injury information is already on file", async () => {
+    mockTables({
+      users: [
+        {
+          data: onboardingUser({
+            onboarding_data: {
+              goal: "5k",
+              strava_connected: true,
+              training_days: ["tuesday", "thursday", "saturday"],
+              current_niggles: "left shin gets sore after long runs",
+            },
+          }),
+          error: null,
+        },
+        { data: null, error: null }, // processing-lock write
+        { data: { onboarding_data: {} }, error: null }, // isReady persist
+        { data: { onboarding_data: {} }, error: null }, // fresh fetch in completeOnboarding
+        { data: { billing_enabled: false, reverse_trial_enabled: false, dashboard_token: null, phone_number: "+12025551234" }, error: null },
+        { data: [{ id: "user-001" }], error: null }, // update guard
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null },
+      races: { data: [], error: null },
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k" });
+    mockLLMResponse("Great, that's everything I need.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const allText = smsCalls.map((c: unknown[]) => c[1] as string).join(" ");
+    expect(allText).not.toContain("Has injury ever been a factor");
+    // Onboarding proceeded to completion
+    const tables = (supabase.from as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[0]);
+    expect(tables).toContain("training_state");
+  });
+});
+
+describe("POST /api/onboarding/handle — no false finish before a checkpoint", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("suppresses the [READY] wrap-up when the schedule checkpoint still has to fire", async () => {
+    // [READY] means Dean wrote a sign-off. Sending it and THEN asking a checkpoint question
+    // reads as onboarding finishing and restarting — caught by sim-runna-user-uploads-plan:
+    // "...your first coaching note lands after your next run" followed immediately by
+    // "What days of the week do you want to run".
+    mockTables({
+      users: [
+        {
+          data: onboardingUser({
+            onboarding_data: { goal: "5k", strava_connected: true, injury_intake_done: true },
+          }),
+          error: null,
+        },
+        { data: null, error: null }, // processing-lock write
+      ],
+      conversations: { data: [], error: null },
+      activities: { data: [], error: null }, // no history → inference returns null
+      training_profiles: { data: { preferred_units: "imperial" }, error: null },
+    });
+    mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: null });
+    mockLLMResponse("You're all set — first coaching note lands after your next run.\n[READY]");
+
+    await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+    // The sign-off must not have gone out ahead of the question
+    expect(sent.some((t) => t.includes("You're all set"))).toBe(false);
+    expect(sent.some((t) => t.includes("days of the week"))).toBe(true);
   });
 });

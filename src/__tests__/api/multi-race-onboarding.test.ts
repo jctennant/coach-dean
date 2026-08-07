@@ -60,7 +60,7 @@ function chain(response: { data: unknown; error: unknown }) {
   const c: Record<string, unknown> = {};
   const methods = [
     "select", "insert", "update", "upsert", "delete",
-    "eq", "neq", "is", "not", "gte", "lte", "in", "or", "order", "limit",
+    "eq", "neq", "is", "not", "gt", "lt", "gte", "lte", "in", "or", "order", "limit",
   ];
   for (const m of methods) c[m] = vi.fn().mockReturnValue(c);
   c["single"] = vi.fn().mockResolvedValue(response);
@@ -240,10 +240,14 @@ describe("Multi-race onboarding — extraction and data merging", () => {
                 { name: "Dipsea Race", date: "2026-07-12", priority: "B", goal: null }
               ],
               strava_connected: true,
+              // Injury intake precedes [READY] for every real athlete; completeOnboarding is
+              // now gated on it having run (maybeEnterInjuryIntake).
+              injury_intake_done: true,
             }
           }),
           error: null,
         },
+        { data: null, error: null },  // POST processing-lock write (onboarding_data + processing_lock_at)
         { data: { onboarding_data: {} }, error: null },  // isReady update (line 806) — onboarding_data persist
         { data: { onboarding_data: {} }, error: null },  // fresh user fetch in completeOnboarding (line 1719)
         { data: { billing_enabled: false, reverse_trial_enabled: false, dashboard_token: null, phone_number: "+12025551234" }, error: null },  // billing check (line 1820)

@@ -44,13 +44,15 @@ import { parseSessionMiles } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
-import { inferTrainingDaysFromActivities, type InferableActivity } from "@/lib/infer-training-days";
+import { onboardingNudgeQuestion } from "@/lib/onboarding-pending";
+import { inferTrainingDaysFromActivities, deriveTrainingDaysFallback, type InferableActivity, type TrainingDaysFallback } from "@/lib/infer-training-days";
 import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds } from "@/lib/strength-library";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
 import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, getRehabData, buildTimelinePromptText, getRecoveryEstimate } from "@/lib/exercise-library";
 import { classifyIntent } from "@/lib/intent-classifier";
+import { buildCadenceOffer, isCadenceOffer, parseCadenceReply } from "@/lib/cadence-offer";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
 import { signPlanToken } from "@/lib/session-token";
@@ -1109,8 +1111,17 @@ async function handleLighterWeek(userId: string, dryRun: boolean): Promise<NextR
 
 /**
  * Handles a Strava activity event for a user who hasn't finished onboarding yet.
- * Sends a brief, warm reaction to the run, then re-asks the current onboarding question
- * so the user knows to reply and finish setup.
+ *
+ * Structurally the same message the fully-onboarded post_run path sends: a deterministic
+ * mileage line computed from activity rows, plus an optional one-sentence reaction from Dean.
+ * It used to be a separate chatty prompt ("react warmly in 1-2 sentences, be specific about
+ * distance and pace, close with a forward-looking line"), which is why mid-onboarding athletes
+ * got paragraph-length recaps restating distance/pace/HR while onboarded athletes got two
+ * lines — the post_run OUTPUT CONTRACT was never applied here.
+ *
+ * The one thing this path adds over post_run: when onboarding is still blocked on a question,
+ * it gets appended, so an athlete who's been logging runs without finishing setup is reminded
+ * what's outstanding instead of being congratulated indefinitely.
  */
 async function handlePostRunOnboarding(
   userId: string,
@@ -1121,7 +1132,7 @@ async function handlePostRunOnboarding(
   const [userResult, activityResult] = await Promise.all([
     supabase
       .from("users")
-      .select("id, phone_number, name, onboarding_step, onboarding_data, linq_chat_id, messaging_opted_out")
+      .select("id, phone_number, name, onboarding_step, onboarding_data, linq_chat_id, messaging_opted_out, timezone")
       .eq("id", userId)
       .single(),
     activityId
@@ -1147,12 +1158,49 @@ async function handlePostRunOnboarding(
     ? `\n\nALREADY COLLECTED (do NOT re-ask for any of these — the athlete has told you already):\n${JSON.stringify(collectedData, null, 2)}`
     : "";
 
-  const closingInstruction =
-    "After your brief reaction, close with a short forward-looking line. Do NOT ask any question — the next onboarding question will come through the main conversation when the athlete next replies.";
-
   const onbIsMetric = (collectedData.preferred_units as string | undefined) === "metric";
-  const unitsLine = onbIsMetric ? ` Use km and min/km for all distances and paces.` : " Use miles and min/mile for all distances and paces.";
-  const systemPrompt = `You are Coach Dean, an AI running coach. A user just finished a run but hasn't finished setting up their coaching profile yet. React briefly and warmly to their run in 1-2 sentences — be specific about what they did (distance, pace if notable). Keep the whole message under 4 sentences. No lists, no markdown, no bullet points.${unitsLine}${collectedSummary}\n\n${closingInstruction}`;
+  const onbTimezone = (user.timezone as string | null) || "America/New_York";
+
+  // Conversation history serves two purposes here: the nudge needs Dean's last question and
+  // his recent sends (to avoid repeating the same unanswered ask run after run), and Claude
+  // needs to see whether an injury/niggle is live before deciding to check in on it.
+  const { data: onbHistoryRows } = await supabase
+    .from("conversations")
+    .select("role, content, message_type")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  const onbHistoryDesc = (onbHistoryRows ?? []) as Array<{ role: string; content: string | null; message_type: string | null }>;
+  const onbHistory = [...onbHistoryDesc]
+    .reverse()
+    .map((m) => ({ role: m.role as "user" | "assistant", content: (m.content as string) || "" }));
+  // Only prior post-activity sends count as "already nudged" — the onboarding message that
+  // originally asked the question is the normal starting state, not evidence of a repeat.
+  const onbRecentPostActivity = onbHistoryDesc
+    .filter((m) => m.role === "assistant" && m.message_type === "post_run")
+    .map((m) => (m.content as string) || "")
+    .filter(Boolean);
+
+  // The onboarding question still outstanding, if any — appended verbatim below rather than
+  // handed to Claude, so it can't be paraphrased into a question the athlete already answered.
+  const nudgeQuestion = onboardingNudgeQuestion(
+    user.onboarding_step as string | null,
+    collectedData,
+    onbHistory,
+    onbRecentPostActivity
+  );
+
+  const unitsLine = onbIsMetric ? " Use km and min/km for all distances and paces." : " Use miles and min/mile for all distances and paces.";
+  const systemPrompt = `You are Coach Dean, an AI running coach. An athlete who hasn't finished setting up their profile yet just logged an activity.${unitsLine}${collectedSummary}
+
+OUTPUT CONTRACT — read this last, check before sending:
+1. YOUR MESSAGE IS ONLY AN OPTIONAL SECOND LINE. The activity and this week's mileage-by-category are already sent automatically as a separate first message, computed directly from Strava data — do NOT restate, estimate, or recompute distance, pace, or weekly mileage yourself.
+2. Your one job is to decide whether a second line is warranted, and if so, write ONE short sentence — nothing more. It's either (a) a check-in on how an injury or niggle they've mentioned is doing, or (b) a genuinely standout observation about this specific activity. Do not manufacture an observation to fill the line.
+3. MOST ACTIVITIES GET NO SECOND LINE. If neither applies, reply with exactly [NO_REPLY]. Sending only the mileage line is the correct, common outcome.
+4. NO GENERIC PRAISE ("Nice work!", "Solid effort!"), no forward-looking sign-offs ("Looking forward to...", "Let's keep building"), no effort corrections, no HR/zone lectures.
+5. DO NOT ask an onboarding question or ask them to finish setup — that's appended separately.
+
+Plain text only. No lists, no markdown.`;
 
   const activityDetails = activity
     ? {
@@ -1193,7 +1241,33 @@ async function handlePostRunOnboarding(
     .map((b) => (b as { type: "text"; text: string }).text.trim())
     .join(" ")
     .trim();
-  const coachMessage = normalizeEmDashes(stripReasoningPreamble(rawOnboardingMsg));
+  const onbLine2Raw = normalizeEmDashes(stripReasoningPreamble(rawOnboardingMsg)).trim();
+  const onbLine2 = onbLine2Raw === "[NO_REPLY]" ? "" : onbLine2Raw;
+
+  // Line 1 is deterministic, exactly as in the post_run path — this week's totals come from
+  // activity rows, not from anything Claude wrote. Activities are fetched for the whole
+  // trailing week so computeWeekActivityTotals can bucket them by category.
+  const onbWeekLookback = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: onbWeekActivities } = await supabase
+    .from("activities")
+    .select("activity_type, distance_meters, start_date")
+    .eq("user_id", userId)
+    .gte("start_date", onbWeekLookback)
+    .order("start_date", { ascending: false });
+  const onbWeekTotals = computeWeekActivityTotals(
+    (onbWeekActivities ?? []) as Array<{ activity_type: string | null; distance_meters: number | null; start_date: string }>,
+    onbTimezone
+  );
+  const onbLine1 = buildPostRunMileageLine(
+    (activity?.activity_type as string | null) ?? null,
+    (activity?.distance_meters as number | null) ?? null,
+    onbWeekTotals,
+    onbIsMetric
+  );
+
+  const coachMessage = [onbLine1, onbLine2, nudgeQuestion]
+    .filter((part): part is string => !!part && part.length > 0)
+    .join("\n\n");
 
   if (dryRun) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage });
 
@@ -1866,6 +1940,49 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
       const extractionInput = burstMessages.length > 1
         ? burstMessages.map(m => m.content).join("\n")
         : latestMsg.content;
+
+      // CADENCE OFFER REPLY — deterministic, ahead of the classifier.
+      // The initial_plan close asks "Reply YES to lock this in, or MORNING / NIGHT if you
+      // also want a reminder on your training days." classifyIntent only ever sees the
+      // message text with no conversation context, so a bare "morning" reads as `general`
+      // with low confidence and never reaches the cadence short-circuit below — the
+      // question would be asked deterministically and then answered by nobody. Pinning it
+      // to "the previous assistant message was that offer" makes the answer as reliable as
+      // the question.
+      const lastAssistantForCadence = [...recentMessages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      if (lastAssistantForCadence && isCadenceOffer(lastAssistantForCadence.content as string)) {
+        const chosen = parseCadenceReply(latestMsg.content);
+        if (chosen) {
+          const hasDays = Array.isArray(profile?.training_days) && (profile!.training_days as string[]).length > 0;
+          // Same "don't guess which days" handling as the cadence short-circuit below —
+          // training_days is routinely empty for Strava-connected athletes, and the
+          // reminder crons fall back to every weekday until it's known.
+          const confirmMsg = chosen === "morning_reminders"
+            ? hasDays
+              ? "Done — I'll text you each morning on your training days with what's on."
+              : "Done — I'll text you each morning. Which days do you want it, every day or just your run days?"
+            : hasDays
+              ? "Done — I'll text you the night before with what's coming up."
+              : "Done — I'll text you the night before. Which days do you want it, every day or just your run days?";
+          const cadenceChatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+          if (cadenceChatId) await startTyping(cadenceChatId);
+          if (!dry_run) {
+            await sendSMS(user.phone_number as string, confirmMsg);
+            await insertConversation({ user_id: userId, role: "assistant", content: confirmMsg, message_type: "coach_response" });
+            const { error } = await supabase
+              .from("training_profiles")
+              .update({ proactive_cadence: chosen })
+              .eq("user_id", userId);
+            if (error) console.error("[coach/respond] proactive_cadence update failed:", error);
+            else void trackEvent(userId, "cadence_changed", { proactive_cadence: chosen, source: "initial_plan_offer" });
+          }
+          return NextResponse.json({ ok: true, message: confirmMsg, dry_run: !!dry_run });
+        }
+        // No explicit MORNING/NIGHT — "YES" is confirming the plan, not choosing a cadence.
+        // Fall through to normal coaching so it gets a real reply.
+      }
 
       // Run profile extraction and intent classification in parallel — both are Haiku calls
       const injuryCtx = {
@@ -3197,8 +3314,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     // actual run history so the plan gets a real day-by-day skeleton instead of falling
     // back to prose + a hardcoded 4/week guess. If the signal isn't there (too little or
     // too inconsistent history), leave training_days empty and ask instead of guessing.
-    let askAboutTrainingDays = false;
     let inferredTrainingDaysForConfirmation: string[] | null = null;
+    let assumedTrainingDays: TrainingDaysFallback | null = null;
     if (!((profile?.training_days as string[] | null)?.length)) {
       const inferredDays = inferTrainingDaysFromActivities(
         recentActivities as unknown as InferableActivity[],
@@ -3210,7 +3327,29 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         inferredTrainingDaysForConfirmation = inferredDays;
         console.log(`[initial_plan] inferred training_days from Strava history: ${inferredDays.join(", ")}`);
       } else {
-        askAboutTrainingDays = true;
+        // Inference is deliberately strict, so it returns null for exactly the athletes who
+        // most need a schedule — mid-rebuild, one week of Strava history, irregular days.
+        // Leaving training_days empty here was never neutral: computeArcWeekSkeleton returns
+        // [] for an empty list, so the athlete's first week lost its day-by-day breakdown and
+        // fell back to free-hand prose with a hardcoded 4/week guess, and the reminder crons
+        // had nothing to gate on. Assume a sensible schedule instead, built from whatever
+        // weak history exists, and have Dean state it for confirmation.
+        assumedTrainingDays = deriveTrainingDaysFallback({
+          activities: recentActivities as unknown as InferableActivity[],
+          timezone: (user.timezone as string | null) ?? "America/New_York",
+          daysPerWeek: (profile?.days_per_week as number | null) ?? null,
+        });
+        const { error: assumedErr } = await supabase
+          .from("training_profiles")
+          .update({ training_days: assumedTrainingDays.days })
+          .eq("user_id", userId);
+        if (assumedErr) console.error("[initial_plan] assumed training_days write failed:", assumedErr);
+        profile = { ...profile, training_days: assumedTrainingDays.days } as typeof profile;
+        console.log(`[initial_plan] assumed training_days (${assumedTrainingDays.source}): ${assumedTrainingDays.days.join(", ")}`);
+        void trackEvent(userId, "training_days_assumed", {
+          source: assumedTrainingDays.source,
+          days: assumedTrainingDays.days.length,
+        });
       }
     }
 
@@ -3272,10 +3411,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         }).eq("user_id", userId);
         console.log(`[initial_plan] mid-week onboard — sliced starter week: ${starterTotal}mi, long run ${arcLongRun}mi (arc week1 was ${arcState?.weekly_mileage_target}mi/${arcState?.weekly_long_run_miles}mi)`);
       } else {
-        // training_days still empty here — Strava history wasn't enough to infer a
-        // schedule (askAboutTrainingDays is set; see below) — computeArcWeekSkeleton
-        // can't assign day-level slots without them. Fall back to a plain numeric
-        // proration by days remaining in the week so the
+        // Defensive only. training_days is now always populated by this point — real,
+        // inferred, or assumed by deriveTrainingDaysFallback — so computeArcWeekSkeleton
+        // should always have day-level slots to assign. Kept because the skeleton can still
+        // return [] for other reasons (e.g. no days left before Sunday on a late-week
+        // onboard). Falls back to a plain numeric proration by days remaining in the week so the
         // stored total/long-run at least match what Dean is about to state, even without
         // a day-by-day breakdown.
         const daysToSundayForStarter = initLocalDow === 0 ? 0 : 7 - initLocalDow;
@@ -3363,8 +3503,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     if (arcLines.length > 0) {
       initialPlanArcConstraint = `\n\n<arc_values>TRAINING ARC — YOUR PLAN MUST USE THESE EXACT VALUES:\n${arcLines.join("\n")}\nDo not prescribe different distances or sessions.\n\n${fullArcSummary ? `MILEAGE PROGRESSION: ${fullArcSummary}\nAt the end of your message, include one sentence summarizing the overall mileage arc so the athlete knows how their plan builds. Keep it brief and natural.` : ""}</arc_values>`;
     }
-    if (askAboutTrainingDays) {
-      initialPlanArcConstraint += `\n\nNo standing training-day schedule is on file, and there wasn't enough recent run history to infer one. End your message by asking which specific days they usually run (or want to run) — this locks in a real day-by-day schedule for next week and lets reminders target the right days, instead of this week's plan being described only in general terms.`;
+    if (assumedTrainingDays) {
+      const dayList = assumedTrainingDays.days.map(d => d.slice(0, 3).replace(/^\w/, c => c.toUpperCase())).join("/");
+      initialPlanArcConstraint += assumedTrainingDays.source === "template"
+        ? `\n\nNo standing training-day schedule is on file and there wasn't enough run history to infer one, so this week's plan is built around an assumed schedule: ${dayList}. State those days plainly and ask them to confirm or send different ones — e.g. "I've set you up on ${dayList} for now — want different days?". One short question, not a paragraph. Do NOT present the days as something you observed in their history; you're proposing them.`
+        : `\n\nNo standing training-day schedule is on file, so this week's plan is built around ${dayList}, drawn from the days they've actually been running. State those days and invite a correction in one short clause — e.g. "I've got you on ${dayList} — let me know if you want different days". Do not make it a separate paragraph.`;
     }
     if (inferredTrainingDaysForConfirmation) {
       initialPlanArcConstraint += `\n\nNo standing training-day schedule was on file, so it was inferred from their recent run history: ${inferredTrainingDaysForConfirmation.join(", ")}. This week's plan is already built around those days, but state the inferred days explicitly and briefly invite a correction if it's wrong (e.g. "Looks like you typically run ${inferredTrainingDaysForConfirmation.join("/")} — I'll build around that, let me know if you want different days"). Keep it to one short clause, not a separate question.`;
@@ -4558,11 +4701,16 @@ OUTPUT CONTRACT:
     // stat this closer was written against). A concrete yes/no plus one first action
     // gives them a low-friction way to confirm and removes the "what do I even do
     // today" gap for athletes coming back from a layoff or injury.
+    //
+    // This bubble now also carries the "how we'll work together" close (post-run notes +
+    // Sunday recap, and the optional daily reminder) — see src/lib/cadence-offer.ts for
+    // why that moved out of the initial_plan prompt and into deterministic code.
     const hasActiveInjuryOnClose = !!(profile?.active_injury);
     const closingBodyPart = (profile?.injury_body_part as string | null)?.replace(/_/g, " ") ?? null;
-    const closingMsg = hasActiveInjuryOnClose
-      ? `Reply YES to lock this in, or tell me what's off. First run: keep it easy${closingBodyPart ? ` and stop if the ${closingBodyPart} flares up` : ""} — text me how it felt either way.`
-      : "Reply YES to lock this in, or tell me what to change.";
+    const closingMsg = buildCadenceOffer({
+      activeInjury: hasActiveInjuryOnClose,
+      bodyPart: closingBodyPart,
+    });
     if (!dry_run) {
       if (chatId) await startTyping(chatId);
       await new Promise((r) => setTimeout(r, 1500));
@@ -8920,7 +9068,7 @@ BUBBLE 2: How you're thinking about the next 1-2 weeks. Conversational, not a da
 
 This is not a plan delivery. Dean calibrates every week based on what actually happens. The Sunday recap will be the primary touchpoint for week-to-week structure going forward.
 
-BREVITY: This is a lot for an athlete to absorb right after onboarding — 2 bubbles total, no restating anything already confirmed earlier in this conversation (training days, race name/timeline, injury details). Close with one short sentence on how check-ins work going forward (e.g. "I'll check in after your runs and send a full recap + next week's plan every Sunday") so they know what to expect — this is the one new piece of information to add, not a reason to lengthen the rest.
+BREVITY: This is a lot for an athlete to absorb right after onboarding — 2 bubbles total, no restating anything already confirmed earlier in this conversation (training days, race name/timeline, injury details). Do NOT explain how check-ins or reminders work, and do not close with "I'll check in after your runs" or similar — a separate message sent right after yours covers that verbatim, so saying it here just duplicates it.
 ${weekMilesBudgetNote}
 
 ${weekBoundaryNote}
