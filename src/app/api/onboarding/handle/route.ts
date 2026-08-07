@@ -135,14 +135,34 @@ async function sendAndStore(
  */
 async function sendPollAndStore(userId: string, phone: string, poll: AppPoll): Promise<void> {
   const isDryRun = dryRunUsers.has(userId);
-  if (!isDryRun) await sendPoll(phone, poll.title, poll.options);
-  await insertConversation({
-    user_id: userId,
-    role: "assistant",
-    content: `[Poll] ${poll.title}`,
-    message_type: "onboarding",
-  });
-  await sendAndStore(userId, phone, poll.fallbackHint, "onboarding");
+  let pollRendered = isDryRun;
+  if (!isDryRun) {
+    try {
+      await sendPoll(phone, poll.title, poll.options);
+      pollRendered = true;
+    } catch (err) {
+      // A poll is a rendering affordance, never the question itself — the same ask has to
+      // survive the interactive layer failing. Letting this throw stranded a real athlete on
+      // 2026-08-07: the training-days poll failed at the sidecar, the exception propagated out
+      // of maybeEnterScheduleConfirm, and onboarding stopped one turn short of plan generation
+      // with nothing sent and no error surfaced. Both poll sites in coach/respond already
+      // treat sendPoll as best-effort for exactly this reason ("the Spectrum plan doesn't
+      // support polls"); this one was the outlier.
+      console.error("[onboarding] sendPoll failed, falling back to plain text:", poll.title, err);
+    }
+  }
+  if (pollRendered) {
+    await insertConversation({
+      user_id: userId,
+      role: "assistant",
+      content: `[Poll] ${poll.title}`,
+      message_type: "onboarding",
+    });
+  }
+  // fallbackHint is a parenthetical addendum ("(Or just reply...)") — meaningless on its own,
+  // so when the poll didn't render, the title has to carry the question.
+  const text = pollRendered ? poll.fallbackHint : `${poll.title} ${poll.fallbackHint}`;
+  await sendAndStore(userId, phone, text, "onboarding");
 }
 
 /**
@@ -1280,7 +1300,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
     // message still goes out after the checkpoint resolves.
     const injuryResult = await maybeEnterInjuryIntake(user, mergedData);
     if (injuryResult) return injuryResult;
-    const scheduleResult = await maybeEnterScheduleConfirm(user, mergedData);
+    const scheduleResult = await scheduleConfirmCheckpoint(user, mergedData);
     if (scheduleResult) return scheduleResult;
     if (responseText.trim()) {
       await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
@@ -1869,7 +1889,7 @@ async function handleInjuryIntake(
       .update({ onboarding_data: mergedData as unknown as Json })
       .eq("id", user.id);
     await sendAndStore(user.id, user.phone_number, completionMsg, "onboarding");
-    const scheduleResult = await maybeEnterScheduleConfirm(user, mergedData);
+    const scheduleResult = await scheduleConfirmCheckpoint(user, mergedData);
     if (scheduleResult) return scheduleResult;
     await completeOnboarding(user, mergedData, chatId);
     return NextResponse.json({ ok: true });
@@ -2054,6 +2074,32 @@ async function maybeEnterInjuryIntake(
  * immediately. Returns null when the checkpoint is already satisfied, so the
  * caller should proceed straight to completeOnboarding.
  */
+/**
+ * maybeEnterScheduleConfirm, wrapped so it can never be the last thing that happens to an
+ * athlete. This checkpoint sits between the completion message and completeOnboarding — the
+ * call that actually builds the profile, training state, and plan arc — so anything that
+ * throws inside it ends onboarding permanently one turn short of the plan, with the athlete
+ * left holding a message that reads like a sign-off. That is exactly what happened on
+ * 2026-08-07 (see sendPollAndStore), and the failure is silent: onboarding_step stays
+ * "onboarding", no error reaches the athlete, and no cron re-drives it.
+ *
+ * Confirming training days is a refinement, not a prerequisite — completeOnboarding's
+ * initial_plan path already infers days from Strava history when none are stored. So on
+ * failure, return null and let the caller proceed to plan generation: a plan built on
+ * inferred days that the athlete can correct afterwards beats no plan at all.
+ */
+async function scheduleConfirmCheckpoint(
+  user: { id: string; phone_number: string },
+  mergedData: Record<string, unknown>
+): Promise<NextResponse | null> {
+  try {
+    return await maybeEnterScheduleConfirm(user, mergedData);
+  } catch (err) {
+    console.error("[onboarding] schedule-confirm checkpoint failed — completing onboarding without it:", err);
+    return null;
+  }
+}
+
 async function maybeEnterScheduleConfirm(
   user: { id: string; phone_number: string },
   mergedData: Record<string, unknown>
@@ -2095,6 +2141,11 @@ async function maybeEnterScheduleConfirm(
   // the conversation in a stage the athlete was never told about.
   if (dayList) {
     if (isPhotonProvider()) {
+      // The poll title is a fixed string ("Keep those training days?") — poll options can't be
+      // templated per-athlete, so *which* days has to be stated in its own bubble first.
+      // Without this the photon branch asked the athlete to confirm a day list they had never
+      // been shown, while the linq branch below states it inline.
+      await sendAndStore(user.id, user.phone_number, `Based on your Strava, you usually run ${dayList}. That's what I'll build around.`, "onboarding");
       await sendPollAndStore(user.id, user.phone_number, TRAINING_DAYS_POLL);
       await sendAndStore(user.id, user.phone_number, "Anything specific you want out of the plan (extra rest days, cross-training, etc.)?", "onboarding");
     } else {
@@ -2270,7 +2321,6 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
   const raceName = data.race_name as string | null;
   const raceDate = data.race_date as string | null;
   const avgMiles = data.strava_avg_weekly_miles as number | null;
-  const hrZones = data.strava_hr_zone_pct as { z1: number; z2: number; z3: number; z4: number; z5: number } | null;
   const currentNiggles = data.current_niggles as string | null;
   const injuryHistory = data.injury_history as string | null;
   const mileageTrend = data.strava_mileage_trend as string | null;
@@ -2305,18 +2355,23 @@ function buildDeterministicCompletion(data: Record<string, unknown>): string {
     opening = `${firstName}, you're set up.`;
   }
 
-  // Key training observation from Strava data
+  // Key training observation from Strava data.
+  //
+  // This used to branch on HR zone distribution and tell athletes with >50% of time in Z3+
+  // that their base was "at higher effort than ideal." Two problems with that. It was
+  // redundant — handleDataAnalysis has already sent a Strava read one or two messages
+  // earlier, so this restated the same diagnosis in different words. And it spent the one
+  // forward-looking sentence in the completion message on a critique of how they've been
+  // running instead of on what they're here for: how much they'll run and how it's
+  // structured (reported 2026-08-07 — "I kind of want him to help me understand mileage and
+  // what my ramp should look like"). Intensity distribution is a real signal, but it belongs
+  // in post-run coaching where it can be tied to a specific run, not in the handoff to a plan.
   let observation = "";
-  if (hrZones && avgMiles) {
-    const highZ = hrZones.z3 + hrZones.z4 + hrZones.z5;
-    if (highZ > 50) {
-      observation = `Your ${avgMiles} mi/week base is there, with a lot of that at higher effort than ideal.`;
-    } else {
-      observation = `Your aerobic base at ${avgMiles} mi/week is well-paced — good platform to build from.`;
-    }
-  } else if (avgMiles) {
-    const trendNote = mileageTrend === "building" ? ", trending up" : "";
-    observation = `Your base at ${avgMiles} mi/week${trendNote} gives us room to work.`;
+  if (avgMiles) {
+    const longestRun = data.strava_longest_run_miles as number | null;
+    const longRunNote = longestRun ? `, longest ${longestRun} mi` : "";
+    const trendNote = mileageTrend === "building" ? " You've already got the ramp started." : "";
+    observation = `Building from ${avgMiles} mi/week${longRunNote}.${trendNote} Next I'll set your weekly mileage, the days, and the key sessions.`;
   }
 
   // Injury note — specific action when active, pattern monitoring when historical
