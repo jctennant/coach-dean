@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
 import { insertConversation, insertConversationReturningId } from "@/lib/conversations";
+import { findPriorInboundDelivery } from "@/lib/inbound-dedup";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { inferTimezoneFromPhone } from "@/lib/timezone";
@@ -306,7 +307,7 @@ async function handleInboundMessage(
     // For new users, images before onboarding are unusual — treat as no message
     // and let onboarding start normally.
     const messageBody = cleanBody || (imageUrl ? "[Workout image received]" : "");
-    await insertConversation({
+    const { id: newUserMsgId } = await insertConversationReturningId({
       user_id: newUser.id,
       role: "user",
       content: messageBody,
@@ -317,7 +318,12 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: newUser.id, message: messageBody, chatId: payloadChatId }),
+      body: JSON.stringify({
+        userId: newUser.id,
+        message: messageBody,
+        chatId: payloadChatId,
+        inboundConversationId: newUserMsgId ?? null,
+      }),
     });
 
     console.log("[linq-webhook] new user routed to onboarding/handle:", senderPhone);
@@ -371,9 +377,15 @@ async function handleInboundMessage(
   // --- Text message path (existing flow) ---
   const messageBody = body || "[Image received]";
 
-  // Content-based dedup: if the exact same text body arrived from this user within
-  // the last 60 seconds, it's a duplicate send (e.g. user double-tapped, Linq retry
-  // with a different message ID). Skip processing to avoid double responses.
+  // Content-based dedup: if the exact same text body arrived from this user within the last
+  // 60 seconds AND that earlier delivery was actually answered, it's a duplicate send (user
+  // double-tapped, Linq retry with a different message ID). Skip to avoid double responses.
+  //
+  // The "actually answered" half matters: an earlier row whose pass died before replying is
+  // not evidence of anything, and skipping on it strands the athlete permanently (see
+  // inbound-dedup.ts). Falling through instead is safe because the debounce below already
+  // resolves the in-flight case — whichever delivery's row is newest proceeds and the rest
+  // bail on the latest-message check.
   //
   // This insert happens BEFORE the duplicate check (rather than select-then-insert)
   // to close a race window: two near-simultaneous webhook deliveries for the same
@@ -393,28 +405,22 @@ async function handleInboundMessage(
   });
 
   if (body && storedMsgId && storedCreatedAt) {
-    const contentCutoff = new Date(Date.now() - 60_000).toISOString();
-    const { data: earlierSame } = await supabase
-      .from("conversations")
-      .select("id, created_at")
-      .eq("user_id", user.id)
-      .eq("role", "user")
-      .eq("content", messageBody)
-      .gte("created_at", contentCutoff)
-      .neq("id", storedMsgId)
-      .order("created_at", { ascending: true })
-      .limit(5);
-
-    const isDuplicate = (earlierSame ?? []).some((row) => {
-      const rowCreatedAt = row.created_at as string;
-      if (rowCreatedAt < storedCreatedAt) return true;
-      if (rowCreatedAt === storedCreatedAt) return (row.id as string) < storedMsgId;
-      return false;
+    const prior = await findPriorInboundDelivery({
+      userId: user.id,
+      content: messageBody,
+      excludeConversationId: storedMsgId,
+      before: { createdAt: storedCreatedAt, id: storedMsgId },
     });
 
-    if (isDuplicate) {
-      console.log("[linq-webhook] content-dedup: same body within 60s, skipping:", user.id);
+    if (prior?.answered) {
+      console.log("[linq-webhook] content-dedup: same body within 60s, already answered, skipping:", user.id);
       return;
+    }
+    if (prior) {
+      console.warn(
+        "[linq-webhook] duplicate inbound body within 60s but no reply — prior delivery failed, re-processing:",
+        user.id
+      );
     }
   }
   const storedMsg = storedMsgId ? { id: storedMsgId } : null;
@@ -473,7 +479,12 @@ async function handleInboundMessage(
     await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/onboarding/handle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user.id, message: messageBody, chatId: resolvedChatId }),
+      body: JSON.stringify({
+        userId: user.id,
+        message: messageBody,
+        chatId: resolvedChatId,
+        inboundConversationId: storedMsg?.id ?? null,
+      }),
     });
     return;
   }

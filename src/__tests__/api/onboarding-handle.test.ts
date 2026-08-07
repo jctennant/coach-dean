@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createHash } from "crypto";
 
 // ---------- module mocks (must be before imports) ----------
 vi.mock("@/lib/supabase", () => ({
@@ -84,6 +85,11 @@ function mockTables(
 
 function makeRequest(body: unknown) {
   return { json: () => Promise.resolve(body) } as unknown as Request;
+}
+
+/** Mirrors lockFingerprint in onboarding/handle/route.ts — the lock is message-scoped. */
+function lockFingerprint(message: string) {
+  return createHash("sha256").update(message).digest("hex").slice(0, 16);
 }
 
 /** Standard user in the "onboarding" step */
@@ -760,7 +766,10 @@ describe("POST /api/onboarding/handle — duplicate inbound handling", () => {
     mockTables({
       users: {
         data: onboardingUser({
-          onboarding_data: { processing_lock_at: new Date().toISOString() },
+          onboarding_data: {
+            processing_lock_at: new Date().toISOString(),
+            processing_lock_for: lockFingerprint("shin has been sore for two weeks"),
+          },
         }),
         error: null,
       },
@@ -775,6 +784,48 @@ describe("POST /api/onboarding/handle — duplicate inbound handling", () => {
     expect(sendSMS).not.toHaveBeenCalled();
     expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
   });
+
+  it("answers a new message even while a lock from the previous turn is still fresh", async () => {
+    // The 2026-08-06 silence: both SMS webhooks insert the inbound row before dispatching
+    // here, so the dedup select always matched this turn's *own* row. With no assistant
+    // reply yet, the whole decision fell to the lock — which was a bare per-user timestamp,
+    // so the previous message's lock (taken 66s earlier, inside the 90s window) read as
+    // "a pass on this message is in flight" and the athlete's reply was dropped silently.
+    // Two things now prevent that: the caller's row is excluded by id, and the lock only
+    // counts for the message it was taken for.
+    mockTables({
+      users: [
+        {
+          data: onboardingUser({
+            onboarding_data: {
+              name: "Jake",
+              processing_lock_at: new Date(Date.now() - 66_000).toISOString(),
+              processing_lock_for: lockFingerprint("previous turn's message"),
+            },
+          }),
+          error: null,
+        },
+        { data: null, error: null }, // processing-lock write
+      ],
+      conversations: [
+        { data: [], error: null }, // dedup select excludes inboundConversationId → no prior copy
+        { data: [], error: null }, // history
+      ],
+    });
+    mockToolResponse("save_training_fields", { current_niggles: "right shin" });
+    mockLLMResponse("Got it — let's back the volume off this week.");
+
+    await POST(
+      makeRequest({
+        userId: "user-001",
+        message: "General soreness, mainly while running",
+        inboundConversationId: "conv-inbound-1",
+      })
+    );
+
+    expect(sendSMS).toHaveBeenCalledWith("+12025551234", expect.stringContaining("back the volume off"));
+  });
+
 
   it("re-processes a duplicate whose first pass died before replying", async () => {
     // The regression this guards: the original dedup skipped on the inbound row alone.

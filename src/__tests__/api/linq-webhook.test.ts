@@ -65,7 +65,7 @@ function chain(response: { data: unknown; error: unknown }) {
   const c: Record<string, unknown> = {};
   const methods = [
     "select", "insert", "update", "upsert", "delete",
-    "eq", "neq", "is", "not", "gte", "lte", "in", "or", "order", "limit",
+    "eq", "neq", "is", "not", "gt", "gte", "lt", "lte", "in", "or", "order", "limit",
   ];
   for (const m of methods) c[m] = vi.fn().mockReturnValue(c);
   c["single"] = vi.fn().mockResolvedValue(response);
@@ -580,6 +580,83 @@ describe("POST /api/webhooks/linq — message routing", () => {
     expect(supabase.from).toHaveBeenCalledTimes(1);
     expect(supabase.from).toHaveBeenCalledWith("conversations");
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("content-dedup: skips a re-delivery whose earlier copy was already answered", async () => {
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        conversations: [
+          { data: null, error: null },                                               // pre-after dedup check
+          { data: { id: "conv-zzz", created_at: "2026-01-01T00:00:05.000Z" }, error: null }, // insert storedMsg
+          { data: [{ id: "conv-aaa", created_at: "2026-01-01T00:00:00.000Z" }], error: null }, // earlier same-body row
+          { data: [{ id: "reply-1" }], error: null },                                // an assistant reply landed after it
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null, dashboard_token: null,
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", "great run today");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await flushPromise;
+
+      expect(global.fetch).not.toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("content-dedup: re-processes a re-delivery whose earlier copy never got a reply", async () => {
+    // The regression: the guard used to skip on the matching row alone. Every path inserts
+    // its inbound row before doing the work that produces a reply, so a pass that threw
+    // partway through left the row behind with nothing sent — and the re-delivery that
+    // would have recovered it was dropped here, permanently. No reply means re-process.
+    vi.useFakeTimers();
+    try {
+      mockTables({
+        conversations: [
+          { data: null, error: null },                                               // pre-after dedup check
+          { data: { id: "conv-zzz", created_at: "2026-01-01T00:00:05.000Z" }, error: null }, // insert storedMsg
+          { data: [{ id: "conv-aaa", created_at: "2026-01-01T00:00:00.000Z" }], error: null }, // earlier same-body row
+          { data: [], error: null },                                                 // no assistant reply — prior pass died
+          { data: { id: "conv-zzz" }, error: null },                                 // debounce latest-msg check
+          { data: [{ id: "conv-zzz" }], error: null },                               // duplicate guard → single row
+          { data: null, error: null },                                               // recent-assistant-reply guard
+        ],
+        users: {
+          data: {
+            id: "user-001", onboarding_step: null, timezone: "America/New_York",
+            linq_chat_id: "chat-abc", messaging_opted_out: false,
+            reengagement_sent_at: null, strava_athlete_id: null, dashboard_token: null,
+          },
+          error: null,
+        },
+      });
+
+      const req = makeRequest("+12025551234", "great run today");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await flushPromise;
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("post-debounce: skips duplicate webhook delivery (same external_message_id, race condition)", async () => {
