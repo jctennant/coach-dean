@@ -8,6 +8,15 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-06 — Shorter onboarding first message, Strava sentence removed
+
+**Type:** Improvement
+**Reported by:** User feedback
+**User feedback:** "let's update the first message to be shorter and remove the 'i follow your strava' sentence" / "Should we say he's a running coach too"
+**Root cause:** N/A — copy change. The opener led with a two-clause sentence about reading Strava runs and sending a note after each one, which made the first text long and front-loaded a mechanic instead of what Dean does.
+**Fix / Change:** New verbatim opener: "Hey! I'm Coach Dean, your AI running coach. I build and adapt training plans around a race, injury recovery, or general fitness, and flag early warning signs before they sideline you." followed by the unchanged name+goal question paragraph. Dropped the Strava sentence; kept "your AI running coach" so the first text still says what he is. Mirrored into both eval runners' `isFirstResponse` branches (they had drifted to older, different example copy — now both carry the same verbatim instruction as `route.ts`).
+**Files changed:** src/app/api/onboarding/handle/route.ts, evals/run-onboarding-evals.mjs, evals/run-simulation-evals.mjs
+
 ## 2026-08-06 — Mid-onboarding athletes get the same short post-run message as everyone else, plus the question they still owe
 
 **Type:** Bug Fix
