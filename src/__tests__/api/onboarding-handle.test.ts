@@ -12,6 +12,11 @@ vi.mock("@/lib/linq", () => ({
   shareContactCard: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/photon", () => ({
+  sendPoll: vi.fn().mockResolvedValue(undefined),
+  isPhotonProvider: vi.fn().mockReturnValue(false),
+}));
+
 vi.mock("@/lib/anthropic", () => ({
   anthropic: {
     messages: {
@@ -48,6 +53,7 @@ import { POST } from "@/app/api/onboarding/handle/route";
 import { supabase } from "@/lib/supabase";
 import { sendSMS } from "@/lib/linq";
 import { anthropic } from "@/lib/anthropic";
+import { sendPoll, isPhotonProvider } from "@/lib/photon";
 
 // ---------- Helpers ----------
 
@@ -239,6 +245,81 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
     const usersUpdates = fromCalls.filter((c: unknown[]) => c[0] === "users");
     expect(usersUpdates.length).toBeGreaterThan(0);
+  });
+
+  // The schedule-confirm checkpoint sits between onboarding's completion message and
+  // completeOnboarding — the call that builds the profile, training state, and plan arc.
+  // Anything that throws in here ends onboarding permanently one turn short of the plan,
+  // silently: onboarding_step stays "onboarding" and nothing re-drives it. That happened in
+  // production on 2026-08-07 (the training-days poll failed at the Photon sidecar), so both
+  // layers of the guard get a test.
+  describe("schedule-confirm checkpoint failures never strand the athlete", () => {
+    // vi.clearAllMocks() clears call history but keeps implementations, so the provider flag
+    // and the throwing sendSMS below would otherwise leak into every later test in the file.
+    afterEach(() => {
+      (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (sendPoll as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (sendSMS as ReturnType<typeof vi.fn>).mockResolvedValue({ chatId: "chat-123" });
+    });
+
+    const MON_WED_FRI = [
+      { start_date: "2026-08-03T14:00:00Z", activity_type: "Run" },
+      { start_date: "2026-08-05T14:00:00Z", activity_type: "Run" },
+      { start_date: "2026-08-07T14:00:00Z", activity_type: "Run" },
+      { start_date: "2026-07-27T14:00:00Z", activity_type: "Run" },
+      { start_date: "2026-07-29T14:00:00Z", activity_type: "Run" },
+      { start_date: "2026-07-31T14:00:00Z", activity_type: "Run" },
+    ];
+
+    function mockReadyTurn() {
+      mockTables({
+        users: { data: onboardingUser({ onboarding_data: { goal: "5k", strava_connected: true, injury_intake_done: true } }), error: null },
+        conversations: { data: [], error: null },
+        activities: { data: MON_WED_FRI, error: null },
+        races: { data: [], error: null },
+        training_profiles: { data: { preferred_units: "imperial" }, error: null },
+      });
+      mockToolResponse("save_training_fields", { name: "Jake", goal: "5k", training_days: null });
+      mockLLMResponse("Awesome, I have everything I need! Let's build your plan.\n[READY]");
+    }
+
+    it("a failing training-days poll still asks the question, in plain text", async () => {
+      (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (sendPoll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Sidecar /send-poll error: 402 poll tier required"));
+      mockReadyTurn();
+
+      await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+
+      const texts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+      // The day list Dean inferred, and the confirm question the poll would have carried.
+      expect(texts.some((t) => t.includes("Mon/Wed/Fri"))).toBe(true);
+      expect(texts.some((t) => t.includes("Keep those training days?"))).toBe(true);
+    });
+
+    it("an outright send failure in the checkpoint falls through to plan generation", async () => {
+      (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (sendSMS as ReturnType<typeof vi.fn>).mockImplementation(async (_phone: string, text: string) => {
+        if (/typically run|days of the week/.test(text)) throw new Error("sidecar 502");
+        return { chatId: "chat-123" };
+      });
+      mockReadyTurn();
+
+      const fetchMock = vi.fn().mockResolvedValue({ json: async () => ({}) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await POST(makeRequest({ userId: "user-001", message: "that's everything" }));
+      await new Promise((r) => setTimeout(r, 0)); // let runAfter's callback drain
+
+      // Confirming days is a refinement, not a prerequisite — the athlete must still get a
+      // plan. Asserting on the initial_plan fire specifically, not on a training_profiles
+      // touch: that table is also *read* earlier in the turn, so a read alone would let this
+      // test pass against the exact stall it exists to catch.
+      const firedInitialPlan = fetchMock.mock.calls.some((c: unknown[]) =>
+        String((c[1] as { body?: string } | undefined)?.body ?? "").includes("initial_plan")
+      );
+      expect(firedInitialPlan).toBe(true);
+      vi.unstubAllGlobals();
+    });
   });
 
   it("schedule_confirm stage: a reply completes onboarding", async () => {

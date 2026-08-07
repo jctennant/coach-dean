@@ -8,6 +8,34 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-07 — A failing iMessage poll stranded onboarding one turn short of the plan
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "This is the most recent message I got from Dean in onboarding. I feel like we still have the same issue where he's not making a plan for me or suggesting I do something next besides taking a gap between now and my next run and icing. I don't know if that's actually the right solution. I kind of want him to help me understand mileage and what my ramp should look like. Seems like we're not properly pushing the user through onboarding here still. […] I also don't think we need to belabor the 'you're doing things at too high of an effort.' Let's focus more on: mileage, training structure, key workouts, what the training days are."
+
+**Root cause:** Three separate defects, one of them a hard blocker.
+
+1. **The blocker.** `handleInjuryIntake`'s completion branch runs `sendAndStore(completionMsg)` → `maybeEnterScheduleConfirm` → `completeOnboarding`. `completeOnboarding` is the call that writes `training_profiles` / `training_state`, generates the arc, and fires `initial_plan` — i.e. everything the athlete is actually here for. `maybeEnterScheduleConfirm` sends the training-days confirmation, and on Photon it does so via `sendPollAndStore` → `sendPoll`, which throws on a Spectrum plan without poll support (documented in `photon.ts`) and was the only one of the three `sendPoll` call sites not wrapped in a try/catch — both sites in `coach/respond` already treat it as best-effort for exactly this reason. The throw propagated out, the route returned, and onboarding ended permanently with the athlete holding an injury-advice message and nothing else. Silent: `onboarding_step` stays `"onboarding"`, no error reaches the athlete, no cron re-drives it.
+
+   Confirmed against the live record for `45dbcdd0-…`: `injury_intake_done: true` and the completion SMS at `01:55:39Z` both landed, then nothing — no `[Poll]` conversation row, no `stage: "schedule_confirm"`, and `training_profiles` / `training_state` / `training_plans` all empty. `sendAndStore` had succeeded seconds earlier, so the sidecar was reachable; `/send-poll` specifically was not. This user never hit a poll before (they gave name and goal in one message, so `GOAL_POLL` never fired) — the training-days poll was the first, and it was fatal.
+
+2. **The Photon schedule-confirm branch never said which days.** Poll options can't be templated per-athlete, so the poll title is the fixed string "Keep those training days?" — the inferred day list appeared nowhere. The Linq branch states it inline ("Looks like you typically run Mon/Wed/Fri"); the Photon branch asked the athlete to confirm a list they had never been shown.
+
+3. **The completion message spent its one forward-looking sentence on a critique.** `buildDeterministicCompletion` branched on Strava HR-zone distribution and told athletes with >50% of time in Z3+ that their base was "at higher effort than ideal" — the line Jake called out. It was also redundant: `handleDataAnalysis` sends a Strava read one or two messages earlier, so this restated the same diagnosis in different words instead of saying anything about mileage or structure.
+
+**Fix / Change:**
+- `sendPollAndStore` no longer throws. A poll failure logs and falls back to plain text; because `fallbackHint` is a parenthetical addendum ("(Or just reply…)"), the fallback sends `title + fallbackHint` so the question survives on its own, and the `[Poll]` conversation row is only written when the poll actually rendered.
+- Added `scheduleConfirmCheckpoint`, a wrapper around `maybeEnterScheduleConfirm` that catches anything and returns `null` so the caller falls through to `completeOnboarding`. Confirming training days is a refinement, not a prerequisite — `initial_plan` already infers days from Strava history when none are stored, so a plan built on inferred days the athlete can correct beats no plan at all. Both call sites ([READY] path and injury-intake completion) now go through it.
+- The Photon schedule-confirm branch now states the inferred day list in its own bubble before the poll.
+- Rewrote the completion message's observation line to be mileage/structure-forward: base, longest run, ramp status, and what comes next ("Next I'll set your weekly mileage, the days, and the key sessions"). Dropped the HR-zone branch entirely — intensity distribution is a real signal, but it belongs in post-run coaching where it can be tied to a specific run, not in the handoff to a plan. `strava_hr_zone_pct` is no longer read here.
+
+**Tests:** Two regression tests under "schedule-confirm checkpoint failures never strand the athlete", both verified to fail against the pre-fix code. The second asserts on the `initial_plan` fetch fire rather than on a `training_profiles` touch — that table is also *read* earlier in the turn, so a read alone would have let the test pass against the exact stall it exists to catch. `@/lib/photon` is now mocked in the onboarding suite; the poll path had no coverage at all, which is why this shipped.
+
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/onboarding-handle.test.ts`, `evals/run-simulation-evals.mjs` (completion-message parity mirror)
+
+---
+
 ## 2026-08-07 — A 90-second-old processing lock was silently swallowing the athlete's next onboarding message
 
 **Type:** Bug Fix

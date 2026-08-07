@@ -594,7 +594,13 @@ function buildCompletionMessage(collected, today) {
     opening = `${firstName}, you're set up.`;
   }
 
-  const observation = avgMiles ? `Your base at ${avgMiles} mi/week gives us room to work.` : "";
+  // Mirrors buildDeterministicCompletion's observation line in onboarding/handle/route.ts —
+  // mileage/structure-forward, no HR-zone intensity critique (see 2026-08-07 changelog).
+  const longestRun = collected.strava_longest_run_miles || null;
+  const mileageTrend = collected.strava_mileage_trend || null;
+  const observation = avgMiles
+    ? `Building from ${avgMiles} mi/week${longestRun ? `, longest ${longestRun} mi` : ""}.${mileageTrend === "building" ? " You've already got the ramp started." : ""} Next I'll set your weekly mileage, the days, and the key sessions.`
+    : "";
 
   let injuryNote = "";
   if (activeInjury && injuryBodyPart) {
