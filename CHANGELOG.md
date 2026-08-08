@@ -8,6 +8,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-08 — Initial plan restated a session distance as miles already run, and had no day-by-day schedule
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Jake (internal test onboarding)
+**User feedback:** "seems like dean didn't say my correct milesage for the week so far here, and I'd like to get back to the 'here's your schedule for the next week' Monday: X, Tuesday: Y, Wednesday: Z and so on"
+
+Dean's onboarding close said "You've already logged 6.5 mi this week. Your budget's covered." Eight minutes later, asked directly, he said "You're at 20.3 mi this week. 4 runs logged." — the second number was right.
+
+**Root cause (bug 1 — wrong week-to-date):** 20.3 mi across 4 runs was correct and was what the system computed; `weekMileageSoFar` was never wrong. The 6.5 was Dean's own plan: `training_state.weekly_plan_sessions` held `Sat 8/8 — Long run 6.5mi`, and the message restated that prescribed distance as mileage already run. Two guards should have caught it and neither did. The Phase B fact gate covers `initial_plan` and has a `week_distance_completed` fact, but it only compares values the model echoes in `stated_facts` — the echo reported nothing for that field, so there was nothing to compare. `correctWeekToDateTotal`, the deterministic post-processor whose regex matches this exact claim shape ("6.5 mi this week"), ran only on `post_run` and `user_message`; the plan triggers were excluded because they legitimately state a *planned* total in the same shape ("16 mi this week").
+
+**Root cause (bug 2 — no schedule):** `weekly_recap` has sent a deterministic day-by-day schedule since the 2026-04-16 redesign (`computeArcWeekSkeleton` → `formatWeeklyPlanDigest`, plus the MMS schedule card). `initial_plan` never got one — its prompt asks for prose and explicitly says "not a day-by-day schedule" — so an athlete finishing onboarding got a paragraph about the week and didn't see an actual schedule until the following Sunday.
+
+**Fix / Change:**
+- Extracted `correctWeekToDateTotal` from `route.ts` into `src/lib/week-to-date-correction.ts` (it had no tests) and gave it a `requireCompletedContext` mode: only rewrites when the *same sentence* marks the number as already run ("logged", "already", "so far", "you're at"), leaving a planned target untouched. Wired `initial_plan` and `weekly_recap` through that mode; `post_run`/`user_message` behavior is unchanged. The sentence-scoped lookback matters — a 40-char window would carry "logged" from the previous sentence onto the next number and rewrite the target too (caught by test).
+- New `src/lib/initial-plan-schedule.ts` — `buildInitialPlanSchedule()` renders a day/date/session list from the same skeleton generator the Sunday recap uses, so the two can't describe a week differently and no model call produces the numbers. Sent as its own bubble at the end of `initial_plan`, best-effort (a failure can't break the onboarding close), skipped on injury hold / complement / analyst modes and when the athlete has no `training_days`.
+- Which week it shows: the rest of the current week when 3+ days remain and the week's mileage budget isn't already met; otherwise the upcoming Mon–Sun week ("Next week (Aug 10–16):"). Jake's case — Saturday onboard, 20.3 of ~20 mi already run — lands on next week, which is what he needed to see.
+- `computeArcWeekSkeleton` gained an optional `weekOffsetDays` (7 = next week); `formatWeeklyPlanDigest` gained an optional heading.
+- One prompt line added to `initial_plan` telling Dean a schedule bubble follows, so his prose gives shape and reasoning rather than duplicating the day list.
+
+**Files changed:** `src/lib/week-to-date-correction.ts` (new), `src/lib/initial-plan-schedule.ts` (new), `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`, `src/__tests__/lib/week-to-date-correction.test.ts` (new), `src/__tests__/lib/initial-plan-schedule.test.ts` (new)
+
+---
+
 ## 2026-08-08 — Goal poll opened with no intro; shin red flag over-fired and kept repeating
 
 **Type:** Bug Fix

@@ -1115,8 +1115,10 @@ export function computeArcWeekSkeleton(params: {
   strengthDay: string | null; // "Mon".."Sun", from computeWeeklyStrength()
   crosstrainingTools?: string[]; // training_profiles.crosstraining_tools — up to 2 supplementary cross-train slots on rest days
   timezone: string;
+  /** Days to shift the Mon–Sun window the dates are computed for. 7 = next week. */
+  weekOffsetDays?: number;
 }): ArcWeekSlot[] {
-  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone } = params;
+  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone, weekOffsetDays = 0 } = params;
 
   const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const tz = timezone || "America/New_York";
@@ -1124,7 +1126,7 @@ export function computeArcWeekSkeleton(params: {
   const [ty, tm, td] = localStr.split("-").map(Number);
   const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
   const daysFromMonday = todayDow === 0 ? 6 : todayDow - 1;
-  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday));
+  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday + weekOffsetDays));
   const dateFor = (abbrev: string) => {
     const offset = dayOffset[abbrev]!;
     const d = new Date(Date.UTC(
@@ -1436,7 +1438,8 @@ export function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
 export function formatWeeklyPlanDigest(
   skeleton: ArcWeekSlot[],
   slotAnnotations?: Array<{ day: string; pace?: string; why?: string }> | null,
-  isMetric = false
+  isMetric = false,
+  heading = "This week's plan:"
 ): string {
   const annotationByDay = new Map((slotAnnotations ?? []).map(a => [a.day, a]));
   const lines = skeleton
@@ -1446,7 +1449,7 @@ export function formatWeeklyPlanDigest(
       const pace = annotation?.pace ? ` (${annotation.pace})` : "";
       return `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}`;
     });
-  return `This week's plan:\n${lines.join("\n")}`;
+  return `${heading}\n${lines.join("\n")}`;
 }
 
 export interface RecoveryWeekSlot {

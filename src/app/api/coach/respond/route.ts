@@ -34,6 +34,8 @@ import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/ti
 import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
+import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
+import { buildInitialPlanSchedule, type SchedulePlanWeek } from "@/lib/initial-plan-schedule";
 import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
@@ -4244,7 +4246,20 @@ OUTPUT CONTRACT:
           weekMileageSoFar,
           isMetricUser
         )
-      : correctMileageTotal(stripped, alreadyCompletedMiles);
+      : trigger === "initial_plan" || trigger === "weekly_recap"
+        // Plan triggers state a PLANNED weekly total in the same shape a week-to-date
+        // claim uses ("16 mi this week"), so the corrector runs in completed-context-only
+        // mode: it rewrites "you've already logged X mi this week" and leaves the target
+        // alone. Without this, initial_plan could restate one of its own session distances
+        // as miles already run and nothing caught it (2026-08-08, Jake: "6.5 mi this week"
+        // when the real figure was 20.3).
+        ? correctWeekToDateTotal(
+            correctMileageTotal(stripped, alreadyCompletedMiles),
+            weekMileageSoFar,
+            isMetricUser,
+            { requireCompletedContext: true }
+          )
+        : correctMileageTotal(stripped, alreadyCompletedMiles);
   // SESSION_LIST correction removed — no day-level session list in responses anymore.
   let mileageCorrected = mileageCorrectedBase;
 
@@ -4695,6 +4710,51 @@ OUTPUT CONTRACT:
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
+    // Day-by-day schedule bubble — deterministic, from the same skeleton generator the
+    // Sunday recap uses (see initial-plan-schedule.ts). Dean's prose above deliberately
+    // stays conversational; this is the actual schedule.
+    if (!(state?.injury_hold_since as string | null) && !isComplementMode && !isAnalystMode) {
+      try {
+        const { data: planForSchedule } = await supabase
+          .from("training_plans")
+          .select("weeks, plan_source")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (planForSchedule?.weeks && Array.isArray(planForSchedule.weeks) && planForSchedule.plan_source !== "uploaded") {
+          const scheduleText = buildInitialPlanSchedule({
+            weeks: planForSchedule.weeks as unknown as SchedulePlanWeek[],
+            currentWeekNumber: periodization.effectiveWeek,
+            trainingDays: (profile?.training_days as string[] | null) ?? [],
+            strengthDay: computeWeeklyStrength(profile).day,
+            crosstrainingTools: (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [],
+            timezone: userTimezone,
+            isMetric: isMetricUser,
+            weekMileageSoFar,
+            avgWeeklyMileage,
+          });
+          if (scheduleText) {
+            if (!dry_run) {
+              if (chatId) await startTyping(chatId);
+              await new Promise((r) => setTimeout(r, 1200));
+              await sendSMS(user.phone_number, scheduleText);
+            }
+            await insertConversation({
+              user_id: userId,
+              role: "assistant",
+              content: scheduleText,
+              message_type: "initial_plan",
+            });
+            void trackEvent(userId, "initial_plan_schedule_sent", { trigger });
+          }
+        }
+      } catch (scheduleErr) {
+        // Never let the schedule bubble break the rest of the onboarding close.
+        console.error(`[initial_plan] schedule bubble failed userId=${userId}:`, scheduleErr);
+      }
+    }
+
     // Send a follow-up confirmation bubble after the plan description. An open-ended
     // "How does this look?" right after a dense plan dump gives the athlete nothing to
     // react to but free text — most go quiet instead of replying (see the 60%-silent
@@ -5168,30 +5228,6 @@ OUTPUT CONTRACT:
  * as a sanity cap — if Claude states a projection that's >50% over the target,
  * replace it with the target to prevent alarming numbers like "on track for 77mi".
  */
-/**
- * Post-processing guard: if the message states a week-to-date total ("X mi for the week",
- * "you're at X mi this week", etc.) that differs from the system-computed weekMileageSoFar,
- * rewrite the number. Skips projection phrasings ("on track for", "projected") which are
- * handled by correctProjectedTotal.
- */
-function correctWeekToDateTotal(message: string, weekMileageSoFar: number | null, isMetric: boolean): string {
-  if (weekMileageSoFar == null || weekMileageSoFar < 0) return message;
-  const correctValue = isMetric
-    ? Math.round(weekMileageSoFar * 1.60934 * 10) / 10
-    : Math.round(weekMileageSoFar * 10) / 10;
-  const unitGroup = isMetric ? "km" : "mi(?:les?)?";
-  const projectionLeadIn = /(?:on\s+track\s+for|on\s+pace\s+for|projected|aiming\s+for|target(?:ing)?|to\s+hit|should\s+hit|expecting|projecting)\s+~?\s*$/i;
-  const pattern = new RegExp(`(\\d+(?:\\.\\d+)?)(\\s*${unitGroup}[ \\t]*(?:for|this)[ \\t]+(?:the[ \\t]+)?week\\b)`, "gi");
-  return message.replace(pattern, (full, num, suffix, offset) => {
-    const stated = parseFloat(num);
-    if (Math.abs(stated - correctValue) <= 0.4) return full;
-    const before = message.slice(Math.max(0, offset - 40), offset);
-    if (projectionLeadIn.test(before)) return full;
-    console.warn(`[correctWeekToDateTotal] stated ${stated} WTD, system says ${correctValue} — correcting`);
-    return `${correctValue}${suffix}`;
-  });
-}
-
 function correctProjectedTotal(message: string, projectedWeekMiles: number | null, weeklyMileageTarget?: number | null): string {
   // Fallback cap: when session data is unavailable (projectedWeekMiles = null),
   // use the weekly target to catch wildly wrong Claude projections.
@@ -9065,6 +9101,8 @@ ${priorMessageGuard}
 BUBBLE 1: One sentence grounding them in where they are and where this is going — only if you haven't just said it in the prior message (see rule above); otherwise skip straight to the plan. Reference their specific race and timeline if there is one and it wasn't just stated. Example: "Dipsea in 6 weeks — I'll be watching every run and calibrating as we go." 2 sentences max, no generic "Welcome aboard."
 
 BUBBLE 2: How you're thinking about the next 1-2 weeks. Conversational, not a day-by-day schedule. ${weekBudgetExhausted ? `The week is essentially done — just orient them to next week's structure (weekly mileage, one quality session). Keep it brief.` : `Three things: what the weekly mileage target looks like this week, one quality session to slot in, and what the long run should be. Frame it as your thinking, not a prescription — "this week I'd aim for X miles, one quality session mid-week, and a longer easy run on the weekend." Invite them to push back: "Text me if anything needs adjusting."` }
+
+A separate bubble listing the day-by-day schedule (day, date, session) is sent right after yours, built from the plan itself — so give the shape and the reasoning, never the day list or a per-day distance.
 
 This is not a plan delivery. Dean calibrates every week based on what actually happens. The Sunday recap will be the primary touchpoint for week-to-week structure going forward.
 
