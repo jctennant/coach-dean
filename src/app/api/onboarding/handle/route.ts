@@ -133,8 +133,13 @@ async function sendAndStore(
  * one-line plain-text fallback so the question is still answerable on clients that
  * can't render the interactive poll (e.g. an out-of-date iOS/macOS Messages build).
  */
-async function sendPollAndStore(userId: string, phone: string, poll: AppPoll): Promise<void> {
+async function sendPollAndStore(userId: string, phone: string, poll: AppPoll, preface?: string): Promise<void> {
   const isDryRun = dryRunUsers.has(userId);
+  // A poll replaces a question Dean would otherwise have written, but it can't carry anything
+  // around that question. When the poll is the very first thing an athlete hears from Dean,
+  // the intro that normally rides along with the first question has to be sent separately —
+  // otherwise Dean's opening line to a stranger is a bare multiple-choice question.
+  if (preface) await sendAndStore(userId, phone, preface, "onboarding");
   let pollRendered = isDryRun;
   if (!isDryRun) {
     try {
@@ -589,10 +594,20 @@ async function handleConversation(
   // re-sending on a duplicate/retried webhook call. See polls.ts for why
   // this is the only poll wired in so far (injury/training-days don't have as clean
   // a fixed insertion point).
+  //
+  // If the athlete's very first message already carries their name ("Hi Dean, this is Jake"),
+  // this branch is reached on Dean's FIRST reply — so the verbatim intro in the conversation
+  // prompt's isFirstResponse branch never runs, and Dean's opening line to a stranger was a
+  // bare poll with no introduction (reported 2026-08-08). Pass the intro as a preface bubble
+  // in that case so the poll still replaces only the question, not the greeting.
   if (isPhotonProvider() && mergedData.name && !mergedData.goal && !mergedData.goal_poll_sent) {
     const updatedData = { ...mergedData, goal_poll_sent: true };
     await supabase.from("users").update({ onboarding_data: updatedData as unknown as Json }).eq("id", user.id);
-    await sendPollAndStore(user.id, user.phone_number, GOAL_POLL);
+    const pollFirstName = ((mergedData.name as string) || "").trim().split(/\s+/)[0];
+    const preface = isFirstResponse
+      ? `Hey${pollFirstName ? ` ${pollFirstName}` : ""}! I'm Coach Dean, your AI running coach. I build and adapt training plans around a race, injury recovery, or general fitness, and flag early warning signs before they sideline you.`
+      : undefined;
+    await sendPollAndStore(user.id, user.phone_number, GOAL_POLL, preface);
     return NextResponse.json({ ok: true });
   }
 
@@ -1397,7 +1412,13 @@ function summarizeCollected(data: Record<string, unknown>): string {
   if (data.injury_notes) lines.push(`Injury/limitation: ${data.injury_notes}`);
   if (data.injury_management) lines.push(`What they're doing for it: ${data.injury_management}`);
   if (data.reported_during) lines.push(`Injury timing: pain reported ${data.reported_during} runs`);
-  if (data.injury_pain_character === "localized_or_rest_pain") lines.push(`RED FLAG: shin/tibia pain described as one specific spot or present at rest — possible stress fracture. Do not recommend continuing to run or add load (including easy miles or incline treadmill work) until the athlete confirms they've been checked by a doctor.`);
+  // Raise-once, not raise-every-turn. The original wording ("until the athlete confirms they've
+  // been checked by a doctor") had no exit condition, so once the flag was set Dean re-escalated
+  // on every remaining turn and kept pushing the doctor line even after the athlete answered it
+  // — which read as alarmist rather than careful (reported 2026-08-08). Dean can see the prior
+  // turns, so he can judge whether he's already said this; the instruction only has to tell him
+  // not to say it twice.
+  if (data.injury_pain_character === "localized_or_rest_pain") lines.push(`POSSIBLE RED FLAG: shin/tibia pain described as one specific spot, worsening within runs, or present at rest — worth ruling out a stress fracture. Recommend they get it looked at, ONCE, and don't add load or prescribe new sessions on top of it. If you've already raised this earlier in the conversation, do NOT raise it again — the athlete heard you. Acknowledge whatever they said back (including reassuring signs like a negative hop test), note briefly that it's still worth checking if it doesn't settle, and continue with onboarding instead of repeating the warning or refusing to move forward.`);
   if (data.avg_sleep_hours) lines.push(`Avg sleep: ${data.avg_sleep_hours} hours/night`);
   if (data.strength_habits) lines.push(`Strength/cross-training: ${data.strength_habits}`);
   if (data.ultra_race_history) lines.push(`Ultra background: ${data.ultra_race_history}`);
@@ -1454,7 +1475,11 @@ Rules:
 - current_niggles: any current aches, pain, or issues the athlete is managing right now (distinct from past injury history). Null if not mentioned.
 - injury_management: what the athlete is doing to manage a current injury — physical therapy, rest, icing, stretching protocol, seeing a doctor or physio, etc. Extract from the athlete's own words. Null if not mentioned or no current injury.
 - reported_during: when the injury pain occurs — 'during' if they feel it while running, 'after' if only after finishing, 'both' if during and after. Null if not mentioned.
-- injury_pain_character: for shin/tibia pain specifically — 'diffuse' if the athlete has EXPLICITLY described the pain itself as spread along the bone (not one spot) AND said it eases with rest, 'localized_or_rest_pain' if there's one specific painful spot, or pain present even at rest/walking/at night (possible stress fracture — needs medical evaluation before more loading). A bare self-diagnosis label like "shin splints" is NOT enough on its own to set this to 'diffuse' — the athlete calling it "shin splints" doesn't mean they've actually described whether it's one spot or a general ache, or whether it hurts at rest. Null unless the athlete has actually described the location/character of the pain, even if they've named a condition.
+- injury_pain_character: for shin/tibia pain specifically — this is a stress-fracture screen, so classify the PATTERN the athlete described, not the label they used.
+  'localized_or_rest_pain' requires at least one of: (a) pinpoint tenderness — one small spot on the bone they could cover with a fingertip; (b) pain that gets WORSE as a run goes on, or that stops them running; (c) pain at night, or real pain (not a faint ache) while simply walking around. This is the possible-stress-fracture bucket.
+  'diffuse' for the ordinary shin-splints (MTSS) pattern: soreness spread over a stretch or side of the shin — a region or an edge of the bone, e.g. "the inside of my shin", counts as spread, not as one spot — AND it is worst at the start of a run and eases as they warm up, or eases with rest. A mild lingering ache at rest is part of this pattern and does NOT by itself make it 'localized_or_rest_pain'; only pain that is significant at rest, at night, or when walking does.
+  If the two halves conflict (one specific pinpoint spot but it warms up, or a general ache that is severe at night), choose 'localized_or_rest_pain'.
+  A bare self-diagnosis label like "shin splints" is NOT enough on its own to set 'diffuse' — the athlete naming a condition doesn't mean they described where it hurts or when. Null unless the athlete has actually described the location/character of the pain, even if they've named a condition.
 - avg_sleep_hours: if the athlete mentions how many hours of sleep they get (e.g. "I sleep about 7 hours", "usually 6-7 hours"), extract as a number. Null if not mentioned.
 - strength_habits: a brief description of the athlete's strength training and cross-training habits — what they do, how often. Examples: "3x/week lifting, no cross-training", "yoga 2x/week, cycling occasionally", "no strength work". Null if not mentioned.
 - cross_training_activities: array of cross-training activities the athlete does (e.g. ['cycling', 'swimming', 'yoga', 'lifting']). Null if not mentioned.
@@ -1518,7 +1543,7 @@ Rules:
           injury_severity: { type: ["string", "null"], enum: ["mild", "moderate", "severe", null], description: "Severity of the current active injury. mild=noticeable but running is UNCHANGED — same distance and effort as normal, just aware of it. moderate=training has ALREADY changed because of it — cutting runs short, skipping sessions, reducing pace/distance, or it's been going on for multiple weeks without resolving. severe=cannot run at all right now. If the athlete describes any actual change to their running (shorter runs, skipped days, reduced volume) or a persistent multi-week issue, that is moderate, not mild — mild is reserved for 'I notice it but haven't changed anything.'" },
           injury_body_part_current: { type: ["string", "null"], description: "Body part of the CURRENT active injury. ALWAYS include laterality (left/right/bilateral) whenever the athlete states it — e.g. if they say 'my left hamstring', extract 'left hamstring', not just 'hamstring'. Never drop the side. Null for historical injuries." },
           reported_during: { type: ["string", "null"], enum: ["during", "after", "both", null], description: "When the injury pain occurs relative to running. 'during' = feels it while running, 'after' = feels it after finishing, 'both' = during and after. Null if not mentioned." },
-          injury_pain_character: { type: ["string", "null"], enum: ["diffuse", "localized_or_rest_pain", null], description: "Shin/tibia pain only. 'diffuse' = the athlete has EXPLICITLY described the pain as spread along the bone AND said it eases with rest — a bare label like 'shin splints' is NOT enough on its own, since a self-diagnosis doesn't mean the actual pain character was described. 'localized_or_rest_pain' = one specific painful spot, or pain even at rest/walking/night — possible stress fracture, needs medical evaluation before more loading. Null unless the athlete has actually described the location/character of the pain." },
+          injury_pain_character: { type: ["string", "null"], enum: ["diffuse", "localized_or_rest_pain", null], description: "Shin/tibia pain only — classify the pattern described, not the label used. 'localized_or_rest_pain' = pinpoint tenderness on one fingertip-sized spot of the bone, OR pain that worsens as a run goes on, OR pain at night or real pain when walking — possible stress fracture. 'diffuse' = the ordinary shin-splints pattern: soreness spread over a stretch or side of the shin (a region such as 'the inside of my shin' counts as spread, not one spot) AND worst at the start of a run / eases as it warms up or with rest. A mild lingering ache at rest is part of the diffuse pattern and does NOT on its own make it 'localized_or_rest_pain'. If the halves conflict, choose 'localized_or_rest_pain'. A bare label like 'shin splints' is NOT enough on its own. Null unless the athlete has actually described the location/character of the pain." },
           avg_sleep_hours: { type: ["number", "null"], description: "Average hours of sleep per night the athlete gets. E.g. '7 hours' → 7.0, '6-7 hours' → 6.5. Null if not mentioned." },
           experience_years: { type: ["number", "null"] },
           other_races: {
