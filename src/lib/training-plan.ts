@@ -1245,6 +1245,25 @@ export function computeArcWeekSkeleton(params: {
     });
   });
 
+  // Distances placed here are what the athlete reads day by day, so they must add back up
+  // to the week's target. They do by construction — leftover is split across easy days and
+  // the last one absorbs the remainder — EXCEPT when a key_workout's distance can't be
+  // parsed: its miles then stay in the leftover pool and get handed to the easy days on top
+  // of the quality session's own stated distance, so the printed week sums high. Surfacing
+  // that here (rather than leaving it to be noticed in a transcript) is the difference
+  // between a known parse gap and the recurring "the weekly mileage doesn't add up" bug.
+  const placedMiles = slots.reduce((sum, s) => sum + (s.distanceMiles ?? 0), 0);
+  const impliedQualityMiles = slots
+    .filter(s => s.type === "quality" && s.distanceMiles == null && s.keyWorkoutText)
+    .reduce((sum, s) => sum + (parseLeadingDistanceMiles(s.keyWorkoutText!) ?? 0), 0);
+  const skeletonTotal = placedMiles + impliedQualityMiles;
+  if (weeklyTotalMiles > 0 && Math.abs(skeletonTotal - weeklyTotalMiles) > 0.6) {
+    console.warn(
+      `[computeArcWeekSkeleton] day-by-day distances sum to ${Math.round(skeletonTotal * 10) / 10}mi but the week's target is ${weeklyTotalMiles}mi` +
+      (impliedQualityMiles > 0 ? " (key_workout distance could not be parsed into the split)" : "")
+    );
+  }
+
   return slots.sort((a, b) => ORDERED_DAYS.indexOf(a.day) - ORDERED_DAYS.indexOf(b.day));
 }
 
@@ -1259,15 +1278,26 @@ export function computeArcWeekSkeleton(params: {
  * baked in (computeWeekOneVolumeCap/computeLongRunCap), so slicing rather than re-deriving
  * keeps the starter week and the full arc as two views of one computation, not two.
  */
-export function computeStarterWeekSkeleton(params: Parameters<typeof computeArcWeekSkeleton>[0]): ArcWeekSlot[] {
+export function computeStarterWeekSkeleton(
+  params: Parameters<typeof computeArcWeekSkeleton>[0] & {
+    /** True when the athlete has already logged a run today — today's slot is dropped. */
+    ranToday?: boolean;
+    nowMs?: number;
+  }
+): ArcWeekSlot[] {
   const full = computeArcWeekSkeleton(params);
   const tz = params.timezone || "America/New_York";
-  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  const now = params.nowMs != null ? new Date(params.nowMs) : new Date();
+  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
   const [ty, tm, td] = localStr.split("-").map(Number);
   const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
   const todayAbbrev = ORDERED_DAYS[todayDow === 0 ? 6 : todayDow - 1];
   const todayIdx = ORDERED_DAYS.indexOf(todayAbbrev);
-  return full.filter(s => ORDERED_DAYS.indexOf(s.day) >= todayIdx);
+  // An athlete who onboards after their run has already been logged doesn't need today
+  // prescribed back to them — that read as Dean not having looked at the run he'd just
+  // been shown (2026-08-08). Their miles are already in weekMileageSoFar either way.
+  const firstIdx = params.ranToday ? todayIdx + 1 : todayIdx;
+  return full.filter(s => ORDERED_DAYS.indexOf(s.day) >= firstIdx);
 }
 
 /**

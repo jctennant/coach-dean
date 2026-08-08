@@ -27,7 +27,12 @@ Dean's onboarding close said "You've already logged 6.5 mi this week. Your budge
 - `computeArcWeekSkeleton` gained an optional `weekOffsetDays` (7 = next week); `formatWeeklyPlanDigest` gained an optional heading.
 - One prompt line added to `initial_plan` telling Dean a schedule bubble follows, so his prose gives shape and reasoning rather than duplicating the day list.
 
-**Files changed:** `src/lib/week-to-date-correction.ts` (new), `src/lib/initial-plan-schedule.ts` (new), `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`, `src/__tests__/lib/week-to-date-correction.test.ts` (new), `src/__tests__/lib/initial-plan-schedule.test.ts` (new)
+**Follow-up in the same session (Jake: "Dean should have caught that I already ran today, so probably don't need a prescription for another run today"):**
+- `computeStarterWeekSkeleton` gained `ranToday` — when a run is already logged on the athlete's local date, today's slot is dropped from the sliced starter week. Applied at the source, so `training_state.weekly_plan_sessions` (what the dashboard, the reminders and the session-swap path all read) matches the schedule the athlete is sent, rather than holding a phantom session for a day they'd already run.
+- `buildInitialPlanSchedule` no longer re-derives the current week from the arc. It renders `training_state.weekly_plan_sessions` — the row the mid-week starter slice already wrote — and only computes the *next* week, which nothing has persisted yet. Re-deriving was a second computation of one thing, the same shape as the 2026-07-26 drift where the stored plan said 8.5mi/25mi and Dean's message said 6mi/13mi.
+- `computeArcWeekSkeleton` now checks that the distances it places sum back to the week's target and warns when they don't. They do by construction — leftover is split across easy days with the last absorbing the remainder — except when a `key_workout`'s distance can't be parsed, in which case its miles stay in the leftover pool and get handed to the easy days *on top of* the quality session's own stated distance, so the printed week reads high. That's the one live path where the day-by-day mileage can fail to add up, and it now announces itself.
+
+**Files changed:** `src/lib/week-to-date-correction.ts` (new), `src/lib/initial-plan-schedule.ts` (new), `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`, `src/__tests__/lib/week-to-date-correction.test.ts` (new), `src/__tests__/lib/initial-plan-schedule.test.ts` (new), `src/__tests__/lib/training-plan.test.ts`
 
 ---
 

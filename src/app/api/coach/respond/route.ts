@@ -35,7 +35,7 @@ import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
 import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
-import { buildInitialPlanSchedule, type SchedulePlanWeek } from "@/lib/initial-plan-schedule";
+import { buildInitialPlanSchedule, type SchedulePlanWeek, type PersistedSession } from "@/lib/initial-plan-schedule";
 import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
@@ -1729,6 +1729,14 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
 
   const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only", isMetricUser, weekRefDate);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone, weekRefDate);
+  // Has the athlete already run today (their local date)? Used by initial_plan so a
+  // mid-day onboard doesn't prescribe a run for a day the athlete has already run —
+  // their miles are in weekMileageSoFar, but the schedule was still handing today back.
+  const todayLocalDate = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
+  const hasRunLoggedToday = recentActivities.some(
+    (a) => RUN_TYPES.has(a.activity_type) &&
+      new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date(a.start_date)) === todayLocalDate
+  );
 
   // Dedup guard — if we've already sent a post_run SMS for this activity, skip Claude.
   if (trigger === "post_run" && activityId) {
@@ -3388,6 +3396,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         strengthDay: strengthForStarter.day,
         crosstrainingTools: crosstrainingToolsForStarter,
         timezone: initTimezone,
+        ranToday: hasRunLoggedToday,
       });
       if (starterSkeleton.length > 0) {
         const runSlots = starterSkeleton.filter(s => s.type !== "rest");
@@ -4722,10 +4731,19 @@ OUTPUT CONTRACT:
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+        // Re-read weekly_plan_sessions rather than reusing anything computed earlier in this
+        // request: the mid-week starter slice above wrote it, and that row — not a second
+        // derivation from the arc — is what the dashboard and reminders show.
+        const { data: scheduleState } = await supabase
+          .from("training_state")
+          .select("weekly_plan_sessions")
+          .eq("user_id", userId)
+          .maybeSingle();
         if (planForSchedule?.weeks && Array.isArray(planForSchedule.weeks) && planForSchedule.plan_source !== "uploaded") {
           const scheduleText = buildInitialPlanSchedule({
             weeks: planForSchedule.weeks as unknown as SchedulePlanWeek[],
             currentWeekNumber: periodization.effectiveWeek,
+            persistedSessions: (scheduleState?.weekly_plan_sessions as PersistedSession[] | null) ?? null,
             trainingDays: (profile?.training_days as string[] | null) ?? [],
             strengthDay: computeWeeklyStrength(profile).day,
             crosstrainingTools: (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [],
@@ -4733,6 +4751,7 @@ OUTPUT CONTRACT:
             isMetric: isMetricUser,
             weekMileageSoFar,
             avgWeeklyMileage,
+            ranToday: hasRunLoggedToday,
           });
           if (scheduleText) {
             if (!dry_run) {

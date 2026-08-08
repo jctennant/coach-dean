@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInitialPlanSchedule, type SchedulePlanWeek } from "@/lib/initial-plan-schedule";
+import { buildInitialPlanSchedule, type SchedulePlanWeek, type PersistedSession } from "@/lib/initial-plan-schedule";
 
 // Sat Aug 8 2026, 18:00 UTC = 12:00 MDT. Week of Mon Aug 3; next week Mon Aug 10–Sun Aug 16.
 const SAT = Date.UTC(2026, 7, 8, 18, 0, 0);
@@ -11,9 +11,18 @@ const weeks: SchedulePlanWeek[] = [
   { week_number: 2, mileage_target: 16, long_run_target: 8, key_workout: "Fartlek 6mi (varied 2-3 min pickups)" },
 ];
 
+// What the mid-week starter slice persists to training_state.weekly_plan_sessions.
+const persisted: PersistedSession[] = [
+  { day: "Tue", date: "8/4", label: "Strength + mobility" },
+  { day: "Wed", date: "8/5", label: "Fartlek 5mi (varied 2-3 min pickups)" },
+  { day: "Thu", date: "8/6", label: "Easy 3mi" },
+  { day: "Sat", date: "8/8", label: "Long run 7mi" },
+];
+
 const base = {
   weeks,
   currentWeekNumber: 1,
+  persistedSessions: persisted,
   trainingDays: ["monday", "wednesday", "thursday", "saturday"],
   strengthDay: "Tue",
   crosstrainingTools: ["bike", "elliptical"],
@@ -21,58 +30,84 @@ const base = {
   isMetric: false,
   weekMileageSoFar: 0,
   avgWeeklyMileage: 25,
+  ranToday: false,
 };
 
 describe("buildInitialPlanSchedule", () => {
-  it("shows next week when the current week's mileage budget is already met", () => {
-    const out = buildInitialPlanSchedule({ ...base, nowMs: SAT, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 });
-    expect(out).toContain("Next week (Aug 10–16):");
-    expect(out).toContain("Mon 8/10");
-    expect(out).toContain("Sat 8/15");
-    // Week 2's long run, not week 1's.
-    expect(out).toContain("Long run 8mi");
+  describe("rest of the current week", () => {
+    it("renders the persisted sessions rather than re-deriving them", () => {
+      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4 })!;
+      expect(out).toContain("Rest of this week:");
+      expect(out).toContain("Tue 8/4 — Strength + mobility");
+      expect(out).toContain("Sat 8/8 — Long run 7mi");
+    });
+
+    it("drops today when the athlete has already run today", () => {
+      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, ranToday: true })!;
+      expect(out).not.toContain("Tue 8/4");
+      expect(out).toContain("Wed 8/5");
+    });
+
+    it("never shows a day that's already passed", () => {
+      const withMonday = [{ day: "Mon", date: "8/3", label: "Easy 4mi" }, ...persisted];
+      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: withMonday })!;
+      expect(out).not.toContain("Mon 8/3");
+    });
+
+    it("orders lines Mon→Sun regardless of stored order", () => {
+      const shuffled = [persisted[3], persisted[1], persisted[0], persisted[2]];
+      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: shuffled })!;
+      const days = out.split("\n").slice(1).map((l) => l.slice(0, 3));
+      expect(days).toEqual(["Tue", "Wed", "Thu", "Sat"]);
+    });
   });
 
-  it("shows next week when too few days remain in the current week", () => {
-    const out = buildInitialPlanSchedule({ ...base, nowMs: SAT, weekMileageSoFar: 0 });
-    expect(out).toContain("Next week (Aug 10–16):");
-  });
+  describe("falling through to next week", () => {
+    it("shows next week when the current week's mileage budget is already met", () => {
+      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 })!;
+      expect(out).toContain("Next week (Aug 10–16):");
+      expect(out).toContain("Long run 8mi"); // week 2's, not week 1's
+    });
 
-  it("shows the rest of the current week when enough of it is left", () => {
-    const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, avgWeeklyMileage: 25 });
-    expect(out).toContain("Rest of this week:");
-    // Tuesday onward only — Monday's session is in the past.
-    expect(out).not.toContain("Mon 8/3");
-    expect(out).toContain("Wed 8/5");
-    expect(out).toContain("Sat 8/8");
+    it("shows next week when too few days remain", () => {
+      const out = buildInitialPlanSchedule({ ...base, nowMs: SAT })!;
+      expect(out).toContain("Next week (Aug 10–16):");
+      expect(out).toContain("Mon 8/10");
+      expect(out).toContain("Sat 8/15");
+    });
+
+    it("shows next week when nothing is left in the persisted current week", () => {
+      const spent = [{ day: "Mon", date: "8/3", label: "Easy 4mi" }];
+      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: spent })!;
+      expect(out).toContain("Next week (Aug 10–16):");
+    });
+
+    it("shows next week when no sessions were persisted at all", () => {
+      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, persistedSessions: null })!;
+      expect(out).toContain("Next week (Aug 10–16):");
+    });
+
+    it("renders distances in km for metric athletes", () => {
+      const out = buildInitialPlanSchedule({ ...base, nowMs: SAT, isMetric: true })!;
+      expect(out).toContain("Long run 12.9km");
+      // key_workout text keeps whatever units it was generated in — see arcWeekSlotLabel.
+      expect(out).toContain("Fartlek 6mi");
+    });
+
+    it("returns null when next week isn't in the plan", () => {
+      expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, weeks: [weeks[0]] })).toBeNull();
+      expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, weeks: [] })).toBeNull();
+    });
+
+    it("returns null when the athlete has no training days set", () => {
+      expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, trainingDays: [] })).toBeNull();
+    });
   });
 
   it("lists one line per session with day, date and label", () => {
-    const out = buildInitialPlanSchedule({ ...base, nowMs: SAT, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 })!;
+    const out = buildInitialPlanSchedule({ ...base, nowMs: SAT })!;
     const lines = out.split("\n").slice(1);
     expect(lines.length).toBeGreaterThanOrEqual(4);
     for (const line of lines) expect(line).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d+\/\d+ — .+/);
-  });
-
-  it("renders distances in km for metric athletes", () => {
-    const out = buildInitialPlanSchedule({ ...base, nowMs: SAT, isMetric: true, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 })!;
-    expect(out).toContain("Long run 12.9km");
-    // key_workout text keeps whatever units it was generated in — see arcWeekSlotLabel.
-    expect(out).toContain("Fartlek 6mi");
-  });
-
-  it("returns null when the athlete has no training days set", () => {
-    expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, trainingDays: [] })).toBeNull();
-  });
-
-  it("returns null when the wanted week isn't in the plan", () => {
-    expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, weeks: [weeks[0]], weekMileageSoFar: 20.3, avgWeeklyMileage: 8 }))
-      .toBeNull();
-    expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, weeks: [] })).toBeNull();
-  });
-
-  it("does not treat a small week-to-date total as the budget being met", () => {
-    const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, avgWeeklyMileage: 25 });
-    expect(out).toContain("Rest of this week:");
   });
 });

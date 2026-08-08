@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
+import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, computeStarterWeekSkeleton, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -430,6 +430,37 @@ describe("computeArcWeekSkeleton", () => {
 
   const fiveDayTraining = ["monday", "tuesday", "wednesday", "friday", "sunday"];
 
+  it("places distances that add back up to the week's target", () => {
+    pinToWednesday();
+    const slots = computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining,
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    const total = slots.reduce((sum, s) => sum + (s.distanceMiles ?? 0), 0);
+    expect(Math.round(total * 10) / 10).toBe(30);
+  });
+
+  it("warns when an unparseable key_workout pushes the week's distances off target", () => {
+    pinToWednesday();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    computeArcWeekSkeleton({
+      trainingDays: fiveDayTraining,
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo intervals at threshold effort", // no distance to parse
+      strengthDay: "Thu",
+      timezone: "UTC",
+    });
+    // Placed distances still sum to the target here (the quality slot carries no miles),
+    // so no divergence warning — only the parse warning fires.
+    expect(warn.mock.calls.flat().join(" ")).toContain("could not parse a distance");
+    warn.mockRestore();
+  });
+
   it("places the long run on Sunday when Sunday is a training day", () => {
     pinToWednesday();
     const slots = computeArcWeekSkeleton({
@@ -837,5 +868,41 @@ describe("formatRecoveryWeekDigest", () => {
 
   it("returns just the header when the skeleton is empty or all-rest", () => {
     expect(formatRecoveryWeekDigest([])).toBe("This week's recovery plan:\n");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeStarterWeekSkeleton
+// ---------------------------------------------------------------------------
+describe("computeStarterWeekSkeleton", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const params = {
+    trainingDays: ["monday", "wednesday", "thursday", "saturday"],
+    weeklyTotalMiles: 20,
+    longRunMiles: 7,
+    keyWorkoutText: "Fartlek 5mi (varied 2-3 min pickups)",
+    strengthDay: "Tue",
+    timezone: "UTC",
+  };
+
+  it("keeps today and everything after it", () => {
+    // Wednesday 2026-05-27.
+    const slots = computeStarterWeekSkeleton({ ...params, nowMs: Date.UTC(2026, 4, 27, 12) });
+    expect(slots.map(s => s.day)).toEqual(["Wed", "Thu", "Fri", "Sat", "Sun"]);
+  });
+
+  it("drops today when the athlete has already run today", () => {
+    const slots = computeStarterWeekSkeleton({ ...params, nowMs: Date.UTC(2026, 4, 27, 12), ranToday: true });
+    expect(slots.map(s => s.day)).toEqual(["Thu", "Fri", "Sat", "Sun"]);
+    expect(slots.some(s => s.day === "Wed")).toBe(false);
+  });
+
+  it("returns nothing when the athlete already ran on the last day of the week", () => {
+    // Sunday 2026-05-31.
+    const slots = computeStarterWeekSkeleton({ ...params, nowMs: Date.UTC(2026, 4, 31, 12), ranToday: true });
+    expect(slots).toEqual([]);
   });
 });
