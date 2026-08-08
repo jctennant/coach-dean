@@ -1,0 +1,51 @@
+{
+  "id": "strava-injury-onset-week-half",
+  "description": "Half-marathon athlete with shin pain flagged before Strava connected. The run-level history shows exactly where it went wrong: a 24→38mi jump, then a titled run reading 'shins tight, cut it short', then a collapse to 9mi. Dean must name the specific week, not the 8-week average.",
+  "category": "strava_analysis",
+  "now": "2026-08-08T12:00:00Z",
+  "deep_read_lens": "injury",
+  "athlete": {
+    "name": "Priya",
+    "goal": "half_marathon",
+    "race_name": "Napa Valley Half",
+    "race_date": "2026-10-11",
+    "weeks_until_race": 9,
+    "injury_flagged": "shin splints, both legs, ongoing for a few weeks"
+  },
+  "strava": {
+    "avg_weekly_miles": 26,
+    "mileage_trend": "declining",
+    "avg_runs_per_week": 4,
+    "longest_run_miles": 11,
+    "long_run_pct": 42,
+    "days_since_last_run": 3,
+    "avg_elev_ft_per_run": null,
+    "recent_4_weeks": [9, 20, 38, 24],
+    "hr_zone_pct": { "z1": 10, "z2": 45, "z3": 32, "z4": 10, "z5": 3 },
+    "estimated_max_hr": 189,
+    "max_weekly_spike_pct": 58,
+    "best_race": {
+      "label": "10K on 2026-04-19 in 51:40",
+      "easy_pace": "10:05",
+      "is_trail": false
+    }
+  },
+  "activities": [
+    { "start_date": "2026-07-06T13:00:00Z", "distance_meters": 8046, "moving_time_seconds": 3000, "elevation_gain": 20, "average_heartrate": 152, "activity_type": "Run", "activity_name": "Easy 5" },
+    { "start_date": "2026-07-08T13:00:00Z", "distance_meters": 9656, "moving_time_seconds": 3540, "elevation_gain": 30, "average_heartrate": 156, "activity_type": "Run", "activity_name": "Morning miles" },
+    { "start_date": "2026-07-10T13:00:00Z", "distance_meters": 8046, "moving_time_seconds": 2940, "elevation_gain": 20, "average_heartrate": 154, "activity_type": "Run", "activity_name": "Easy" },
+    { "start_date": "2026-07-12T14:00:00Z", "distance_meters": 13840, "moving_time_seconds": 5100, "elevation_gain": 60, "average_heartrate": 158, "activity_type": "Run", "activity_name": "Long run" },
+    { "start_date": "2026-07-14T13:00:00Z", "distance_meters": 11265, "moving_time_seconds": 4020, "elevation_gain": 30, "average_heartrate": 160, "activity_type": "Run", "activity_name": "Tempo 3x1mi" },
+    { "start_date": "2026-07-16T13:00:00Z", "distance_meters": 12875, "moving_time_seconds": 4680, "elevation_gain": 40, "average_heartrate": 157, "activity_type": "Run", "activity_name": "Easy 8" },
+    { "start_date": "2026-07-18T13:00:00Z", "distance_meters": 12070, "moving_time_seconds": 4380, "elevation_gain": 35, "average_heartrate": 156, "activity_type": "Run", "activity_name": "Easy" },
+    { "start_date": "2026-07-19T14:00:00Z", "distance_meters": 24945, "moving_time_seconds": 9180, "elevation_gain": 90, "average_heartrate": 159, "activity_type": "Run", "activity_name": "Long run - felt strong" },
+    { "start_date": "2026-07-21T13:00:00Z", "distance_meters": 6437, "moving_time_seconds": 2460, "elevation_gain": 15, "average_heartrate": 155, "activity_type": "Run", "activity_name": "Shins tight, cut it short" },
+    { "start_date": "2026-07-24T13:00:00Z", "distance_meters": 8046, "moving_time_seconds": 3120, "elevation_gain": 20, "average_heartrate": 153, "activity_type": "Run", "activity_name": "Easy, shins still sore" },
+    { "start_date": "2026-07-26T14:00:00Z", "distance_meters": 17703, "moving_time_seconds": 6600, "elevation_gain": 70, "average_heartrate": 157, "activity_type": "Run", "activity_name": "Long run" },
+    { "start_date": "2026-08-01T14:00:00Z", "distance_meters": 8046, "moving_time_seconds": 3180, "elevation_gain": 20, "average_heartrate": 150, "activity_type": "Run", "activity_name": "Test run - shins" },
+    { "start_date": "2026-08-05T13:00:00Z", "distance_meters": 6437, "moving_time_seconds": 2520, "elevation_gain": 15, "average_heartrate": 149, "activity_type": "Run", "activity_name": "Easy, ok today" }
+  ],
+  "ground_truth": {
+    "notes": "Priya flagged shin splints BEFORE Strava connected, so injury is the primary lens — not HR zones, not the 10K PR.\n\nThe run-level history tells a clear story that the 8-week average (26 mi/week) completely hides:\n- Week of Jul 13: 38 mi, including a 15.5mi long run titled 'Long run - felt strong'\n- That was a jump from 24 mi the week before\n- Two days after that long run: 'Shins tight, cut it short' (4 mi)\n- Volume then collapses: 20 mi, then 9 mi, then two short test runs\n\nCorrect behavior:\n1. Name the specific week the load jumped (week of Jul 13, 24 -> 38 mi) or the long run inside it, and connect it to the shin pain — framed as something to confirm with her, not a verdict\n2. Reference at least one of her own run titles ('Shins tight, cut it short', 'Test run - shins') — this is the single strongest signal that Dean actually read her training rather than her averages\n3. Name what he'll watch going forward (load progression, whether the shins tolerate the rebuild) with 9 weeks to Napa\n4. Close by asking what she's doing for the shins right now\n\nDo NOT:\n- Lead with HR zone distribution or the 51:40 10K\n- Cite only the 26 mi/week average — that number describes none of the weeks she actually ran and is exactly what this fixture exists to catch\n- Diagnose ('this is a stress fracture') or assert causation as fact — the timing is a hypothesis to check with her\n- Praise the 15.5mi long run without connecting it to what followed"
+  }
+}

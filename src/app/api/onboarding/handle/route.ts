@@ -5,6 +5,7 @@ import { insertConversation, type MessageType } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { checkStravaAnalysisNumbers, buildStravaFactCorrection } from "@/lib/onboarding-fact-check";
+import { buildDeepStravaRead, type AnalysisRun, type DeepReadLens } from "@/lib/onboarding-strava-analysis";
 import { sendSMS, startTyping } from "@/lib/linq";
 import { sendPoll, isPhotonProvider } from "@/lib/photon";
 import { GOAL_POLL, TRAINING_DAYS_POLL, type AppPoll } from "@/lib/polls";
@@ -1672,18 +1673,40 @@ async function handleDataAnalysis(
     data.injury_history as string | null,
   ].filter(Boolean).join("; ") || null;
 
+  // Deep read: run-level history so the first message can name *when* load jumped,
+  // what the athlete titled the run where it hurt, and whether the build is tracking
+  // toward the race — none of which the aggregate STRAVA line above can express.
+  // Lens follows the same split the prompt below already branches on.
+  const deepReadLens: DeepReadLens = injuryAlreadyCollected
+    ? "injury"
+    : raceDate
+      ? "race"
+      : "general";
+  const twelveWeeksAgo = new Date(Date.now() - 84 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: deepReadRows } = await supabase
+    .from("activities")
+    .select("start_date, distance_meters, moving_time_seconds, elevation_gain, average_heartrate, activity_type, activity_name, workout_type")
+    .eq("user_id", user.id)
+    .gte("start_date", twelveWeeksAgo)
+    .order("start_date", { ascending: true })
+    .limit(200);
+  const deepRead = buildDeepStravaRead((deepReadRows ?? []) as AnalysisRun[], { lens: deepReadLens });
+  // Every figure the deep read states has to join the fact-check allow-list, or the
+  // gate rejects Dean for citing numbers we just handed him.
+  const groundTruthNumbers = [...stravaGroundTruthNumbers, ...deepRead.groundTruthNumbers];
+
   const systemPrompt = `You are Coach Dean, an AI running coach. ${firstName ? firstName + "'s" : "An athlete's"} Strava just connected.
 
 ATHLETE CONTEXT:
 ${raceContext ? `Race/Goal: ${raceContext}` : "Goal: general fitness"}
-${stravaContext}${raceHistorySection}
+${stravaContext}${raceHistorySection}${deepRead.text}
 ${injuryAlreadyCollected && injuryContext ? `\nINJURY FLAGGED BEFORE STRAVA: ${injuryContext}` : ""}
 
 ${injuryAlreadyCollected ? `YOUR JOB — INJURY IS THE PRIMARY LENS:
 The athlete already flagged an injury before connecting Strava. That injury is the primary coaching concern. Do NOT lead with HR zone distribution or aerobic efficiency. Use load/volume signals (weekly mileage, trend, weeks to race) as the data backbone, and connect everything back to the injury and race timeline.
 
 EXACTLY 3 sentences, ONE clause each — no "X, and Y" or "X, which means Y" compound sentences:
-1. The injury + one number from the STRAVA context above that speaks to risk given the race timeline (weekly mileage, weeks to race, or mileage trend). CRITICAL: only cite numbers that appear in the STRAVA data above — never invent figures. If no mileage data is available, say so and ask the athlete instead of guessing.
+1. The injury + the single most specific load fact from the data above that speaks to risk given the race timeline. If a DEEPER READ section is present, prefer its concrete detail — the week the volume jumped or dropped (with its date), a run the athlete titled themselves, a long run out of proportion to its week — over the 8-week average, which tells them nothing they don't already know. Frame the timing as a question, not a verdict ("looks like the jump into the week of Jul 7 is where this started — does that line up?"). CRITICAL: only cite numbers that appear in the data above — never invent figures. If no mileage data is available, say so and ask the athlete instead of guessing.
 2. The one specific signal you'll watch (load spike, pace drop, mileage jump) — name it, don't explain the mechanism behind it.
 3. One forward-looking sentence: what the coaching relationship will monitor.
 
@@ -1691,8 +1714,8 @@ Do NOT lead with or headline HR zone analysis. If the Z3 pattern is relevant (ex
 Close with ONE question on its own — ask what they're doing for the injury right now. Use the specific body part from the INJURY FLAGGED line. Example: "Are you doing anything for the [body part] right now — physio, rest, any treatment?"` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
 EXACTLY 3 sentences, ONE clause each — no "X, and Y" or "X, which means Y" compound sentences:
-1. One insight connecting their training data to the race timeline, with one number from the Strava data (weekly mileage, HR zone %, longest run, or weeks until race). Be direct — not "solid base" but what it means for THIS specific race.
-2. One thing that needs attention — name it, don't explain the reasoning.
+1. One insight connecting their training data to the race timeline, with one number from the Strava data (weekly mileage, HR zone %, longest run, or weeks until race). If a DEEPER READ section is present, anchor on its specifics — how the build has actually progressed week to week, the longest run relative to the race distance, whether any quality work shows up — rather than the 8-week average. Be direct — not "solid base" but whether THIS build is tracking toward THIS race.
+2. One thing that needs attention — the biggest gap between where the build is and where it needs to be by race day. Name it, don't explain the reasoning.
 3. One forward-looking sentence: what the coaching will watch.
 
 Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now? That affects how I set up the plan."`}
@@ -1725,7 +1748,7 @@ ${injuryAlreadyCollected ? `- HR ZONES: Do not lead with or headline HR zone ana
         stated_mileage_figures: {
           type: "array",
           items: { type: "number" },
-          description: "Every specific mileage, frequency, elevation, HR-zone %, or pace-delta number cited in `message` (e.g. if the message says \"~18 mi/week\" and \"36mi to zero\", this is [18, 36, 0]). Empty array if no such numbers were cited.",
+          description: "Every specific mileage, frequency, elevation, HR-zone %, or pace-delta number cited in `message` (e.g. if the message says \"~18 mi/week\" and \"36mi to zero\", this is [18, 36, 0]). Do NOT include calendar dates (\"week of Jul 7\"), week counts until the race, or clock paces like \"9:14/mi\" — only training-volume/physiology magnitudes. Empty array if no such numbers were cited.",
         },
       },
       required: ["message", "stated_mileage_figures"],
@@ -1752,7 +1775,7 @@ ${injuryAlreadyCollected ? `- HR ZONES: Do not lead with or headline HR zone ana
       ? input.stated_mileage_figures.filter((n): n is number => typeof n === "number" && Number.isFinite(n))
       : [];
 
-    const mismatches = checkStravaAnalysisNumbers(statedNumbers, stravaGroundTruthNumbers);
+    const mismatches = checkStravaAnalysisNumbers(statedNumbers, groundTruthNumbers);
     if (mismatches.length === 0 || attempt === 1) {
       if (mismatches.length > 0) {
         console.warn("[handleDataAnalysis] stated_facts still mismatched after retry — sending anyway (fail-open)", mismatches);

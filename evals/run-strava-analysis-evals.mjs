@@ -19,6 +19,9 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { buildStravaAnalysisJudgePrompt } from "./judges/strava-analysis-quality.mjs";
+// Imported, not mirrored — same rule as the main runner's coach-context modules.
+// Requires tsx (see the eval:strava script).
+import { buildDeepStravaRead } from "../src/lib/onboarding-strava-analysis.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "fixtures", "strava-analysis");
@@ -125,6 +128,16 @@ function buildStravaContext(strava, goal) {
   return `STRAVA: Connected.${weeklyLine}${frequencyLine}${longestLine}${lastRunLine}${elevLine}${progressionLine}${paceTrendLine}${hrZoneLine}${spikeLine}${paceNote}`;
 }
 
+// Run-level deep read, when the fixture supplies activities. Fixtures without an
+// `activities` array exercise the aggregate-only path exactly as before.
+function deepReadFor(fixture) {
+  if (!fixture.activities?.length) return "";
+  return buildDeepStravaRead(fixture.activities, {
+    lens: fixture.deep_read_lens ?? (fixture.athlete?.race_date ? "race" : "general"),
+    nowMs: fixture.now ? new Date(fixture.now).getTime() : undefined,
+  }).text;
+}
+
 // ─────────────────────────────────────────────
 // Mirrors handleDataAnalysis system prompt in onboarding/handle/route.ts
 // ─────────────────────────────────────────────
@@ -147,20 +160,30 @@ function buildDataAnalysisPrompt(fixture) {
       ).join("\n")}`
     : "";
 
+  const deepRead = deepReadFor(fixture);
+
   return `You are Coach Dean, an AI running coach. ${firstName ? firstName + "'s" : "An athlete's"} Strava just connected.
 
 ATHLETE CONTEXT:
 ${raceContext ? `Race/Goal: ${raceContext}` : "Goal: general fitness"}
-${stravaContext}${raceHistorySection}
+${stravaContext}${raceHistorySection}${deepRead}
+${athlete.injury_flagged ? `\nINJURY FLAGGED BEFORE STRAVA: ${athlete.injury_flagged}` : ""}
+${athlete.injury_flagged ? `YOUR JOB — INJURY IS THE PRIMARY LENS:
+The athlete already flagged an injury before connecting Strava. That injury is the primary coaching concern. Do NOT lead with HR zone distribution or aerobic efficiency. Use load/volume signals as the data backbone, and connect everything back to the injury and race timeline.
 
-YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
+Write 3 sentences:
+1. The injury + the single most specific load fact above that speaks to risk given the race timeline — prefer a DEEPER READ specific (the week volume jumped or dropped, with its date; a run the athlete titled themselves) over the 8-week average. Frame the timing as a question, not a verdict.
+2. The one specific signal you'll watch (load spike, pace drop, mileage jump) — name it, don't explain the mechanism.
+3. One forward-looking sentence: what the coaching relationship will monitor.
+
+Close with ONE question on its own — ask what they're doing for the injury right now, naming the specific body part.` : `YOUR JOB: Give a coaching opinion on what you see — not a data summary, but an interpretation connected to their specific race and timeline. This is the moment you earn their trust.
 
 Write 3–4 sentences:
 1. One insight that connects their training data to the race timeline. Use at least 2 specific numbers from the Strava data (e.g. weekly mileage, HR zone %, longest run, weeks until race). Be direct — not "solid base" but what it means for THIS specific race. E.g. if their HR distribution is skewed hard for a climb-heavy trail race, say what that means.
 2. One thing that needs attention or one adjustment. Be specific about WHY it matters for this race.
 3. One forward-looking sentence about what the coaching will watch.
 
-Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"
+Then close with exactly: "Has injury ever been a factor for you, or anything you're managing right now?"`}
 
 Rules:
 - Do NOT ask for road race times — training zones calibrate from Strava data
@@ -168,6 +191,7 @@ Rules:
 - Avoid: "solid base", "great foundation", "exciting", "strong work", "keep it up"
 - 4 sentences max before the injury question
 - Plain text, no markdown
+- DEEPER READ: If a DEEPER READ section appears, anchor your read on its specifics — the week load jumped or dropped (with its date), a run the athlete titled themselves, the long run relative to its week, whether any quality work shows up — rather than the 8-week average, which tells them nothing they don't already know. Run titles are the athlete's own words, so treat them as a lead to ask about, not a diagnosis.
 - RACE HISTORY: If a RACE HISTORY section appears, you MUST reference at least one race by name or result in your response. The race history shows their competitive background — acknowledging it ("I can see you ran a 1:48 half in September") earns trust and grounds the coaching in their real fitness. Do NOT ignore it.
 - HIGH Z3 WARNING: If ≥50% of runs are in Z3, name this clearly but without alarm. Z3 is "no man's land" — hard enough to accumulate fatigue, too easy to build race-specific fitness. Note that wrist-based HR can read high, so the real zones might be slightly lower, but the pattern is still worth polarizing: more true easy (Z1/Z2) and add one genuine quality session (Z4/Z5). Frame it as a direction to move toward, not a condemnation of what they've been doing.
 - PACE TREND: If "Easy pace trend (Z2 runs): improving" appears in the context, weave it in as a positive signal. "Your Z2 pace has been improving 22s/mi" tells them their aerobic base is actually developing — don't waste that data point.
@@ -204,7 +228,7 @@ async function runFixture(fixture, verbose) {
   }
 
   // Judge
-  const judgePrompt = buildStravaAnalysisJudgePrompt(fixture, deanResponse);
+  const judgePrompt = buildStravaAnalysisJudgePrompt(fixture, deanResponse, deepReadFor(fixture));
   let judgment = null;
   let score = 0;
   let flags = [];
