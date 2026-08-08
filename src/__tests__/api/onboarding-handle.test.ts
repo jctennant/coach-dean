@@ -322,6 +322,49 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     });
   });
 
+  describe("goal poll (Photon) carries Dean's intro when it's the first thing sent", () => {
+    afterEach(() => {
+      (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    });
+
+    function mockGoalPollTurn(history: unknown[]) {
+      mockTables({
+        users: { data: onboardingUser({ onboarding_data: {} }), error: null },
+        conversations: { data: history, error: null },
+        activities: { data: [], error: null },
+        races: { data: [], error: null },
+        training_profiles: { data: null, error: null },
+      });
+      mockToolResponse("save_training_fields", { name: "Jake", goal: null, training_days: null });
+    }
+
+    it("first reply: introduces Dean before the poll, since the poll can't carry a greeting", async () => {
+      (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      mockGoalPollTurn([]);
+
+      await POST(makeRequest({ userId: "user-001", message: "Hi dean this is Jake" }));
+
+      const texts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+      expect(texts[0]).toContain("I'm Coach Dean");
+      expect(texts[0]).toContain("Jake");
+      expect(sendPoll).toHaveBeenCalledWith("+12025551234", "What's your main goal right now?", expect.any(Array));
+    });
+
+    it("later reply: no intro — Dean has already introduced himself", async () => {
+      (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      mockGoalPollTurn([
+        { role: "assistant", content: "Hey! I'm Coach Dean, your AI running coach." },
+        { role: "user", content: "cool" },
+      ]);
+
+      await POST(makeRequest({ userId: "user-001", message: "I'm Jake" }));
+
+      const texts = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+      expect(texts.some((t) => t.includes("I'm Coach Dean"))).toBe(false);
+      expect(sendPoll).toHaveBeenCalled();
+    });
+  });
+
   it("schedule_confirm stage: a reply completes onboarding", async () => {
     mockTables({
       users: [

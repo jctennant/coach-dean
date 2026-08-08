@@ -8,6 +8,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-08 — Goal poll opened with no intro; shin red flag over-fired and kept repeating
+
+**Type:** Bug Fix
+**Reported by:** Jake (internal test onboarding)
+**User feedback:** "feels like Dean was maybe a bit too aggressive in saying this had to be look at by a doctor here, also the intro message was random"
+
+**Root cause (two separate bugs in one transcript):**
+
+1. *Missing intro.* The Photon goal-poll branch in `handleConversation` fires as soon as `name` is known and `goal` isn't — it returns early, before the conversation prompt (and therefore before the `isFirstResponse` verbatim intro) ever runs. When the athlete's **first** message already carries their name ("Hi dean this is Jake"), that branch is reached on Dean's very first reply, so his opening line to a stranger was a bare multiple-choice poll with no greeting and no explanation of who he is. The poll was designed to replace a question; nothing accounted for it also replacing the introduction that normally rides along with that question.
+
+2. *Over-aggressive stress-fracture screen.* Two compounding problems. (a) The `injury_pain_character` extraction criteria treated *any* mention of pain at rest as `localized_or_rest_pain` — so "on the interior side of my right shin, feel a little at rest but mainly at the beginning of runs" got flagged as a possible stress fracture, even though a spread-out medial-shin ache that's worst at the start of a run and warms up is textbook MTSS, not a bone injury. (b) Once set, the flag's instruction in `summarizeCollected` ("do not recommend continuing to run or add load until the athlete confirms they've been checked by a doctor") had no exit condition, so Dean re-escalated on every remaining turn — including after the athlete answered the question and reported a negative hop test.
+
+**Fix / Change:**
+- `sendPollAndStore` takes an optional `preface` bubble; the goal-poll site passes Dean's standard intro (personalized with the known first name) when `isFirstResponse`. The poll still replaces only the question.
+- Rewrote the `injury_pain_character` criteria in both the extraction prompt and the tool schema to classify the *pattern* rather than the label: `localized_or_rest_pain` now requires fingertip-sized pinpoint bone tenderness, pain that worsens as a run goes on, or night/walking pain; a region ("the inside of my shin") counts as diffuse, and a mild lingering ache at rest is explicitly part of the diffuse pattern. Conflicting halves still resolve to the red-flag bucket.
+- Reworded the red-flag line to raise-once: recommend evaluation and hold off on adding load, but if it's already been raised in this conversation, acknowledge what the athlete said back (including reassuring signs), note briefly it's worth checking if it doesn't settle, and continue onboarding instead of repeating. Dean can see prior turns, so he judges "already said" himself — no new state field.
+- Mirrored both prompt changes into `evals/run-simulation-evals.mjs` (documented parity points).
+- The completion-message red-flag override (`buildInjuryCompletion`) was left as-is — with the tightened classifier it now fires only on genuine red flags, where declining to schedule sessions is the right call.
+
+**Files changed:** `src/app/api/onboarding/handle/route.ts`, `evals/run-simulation-evals.mjs`, `src/__tests__/api/onboarding-handle.test.ts`
+
 ## 2026-08-07 — A failing iMessage poll stranded onboarding one turn short of the plan
 
 **Type:** Bug Fix
