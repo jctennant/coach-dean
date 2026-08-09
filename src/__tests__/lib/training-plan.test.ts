@@ -430,6 +430,65 @@ describe("computeArcWeekSkeleton", () => {
 
   const fiveDayTraining = ["monday", "tuesday", "wednesday", "friday", "sunday"];
 
+  describe("injury awareness", () => {
+    const injuryParams = {
+      trainingDays: fiveDayTraining,
+      weeklyTotalMiles: 30,
+      longRunMiles: 10,
+      keyWorkoutText: "Tempo 5mi (1mi WU + 3mi @ 7:45/mi + 1mi CD)",
+      keyWorkoutText2: "Intervals 4mi (1mi WU + 2mi @ 6:50/mi + 1mi CD)",
+      strengthDay: "Thu",
+      timezone: "UTC",
+    };
+
+    it("never prescribes a modality the injury rules say to avoid", () => {
+      pinToWednesday();
+      const slots = computeArcWeekSkeleton({
+        ...injuryParams,
+        crosstrainingTools: ["rowing machine", "bike"],
+        injuryBodyPart: "shin",
+      });
+      const modalities = slots.filter(s => s.type === "cross_train").map(s => s.modality);
+      expect(modalities.length).toBeGreaterThan(0);
+      expect(modalities).not.toContain("rowing");
+    });
+
+    it("drops the second quality session when the athlete is running injured", () => {
+      pinToWednesday();
+      const slots = computeArcWeekSkeleton({ ...injuryParams, qualityPolicy: "one" });
+      expect(slots.filter(s => s.type === "quality")).toHaveLength(1);
+    });
+
+    it("drops all quality work on an easy-only week", () => {
+      pinToWednesday();
+      const slots = computeArcWeekSkeleton({ ...injuryParams, qualityPolicy: "none" });
+      expect(slots.filter(s => s.type === "quality")).toHaveLength(0);
+    });
+
+    it("preserves the weekly total when quality sessions are dropped", () => {
+      pinToWednesday();
+      for (const qualityPolicy of ["both", "one", "none"] as const) {
+        const slots = computeArcWeekSkeleton({ ...injuryParams, qualityPolicy });
+        const total = slots.reduce((sum, s) => sum + (s.distanceMiles ?? 0), 0);
+        expect(Math.round(total * 10) / 10).toBe(30);
+      }
+    });
+
+    it("reproduces today's output exactly when the new params are omitted", () => {
+      pinToWednesday();
+      const withDefaults = computeArcWeekSkeleton({ ...injuryParams, crosstrainingTools: ["bike"] });
+      pinToWednesday();
+      const explicit = computeArcWeekSkeleton({
+        ...injuryParams,
+        crosstrainingTools: ["bike"],
+        injuryBodyPart: null,
+        qualityPolicy: "both",
+      });
+      expect(withDefaults).toEqual(explicit);
+      expect(withDefaults.filter(s => s.type === "quality")).toHaveLength(2);
+    });
+  });
+
   it("places distances that add back up to the week's target", () => {
     pinToWednesday();
     const slots = computeArcWeekSkeleton({

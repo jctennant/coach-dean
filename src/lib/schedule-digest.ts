@@ -27,6 +27,7 @@
  */
 
 import { computeArcWeekSkeleton, formatWeeklyPlanDigest } from "@/lib/training-plan";
+import type { QualityPolicy } from "@/lib/week-mode";
 
 export type SchedulePlanWeek = {
   week_number: number;
@@ -70,6 +71,10 @@ export function buildScheduleDigest(params: {
   ranToday: boolean;
   /** Athlete explicitly asked about next week — skip the current-week path entirely. */
   preferNextWeek?: boolean;
+  /** training_profiles.injury_body_part — keeps next week's cross-training injury-safe. */
+  injuryBodyPart?: string | null;
+  /** How many quality sessions next week may carry (see resolveWeekMode). */
+  qualityPolicy?: QualityPolicy;
   nowMs?: number;
 }): string | null {
   const {
@@ -114,6 +119,8 @@ export function buildScheduleDigest(params: {
     crosstrainingTools,
     timezone,
     weekOffsetDays: 7,
+    injuryBodyPart: params.injuryBodyPart ?? null,
+    qualityPolicy: params.qualityPolicy ?? "both",
   });
   if (skeleton.filter((s) => s.type !== "rest").length === 0) return null;
 

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import type { QualityPolicy } from "@/lib/week-mode";
 import { insertConversation } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
@@ -1117,8 +1118,12 @@ export function computeArcWeekSkeleton(params: {
   timezone: string;
   /** Days to shift the Mon–Sun window the dates are computed for. 7 = next week. */
   weekOffsetDays?: number;
+  /** training_profiles.injury_body_part — selects injury-safe cross-training modalities. */
+  injuryBodyPart?: string | null;
+  /** How many quality sessions this week may carry (see resolveWeekMode). Default "both". */
+  qualityPolicy?: QualityPolicy;
 }): ArcWeekSlot[] {
-  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone, weekOffsetDays = 0 } = params;
+  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone, weekOffsetDays = 0, injuryBodyPart = null, qualityPolicy = "both" } = params;
 
   const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const tz = timezone || "America/New_York";
@@ -1188,6 +1193,10 @@ export function computeArcWeekSkeleton(params: {
     console.warn(`[computeArcWeekSkeleton] key_workout is a back-to-back long run weekend — excluding from quality-slot placement: "${keyWorkoutText}"`);
   }
 
+  // An injured athlete gets at most one quality session, an RTR-phase-2 athlete none — the
+  // leftover mileage flows into the easy-day pool below, so the weekly total is preserved.
+  const qualityAllowed = qualityPolicy === "none" ? 0 : qualityPolicy === "one" ? 1 : 2;
+
   const qualityDistance = keyWorkoutUsable ? parseLeadingDistanceMiles(keyWorkoutText!) : null;
   const qualityDistance2 = keyWorkoutText2Usable ? parseLeadingDistanceMiles(keyWorkoutText2!) : null;
   if (keyWorkoutUsable && qualityDistance == null) {
@@ -1200,19 +1209,21 @@ export function computeArcWeekSkeleton(params: {
   slots.push({ day: longRunDay as ArcWeekSlot["day"], date: dateFor(longRunDay), type: "long_run", distanceMiles: longRunMiles });
   usedDays.add(longRunDay);
 
-  if (qualityDay && keyWorkoutUsable) {
-    slots.push({ day: qualityDay as ArcWeekSlot["day"], date: dateFor(qualityDay), type: "quality", distanceMiles: qualityDistance, keyWorkoutText: keyWorkoutText! });
-    usedDays.add(qualityDay);
+  const qualityPlaced = qualityDay && keyWorkoutUsable && qualityAllowed >= 1;
+  const quality2Placed = qualityDay2 && keyWorkoutText2Usable && qualityAllowed >= 2;
+  if (qualityPlaced) {
+    slots.push({ day: qualityDay as ArcWeekSlot["day"], date: dateFor(qualityDay!), type: "quality", distanceMiles: qualityDistance, keyWorkoutText: keyWorkoutText! });
+    usedDays.add(qualityDay!);
   }
-  if (qualityDay2 && keyWorkoutText2Usable) {
-    slots.push({ day: qualityDay2 as ArcWeekSlot["day"], date: dateFor(qualityDay2), type: "quality", distanceMiles: qualityDistance2, keyWorkoutText: keyWorkoutText2! });
-    usedDays.add(qualityDay2);
+  if (quality2Placed) {
+    slots.push({ day: qualityDay2 as ArcWeekSlot["day"], date: dateFor(qualityDay2!), type: "quality", distanceMiles: qualityDistance2, keyWorkoutText: keyWorkoutText2! });
+    usedDays.add(qualityDay2!);
   }
 
   // Remaining training days -> easy, splitting leftover mileage evenly (rounded to
   // the nearest 0.5, with the exact remainder absorbed into the last easy slot).
   const easyDays = trainDayAbbrevs.filter(d => !usedDays.has(d));
-  const qualityTotal = (qualityDistance ?? 0) + (qualityDistance2 ?? 0);
+  const qualityTotal = (qualityPlaced ? qualityDistance ?? 0 : 0) + (quality2Placed ? qualityDistance2 ?? 0 : 0);
   const leftover = Math.max(0, weeklyTotalMiles - longRunMiles - qualityTotal);
   if (easyDays.length > 0) {
     const base = Math.floor((leftover / easyDays.length) * 2) / 2;
@@ -1228,7 +1239,12 @@ export function computeArcWeekSkeleton(params: {
   // Non-training, non-strength days -> up to 2 supplementary cross-train slots (when the
   // athlete has tools on file), remainder -> rest.
   const restCandidates = ORDERED_DAYS.filter(d => !trainDayAbbrevs.includes(d) && d !== strengthDay);
-  const ctModalities = safeModalitiesFor(null, crosstrainingTools);
+  // Body part matters here: CROSS_TRAINING_ALTERNATIVES knows what to avoid per injury (rowing
+  // with shin splints, for one), and passing null made that knowledge unreachable in every
+  // non-hold week. Note a deliberate behaviour change — with a body part set, safeModalitiesFor
+  // returns the safe list even when the athlete has no tools on file, so injured athletes now
+  // get cross-training slots where healthy ones still get none.
+  const ctModalities = safeModalitiesFor(injuryBodyPart, crosstrainingTools);
   const ctDays = restCandidates.slice(0, 2);
   const ctAssignments = assignCrossTrainSlots(ctDays, ctModalities);
   const ctByDay = new Map(ctAssignments.map(a => [a.day, a.modality]));

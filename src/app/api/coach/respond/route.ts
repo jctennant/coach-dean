@@ -35,6 +35,7 @@ import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
 import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
+import { resolveWeekMode } from "@/lib/week-mode";
 import { buildScheduleDigest, countDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
@@ -2475,13 +2476,18 @@ Apply this to bias which metric lens you pick and what advice you give proactive
   // skeleton_annotations tool call comes back — read by the weekly_recap after() block to
   // flavor the deterministic weekly_plan_digest without re-calling the model.
   let arcSlotAnnotations: Array<{ day: string; pace?: string; why?: string; description?: string }> | null = null;
-  if (
-    trigger === "weekly_recap" &&
-    storedPlanWeek &&
-    !(state?.injury_hold_since as string | null) &&
-    !isComplementMode &&
-    !isAnalystMode
-  ) {
+  // Which shape of week this athlete gets, and how much quality work belongs in it. One resolver
+  // instead of the two hand-rolled injury_hold_since conditions this block and the recovery block
+  // below used to carry — see week-mode.ts for the three cases that gating got wrong.
+  const weekMode = resolveWeekMode({
+    injuryHoldSince: (state?.injury_hold_since as string | null) ?? null,
+    returnToRunPhase: (state?.return_to_run_phase as number | null) ?? null,
+    activeInjury: !!(profile?.active_injury),
+    isComplementMode,
+    isAnalystMode,
+  });
+  const injuryBodyPartForWeek = (profile?.injury_body_part as string | null) ?? null;
+  if (trigger === "weekly_recap" && storedPlanWeek && weekMode.mode === "arc") {
     const trainingDaysForSkeleton = (profile?.training_days as string[] | null) ?? [];
     const crosstrainingToolsForSkeleton = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
     const strengthForSkeleton = computeWeeklyStrength(profile);
@@ -2494,6 +2500,8 @@ Apply this to bias which metric lens you pick and what advice you give proactive
       strengthDay: strengthForSkeleton.day,
       crosstrainingTools: crosstrainingToolsForSkeleton,
       timezone: userTimezone,
+      injuryBodyPart: injuryBodyPartForWeek,
+      qualityPolicy: weekMode.qualityPolicy,
     });
     // computeArcWeekSkeleton returns [] when the athlete has no training_days set —
     // fall back to the prose-only path in that case rather than sending an empty schedule.
@@ -2511,12 +2519,7 @@ Apply this to bias which metric lens you pick and what advice you give proactive
   // digest bubble (see formatRecoveryWeekDigest).
   let recoverySlotAnnotations: Array<{ day: string; description?: string }> | null = null;
   let recoveryProbe: { day: string; note: string } | null = null;
-  if (
-    trigger === "weekly_recap" &&
-    !!(state?.injury_hold_since as string | null) &&
-    !isComplementMode &&
-    !isAnalystMode
-  ) {
+  if (trigger === "weekly_recap" && weekMode.mode === "recovery") {
     const trainingDaysForRecovery = (profile?.training_days as string[] | null) ?? [];
     const crosstrainingDaysForRecovery = (profile?.crosstraining_days as string[] | null)?.filter(Boolean) ?? null;
     const crosstrainingToolsForRecovery = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
@@ -3397,6 +3400,8 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         crosstrainingTools: crosstrainingToolsForStarter,
         timezone: initTimezone,
         ranToday: hasRunLoggedToday,
+        injuryBodyPart: injuryBodyPartForWeek,
+        qualityPolicy: weekMode.qualityPolicy,
       });
       if (starterSkeleton.length > 0) {
         const runSlots = starterSkeleton.filter(s => s.type !== "rest");
@@ -4720,6 +4725,8 @@ OUTPUT CONTRACT:
         avgWeeklyMileage: null,
         ranToday: hasRunLoggedToday,
         preferNextWeek: askedAboutNextWeek,
+        injuryBodyPart: injuryBodyPartForWeek,
+        qualityPolicy: weekMode.qualityPolicy,
       });
       if (scheduleText) {
         if (!dry_run) {
@@ -4812,6 +4819,8 @@ OUTPUT CONTRACT:
             weekMileageSoFar,
             avgWeeklyMileage,
             ranToday: hasRunLoggedToday,
+            injuryBodyPart: injuryBodyPartForWeek,
+            qualityPolicy: weekMode.qualityPolicy,
           });
           if (scheduleText) {
             if (!dry_run) {
