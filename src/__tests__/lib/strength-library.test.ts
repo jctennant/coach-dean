@@ -3,6 +3,9 @@ import {
   EXERCISES,
   ROUTINES,
   getRoutine,
+  rehabSessionsPerWeek,
+  routineExerciseIds,
+  DRILL_EXERCISE_IDS,
   routineKeyForInjuryText,
   composeStrengthRoutine,
   buildStoredRoutine,
@@ -174,5 +177,74 @@ describe("newly added exercises — routine wiring", () => {
         expect(hasDrills).toBe(false);
       }
     }
+  });
+});
+
+describe("frequencyPerWeek", () => {
+  it("is set on every routine", () => {
+    for (const r of ROUTINES) {
+      expect(r.frequencyPerWeek.min).toBeGreaterThan(0);
+      expect(r.frequencyPerWeek.max).toBeGreaterThanOrEqual(r.frequencyPerWeek.min);
+    }
+  });
+
+  it("gives low-load routines a daily range and high-eccentric ones a recovery gap", () => {
+    // The distinction the single shared REHAB_FREQ string used to erase: shin/calf/foot are
+    // low-load loading and mobility, the hamstring routine is Nordics and hip thrusts.
+    for (const key of ["shin", "calf", "foot", "ankle"]) {
+      expect(getRoutine(key)!.frequencyPerWeek).toEqual({ min: 5, max: 7 });
+    }
+    expect(getRoutine("hamstring")!.frequencyPerWeek).toEqual({ min: 2, max: 3 });
+    expect(getRoutine("knee")!.frequencyPerWeek).toEqual({ min: 3, max: 5 });
+  });
+
+  it("keeps the display string consistent with the range", () => {
+    expect(getRoutine("shin")!.frequency).toContain("5–7×");
+    expect(getRoutine("hamstring")!.frequency).toContain("2–3×");
+  });
+});
+
+describe("rehabSessionsPerWeek", () => {
+  it("scales with severity inside the routine's own range", () => {
+    expect(rehabSessionsPerWeek("shin", "mild", true)).toBe(5);
+    expect(rehabSessionsPerWeek("shin", "moderate", true)).toBe(6);
+    expect(rehabSessionsPerWeek("shin", "severe", true)).toBe(7);
+    expect(rehabSessionsPerWeek("hamstring", "mild", true)).toBe(2);
+    expect(rehabSessionsPerWeek("hamstring", "severe", true)).toBe(3);
+  });
+
+  it("starts at the low end when severity is unknown", () => {
+    expect(rehabSessionsPerWeek("shin", null, true)).toBe(5);
+  });
+
+  it("gives an athlete with no ACTIVE injury a single session, whatever their history says", () => {
+    // composeStrengthRoutine matches on injury_notes, which never expires — an athlete whose
+    // shin splints resolved months ago must not be scheduled as though they were hurt.
+    expect(rehabSessionsPerWeek("shin", "moderate", false)).toBe(1);
+    expect(rehabSessionsPerWeek("hip_core", null, false)).toBe(1);
+  });
+
+  it("falls back to one session for an unknown routine", () => {
+    expect(rehabSessionsPerWeek("nonsense", "severe", true)).toBe(1);
+    expect(rehabSessionsPerWeek(null, "severe", true)).toBe(1);
+  });
+});
+
+describe("routineExerciseIds", () => {
+  it("drops the plyometric drills for an injured athlete", () => {
+    // hip_core's note has always said "skip these if returning from injury" — nothing enforced it.
+    const healthy = routineExerciseIds("hip_core");
+    const injured = routineExerciseIds("hip_core", { activeInjury: true });
+    expect(healthy.filter(id => DRILL_EXERCISE_IDS.has(id))).toHaveLength(3);
+    expect(injured.filter(id => DRILL_EXERCISE_IDS.has(id))).toHaveLength(0);
+    expect(injured).toHaveLength(healthy.length - 3);
+  });
+
+  it("leaves routines without drills untouched", () => {
+    expect(routineExerciseIds("shin", { activeInjury: true })).toEqual(getRoutine("shin")!.exerciseIds);
+  });
+
+  it("returns nothing for an unknown key", () => {
+    expect(routineExerciseIds("nonsense")).toEqual([]);
   });
 });

@@ -144,4 +144,26 @@ describe("syncWeekFromArc", () => {
     const crossTrain = sessions.filter(s => s.type === "cross_train").map(s => s.label);
     expect(crossTrain.join(" ").toLowerCase()).not.toContain("row");
   });
+
+  it("persists the rehab days so the reminders and dashboard see them too", async () => {
+    const stateChain = setup({
+      state: { injury_hold_since: null, return_to_run_phase: null },
+      profile: { active_injury: true, injury_body_part: "shin", injury_severity: "moderate" },
+    });
+    await syncWeekFromArc("user-1", 3, "UTC");
+
+    const sessions = updatePayload(stateChain).weekly_plan_sessions as Array<Session & { rehab_routine_key?: string }>;
+    const rehabDays = sessions.filter(s => s.rehab_routine_key === "shin");
+    expect(rehabDays.length).toBeGreaterThanOrEqual(5);
+    // The strength day names the routine rather than the old bare "Strength + mobility".
+    expect(sessions.some(s => s.type === "strength" && s.label.includes("Shin splints"))).toBe(true);
+  });
+
+  it("leaves a healthy athlete on a single strength day", async () => {
+    const stateChain = setup({ state: { injury_hold_since: null, return_to_run_phase: null } });
+    await syncWeekFromArc("user-1", 3, "UTC");
+
+    const sessions = updatePayload(stateChain).weekly_plan_sessions as Array<Session & { rehab_routine_key?: string }>;
+    expect(sessions.filter(s => s.rehab_routine_key).length).toBeLessThanOrEqual(1);
+  });
 });

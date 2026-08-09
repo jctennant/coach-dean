@@ -75,6 +75,8 @@ export function buildScheduleDigest(params: {
   injuryBodyPart?: string | null;
   /** How many quality sessions next week may carry (see resolveWeekMode). */
   qualityPolicy?: QualityPolicy;
+  /** Rehab routine + severity, so next week's schedule carries the rehab days too. */
+  rehab?: { routineKey: string | null; severity: "mild" | "moderate" | "severe" | null; activeInjury: boolean };
   nowMs?: number;
 }): string | null {
   const {
@@ -121,6 +123,7 @@ export function buildScheduleDigest(params: {
     weekOffsetDays: 7,
     injuryBodyPart: params.injuryBodyPart ?? null,
     qualityPolicy: params.qualityPolicy ?? "both",
+    rehab: params.rehab,
   });
   if (skeleton.filter((s) => s.type !== "rest").length === 0) return null;
 

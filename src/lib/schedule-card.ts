@@ -1,5 +1,6 @@
 import type { ArcWeekSlot, RecoveryWeekSlot } from "@/lib/training-plan";
 import { MODALITY_DISPLAY_NAMES } from "@/lib/exercise-library";
+import { getRoutine } from "@/lib/strength-library";
 
 /**
  * Shared payload for the schedule-card image (see /api/coach/schedule-card).
@@ -77,7 +78,16 @@ export function buildRegularCardPayload(params: {
   const annotationByDay = new Map((annotations ?? []).map((a) => [a.day, a]));
   const fmtDist = (miles: number) => (isMetric ? `${(miles * 1.60934).toFixed(1)}km` : `${miles}mi`);
   let totalMiles = 0;
-  const rows: CardRow[] = skeleton.map((s) => {
+  const rows: CardRow[] = skeleton.map((s): CardRow => {
+    // A rest day carrying rehab is a rehab session day — the card would otherwise show "Rest"
+    // on a day the schedule digest and the reminders both say has work on it.
+    if (s.type === "rest" && s.rehab) {
+      return {
+        day: s.day.toUpperCase(), date: s.date, type: "strength" as const,
+        label: `${getRoutine(s.rehab.routineKey)?.label ?? "Rehab"} routine`,
+        detail: annotationByDay.get(s.day)?.description,
+      };
+    }
     if (s.type === "rest") {
       return { day: s.day.toUpperCase(), date: s.date, type: "rest", label: "Rest" };
     }
@@ -100,12 +110,22 @@ export function buildRegularCardPayload(params: {
       return { day: s.day.toUpperCase(), date: s.date, type: (s.modality as CardRowType) ?? "cross_train", label, detail: annotation?.description };
     }
     if (s.type === "strength") {
-      return { day: s.day.toUpperCase(), date: s.date, type: "strength", label: "Strength + mobility", detail: annotation?.description };
+      return {
+        day: s.day.toUpperCase(), date: s.date, type: "strength" as const,
+        label: s.rehab ? `${getRoutine(s.rehab.routineKey)?.label ?? "Strength"} routine` : "Strength + mobility",
+        detail: annotation?.description,
+      };
     }
     return {
       day: s.day.toUpperCase(), date: s.date, type: "easy", label: "Easy run",
       detail: `${fmtDist(s.distanceMiles ?? 0)}${annotation?.pace ? ` @ ${annotation.pace}` : ""}`,
     };
+  }).map((row, i): CardRow => {
+    // Rehab riding along with a run or cross-training day: mark the row rather than adding a
+    // second one — the card's row geometry is fixed height per row, so an extra row per day
+    // would push a 7-day week off the image.
+    const slot = skeleton[i];
+    return slot?.rehab && row.type !== "strength" ? { ...row, tag: row.tag ?? "+REHAB" } : row;
   });
   const countLabel = isMetric ? `${(totalMiles * 1.60934).toFixed(1)} km` : `${totalMiles.toFixed(1)} mi`;
   return { weekLabel, countLabel, rows, watch: watch ?? [] };

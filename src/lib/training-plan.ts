@@ -4,7 +4,7 @@ import { insertConversation } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
 import type { Json } from "@/lib/database.types";
-import { composeStrengthRoutine } from "@/lib/strength-library";
+import { composeStrengthRoutine, rehabSessionsPerWeek, getRoutine } from "@/lib/strength-library";
 import { CROSS_TRAINING_ALTERNATIVES, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, DEFAULT_SAFE_MODALITIES } from "@/lib/exercise-library";
 import { estimateCurrentWeeklyMileage } from "@/lib/plan-validation";
 import type { PostgrestError } from "@supabase/supabase-js";
@@ -936,6 +936,8 @@ export interface PlanSession {
   type?: "run" | "strength" | "cross_train";
   /** For type: "strength" — the strength-library.ts routine key to look up exercises from. */
   routine_key?: string;
+  /** Rehab routine to do on this day in addition to the session itself (see ArcWeekSlot.rehab). */
+  rehab_routine_key?: string;
 }
 
 const WEEK_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
@@ -973,6 +975,90 @@ export function computeWeeklyStrength(profile: Record<string, unknown> | null): 
   const routineKey = composed?.routine_key ?? "hip_core";
 
   return { day, routineKey };
+}
+
+/**
+ * Which days this week carry the rehab routine.
+ *
+ * `computeWeeklyStrength` returns exactly one day — "the first day you don't run" — while the
+ * routine it selects says "3–5× per week" (and now, for shin/calf/foot/ankle, 5–7×). The
+ * schedule contradicted the prescription, and an athlete who runs all seven days got zero
+ * strength days at all, since there was no rest day to put one on.
+ *
+ * Rehab is 15–20 minutes and can share a day with a run; that's what makes daily dosing
+ * possible at all. Placement avoids the long run and quality days while it can, because
+ * stacking rehab onto the two highest-load days is the one arrangement that could plausibly
+ * hurt — but at a daily target there aren't enough other days, and daily means daily.
+ */
+export function computeRehabSchedule(params: {
+  trainingDays: string[]; // lowercase day names
+  dedicatedDay: string | null; // computeWeeklyStrength().day — "Mon".."Sun"
+  routineKey: string | null;
+  severity: "mild" | "moderate" | "severe" | null;
+  activeInjury: boolean;
+  longRunDay?: string | null;
+  qualityDays?: string[];
+}): { days: string[]; routineKey: string | null } {
+  const { trainingDays, dedicatedDay, routineKey, severity, activeInjury, longRunDay = null, qualityDays = [] } = params;
+  if (!routineKey) return { days: dedicatedDay ? [dedicatedDay] : [], routineKey: null };
+
+  const target = rehabSessionsPerWeek(routineKey, severity, activeInjury);
+  const runDays = new Set(
+    WEEK_DAYS.map((full, i) => (trainingDays.map(d => d.toLowerCase().trim()).includes(full) ? WEEK_DAY_ABBREV[i] : null))
+      .filter((d): d is string => d !== null)
+  );
+  const hardDays = new Set([longRunDay, ...qualityDays].filter((d): d is string => !!d));
+
+  // Preference order: the dedicated rest day first (it's already the athlete's strength day),
+  // then easy run days, then any other rest day, and only then the hard days.
+  const preference = [
+    ...(dedicatedDay ? [dedicatedDay] : []),
+    ...ORDERED_DAYS.filter(d => runDays.has(d) && !hardDays.has(d)),
+    ...ORDERED_DAYS.filter(d => !runDays.has(d)),
+    ...ORDERED_DAYS.filter(d => hardDays.has(d)),
+  ].filter((d, i, arr) => arr.indexOf(d) === i);
+
+  // Greedily take from the preference order, but among equally-preferred candidates prefer the
+  // one furthest from any day already chosen, so 3 sessions land Mon/Wed/Fri rather than
+  // Mon/Tue/Wed. Spacing only matters below a daily dose; at 6–7 it's moot.
+  const chosen: string[] = [];
+  const remaining = [...preference];
+  while (chosen.length < target && remaining.length > 0) {
+    if (chosen.length === 0) {
+      chosen.push(remaining.shift()!);
+      continue;
+    }
+    const tier = remaining.filter(d => preferenceTier(d, dedicatedDay, runDays, hardDays) === preferenceTier(remaining[0], dedicatedDay, runDays, hardDays));
+    let best = tier[0];
+    let bestGap = -1;
+    for (const cand of tier) {
+      const gap = Math.min(...chosen.map(c => dayGap(c, cand)));
+      if (gap > bestGap) { bestGap = gap; best = cand; }
+    }
+    chosen.push(best);
+    remaining.splice(remaining.indexOf(best), 1);
+  }
+
+  return {
+    days: ORDERED_DAYS.filter(d => chosen.includes(d)),
+    routineKey,
+  };
+}
+
+/** Lower is more preferred: dedicated day, easy run day, rest day, hard day. */
+function preferenceTier(day: string, dedicatedDay: string | null, runDays: Set<string>, hardDays: Set<string>): number {
+  if (day === dedicatedDay) return 0;
+  if (runDays.has(day) && !hardDays.has(day)) return 1;
+  if (!runDays.has(day)) return 2;
+  return 3;
+}
+
+/** Circular distance between two weekdays, in days. */
+function dayGap(a: string, b: string): number {
+  const ia = ORDERED_DAYS.indexOf(a as typeof ORDERED_DAYS[number]);
+  const ib = ORDERED_DAYS.indexOf(b as typeof ORDERED_DAYS[number]);
+  const raw = Math.abs(ia - ib);
+  return Math.min(raw, 7 - raw);
 }
 
 export interface UploadedPlanWeek {
@@ -1031,6 +1117,14 @@ export interface ArcWeekSlot {
   keyWorkoutText?: string;
   /** Canonical modality key (e.g. "bike", "swimming") — cross_train slots only. */
   modality?: string;
+  /**
+   * Rehab routine scheduled on this day, on top of whatever the slot already is. Additive
+   * rather than its own slot type on purpose: computeArcWeekSkeleton emits exactly one slot
+   * per day and four consumers map it 1:1 (the digest, the card payload, syncWeekFromArc,
+   * and the card's fixed row geometry). A second row per day breaks all four; a field breaks
+   * none, and old persisted rows without it render exactly as they did.
+   */
+  rehab?: { routineKey: string };
 }
 
 /**
@@ -1122,8 +1216,14 @@ export function computeArcWeekSkeleton(params: {
   injuryBodyPart?: string | null;
   /** How many quality sessions this week may carry (see resolveWeekMode). Default "both". */
   qualityPolicy?: QualityPolicy;
+  /**
+   * Schedules the rehab routine across this week. Done inside the skeleton rather than by the
+   * caller because placement needs to know which days ended up as the long run and the quality
+   * sessions, and every caller would otherwise have to build the week twice to find out.
+   */
+  rehab?: { routineKey: string | null; severity: "mild" | "moderate" | "severe" | null; activeInjury: boolean };
 }): ArcWeekSlot[] {
-  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone, weekOffsetDays = 0, injuryBodyPart = null, qualityPolicy = "both" } = params;
+  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone, weekOffsetDays = 0, injuryBodyPart = null, qualityPolicy = "both", rehab = null } = params;
 
   const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const tz = timezone || "America/New_York";
@@ -1280,7 +1380,25 @@ export function computeArcWeekSkeleton(params: {
     );
   }
 
-  return slots.sort((a, b) => ORDERED_DAYS.indexOf(a.day) - ORDERED_DAYS.indexOf(b.day));
+  const sorted = slots.sort((a, b) => ORDERED_DAYS.indexOf(a.day) - ORDERED_DAYS.indexOf(b.day));
+
+  if (rehab?.routineKey) {
+    const schedule = computeRehabSchedule({
+      trainingDays,
+      dedicatedDay: strengthDay,
+      routineKey: rehab.routineKey,
+      severity: rehab.severity,
+      activeInjury: rehab.activeInjury,
+      longRunDay,
+      qualityDays: [qualityPlaced ? qualityDay : null, quality2Placed ? qualityDay2 : null]
+        .filter((d): d is string => !!d),
+    });
+    const rehabSet = new Set(schedule.days);
+    for (const slot of sorted) {
+      if (rehabSet.has(slot.day)) slot.rehab = { routineKey: rehab.routineKey };
+    }
+  }
+  return sorted;
 }
 
 /**
@@ -1376,7 +1494,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
 
   const { data: profile } = await supabase
     .from("training_profiles")
-    .select("training_days, injury_notes, injury_body_part, injury_body_parts, preferred_units, crosstraining_tools, crosstraining_days, active_injury")
+    .select("training_days, injury_notes, injury_body_part, injury_body_parts, preferred_units, crosstraining_tools, crosstraining_days, active_injury, injury_severity")
     .eq("user_id", userId)
     .single();
   const strength = computeWeeklyStrength(profile as Record<string, unknown> | null);
@@ -1461,28 +1579,36 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
             routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
           }))
       : weekMode.mode === "arc"
-        ? computeArcWeekSkeleton({
-            trainingDays,
-            weeklyTotalMiles: week.mileage_target ?? 0,
-            longRunMiles: week.long_run_target ?? 0,
-            keyWorkoutText: week.key_workout || null,
-            keyWorkoutText2: week.key_workout_2 ?? null,
-            strengthDay: strength.day,
-            crosstrainingTools,
-            timezone,
-            injuryBodyPart: injuryBodyPartForSync,
-            qualityPolicy: weekMode.qualityPolicy,
-          })
-            .filter(s => s.type !== "rest")
-            .map(s => ({
-              day: s.day,
-              date: s.date,
-              label: arcWeekSlotLabel(s, isMetric),
-              type: s.type === "long_run" || s.type === "quality" || s.type === "easy"
-                ? "run" as const
-                : s.type === "cross_train" ? "cross_train" as const : "strength" as const,
-              routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
-            }))
+        ? (() => {
+            return computeArcWeekSkeleton({
+              trainingDays,
+              weeklyTotalMiles: week.mileage_target ?? 0,
+              longRunMiles: week.long_run_target ?? 0,
+              keyWorkoutText: week.key_workout || null,
+              keyWorkoutText2: week.key_workout_2 ?? null,
+              strengthDay: strength.day,
+              crosstrainingTools,
+              timezone,
+              injuryBodyPart: injuryBodyPartForSync,
+              qualityPolicy: weekMode.qualityPolicy,
+              rehab: {
+                routineKey: strength.routineKey,
+                severity: (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null,
+                activeInjury: !!(profile as Record<string, unknown> | null)?.active_injury,
+              },
+            })
+              .filter(s => s.type !== "rest" || !!s.rehab)
+              .map(s => ({
+                day: s.day,
+                date: s.date,
+                label: arcWeekSlotLabel(s, isMetric),
+                type: s.type === "long_run" || s.type === "quality" || s.type === "easy"
+                  ? "run" as const
+                  : s.type === "cross_train" ? "cross_train" as const : "strength" as const,
+                routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
+                rehab_routine_key: s.rehab?.routineKey,
+              }));
+          })()
         : [];
 
     // On a hold the arc's running numbers describe a week the athlete isn't running. Zero the
@@ -1521,6 +1647,11 @@ export function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
     ? `Easy ${fmtDist(slot.distanceMiles ?? 0)}`
     : slot.type === "cross_train"
     ? (MODALITY_DISPLAY_NAMES[slot.modality ?? ""] ?? "Cross-training")
+    // Name the routine on the dedicated day. "Strength + mobility" was the entire strength
+    // representation in every surface — digest, card, and weekly_plan_sessions alike — which
+    // told an injured athlete nothing about what they're supposed to be doing.
+    : slot.rehab
+    ? `${getRoutine(slot.rehab.routineKey)?.label ?? "Strength"} routine`
     : "Strength + mobility";
 }
 
@@ -1542,11 +1673,20 @@ export function formatWeeklyPlanDigest(
 ): string {
   const annotationByDay = new Map((slotAnnotations ?? []).map(a => [a.day, a]));
   const lines = skeleton
-    .filter(s => s.type !== "rest")
-    .map(s => {
+    // Rest days are normally omitted, but a rest day carrying rehab is a day with something
+    // to do on it — dropping it would hide sessions the athlete is meant to complete.
+    .filter(s => s.type !== "rest" || !!s.rehab)
+    .flatMap(s => {
       const annotation = annotationByDay.get(s.day);
       const pace = annotation?.pace ? ` (${annotation.pace})` : "";
-      return `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}`;
+      const row = `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}`;
+      // Sub-line convention matches formatRecoveryWeekDigest: a leading "›" rather than
+      // indentation, because SMS clients collapse leading whitespace. Days whose whole
+      // session IS the rehab (the dedicated day, or a rest day carrying it) already name the
+      // routine in their label — only running and cross-training days need the "+" line.
+      if (!s.rehab || s.type === "strength" || s.type === "rest") return [row];
+      const routineLabel = getRoutine(s.rehab.routineKey)?.label ?? "Rehab";
+      return [row, `   › + ${routineLabel} rehab (~15 min)`];
     });
   return `${heading}\n${lines.join("\n")}`;
 }

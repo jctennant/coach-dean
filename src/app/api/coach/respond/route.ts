@@ -2502,6 +2502,11 @@ Apply this to bias which metric lens you pick and what advice you give proactive
       timezone: userTimezone,
       injuryBodyPart: injuryBodyPartForWeek,
       qualityPolicy: weekMode.qualityPolicy,
+      rehab: {
+        routineKey: strengthForSkeleton.routineKey,
+        severity: (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null,
+        activeInjury: !!(profile?.active_injury),
+      },
     });
     // computeArcWeekSkeleton returns [] when the athlete has no training_days set —
     // fall back to the prose-only path in that case rather than sending an empty schedule.
@@ -3402,6 +3407,11 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         ranToday: hasRunLoggedToday,
         injuryBodyPart: injuryBodyPartForWeek,
         qualityPolicy: weekMode.qualityPolicy,
+        rehab: {
+          routineKey: strengthForStarter.routineKey,
+          severity: (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null,
+          activeInjury: !!(profile?.active_injury),
+        },
       });
       if (starterSkeleton.length > 0) {
         const runSlots = starterSkeleton.filter(s => s.type !== "rest");
@@ -4727,6 +4737,11 @@ OUTPUT CONTRACT:
         preferNextWeek: askedAboutNextWeek,
         injuryBodyPart: injuryBodyPartForWeek,
         qualityPolicy: weekMode.qualityPolicy,
+        rehab: {
+          routineKey: computeWeeklyStrength(profile).routineKey,
+          severity: (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null,
+          activeInjury: !!(profile?.active_injury),
+        },
       });
       if (scheduleText) {
         if (!dry_run) {
@@ -4821,6 +4836,11 @@ OUTPUT CONTRACT:
             ranToday: hasRunLoggedToday,
             injuryBodyPart: injuryBodyPartForWeek,
             qualityPolicy: weekMode.qualityPolicy,
+            rehab: {
+              routineKey: computeWeeklyStrength(profile).routineKey,
+              severity: (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null,
+              activeInjury: !!(profile?.active_injury),
+            },
           });
           if (scheduleText) {
             if (!dry_run) {

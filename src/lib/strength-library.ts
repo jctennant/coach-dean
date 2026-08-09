@@ -40,6 +40,14 @@ export interface Routine {
   /** Injury keywords that route here (lowercased substring match, priority order below). */
   matches: string[];
   frequency: string;
+  /**
+   * How many sessions a week this routine actually wants, as a range. Every rehab routine
+   * used to share one "3–5× per week" string, but they differ sharply in load: shin/calf/foot
+   * are low-load loading and mobility where daily is the standard prescription, while the
+   * hamstring routine is Nordic curls and hip thrusts, where daily is how you get hurt.
+   * `injury_severity` picks within the range (see rehabSessionsPerWeek).
+   */
+  frequencyPerWeek: { min: number; max: number };
   /** Why this routine, for the athlete. */
   note: string;
   exerciseIds: string[];
@@ -160,53 +168,65 @@ export const EXERCISES: Record<string, Exercise> = {
 /* ── Routines ───────────────────────────────────────────────────────────────── */
 
 const REHAB_FREQ = "3–5× per week, 20–30 min per session — these are gentle; stop any rep that climbs past 2/10 pain";
+const DAILY_FREQ = "5–7× per week, 15–20 min per session — low-load enough to do daily; stop any rep that climbs past 2/10 pain";
+const HEAVY_FREQ = "2–3× per week, 20–30 min per session — heavy eccentric work needs a recovery day between sessions";
 const PREVENT_FREQ = "2× per week as its own 20–30 min session";
+
+/** Low-load loading + mobility — daily is the standard prescription (eccentric heel-drop
+ *  protocols for Achilles are literally twice a day, seven days a week). */
+const DAILY_RANGE = { min: 5, max: 7 };
+/** Mixed mobility and glute/quad strength — wants some recovery between sessions. */
+const REHAB_RANGE = { min: 3, max: 5 };
+/** High eccentric load (Nordics, hip thrusts, deep single-leg work). */
+const HEAVY_RANGE = { min: 2, max: 3 };
+/** Prevention baseline for athletes with no active injury. */
+const PREVENT_RANGE = { min: 2, max: 2 };
 
 /** Routines in priority order — `composeStrengthRoutine` matches the FIRST routine whose
  *  `matches` keyword appears in the athlete's injury text. More specific terms come first. */
 export const ROUTINES: Routine[] = [
-  { key: "it_band", label: "IT band", matches: ["it band", "itb", "iliotibial"], frequency: REHAB_FREQ,
+  { key: "it_band", label: "IT band", matches: ["it band", "itb", "iliotibial"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Builds the glute-med strength that stops the IT band overloading, and calms the lateral knee.",
     exerciseIds: ["leg_swings", "clamshells", "lateral_band_walks", "monster_walk", "side_lying_hip_abduction", "single_leg_glute_bridge", "foam_roll_tfl", "hip_flexor_stretch", "single_leg_balance"] },
-  { key: "shin", label: "Shin splints", matches: ["shin", "tibia", "medial tibial", "mtss"], frequency: REHAB_FREQ,
+  { key: "shin", label: "Shin splints", matches: ["shin", "tibia", "medial tibial", "mtss"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Loads the tibialis and calf so the shin can handle ground impact without flaring.",
     exerciseIds: ["toe_taps", "tib_anterior_raise", "band_dorsiflexion", "ecc_calf_raise_straight", "single_leg_calf_raise", "calf_stretch", "soleus_stretch", "ankle_alphabet", "single_leg_balance"] },
-  { key: "calf", label: "Calf / Achilles", matches: ["calf", "achilles", "soleus", "gastroc"], frequency: REHAB_FREQ,
+  { key: "calf", label: "Calf / Achilles", matches: ["calf", "achilles", "soleus", "gastroc"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Eccentric calf loading is the best-evidenced rehab for Achilles and calf strain.",
     exerciseIds: ["ankle_circles", "ecc_heel_drop", "single_leg_calf_raise", "soleus_stretch", "calf_stretch", "toe_taps", "tib_anterior_raise", "single_leg_balance", "ankle_alphabet"] },
-  { key: "knee", label: "Runner's knee", matches: ["knee", "patella", "patellar", "pf ", "kneecap", "pfps"], frequency: REHAB_FREQ,
+  { key: "knee", label: "Runner's knee", matches: ["knee", "patella", "patellar", "pf ", "kneecap", "pfps"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Quad and glute strength to track the kneecap properly and offload the joint.",
     exerciseIds: ["leg_swings", "vmo_quad_set", "tke", "step_down", "straight_leg_raise", "single_leg_squat", "wall_sit", "glute_bridge", "single_leg_balance", "reverse_nordic"] },
-  { key: "hamstring", label: "Hamstring", matches: ["hamstring", "ham ", "biceps femoris"], frequency: REHAB_FREQ,
+  { key: "hamstring", label: "Hamstring", matches: ["hamstring", "ham ", "biceps femoris"], frequency: HEAVY_FREQ, frequencyPerWeek: HEAVY_RANGE,
     note: "Eccentric hamstring loading to build strain resilience through full range.",
     exerciseIds: ["leg_swings", "nordic_curls", "single_leg_rdl", "prone_hamstring_raise", "glute_bridge", "single_leg_glute_bridge", "hip_thrust", "bird_dog", "single_leg_balance"] },
-  { key: "foot", label: "Foot / plantar fascia", matches: ["plantar", "foot", "arch", "fascia", "heel"], frequency: REHAB_FREQ,
+  { key: "foot", label: "Foot / plantar fascia", matches: ["plantar", "foot", "arch", "fascia", "heel"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Calms the plantar fascia and rebuilds the intrinsic foot strength that supports the arch.",
     exerciseIds: ["ankle_circles", "frozen_bottle_roll", "towel_toe_curl", "short_foot", "ecc_calf_raise_straight", "single_leg_calf_raise", "calf_stretch", "single_leg_balance", "toe_taps"] },
-  { key: "piriformis", label: "Piriformis", matches: ["piriformis", "sciatic"], frequency: REHAB_FREQ,
+  { key: "piriformis", label: "Piriformis", matches: ["piriformis", "sciatic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Releases the piriformis and builds hip rotator control to stop it gripping.",
     exerciseIds: ["cat_cow", "figure_4_stretch", "pigeon_pose", "seated_piriformis_stretch", "clamshells", "fire_hydrant", "lateral_band_walks", "glute_bridge", "bird_dog", "single_leg_balance"] },
-  { key: "groin", label: "Groin / adductor", matches: ["groin", "adductor", "inner thigh", "pubic"], frequency: REHAB_FREQ,
+  { key: "groin", label: "Groin / adductor", matches: ["groin", "adductor", "inner thigh", "pubic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Low-load adductor strengthening — gentle and pregnancy-safe.",
     exerciseIds: ["leg_swings", "side_lying_hip_adduction", "seated_adductor_isometric", "butterfly_stretch", "clamshells", "copenhagen_plank", "glute_bridge", "single_leg_balance", "bird_dog"] },
-  { key: "glute", label: "Glute", matches: ["glute", "gluteal", "buttock"], frequency: REHAB_FREQ,
+  { key: "glute", label: "Glute", matches: ["glute", "gluteal", "buttock"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Glute strength is the foundation for hip and knee stability when you run.",
     exerciseIds: ["leg_swings", "clamshells", "single_leg_glute_bridge", "hip_thrust", "side_lying_hip_abduction", "lateral_band_walks", "monster_walk", "single_leg_squat", "front_plank", "single_leg_balance"] },
-  { key: "hip", label: "Hip", matches: ["hip flexor", "hip"], frequency: REHAB_FREQ,
+  { key: "hip", label: "Hip", matches: ["hip flexor", "hip"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Mobilizes tight hip flexors and strengthens the glutes that share the load.",
     exerciseIds: ["worlds_greatest_stretch", "hip_flexor_stretch", "glute_bridge", "lateral_band_walks", "pigeon_pose", "clamshells", "single_leg_glute_bridge", "hip_thrust", "single_leg_balance"] },
-  { key: "pelvis", label: "Pelvic girdle", matches: ["pelvis", "pelvic"], frequency: REHAB_FREQ,
+  { key: "pelvis", label: "Pelvic girdle", matches: ["pelvis", "pelvic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Pelvis pain can come from the SI joint, pubic symphysis, or general girdle instability — this builds the deep core and glute stabilizers that support the whole pelvic girdle regardless of the exact source. If pain is sharp, one-sided at the pubic bone, or worsens with single-leg hopping, flag it for a sports physio rather than pushing through.",
     exerciseIds: ["cat_cow", "dead_bug", "bird_dog", "glute_bridge", "single_leg_glute_bridge", "clamshells", "hip_thrust", "front_plank", "side_plank"] },
-  { key: "ankle", label: "Ankle", matches: ["ankle", "sprain", "rolled"], frequency: REHAB_FREQ,
+  { key: "ankle", label: "Ankle", matches: ["ankle", "sprain", "rolled"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Rebuilds ankle strength, range, and the balance that prevents re-spraining.",
     exerciseIds: ["ankle_circles", "ecc_calf_raise_straight", "single_leg_balance", "band_dorsiflexion", "ankle_alphabet", "single_leg_calf_raise", "toe_taps", "soleus_stretch", "calf_stretch"] },
-  { key: "back", label: "Lower back", matches: ["back", "lumbar", "si joint", "sacroiliac"], frequency: REHAB_FREQ,
+  { key: "back", label: "Lower back", matches: ["back", "lumbar", "si joint", "sacroiliac"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Gentle mobility plus core control to settle the low back and support running posture.",
     exerciseIds: ["cat_cow", "bird_dog", "childs_pose", "dead_bug", "glute_bridge", "front_plank", "side_plank", "superman", "pigeon_pose"] },
   // Default / universal base — strongest general evidence (Run RCT). Used when there's an
   // injury history but no recognizable body part, or as the everyone-benefits routine.
-  { key: "hip_core", label: "Hip & core base", matches: [], frequency: PREVENT_FREQ,
+  { key: "hip_core", label: "Hip & core base", matches: [], frequency: PREVENT_FREQ, frequencyPerWeek: PREVENT_RANGE,
     note: "The strongest general injury-prevention evidence we have (Run RCT, Leppänen 2024): hip + core strength twice a week cut overuse injuries roughly in half. Closes with running-specific drills — skip these if returning from injury.",
     exerciseIds: ["worlds_greatest_stretch", "side_plank", "single_leg_squat", "single_leg_glute_bridge", "lateral_band_walks", "front_plank", "clamshells", "dead_bug", "bird_dog", "hip_thrust", "a_skip", "high_knees", "bounding"] },
 ];
@@ -250,6 +270,49 @@ export function composeStrengthRoutine(input: ComposeInput): StoredStrengthRouti
 
   const key = routineKeyForInjuryText(haystack) ?? "hip_core";
   return buildStoredRoutine(key);
+}
+
+/**
+ * Running-specific plyometric drills that close the hip_core routine. `hip_core`'s note has
+ * always said "skip these if returning from injury"; nothing enforced it, so an athlete coming
+ * back from a shin injury could be handed bounding. This makes the note executable.
+ */
+export const DRILL_EXERCISE_IDS: ReadonlySet<string> = new Set(["a_skip", "high_knees", "bounding"]);
+
+/** A routine's exercise ids, minus the plyometric drills when the athlete is currently injured. */
+export function routineExerciseIds(key: string, opts: { activeInjury?: boolean } = {}): string[] {
+  const routine = getRoutine(key);
+  if (!routine) return [];
+  return opts.activeInjury
+    ? routine.exerciseIds.filter((id) => !DRILL_EXERCISE_IDS.has(id))
+    : [...routine.exerciseIds];
+}
+
+/**
+ * How many rehab sessions this athlete should do this week: the routine's own range, with
+ * `training_profiles.injury_severity` picking within it. This is the first place severity
+ * influences anything — it was stored and never read.
+ *
+ * No active injury means the prevention baseline (the routine's minimum), not a rehab dose:
+ * `composeStrengthRoutine` matches on `injury_notes`, which never expires, so an athlete whose
+ * shin splints resolved months ago still has a routine on file and must not be scheduled as
+ * though they were hurt.
+ */
+export function rehabSessionsPerWeek(
+  routineKey: string | null,
+  severity: "mild" | "moderate" | "severe" | null,
+  activeInjury: boolean
+): number {
+  const routine = routineKey ? getRoutine(routineKey) : null;
+  if (!routine) return 1;
+  const { min, max } = routine.frequencyPerWeek;
+  // History only, no active injury: one dedicated session, exactly as before this existed.
+  // Returning the routine's own minimum here would put an athlete whose shin splints resolved
+  // months ago on 5 rehab days a week off the strength of a stale injury_notes match.
+  if (!activeInjury) return 1;
+  if (severity === "severe") return max;
+  if (severity === "moderate") return Math.round((min + max) / 2);
+  return min; // mild, or unknown severity — start at the low end of the evidence range
 }
 
 /** Build the stored-routine object for a known routine key. */

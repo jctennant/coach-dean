@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, computeStarterWeekSkeleton, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
+import { computePhaseForPlan, computeWeekSessions, computeWeeklyStrength, computeArcWeekSkeleton, computeStarterWeekSkeleton, computeRehabSchedule, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc, type UploadedPlanWeek, type ArcWeekSlot } from "@/lib/training-plan";
 
 // ---------------------------------------------------------------------------
 // computePhaseForPlan — no-race cycle
@@ -963,5 +963,114 @@ describe("computeStarterWeekSkeleton", () => {
     // Sunday 2026-05-31.
     const slots = computeStarterWeekSkeleton({ ...params, nowMs: Date.UTC(2026, 4, 31, 12), ranToday: true });
     expect(slots).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeRehabSchedule
+// ---------------------------------------------------------------------------
+describe("computeRehabSchedule", () => {
+  // Jake's week: runs Mon/Wed/Thu/Sat, long run Saturday, quality Monday, strength day Tue.
+  const jake = {
+    trainingDays: ["monday", "wednesday", "thursday", "saturday"],
+    dedicatedDay: "Tue",
+    routineKey: "shin",
+    severity: "moderate" as const,
+    activeInjury: true,
+    longRunDay: "Sat",
+    qualityDays: ["Mon"],
+  };
+
+  it("schedules a low-load rehab routine near-daily", () => {
+    const { days } = computeRehabSchedule(jake);
+    expect(days).toHaveLength(6);
+    // The long run is the one day it protects when it can.
+    expect(days).not.toContain("Sat");
+  });
+
+  it("keeps a high-eccentric routine to two spaced days", () => {
+    const { days } = computeRehabSchedule({ ...jake, routineKey: "hamstring", severity: "mild" });
+    expect(days).toHaveLength(2);
+    const [a, b] = days.map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(d));
+    expect(Math.abs(a - b)).toBeGreaterThanOrEqual(2);
+  });
+
+  it("avoids the long run and quality days when the dose leaves room", () => {
+    const { days } = computeRehabSchedule({ ...jake, routineKey: "knee", severity: "mild" });
+    expect(days).toHaveLength(3);
+    expect(days).not.toContain("Sat");
+    expect(days).not.toContain("Mon");
+  });
+
+  it("puts an athlete with no active injury back on a single day", () => {
+    expect(computeRehabSchedule({ ...jake, activeInjury: false }).days).toEqual(["Tue"]);
+  });
+
+  it("schedules rehab for a seven-day-a-week runner, who used to get none at all", () => {
+    // computeWeeklyStrength returns null for these athletes — there's no rest day to place a
+    // dedicated session on — so before this they had zero strength days scheduled, ever.
+    const { days } = computeRehabSchedule({
+      ...jake,
+      trainingDays: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+      dedicatedDay: null,
+    });
+    expect(days).toHaveLength(6);
+  });
+
+  it("returns nothing schedulable when there's no routine", () => {
+    expect(computeRehabSchedule({ ...jake, routineKey: null }).days).toEqual(["Tue"]);
+  });
+
+  it("never double-books a day", () => {
+    const { days } = computeRehabSchedule({ ...jake, severity: "severe" });
+    expect(new Set(days).size).toBe(days.length);
+  });
+});
+
+describe("computeArcWeekSkeleton — rehab", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function build(overrides: Record<string, unknown> = {}) {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00Z"));
+    return computeArcWeekSkeleton({
+      trainingDays: ["monday", "wednesday", "thursday", "saturday"],
+      weeklyTotalMiles: 17,
+      longRunMiles: 7,
+      keyWorkoutText: "Fartlek 6mi (varied 2-3 min pickups)",
+      strengthDay: "Tue",
+      crosstrainingTools: ["bike", "elliptical"],
+      timezone: "UTC",
+      rehab: { routineKey: "shin", severity: "moderate", activeInjury: true },
+      ...overrides,
+    });
+  }
+
+  it("attaches rehab to the days it schedules, and still emits one slot per day", () => {
+    const slots = build();
+    expect(slots).toHaveLength(7);
+    expect(slots.filter(s => s.rehab)).toHaveLength(6);
+  });
+
+  it("leaves the week untouched when no routine applies", () => {
+    const slots = build({ rehab: { routineKey: null, severity: null, activeInjury: false } });
+    expect(slots.filter(s => s.rehab)).toHaveLength(0);
+  });
+
+  it("names the routine on the dedicated strength day", () => {
+    const digest = formatWeeklyPlanDigest(build(), null, false);
+    expect(digest).toContain("Shin splints routine");
+  });
+
+  it("marks rehab riding along with a run as a sub-line, not a second row", () => {
+    const digest = formatWeeklyPlanDigest(build(), null, false);
+    expect(digest).toContain("   › + Shin splints rehab");
+    // One row per day plus sub-lines — the long run has no rehab, so no sub-line under it.
+    const longRunIdx = digest.split("\n").findIndex(l => l.includes("Long run"));
+    expect(digest.split("\n")[longRunIdx + 1] ?? "").not.toContain("›");
+  });
+
+  it("keeps a full rehab week's digest inside one SMS bubble", () => {
+    expect(formatWeeklyPlanDigest(build(), null, false).length).toBeLessThan(480);
   });
 });
