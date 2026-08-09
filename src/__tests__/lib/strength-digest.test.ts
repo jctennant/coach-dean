@@ -22,7 +22,7 @@ describe("formatStrengthDigest", () => {
 
   it("renders the routine with one line per exercise", () => {
     const digest = formatStrengthDigest({ routineKey: "shin", days: SHIN_DAYS, activeInjury: true })!;
-    expect(digest.text).toContain("Shin splints routine — daily this week");
+    expect(digest.text).toContain("Shin routine — daily this week");
     expect(digest.text).toContain("› Toe taps on a stair — 2×20");
     expect(digest.exerciseIds).toEqual(getRoutine("shin")!.exerciseIds);
     expect(digest.truncated).toBe(false);

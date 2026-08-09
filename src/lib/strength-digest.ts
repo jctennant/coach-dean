@@ -65,7 +65,11 @@ export function formatStrengthDigest(params: {
   if (ids.length === 0) return null;
 
   const routine = routineKey ? getRoutine(routineKey) : null;
-  const label = routine ? `${routine.label} routine` : "Strength routine";
+  // Short label, matching the schedule lines ("Easy 4mi + shin routine") so the two messages
+  // are obviously about the same thing.
+  const label = routine
+    ? `${routine.shortLabel.charAt(0).toUpperCase()}${routine.shortLabel.slice(1)} routine`
+    : "Strength routine";
   const minutes = days && days.length >= 5 ? "~15 min" : "~20 min";
   const header = `${label} — ${cadenceLabel(days)}, ${minutes}:`;
 

@@ -1059,15 +1059,16 @@ describe("computeArcWeekSkeleton — rehab", () => {
 
   it("names the routine on the dedicated strength day", () => {
     const digest = formatWeeklyPlanDigest(build(), null, false);
-    expect(digest).toContain("Shin splints routine");
+    expect(digest).toContain("Shin routine");
   });
 
-  it("marks rehab riding along with a run as a sub-line, not a second row", () => {
+  it("puts rehab on the same line as the run, not a sub-line under it", () => {
+    // Sub-lines doubled the line count and made a full week unreadable (2026-08-09).
     const digest = formatWeeklyPlanDigest(build(), null, false);
-    expect(digest).toContain("   › + Shin splints rehab");
-    // One row per day plus sub-lines — the long run has no rehab, so no sub-line under it.
-    const longRunIdx = digest.split("\n").findIndex(l => l.includes("Long run"));
-    expect(digest.split("\n")[longRunIdx + 1] ?? "").not.toContain("›");
+    expect(digest).not.toContain("›");
+    expect(digest).toMatch(/Easy [\d.]+mi \+ shin routine/);
+    // One line per day, nothing more.
+    expect(digest.split("\n")).toHaveLength(8); // heading + 7 days
   });
 
   it("keeps a full rehab week's digest inside one SMS bubble", () => {

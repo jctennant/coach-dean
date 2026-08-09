@@ -156,7 +156,7 @@ describe("syncWeekFromArc", () => {
     const rehabDays = sessions.filter(s => s.rehab_routine_key === "shin");
     expect(rehabDays.length).toBeGreaterThanOrEqual(5);
     // The strength day names the routine rather than the old bare "Strength + mobility".
-    expect(sessions.some(s => s.type === "strength" && s.label.includes("Shin splints"))).toBe(true);
+    expect(sessions.some(s => s.type === "strength" && s.label === "Shin routine")).toBe(true);
   });
 
   it("leaves a healthy athlete on a single strength day", async () => {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runAfter } from "@/lib/safe-after";
 import { supabase } from "@/lib/supabase";
-import { insertConversation } from "@/lib/conversations";
+import { insertConversation, type MessageType } from "@/lib/conversations";
 import { calculateVDOTPaces, estimatePacesFromEasyPace } from "@/lib/paces";
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { buildHRZoneContext, deriveZones, type LTHRConfidence } from "@/lib/hr-zones";
@@ -36,7 +36,7 @@ import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
 import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
 import { resolveWeekMode } from "@/lib/week-mode";
-import { buildScheduleDigest, countDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
+import { buildScheduleDigest, countDayLabeledLines, stripDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
@@ -4359,6 +4359,31 @@ OUTPUT CONTRACT:
   // the same text an athlete would receive.
   let coachMessage = normalizeEmDashes(stripBoilerplateSignoffs(dayAbbrevFixed));
 
+  // A deterministic schedule is about to follow this message, so Dean's own day-by-day list
+  // comes out of it. Not merely to avoid duplication: in a real transcript the two lists
+  // disagreed — his prose put the long run on Wednesday and easy 5mi on Monday while the
+  // stored plan had strides Monday and the long run Saturday (2026-08-09). The stored plan is
+  // the one the reminders, the dashboard and the swap path all read, so it wins.
+  const planMutationInFlight =
+    tagSessionSwaps.length > 0 || wantsRebuild || wantsLighterWeek || wantsInjuryHold || wantsInjuryClear || wantsRtrAdvance;
+  const scheduleWillFollow =
+    trigger === "initial_plan" ||
+    trigger === "weekly_recap" ||
+    (trigger === "user_message" &&
+      classifiedIntent.intent === "plan_question" &&
+      !planMutationInFlight &&
+      !(state?.injury_hold_since as string | null) &&
+      !isComplementMode &&
+      !isAnalystMode &&
+      storedPlanAllWeeks.length > 0);
+  if (scheduleWillFollow) {
+    const withoutDayList = stripDayLabeledLines(coachMessage);
+    if (withoutDayList !== coachMessage) {
+      void trackEvent(userId, "day_list_stripped_from_prose", { trigger, lines: countDayLabeledLines(coachMessage) });
+      coachMessage = withoutDayList;
+    }
+  }
+
   // Post-run line 1 is fully deterministic — today's activity + the week's mileage-by-category
   // so far, computed from activity rows, never LLM-authored (see buildPostRunMileageLine). Dean's
   // own generated text becomes an optional line 2 (injury check-in or a genuine standout
@@ -4744,16 +4769,10 @@ OUTPUT CONTRACT:
   // the athlete has to assemble the week themselves from a paragraph (2026-08-09).
   // Skipped when a plan mutation is in flight (swap, rebuild, lighter week, injury hold):
   // those apply in after(), so anything rendered here would show the pre-change week.
-  const planMutationInFlight =
-    tagSessionSwaps.length > 0 || wantsRebuild || wantsLighterWeek || wantsInjuryHold || wantsInjuryClear || wantsRtrAdvance;
-  // If Dean already answered with the day list himself, the bubble would only repeat it.
-  // Two or more day-labeled lines is a schedule; one is a passing mention of a single day.
-  const messageAlreadyListsDays = countDayLabeledLines(coachMessage) >= 2;
   if (
     trigger === "user_message" &&
     classifiedIntent.intent === "plan_question" &&
     !planMutationInFlight &&
-    !messageAlreadyListsDays &&
     !(state?.injury_hold_since as string | null) &&
     !isComplementMode && !isAnalystMode &&
     storedPlanAllWeeks.length > 0
@@ -4785,24 +4804,21 @@ OUTPUT CONTRACT:
         },
       });
       if (scheduleText) {
-        if (!dry_run) {
-          if (chatId) await startTyping(chatId);
-          await new Promise((r) => setTimeout(r, 1200));
-          await sendSMS(user.phone_number, scheduleText);
-        }
-        await insertConversation({
-          user_id: userId,
-          role: "assistant",
-          content: scheduleText,
-          message_type: "coach_response",
+        await sendScheduleWithRoutine({
+          schedule: scheduleText,
+          phoneNumber: user.phone_number as string,
+          userId,
+          chatId,
+          dryRun: !!dry_run,
+          activeInjury: !!(profile?.active_injury),
+          messageType: "coach_response",
+          event: "plan_question_schedule_sent",
+          eventProps: { next_week: askedAboutNextWeek },
         });
-        void trackEvent(userId, "plan_question_schedule_sent", { next_week: askedAboutNextWeek });
       }
     } catch (scheduleErr) {
       console.error(`[coach/respond] plan-question schedule bubble failed userId=${userId}:`, scheduleErr);
     }
-  } else if (trigger === "user_message" && classifiedIntent.intent === "plan_question" && messageAlreadyListsDays) {
-    void trackEvent(userId, "plan_question_schedule_skipped", { reason: "message_already_lists_days" });
   }
 
   if (trigger === "initial_plan") {
@@ -4884,18 +4900,17 @@ OUTPUT CONTRACT:
             },
           });
           if (scheduleText) {
-            if (!dry_run) {
-              if (chatId) await startTyping(chatId);
-              await new Promise((r) => setTimeout(r, 1200));
-              await sendSMS(user.phone_number, scheduleText);
-            }
-            await insertConversation({
-              user_id: userId,
-              role: "assistant",
-              content: scheduleText,
-              message_type: "initial_plan",
+            await sendScheduleWithRoutine({
+              schedule: scheduleText,
+              phoneNumber: user.phone_number as string,
+              userId,
+              chatId,
+              dryRun: !!dry_run,
+              activeInjury: !!(profile?.active_injury),
+              messageType: "initial_plan",
+              event: "initial_plan_schedule_sent",
+              eventProps: { trigger },
             });
-            void trackEvent(userId, "initial_plan_schedule_sent", { trigger });
           }
         }
       } catch (scheduleErr) {
@@ -9684,4 +9699,51 @@ async function sendExerciseImages(params: {
     }
   }
   return sent;
+}
+
+
+/**
+ * Send a schedule bubble, then — when the week carries a rehab routine — the routine itself as
+ * its own follow-up message.
+ *
+ * The schedule names the routine per day ("Easy 4mi + shin routine") but not what's in it, and
+ * stacking the exercises under each day made the schedule unreadable (2026-08-09). One line per
+ * day, one message for the routine.
+ */
+async function sendScheduleWithRoutine(params: {
+  schedule: { text: string; rehabRoutineKey: string | null; rehabDays: string[] };
+  phoneNumber: string;
+  userId: string;
+  chatId?: string | null;
+  dryRun: boolean;
+  activeInjury: boolean;
+  messageType: MessageType;
+  event: string;
+  eventProps: Record<string, unknown>;
+}): Promise<void> {
+  const send = async (text: string, type: MessageType) => {
+    if (!params.dryRun) {
+      if (params.chatId) await startTyping(params.chatId);
+      await new Promise((r) => setTimeout(r, 1200));
+      await sendSMS(params.phoneNumber, text);
+    }
+    await insertConversation({ user_id: params.userId, role: "assistant", content: text, message_type: type });
+  };
+
+  await send(params.schedule.text, params.messageType);
+  void trackEvent(params.userId, params.event, params.eventProps);
+
+  if (!params.schedule.rehabRoutineKey) return;
+  const routine = formatStrengthDigest({
+    routineKey: params.schedule.rehabRoutineKey,
+    days: params.schedule.rehabDays,
+    activeInjury: params.activeInjury,
+  });
+  if (!routine) return;
+  await send(routine.text, "coach_response");
+  void trackEvent(params.userId, "strength_digest_sent", {
+    routine_key: params.schedule.rehabRoutineKey,
+    exercise_count: routine.exerciseIds.length,
+    source: "schedule_follow_up",
+  });
 }

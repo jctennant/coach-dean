@@ -8,6 +8,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-09 — Two disagreeing schedules in one reply, and rehab sub-lines made the week unreadable
+
+**Type:** Bug Fix
+**Reported by:** Jake (live test, asking for the full week)
+**User feedback:** "It seems like there's maybe a duplication in Coach Respond and how it responds. It kind of gives me the plan twice for the next week." … "Right now, it's actually very difficult to read the way we're bolding it under the line. I would maybe just recommend we do Monday run workout + Shin routine … Maybe we send a second message with, 'As a reminder, here's what the routine is to do each day'"
+
+**Root cause (worse than duplication):** the two schedules didn't just repeat each other, they **disagreed**. Dean's prose put the long run on Wednesday and 5mi easy on Monday; the stored plan had strides Monday and the long run Saturday. The `countDayLabeledLines` guard added earlier that day was supposed to suppress the second one, but its regex only recognised `:` and dash separators — Dean writes `Mon 8/10 · Easy 5mi` and `Mon 8/10. Easy 4mi`, so it never fired. Suppressing the bubble would have been the wrong fix anyway: it keeps Dean's invented days and drops the accurate ones.
+
+**Fix / Change:**
+- `stripDayLabeledLines` removes Dean's day list from the message when a deterministic schedule is about to follow (`initial_plan`, `weekly_recap`, and plan questions with no mutation in flight). The stored plan wins, since it's what the reminders, the dashboard and the swap path all read. Only strips at two or more lines — a single "Saturday's long run is the key one" is prose. Tracked as `day_list_stripped_from_prose` so the rate is visible.
+- The separator set now covers what Dean actually writes: `·`, `.`, `:`, `—`, `–`, `-`, with or without a date, abbreviated or full day names.
+- Rehab moved from a `›` sub-line to the same line: `Wed 8/12 — Easy 3.5mi + shin routine`. The sub-line came from `formatRecoveryWeekDigest`, where each day has one thing on it; stacked under a full run week it doubled the line count. Routines gained a `shortLabel` so the line reads "shin routine" rather than "Shin splints rehab".
+- The routine itself now follows the schedule as its own message (`sendScheduleWithRoutine`), so the schedule says *when* and the second message says *what*. Reuses `formatStrengthDigest`, so it's the same text the on-request path sends and it ends with the same "just ask" invitation.
+
+**Known gap, not fixed here:** after a session swap the schedule bubble is suppressed (the swap applies in `after()`, so anything rendered inline would show the pre-change week) and Dean's prose is left alone — which means his day list is still the only summary on that turn, and it can disagree with what actually got stored. Sending a refreshed schedule after the swap lands is the real fix and is its own change.
+
+**Files changed:** `src/lib/schedule-digest.ts`, `src/lib/training-plan.ts`, `src/lib/strength-library.ts`, `src/lib/strength-digest.ts`, `src/app/api/coach/respond/route.ts`, plus tests in `schedule-digest.test.ts`, `training-plan.test.ts`, `strength-digest.test.ts`, `sync-week-from-arc.test.ts`, `coach-respond.test.ts`
+
+---
+
 ## 2026-08-09 — Injury-aware week structure, rehab scheduled properly, routines sent as text
 
 **Type:** Bug Fix + Feature

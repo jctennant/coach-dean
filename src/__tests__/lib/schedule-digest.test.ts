@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildScheduleDigest, countDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
+import { buildScheduleDigest, countDayLabeledLines, stripDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 
 // Sat Aug 8 2026, 18:00 UTC = 12:00 MDT. Week of Mon Aug 3; next week Mon Aug 10–Sun Aug 16.
 const SAT = Date.UTC(2026, 7, 8, 18, 0, 0);
@@ -36,27 +36,27 @@ const base = {
 describe("buildScheduleDigest", () => {
   describe("rest of the current week", () => {
     it("renders the persisted sessions rather than re-deriving them", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4 })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4 })!.text;
       expect(out).toContain("Rest of this week:");
       expect(out).toContain("Tue 8/4 — Strength + mobility");
       expect(out).toContain("Sat 8/8 — Long run 7mi");
     });
 
     it("drops today when the athlete has already run today", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, ranToday: true })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, ranToday: true })!.text;
       expect(out).not.toContain("Tue 8/4");
       expect(out).toContain("Wed 8/5");
     });
 
     it("never shows a day that's already passed", () => {
       const withMonday = [{ day: "Mon", date: "8/3", label: "Easy 4mi" }, ...persisted];
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: withMonday })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: withMonday })!.text;
       expect(out).not.toContain("Mon 8/3");
     });
 
     it("orders lines Mon→Sun regardless of stored order", () => {
       const shuffled = [persisted[3], persisted[1], persisted[0], persisted[2]];
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: shuffled })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: shuffled })!.text;
       const days = out.split("\n").slice(1).map((l) => l.slice(0, 3));
       expect(days).toEqual(["Tue", "Wed", "Thu", "Sat"]);
     });
@@ -64,13 +64,13 @@ describe("buildScheduleDigest", () => {
 
   describe("falling through to next week", () => {
     it("shows next week when the current week's mileage budget is already met", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 })!.text;
       expect(out).toContain("Next week (Aug 10–16):");
       expect(out).toContain("Long run 8mi"); // week 2's, not week 1's
     });
 
     it("shows next week when too few days remain", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: SAT })!;
+      const out = buildScheduleDigest({ ...base, nowMs: SAT })!.text;
       expect(out).toContain("Next week (Aug 10–16):");
       expect(out).toContain("Mon 8/10");
       expect(out).toContain("Sat 8/15");
@@ -78,23 +78,23 @@ describe("buildScheduleDigest", () => {
 
     it("shows next week when nothing is left in the persisted current week", () => {
       const spent = [{ day: "Mon", date: "8/3", label: "Easy 4mi" }];
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: spent })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: spent })!.text;
       expect(out).toContain("Next week (Aug 10–16):");
     });
 
     it("skips the current week when the athlete asked about next week", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, preferNextWeek: true })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, preferNextWeek: true })!.text;
       expect(out).toContain("Next week (Aug 10–16):");
       expect(out).not.toContain("Rest of this week");
     });
 
     it("shows next week when no sessions were persisted at all", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, persistedSessions: null })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, persistedSessions: null })!.text;
       expect(out).toContain("Next week (Aug 10–16):");
     });
 
     it("renders distances in km for metric athletes", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: SAT, isMetric: true })!;
+      const out = buildScheduleDigest({ ...base, nowMs: SAT, isMetric: true })!.text;
       expect(out).toContain("Long run 12.9km");
       // key_workout text keeps whatever units it was generated in — see arcWeekSlotLabel.
       expect(out).toContain("Fartlek 6mi");
@@ -111,7 +111,7 @@ describe("buildScheduleDigest", () => {
   });
 
   it("lists one line per session with day, date and label", () => {
-    const out = buildScheduleDigest({ ...base, nowMs: SAT })!;
+    const out = buildScheduleDigest({ ...base, nowMs: SAT })!.text;
     const lines = out.split("\n").slice(1);
     expect(lines.length).toBeGreaterThanOrEqual(4);
     for (const line of lines) expect(line).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d+\/\d+ — .+/);
@@ -147,5 +147,57 @@ describe("countDayLabeledLines", () => {
   it("returns 0 for prose with no day lines", () => {
     expect(countDayLabeledLines("17 mi next week — long run 7, one strides session, rest easy."))
       .toBe(0);
+  });
+});
+
+describe("stripDayLabeledLines", () => {
+  it("strips the day list Dean writes when a real schedule is about to follow", () => {
+    // Verbatim from the transcript that exposed this: the two schedules disagreed, his prose
+    // putting the long run Wednesday while the stored plan had it Saturday.
+    const msg = [
+      "Mon 8/10 · Easy 5mi",
+      "Wed 8/12 · Long run 7mi easy",
+      "Thu 8/13 · Easy 2.5mi + 5×20sec strides",
+      "Sat 8/15 · Easy 2.5mi",
+      "",
+      "Two cross-training sessions and strength 2× spread across the week.",
+    ].join("\n");
+    expect(stripDayLabeledLines(msg)).toBe("Two cross-training sessions and strength 2× spread across the week.");
+  });
+
+  it("recognises the separators Dean actually uses", () => {
+    for (const line of ["Mon 8/10 · Easy 5mi", "Mon 8/10. Easy 5mi", "Monday, Aug 10: Easy 5mi", "Mon - Easy 5mi", "Tue 8/11 — Bike"]) {
+      expect(countDayLabeledLines(`${line}\n${line.replace(/Mon|Tue/, "Wed")}`), line).toBe(2);
+    }
+  });
+
+  it("leaves prose that merely mentions a day alone", () => {
+    const prose = "Saturday's long run is the key one this week. Move Thursday to Friday if travel gets in the way.";
+    expect(stripDayLabeledLines(prose)).toBe(prose);
+  });
+
+  it("leaves a single day line alone — that's a mention, not a schedule", () => {
+    const one = "Here's the plan.\nSat 8/15 · Long run 7mi\nThat's the one that matters.";
+    expect(stripDayLabeledLines(one)).toBe(one);
+  });
+
+  it("collapses the blank lines the strip leaves behind", () => {
+    const msg = "Here's next week.\n\nMon 8/10 · Easy 5mi\nWed 8/12 · Easy 3mi\n\nKeep the shin routine going.";
+    expect(stripDayLabeledLines(msg)).toBe("Here's next week.\n\nKeep the shin routine going.");
+  });
+});
+
+describe("buildScheduleDigest — rehab reporting", () => {
+  it("reports the rehab routine and days so the routine can follow as its own message", () => {
+    const withRehab = persisted.map(p => ({ ...p, rehab_routine_key: "shin" }));
+    const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: withRehab })!;
+    expect(out.rehabRoutineKey).toBe("shin");
+    expect(out.rehabDays).toEqual(["Tue", "Wed", "Thu", "Sat"]);
+  });
+
+  it("reports no routine when the week has none", () => {
+    const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4 })!;
+    expect(out.rehabRoutineKey).toBeNull();
+    expect(out.rehabDays).toEqual([]);
   });
 });

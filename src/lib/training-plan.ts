@@ -1637,6 +1637,10 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
  * keyWorkoutText (quality sessions) is left as-is: it's baked in the athlete's preferred
  * units at plan-generation time already, same assumption Dean's own prompt makes.
  */
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
   const fmtDist = (miles: number) => isMetric ? `${(miles * 1.60934).toFixed(1)}km` : `${miles}mi`;
   return slot.type === "long_run"
@@ -1651,7 +1655,7 @@ export function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
     // representation in every surface — digest, card, and weekly_plan_sessions alike — which
     // told an injured athlete nothing about what they're supposed to be doing.
     : slot.rehab
-    ? `${getRoutine(slot.rehab.routineKey)?.label ?? "Strength"} routine`
+    ? `${capitalize(getRoutine(slot.rehab.routineKey)?.shortLabel ?? "strength")} routine`
     : "Strength + mobility";
 }
 
@@ -1676,17 +1680,18 @@ export function formatWeeklyPlanDigest(
     // Rest days are normally omitted, but a rest day carrying rehab is a day with something
     // to do on it — dropping it would hide sessions the athlete is meant to complete.
     .filter(s => s.type !== "rest" || !!s.rehab)
-    .flatMap(s => {
+    .map(s => {
       const annotation = annotationByDay.get(s.day);
       const pace = annotation?.pace ? ` (${annotation.pace})` : "";
-      const row = `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}`;
-      // Sub-line convention matches formatRecoveryWeekDigest: a leading "›" rather than
-      // indentation, because SMS clients collapse leading whitespace. Days whose whole
-      // session IS the rehab (the dedicated day, or a rest day carrying it) already name the
-      // routine in their label — only running and cross-training days need the "+" line.
-      if (!s.rehab || s.type === "strength" || s.type === "rest") return [row];
-      const routineLabel = getRoutine(s.rehab.routineKey)?.label ?? "Rehab";
-      return [row, `   › + ${routineLabel} rehab (~15 min)`];
+      // Rehab rides on the same line rather than a "›" sub-line under it. The sub-line came
+      // from formatRecoveryWeekDigest, where each day has one thing on it — stacked under a
+      // full run week it doubled the line count and read as noise (2026-08-09, Jake: "it's
+      // actually very difficult to read the way we're bolding it under the line"). Days whose
+      // whole session IS the rehab already name the routine in their label.
+      const rehabSuffix = s.rehab && s.type !== "strength" && s.type !== "rest"
+        ? ` + ${getRoutine(s.rehab.routineKey)?.shortLabel ?? "rehab"} routine`
+        : "";
+      return `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}${rehabSuffix}`;
     });
   return `${heading}\n${lines.join("\n")}`;
 }

@@ -112,6 +112,8 @@ function setupSupabase(opts: {
   // Conversations supplied newest-first, matching DB ORDER BY created_at DESC.
   // The route calls .reverse() on this data internally, making it oldest-first.
   conversations?: Array<Record<string, unknown>>;
+  /** training_plans row — needed by paths that read the stored arc (e.g. plan questions). */
+  plan?: Record<string, unknown> | null;
 }) {
   // Reuse the same chain for training_state so we can inspect all update() calls.
   const stateChain = makeChain({ data: opts.state ?? null, error: null });
@@ -122,6 +124,7 @@ function setupSupabase(opts: {
     if (table === "training_state") return stateChain;
     if (table === "races") return makeChain({ data: opts.races ?? null, error: null });
     if (table === "conversations") return makeChain({ data: opts.conversations ?? null, error: null });
+    if (table === "training_plans" && opts.plan) return makeChain({ data: opts.plan, error: null });
     // activities, training_plans etc. — return empty/null data
     return makeChain({ data: null, error: null });
   });
@@ -2162,7 +2165,7 @@ describe("coach/respond — strength routine delivery", () => {
     const { sendSMS, sendMediaSMS } = await import("@/lib/linq");
     const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
     // The routine goes out as text...
-    expect(sentText).toContain("Shin splints routine");
+    expect(sentText).toContain("Shin routine");
     expect(sentText).toContain("Want to see how any of these look? Just ask.");
     // ...and not as 9-13 separate image bubbles.
     expect((sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
@@ -2215,5 +2218,80 @@ describe("coach/respond — strength routine delivery", () => {
     const { sendMediaSMS } = await import("@/lib/linq");
     expect((sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
     expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan questions: one schedule, and the routine as its own message
+// ---------------------------------------------------------------------------
+describe("coach/respond — plan question schedule", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  function setupPlanQuestion() {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockImplementation((args: { system?: unknown }) => {
+      // The intent classifier is a plain-text Haiku call; everything else is the coach tool call.
+      if (typeof args.system === "string" && args.system.includes("classifying a message")) {
+        return Promise.resolve({ content: [{ type: "text", text: '{"intent":"plan_question","body_part":null,"cadence":null,"confidence":"high"}' }] });
+      }
+      return Promise.resolve({
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+          message: "Here's next week.\n\nMon 8/10 · Easy 5mi\nWed 8/12 · Long run 7mi\nSat 8/15 · Easy 2.5mi\n\nKeep the shin routine going.",
+        } }],
+      });
+    });
+    return setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({
+        injury_notes: "shin splints", injury_body_part: "shin", active_injury: true, injury_severity: "moderate",
+        training_days: ["monday", "wednesday", "thursday", "saturday"], crosstraining_tools: ["bike"],
+      }),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Wed", date: "8/12", label: "Easy 3.5mi", type: "run", rehab_routine_key: "shin" },
+          { day: "Sat", date: "8/15", label: "Long run 7mi", type: "run" },
+        ],
+      }),
+      conversations: [{ role: "user", content: "What is the full plan for the week?", created_at: "2026-08-09T10:00:00Z" }],
+      plan: { weeks: [
+        { week_number: 8, mileage_target: 17, long_run_target: 7, key_workout: "Easy 2.5mi + 5x20sec strides" },
+        { week_number: 9, mileage_target: 16, long_run_target: 7, key_workout: "Easy 3mi + 5x20sec strides" },
+      ] },
+    });
+  }
+
+  it("strips Dean's own day list so only the stored schedule goes out", async () => {
+    setupPlanQuestion();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const { sendSMS } = await import("@/lib/linq");
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+    const all = sent.join("\n");
+    // Dean's invented days are gone — his prose put the long run Wednesday, the plan says Saturday.
+    expect(all).not.toContain("Mon 8/10 · Easy 5mi");
+    expect(all).not.toContain("Wed 8/12 · Long run 7mi");
+    // His framing survives.
+    expect(all).toContain("Keep the shin routine going.");
+  });
+
+  it("follows the schedule with the routine as a separate message", async () => {
+    setupPlanQuestion();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const { sendSMS } = await import("@/lib/linq");
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+    const schedule = sent.find((t: string) => t.includes("this week:") || t.includes("Next week"));
+    const routine = sent.find((t: string) => t.includes("Want to see how any of these look?"));
+    expect(schedule).toBeDefined();
+    expect(routine).toBeDefined();
+    // The schedule names the routine per day; the routine message carries the exercises.
+    expect(schedule).toContain("shin routine");
+    expect(schedule).not.toContain("Toe taps");
+    expect(routine).toContain("Toe taps on a stair");
   });
 });

@@ -37,6 +37,8 @@ export interface Routine {
   key: string;
   /** Human label, e.g. "IT band". */
   label: string;
+  /** Compact label for schedule lines, e.g. "shin" in "Easy 4mi + shin routine". */
+  shortLabel: string;
   /** Injury keywords that route here (lowercased substring match, priority order below). */
   matches: string[];
   frequency: string;
@@ -185,48 +187,48 @@ const PREVENT_RANGE = { min: 2, max: 2 };
 /** Routines in priority order — `composeStrengthRoutine` matches the FIRST routine whose
  *  `matches` keyword appears in the athlete's injury text. More specific terms come first. */
 export const ROUTINES: Routine[] = [
-  { key: "it_band", label: "IT band", matches: ["it band", "itb", "iliotibial"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "it_band", label: "IT band", shortLabel: "IT band", matches: ["it band", "itb", "iliotibial"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Builds the glute-med strength that stops the IT band overloading, and calms the lateral knee.",
     exerciseIds: ["leg_swings", "clamshells", "lateral_band_walks", "monster_walk", "side_lying_hip_abduction", "single_leg_glute_bridge", "foam_roll_tfl", "hip_flexor_stretch", "single_leg_balance"] },
-  { key: "shin", label: "Shin splints", matches: ["shin", "tibia", "medial tibial", "mtss"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
+  { key: "shin", label: "Shin splints", shortLabel: "shin", matches: ["shin", "tibia", "medial tibial", "mtss"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Loads the tibialis and calf so the shin can handle ground impact without flaring.",
     exerciseIds: ["toe_taps", "tib_anterior_raise", "band_dorsiflexion", "ecc_calf_raise_straight", "single_leg_calf_raise", "calf_stretch", "soleus_stretch", "ankle_alphabet", "single_leg_balance"] },
-  { key: "calf", label: "Calf / Achilles", matches: ["calf", "achilles", "soleus", "gastroc"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
+  { key: "calf", label: "Calf / Achilles", shortLabel: "calf", matches: ["calf", "achilles", "soleus", "gastroc"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Eccentric calf loading is the best-evidenced rehab for Achilles and calf strain.",
     exerciseIds: ["ankle_circles", "ecc_heel_drop", "single_leg_calf_raise", "soleus_stretch", "calf_stretch", "toe_taps", "tib_anterior_raise", "single_leg_balance", "ankle_alphabet"] },
-  { key: "knee", label: "Runner's knee", matches: ["knee", "patella", "patellar", "pf ", "kneecap", "pfps"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "knee", label: "Runner's knee", shortLabel: "knee", matches: ["knee", "patella", "patellar", "pf ", "kneecap", "pfps"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Quad and glute strength to track the kneecap properly and offload the joint.",
     exerciseIds: ["leg_swings", "vmo_quad_set", "tke", "step_down", "straight_leg_raise", "single_leg_squat", "wall_sit", "glute_bridge", "single_leg_balance", "reverse_nordic"] },
-  { key: "hamstring", label: "Hamstring", matches: ["hamstring", "ham ", "biceps femoris"], frequency: HEAVY_FREQ, frequencyPerWeek: HEAVY_RANGE,
+  { key: "hamstring", label: "Hamstring", shortLabel: "hamstring", matches: ["hamstring", "ham ", "biceps femoris"], frequency: HEAVY_FREQ, frequencyPerWeek: HEAVY_RANGE,
     note: "Eccentric hamstring loading to build strain resilience through full range.",
     exerciseIds: ["leg_swings", "nordic_curls", "single_leg_rdl", "prone_hamstring_raise", "glute_bridge", "single_leg_glute_bridge", "hip_thrust", "bird_dog", "single_leg_balance"] },
-  { key: "foot", label: "Foot / plantar fascia", matches: ["plantar", "foot", "arch", "fascia", "heel"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
+  { key: "foot", label: "Foot / plantar fascia", shortLabel: "foot", matches: ["plantar", "foot", "arch", "fascia", "heel"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Calms the plantar fascia and rebuilds the intrinsic foot strength that supports the arch.",
     exerciseIds: ["ankle_circles", "frozen_bottle_roll", "towel_toe_curl", "short_foot", "ecc_calf_raise_straight", "single_leg_calf_raise", "calf_stretch", "single_leg_balance", "toe_taps"] },
-  { key: "piriformis", label: "Piriformis", matches: ["piriformis", "sciatic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "piriformis", label: "Piriformis", shortLabel: "piriformis", matches: ["piriformis", "sciatic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Releases the piriformis and builds hip rotator control to stop it gripping.",
     exerciseIds: ["cat_cow", "figure_4_stretch", "pigeon_pose", "seated_piriformis_stretch", "clamshells", "fire_hydrant", "lateral_band_walks", "glute_bridge", "bird_dog", "single_leg_balance"] },
-  { key: "groin", label: "Groin / adductor", matches: ["groin", "adductor", "inner thigh", "pubic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "groin", label: "Groin / adductor", shortLabel: "groin", matches: ["groin", "adductor", "inner thigh", "pubic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Low-load adductor strengthening — gentle and pregnancy-safe.",
     exerciseIds: ["leg_swings", "side_lying_hip_adduction", "seated_adductor_isometric", "butterfly_stretch", "clamshells", "copenhagen_plank", "glute_bridge", "single_leg_balance", "bird_dog"] },
-  { key: "glute", label: "Glute", matches: ["glute", "gluteal", "buttock"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "glute", label: "Glute", shortLabel: "glute", matches: ["glute", "gluteal", "buttock"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Glute strength is the foundation for hip and knee stability when you run.",
     exerciseIds: ["leg_swings", "clamshells", "single_leg_glute_bridge", "hip_thrust", "side_lying_hip_abduction", "lateral_band_walks", "monster_walk", "single_leg_squat", "front_plank", "single_leg_balance"] },
-  { key: "hip", label: "Hip", matches: ["hip flexor", "hip"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "hip", label: "Hip", shortLabel: "hip", matches: ["hip flexor", "hip"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Mobilizes tight hip flexors and strengthens the glutes that share the load.",
     exerciseIds: ["worlds_greatest_stretch", "hip_flexor_stretch", "glute_bridge", "lateral_band_walks", "pigeon_pose", "clamshells", "single_leg_glute_bridge", "hip_thrust", "single_leg_balance"] },
-  { key: "pelvis", label: "Pelvic girdle", matches: ["pelvis", "pelvic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "pelvis", label: "Pelvic girdle", shortLabel: "pelvis", matches: ["pelvis", "pelvic"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Pelvis pain can come from the SI joint, pubic symphysis, or general girdle instability — this builds the deep core and glute stabilizers that support the whole pelvic girdle regardless of the exact source. If pain is sharp, one-sided at the pubic bone, or worsens with single-leg hopping, flag it for a sports physio rather than pushing through.",
     exerciseIds: ["cat_cow", "dead_bug", "bird_dog", "glute_bridge", "single_leg_glute_bridge", "clamshells", "hip_thrust", "front_plank", "side_plank"] },
-  { key: "ankle", label: "Ankle", matches: ["ankle", "sprain", "rolled"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
+  { key: "ankle", label: "Ankle", shortLabel: "ankle", matches: ["ankle", "sprain", "rolled"], frequency: DAILY_FREQ, frequencyPerWeek: DAILY_RANGE,
     note: "Rebuilds ankle strength, range, and the balance that prevents re-spraining.",
     exerciseIds: ["ankle_circles", "ecc_calf_raise_straight", "single_leg_balance", "band_dorsiflexion", "ankle_alphabet", "single_leg_calf_raise", "toe_taps", "soleus_stretch", "calf_stretch"] },
-  { key: "back", label: "Lower back", matches: ["back", "lumbar", "si joint", "sacroiliac"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
+  { key: "back", label: "Lower back", shortLabel: "back", matches: ["back", "lumbar", "si joint", "sacroiliac"], frequency: REHAB_FREQ, frequencyPerWeek: REHAB_RANGE,
     note: "Gentle mobility plus core control to settle the low back and support running posture.",
     exerciseIds: ["cat_cow", "bird_dog", "childs_pose", "dead_bug", "glute_bridge", "front_plank", "side_plank", "superman", "pigeon_pose"] },
   // Default / universal base — strongest general evidence (Run RCT). Used when there's an
   // injury history but no recognizable body part, or as the everyone-benefits routine.
-  { key: "hip_core", label: "Hip & core base", matches: [], frequency: PREVENT_FREQ, frequencyPerWeek: PREVENT_RANGE,
+  { key: "hip_core", label: "Hip & core base", shortLabel: "hip & core", matches: [], frequency: PREVENT_FREQ, frequencyPerWeek: PREVENT_RANGE,
     note: "The strongest general injury-prevention evidence we have (Run RCT, Leppänen 2024): hip + core strength twice a week cut overuse injuries roughly in half. Closes with running-specific drills — skip these if returning from injury.",
     exerciseIds: ["worlds_greatest_stretch", "side_plank", "single_leg_squat", "single_leg_glute_bridge", "lateral_band_walks", "front_plank", "clamshells", "dead_bug", "bird_dog", "hip_thrust", "a_skip", "high_knees", "bounding"] },
 ];

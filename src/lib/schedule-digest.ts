@@ -38,7 +38,14 @@ export type SchedulePlanWeek = {
 };
 
 /** Shape of a `training_state.weekly_plan_sessions` entry. */
-export type PersistedSession = { day: string; date: string; label: string };
+export type PersistedSession = { day: string; date: string; label: string; rehab_routine_key?: string };
+
+export interface ScheduleDigest {
+  text: string;
+  /** Rehab routine scheduled in the week this digest covers, for the follow-up bubble. */
+  rehabRoutineKey: string | null;
+  rehabDays: string[];
+}
 
 const ORDERED_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const DAY_INDEX: Record<string, number> = {
@@ -78,7 +85,7 @@ export function buildScheduleDigest(params: {
   /** Rehab routine + severity, so next week's schedule carries the rehab days too. */
   rehab?: { routineKey: string | null; severity: "mild" | "moderate" | "severe" | null; activeInjury: boolean };
   nowMs?: number;
-}): string | null {
+}): ScheduleDigest | null {
   const {
     weeks, currentWeekNumber, persistedSessions, trainingDays, strengthDay,
     crosstrainingTools, timezone, isMetric, weekMileageSoFar, avgWeeklyMileage, ranToday,
@@ -103,7 +110,18 @@ export function buildScheduleDigest(params: {
       .filter((s): s is PersistedSession & { idx: number } => s.idx != null && s.idx >= firstIndex)
       .sort((a, b) => a.idx - b.idx)
       .map((s) => `${ORDERED_DAYS[s.idx]} ${s.date} — ${s.label}`);
-    if (lines.length > 0) return `Rest of this week:\n${lines.join("\n")}`;
+    if (lines.length > 0) {
+      const withRehab = persistedSessions.filter((p) => p.rehab_routine_key);
+      return {
+        text: `Rest of this week:\n${lines.join("\n")}`,
+        rehabRoutineKey: withRehab[0]?.rehab_routine_key ?? null,
+        rehabDays: withRehab
+          .map((p) => ({ p, idx: dayIndexOf(p.day) }))
+          .filter((x): x is { p: PersistedSession; idx: number } => x.idx != null && x.idx >= firstIndex)
+          .sort((a, b) => a.idx - b.idx)
+          .map((x) => ORDERED_DAYS[x.idx]),
+      };
+    }
     // Nothing left to run this week — fall through to next week rather than send nothing.
   }
 
@@ -127,7 +145,12 @@ export function buildScheduleDigest(params: {
   });
   if (skeleton.filter((s) => s.type !== "rest").length === 0) return null;
 
-  return formatWeeklyPlanDigest(skeleton, null, isMetric, `Next week (${rangeLabel(ty, tm, td, todayIndex)}):`);
+  const rehabSlots = skeleton.filter((slot) => slot.rehab);
+  return {
+    text: formatWeeklyPlanDigest(skeleton, null, isMetric, `Next week (${rangeLabel(ty, tm, td, todayIndex)}):`),
+    rehabRoutineKey: rehabSlots[0]?.rehab?.routineKey ?? null,
+    rehabDays: rehabSlots.map((slot) => slot.day),
+  };
 }
 
 /** "Aug 10–16" for the Mon–Sun week after the one containing the given local date. */
@@ -141,13 +164,42 @@ function rangeLabel(y: number, m: number, d: number, todayIndex: number): string
   return `${mon}–${sun}`;
 }
 
+const DAY_NAME = "(?:mon|tues?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?";
+/** Day, optional date ("8/10", "Aug 10"), then a separator, then the session text. */
+const DAY_SESSION_LINE = new RegExp(
+  `^\\s*${DAY_NAME}\\b[,.]?\\s*(?:\\d{1,2}/\\d{1,2}|[A-Z][a-z]{2}\\.?\\s*\\d{1,2})?\\s*[·:.\\u2014\\u2013-]\\s+\\S`,
+  "i"
+);
+
 /**
- * How many lines of a message read as "<day> … <separator>" — i.e. a day-by-day schedule
- * the athlete can already read off. Used to suppress the schedule bubble when Dean's own
- * message already listed the days, which is now the expected shape for plan answers.
+ * Lines that read as one day of a schedule. Dean writes these several ways — "Mon 8/10 · Easy 5mi",
+ * "Mon 8/10. Easy 4mi", "Monday, Aug 10: Easy 2.5 mi" — and an earlier version of this only
+ * recognised dash and colon separators, which is why a real transcript still got two schedules
+ * (2026-08-09).
  */
 export function countDayLabeledLines(message: string): number {
-  return (message.match(
-    /^\s*(?:mon|tues?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?\b[^\n]*[:—–-]/gim
-  ) ?? []).length;
+  return message.split("\n").filter((line) => DAY_SESSION_LINE.test(line)).length;
+}
+
+/**
+ * Remove Dean's own day-by-day list from a message that's about to be followed by the
+ * deterministic schedule.
+ *
+ * Suppressing the schedule bubble instead — what this used to do — was the wrong call: when both
+ * appeared in one real transcript they didn't merely duplicate, they *disagreed*. Dean's prose
+ * put the long run on Wednesday and 5mi easy on Monday while the stored plan had strides Monday
+ * and the long run Saturday. Keeping his version and dropping the accurate one is the worse of
+ * the two failures, so the schedule always wins and his lines come out.
+ *
+ * Only strips when there are at least two such lines — a single "Saturday's long run is the one
+ * that matters" is prose, not a schedule.
+ */
+export function stripDayLabeledLines(message: string): string {
+  const lines = message.split("\n");
+  if (lines.filter((line) => DAY_SESSION_LINE.test(line)).length < 2) return message;
+  return lines
+    .filter((line) => !DAY_SESSION_LINE.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
