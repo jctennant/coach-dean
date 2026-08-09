@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import type { QualityPolicy } from "@/lib/week-mode";
+import { resolveWeekMode, type QualityPolicy } from "@/lib/week-mode";
 import { insertConversation } from "@/lib/conversations";
 import { anthropic } from "@/lib/anthropic";
 import { sendSMS } from "@/lib/linq";
@@ -1376,12 +1376,34 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
 
   const { data: profile } = await supabase
     .from("training_profiles")
-    .select("training_days, injury_notes, injury_body_part, injury_body_parts, preferred_units, crosstraining_tools")
+    .select("training_days, injury_notes, injury_body_part, injury_body_parts, preferred_units, crosstraining_tools, crosstraining_days, active_injury")
     .eq("user_id", userId)
     .single();
   const strength = computeWeeklyStrength(profile as Record<string, unknown> | null);
   const isMetric = (profile?.preferred_units as string | null) === "metric";
   const crosstrainingTools = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
+
+  // This function is the ONLY writer of weekly_plan_sessions for arc plans, and it used to
+  // call computeArcWeekSkeleton unconditionally — so an athlete on an injury hold had a full
+  // running week persisted and read straight back out by the reminders, the dashboard, the
+  // schedule digest and the plan-deviation check, while the recovery skeleton existed only
+  // inside a single weekly_recap request and was never stored anywhere.
+  const { data: syncState } = await supabase
+    .from("training_state")
+    .select("injury_hold_since, return_to_run_phase")
+    .eq("user_id", userId)
+    .single();
+  const weekMode = resolveWeekMode({
+    injuryHoldSince: (syncState?.injury_hold_since as string | null) ?? null,
+    returnToRunPhase: (syncState?.return_to_run_phase as number | null) ?? null,
+    activeInjury: !!(profile as Record<string, unknown> | null)?.active_injury,
+    // syncWeekFromArc is never reached for these modes — the callers that would produce a
+    // complement/analyst sync don't have an arc to sync from — but pass them honestly rather
+    // than hardcoding false and having the resolver mean something different here.
+    isComplementMode: false,
+    isAnalystMode: false,
+  });
+  const injuryBodyPartForSync = (profile?.injury_body_part as string | null) ?? null;
 
   type UploadedSession = { type: string; description: string; targetDistanceMiles?: number | null };
   type UploadedWeek = { week_number: number; sessions: UploadedSession[]; total_miles: number };
@@ -1415,31 +1437,62 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
     // even when called from a path other than the weekly_recap response (e.g. after a
     // plan patch in user_message, see the syncWeekFromArc call sites in route.ts).
     const trainingDays = (profile?.training_days as string[] | null) ?? [];
-    const skeleton = computeArcWeekSkeleton({
-      trainingDays,
-      weeklyTotalMiles: week.mileage_target ?? 0,
-      longRunMiles: week.long_run_target ?? 0,
-      keyWorkoutText: week.key_workout || null,
-      keyWorkoutText2: week.key_workout_2 ?? null,
-      strengthDay: strength.day,
-      crosstrainingTools,
-      timezone,
-    });
-    const planSessions: PlanSession[] = skeleton
-      .filter(s => s.type !== "rest")
-      .map(s => ({
-        day: s.day,
-        date: s.date,
-        label: arcWeekSlotLabel(s, isMetric),
-        type: s.type === "long_run" || s.type === "quality" || s.type === "easy"
-          ? "run"
-          : s.type === "cross_train" ? "cross_train" : "strength",
-        routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
-      }));
+
+    // Injury hold: persist the cross-training/strength week the athlete is actually on, not a
+    // running week they've been told not to run. Mode "none" (return-to-run phase 1, where the
+    // prompt owns the week) leaves weekly_plan_sessions untouched rather than writing runs.
+    const planSessions: PlanSession[] = weekMode.mode === "recovery"
+      ? computeRecoveryWeekSkeleton({
+          trainingDays,
+          crosstrainingDays: (profile?.crosstraining_days as string[] | null)?.filter(Boolean) ?? null,
+          crosstrainingTools,
+          bodyPart: injuryBodyPartForSync,
+          strengthDay: strength.day,
+          timezone,
+        })
+          .filter(s => s.type !== "rest")
+          .map(s => ({
+            day: s.day,
+            date: s.date,
+            label: s.type === "strength"
+              ? "Strength + mobility"
+              : (MODALITY_DISPLAY_NAMES[s.modality ?? ""] ?? "Cross-training"),
+            type: s.type === "strength" ? "strength" as const : "cross_train" as const,
+            routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
+          }))
+      : weekMode.mode === "arc"
+        ? computeArcWeekSkeleton({
+            trainingDays,
+            weeklyTotalMiles: week.mileage_target ?? 0,
+            longRunMiles: week.long_run_target ?? 0,
+            keyWorkoutText: week.key_workout || null,
+            keyWorkoutText2: week.key_workout_2 ?? null,
+            strengthDay: strength.day,
+            crosstrainingTools,
+            timezone,
+            injuryBodyPart: injuryBodyPartForSync,
+            qualityPolicy: weekMode.qualityPolicy,
+          })
+            .filter(s => s.type !== "rest")
+            .map(s => ({
+              day: s.day,
+              date: s.date,
+              label: arcWeekSlotLabel(s, isMetric),
+              type: s.type === "long_run" || s.type === "quality" || s.type === "easy"
+                ? "run" as const
+                : s.type === "cross_train" ? "cross_train" as const : "strength" as const,
+              routine_key: s.type === "strength" ? (strength.routineKey ?? undefined) : undefined,
+            }))
+        : [];
+
+    // On a hold the arc's running numbers describe a week the athlete isn't running. Zero the
+    // running target so the dashboard and the reminders don't quote a target against a
+    // cross-training week — matching what handleInjuryHold already writes when the hold starts.
+    const isHold = weekMode.mode === "recovery";
     await supabase.from("training_state").update({
-      weekly_long_run_miles: week.long_run_target ?? null,
-      weekly_quality_session: week.key_workout || null,
-      weekly_mileage_target: week.mileage_target || null,
+      weekly_long_run_miles: isHold ? null : week.long_run_target ?? null,
+      weekly_quality_session: isHold ? null : week.key_workout || null,
+      weekly_mileage_target: isHold ? 0 : week.mileage_target || null,
       weekly_strength_day: strength.day,
       weekly_strength_routine_key: strength.routineKey,
       plan_adjustments: null, // new week — mid-week swaps/lighter-week notes from last week no longer apply
