@@ -321,6 +321,10 @@ function buildEvalSystemPrompt(fixture) {
   // since fixtures are the authoritative source for what week type it is.
   const isDeload = user.is_deload_week === true;
   const weekMileageSoFar = user.miles_logged_this_week || 0;
+  // Mirrors buildSystemPrompt's hasDatedSessions (training_state.weekly_plan_sessions):
+  // gates principle 8's day-agnostic branch, which is only true for athletes whose stored
+  // plan assigns no days.
+  const hasDatedSessions = Array.isArray(user.plan_sessions_remaining) && user.plan_sessions_remaining.length > 0;
 
   // Activity summary
   let activitySummary = "";
@@ -610,7 +614,7 @@ PRINCIPLES — these apply to every response. They are stated once here and not 
 5. PRE-COMPUTED VALUES ARE AUTHORITATIVE. VDOT, training paces, weekly mileage totals, race timeline, and taper percentages are computed by the system. Never recalculate, never web-search VDOT tables. Use stored values verbatim.
 6. RECENCY — USE THE LABELS. Past activities in RECENT WORKOUTS include "(N days ago)" labels. Never say "yesterday" for anything 2+ days ago — use the day name.
 7. SPECIFIC CALENDAR DATES for future references — pull from DATE CONTEXT. Never invent a date. "This week"/"next week" are fine for general structure; "tomorrow"/"next Monday" are not.
-8. DAY-AGNOSTIC PLANNING. Weekly plans have NO day-by-day schedule — present as framework (weekly total + long run + quality + spacing). Reminders never prescribe a specific "today's workout".
+8. THE SCHEDULE IS SYSTEM-OWNED. Never write a day-by-day list yourself — the system renders this athlete's schedule from the stored plan and sends it as its own text. ${hasDatedSessions ? `This athlete's week HAS assigned days (see the session lists in this prompt): answer from those days, name the session that falls on a day when they ask about it, and never tell them the plan is day-agnostic or that they pick their own days.` : `This athlete has no day assignments on file: present the week as a framework — weekly total + long run + quality session(s) + spacing guidance — and let them pick when to run each. Morning/nightly reminders name what's still outstanding this week, not a specific "today's workout".`}
 9. MILEAGE FORMAT. Never additive — "22 planned + 10 done = 32" is wrong. State completed and planned separately. The weekly target is a ceiling that already includes completed miles. Running miles only — cross-training contributes zero and uses "min", never "mi".
 10. CONSISTENCY GATES — verify before sending: (a) quality pace MUST be faster than easy, (b) stated weekly total MUST equal sum of running session distances, (c) counts MUST match enumerated lists.
 11. IDENTITY. Never refer to yourself as "Dean". Always use "I".

@@ -1115,8 +1115,10 @@ export function computeArcWeekSkeleton(params: {
   strengthDay: string | null; // "Mon".."Sun", from computeWeeklyStrength()
   crosstrainingTools?: string[]; // training_profiles.crosstraining_tools — up to 2 supplementary cross-train slots on rest days
   timezone: string;
+  /** Days to shift the Mon–Sun window the dates are computed for. 7 = next week. */
+  weekOffsetDays?: number;
 }): ArcWeekSlot[] {
-  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone } = params;
+  const { trainingDays, weeklyTotalMiles, longRunMiles, keyWorkoutText, keyWorkoutText2, strengthDay, crosstrainingTools = [], timezone, weekOffsetDays = 0 } = params;
 
   const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const tz = timezone || "America/New_York";
@@ -1124,7 +1126,7 @@ export function computeArcWeekSkeleton(params: {
   const [ty, tm, td] = localStr.split("-").map(Number);
   const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
   const daysFromMonday = todayDow === 0 ? 6 : todayDow - 1;
-  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday));
+  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday + weekOffsetDays));
   const dateFor = (abbrev: string) => {
     const offset = dayOffset[abbrev]!;
     const d = new Date(Date.UTC(
@@ -1243,6 +1245,25 @@ export function computeArcWeekSkeleton(params: {
     });
   });
 
+  // Distances placed here are what the athlete reads day by day, so they must add back up
+  // to the week's target. They do by construction — leftover is split across easy days and
+  // the last one absorbs the remainder — EXCEPT when a key_workout's distance can't be
+  // parsed: its miles then stay in the leftover pool and get handed to the easy days on top
+  // of the quality session's own stated distance, so the printed week sums high. Surfacing
+  // that here (rather than leaving it to be noticed in a transcript) is the difference
+  // between a known parse gap and the recurring "the weekly mileage doesn't add up" bug.
+  const placedMiles = slots.reduce((sum, s) => sum + (s.distanceMiles ?? 0), 0);
+  const impliedQualityMiles = slots
+    .filter(s => s.type === "quality" && s.distanceMiles == null && s.keyWorkoutText)
+    .reduce((sum, s) => sum + (parseLeadingDistanceMiles(s.keyWorkoutText!) ?? 0), 0);
+  const skeletonTotal = placedMiles + impliedQualityMiles;
+  if (weeklyTotalMiles > 0 && Math.abs(skeletonTotal - weeklyTotalMiles) > 0.6) {
+    console.warn(
+      `[computeArcWeekSkeleton] day-by-day distances sum to ${Math.round(skeletonTotal * 10) / 10}mi but the week's target is ${weeklyTotalMiles}mi` +
+      (impliedQualityMiles > 0 ? " (key_workout distance could not be parsed into the split)" : "")
+    );
+  }
+
   return slots.sort((a, b) => ORDERED_DAYS.indexOf(a.day) - ORDERED_DAYS.indexOf(b.day));
 }
 
@@ -1257,15 +1278,26 @@ export function computeArcWeekSkeleton(params: {
  * baked in (computeWeekOneVolumeCap/computeLongRunCap), so slicing rather than re-deriving
  * keeps the starter week and the full arc as two views of one computation, not two.
  */
-export function computeStarterWeekSkeleton(params: Parameters<typeof computeArcWeekSkeleton>[0]): ArcWeekSlot[] {
+export function computeStarterWeekSkeleton(
+  params: Parameters<typeof computeArcWeekSkeleton>[0] & {
+    /** True when the athlete has already logged a run today — today's slot is dropped. */
+    ranToday?: boolean;
+    nowMs?: number;
+  }
+): ArcWeekSlot[] {
   const full = computeArcWeekSkeleton(params);
   const tz = params.timezone || "America/New_York";
-  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+  const now = params.nowMs != null ? new Date(params.nowMs) : new Date();
+  const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(now);
   const [ty, tm, td] = localStr.split("-").map(Number);
   const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
   const todayAbbrev = ORDERED_DAYS[todayDow === 0 ? 6 : todayDow - 1];
   const todayIdx = ORDERED_DAYS.indexOf(todayAbbrev);
-  return full.filter(s => ORDERED_DAYS.indexOf(s.day) >= todayIdx);
+  // An athlete who onboards after their run has already been logged doesn't need today
+  // prescribed back to them — that read as Dean not having looked at the run he'd just
+  // been shown (2026-08-08). Their miles are already in weekMileageSoFar either way.
+  const firstIdx = params.ranToday ? todayIdx + 1 : todayIdx;
+  return full.filter(s => ORDERED_DAYS.indexOf(s.day) >= firstIdx);
 }
 
 /**
@@ -1436,7 +1468,8 @@ export function arcWeekSlotLabel(slot: ArcWeekSlot, isMetric = false): string {
 export function formatWeeklyPlanDigest(
   skeleton: ArcWeekSlot[],
   slotAnnotations?: Array<{ day: string; pace?: string; why?: string }> | null,
-  isMetric = false
+  isMetric = false,
+  heading = "This week's plan:"
 ): string {
   const annotationByDay = new Map((slotAnnotations ?? []).map(a => [a.day, a]));
   const lines = skeleton
@@ -1446,7 +1479,7 @@ export function formatWeeklyPlanDigest(
       const pace = annotation?.pace ? ` (${annotation.pace})` : "";
       return `${s.day} ${s.date} — ${arcWeekSlotLabel(s, isMetric)}${pace}`;
     });
-  return `This week's plan:\n${lines.join("\n")}`;
+  return `${heading}\n${lines.join("\n")}`;
 }
 
 export interface RecoveryWeekSlot {

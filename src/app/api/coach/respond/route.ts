@@ -34,13 +34,15 @@ import { inferTimezoneFromPhone, formatDateAnchor, getDateFacts } from "@/lib/ti
 import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
+import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
+import { buildScheduleDigest, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
 import { buildFitnessTierBlock } from "@/lib/coach-fitness-tier";
 import { computePaceContext } from "@/lib/coach-pace-context";
-import { parseSessionMiles } from "@/lib/session-mileage";
+import { parseSessionMiles, recomputeWeekTotalsFromSessions, parseStoredSessionDate } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
@@ -155,9 +157,9 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
         : "") +
       (mode === "plan_facts"
         ? " You must also report the `plan` object: the concrete numbers behind this message, exactly as you intend " +
-          "to state them in your text (same values, same unit). This plan is day-agnostic prose (no day-by-day " +
-          "list) — `plan` is how the system verifies those numbers are safe and internally consistent, since they " +
-          "can't be parsed back out of a dated session list the way older plan formats could."
+          "to state them in your text (same values, same unit). Your prose carries no day-by-day list of its own " +
+          "(the system sends the schedule as a separate text) — `plan` is how the system verifies these numbers " +
+          "are safe and internally consistent, since they can't be parsed back out of your prose."
         : mode === "skeleton_annotations"
         ? " You must also report `slot_annotations`: one entry per non-rest slot in the fixed week skeleton given " +
           "to you in this prompt. The skeleton already decided every slot's day, date, type, and distance — do not " +
@@ -1727,6 +1729,14 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
 
   const activitySummary = buildActivitySummary(recentActivities, userTimezone, excludeFromSummary, recentWorkoutsMode as "full" | "suppress" | "this_week_only", isMetricUser, weekRefDate);
   const weekMileageSoFar = computeWeekMileage(recentActivities, userTimezone, weekRefDate);
+  // Has the athlete already run today (their local date)? Used by initial_plan so a
+  // mid-day onboard doesn't prescribe a run for a day the athlete has already run —
+  // their miles are in weekMileageSoFar, but the schedule was still handing today back.
+  const todayLocalDate = new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date());
+  const hasRunLoggedToday = recentActivities.some(
+    (a) => RUN_TYPES.has(a.activity_type) &&
+      new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date(a.start_date)) === todayLocalDate
+  );
 
   // Dedup guard — if we've already sent a post_run SMS for this activity, skip Claude.
   if (trigger === "post_run" && activityId) {
@@ -3175,7 +3185,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     ).length;
     return pool[timesAsked % pool.length];
   })();
-  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null, priorAssistantMessageForInitialPlan, (profile?.goal as string | null) ?? null, recentPostRunVerbatim, suggestedInjuryCheckQuestion);
+  let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null, priorAssistantMessageForInitialPlan, (profile?.goal as string | null) ?? null, recentPostRunVerbatim, suggestedInjuryCheckQuestion, Array.isArray(state?.weekly_plan_sessions) && (state!.weekly_plan_sessions as unknown[]).length > 0);
 
   // Re-anchor today/tomorrow right next to the generation instructions. The full
   // DATE CONTEXT block lives early in the (much longer) system prompt — by the time
@@ -3386,6 +3396,7 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         strengthDay: strengthForStarter.day,
         crosstrainingTools: crosstrainingToolsForStarter,
         timezone: initTimezone,
+        ranToday: hasRunLoggedToday,
       });
       if (starterSkeleton.length > 0) {
         const runSlots = starterSkeleton.filter(s => s.type !== "rest");
@@ -4244,7 +4255,20 @@ OUTPUT CONTRACT:
           weekMileageSoFar,
           isMetricUser
         )
-      : correctMileageTotal(stripped, alreadyCompletedMiles);
+      : trigger === "initial_plan" || trigger === "weekly_recap"
+        // Plan triggers state a PLANNED weekly total in the same shape a week-to-date
+        // claim uses ("16 mi this week"), so the corrector runs in completed-context-only
+        // mode: it rewrites "you've already logged X mi this week" and leaves the target
+        // alone. Without this, initial_plan could restate one of its own session distances
+        // as miles already run and nothing caught it (2026-08-08, Jake: "6.5 mi this week"
+        // when the real figure was 20.3).
+        ? correctWeekToDateTotal(
+            correctMileageTotal(stripped, alreadyCompletedMiles),
+            weekMileageSoFar,
+            isMetricUser,
+            { requireCompletedContext: true }
+          )
+        : correctMileageTotal(stripped, alreadyCompletedMiles);
   // SESSION_LIST correction removed — no day-level session list in responses anymore.
   let mileageCorrected = mileageCorrectedBase;
 
@@ -4658,6 +4682,60 @@ OUTPUT CONTRACT:
 
   void trackEvent(userId, "coaching_response_sent", { trigger, onboarding: false });
 
+  // Plan questions get the same deterministic day-by-day schedule the Sunday recap and
+  // the onboarding close send. Asked "what's the plan for next week?", Dean's prose
+  // answered with a shape ("spread these across Mon/Wed/Thu/Sat") rather than a schedule —
+  // the athlete has to assemble the week themselves from a paragraph (2026-08-09).
+  // Skipped when a plan mutation is in flight (swap, rebuild, lighter week, injury hold):
+  // those apply in after(), so anything rendered here would show the pre-change week.
+  const planMutationInFlight =
+    tagSessionSwaps.length > 0 || wantsRebuild || wantsLighterWeek || wantsInjuryHold || wantsInjuryClear || wantsRtrAdvance;
+  if (
+    trigger === "user_message" &&
+    classifiedIntent.intent === "plan_question" &&
+    !planMutationInFlight &&
+    !(state?.injury_hold_since as string | null) &&
+    !isComplementMode && !isAnalystMode &&
+    storedPlanAllWeeks.length > 0
+  ) {
+    try {
+      const lastUserMsgForSchedule = [...recentMessages].reverse().find((m) => m.role === "user");
+      const askedAboutNextWeek = /\bnext week\b/i.test((lastUserMsgForSchedule?.content as string) ?? "");
+      const scheduleText = buildScheduleDigest({
+        weeks: storedPlanAllWeeks as unknown as SchedulePlanWeek[],
+        currentWeekNumber: periodization.effectiveWeek,
+        persistedSessions: (state?.weekly_plan_sessions as PersistedSession[] | null) ?? null,
+        trainingDays: (profile?.training_days as string[] | null) ?? [],
+        strengthDay: computeWeeklyStrength(profile).day,
+        crosstrainingTools: (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [],
+        timezone: userTimezone,
+        isMetric: isMetricUser,
+        weekMileageSoFar,
+        // No budget-met fallback outside onboarding: an athlete mid-week asking about the
+        // plan wants what's left of it, however many miles they've already run.
+        avgWeeklyMileage: null,
+        ranToday: hasRunLoggedToday,
+        preferNextWeek: askedAboutNextWeek,
+      });
+      if (scheduleText) {
+        if (!dry_run) {
+          if (chatId) await startTyping(chatId);
+          await new Promise((r) => setTimeout(r, 1200));
+          await sendSMS(user.phone_number, scheduleText);
+        }
+        await insertConversation({
+          user_id: userId,
+          role: "assistant",
+          content: scheduleText,
+          message_type: "coach_response",
+        });
+        void trackEvent(userId, "plan_question_schedule_sent", { next_week: askedAboutNextWeek });
+      }
+    } catch (scheduleErr) {
+      console.error(`[coach/respond] plan-question schedule bubble failed userId=${userId}:`, scheduleErr);
+    }
+  }
+
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
     const _ipStart = Date.now();
@@ -4695,6 +4773,61 @@ OUTPUT CONTRACT:
       ...(weekMileageTarget != null ? { weekly_mileage_target: weekMileageTarget } : {}),
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
+    // Day-by-day schedule bubble — deterministic, from the same skeleton generator the
+    // Sunday recap uses (see initial-plan-schedule.ts). Dean's prose above deliberately
+    // stays conversational; this is the actual schedule.
+    if (!(state?.injury_hold_since as string | null) && !isComplementMode && !isAnalystMode) {
+      try {
+        const { data: planForSchedule } = await supabase
+          .from("training_plans")
+          .select("weeks, plan_source")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        // Re-read weekly_plan_sessions rather than reusing anything computed earlier in this
+        // request: the mid-week starter slice above wrote it, and that row — not a second
+        // derivation from the arc — is what the dashboard and reminders show.
+        const { data: scheduleState } = await supabase
+          .from("training_state")
+          .select("weekly_plan_sessions")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (planForSchedule?.weeks && Array.isArray(planForSchedule.weeks) && planForSchedule.plan_source !== "uploaded") {
+          const scheduleText = buildScheduleDigest({
+            weeks: planForSchedule.weeks as unknown as SchedulePlanWeek[],
+            currentWeekNumber: periodization.effectiveWeek,
+            persistedSessions: (scheduleState?.weekly_plan_sessions as PersistedSession[] | null) ?? null,
+            trainingDays: (profile?.training_days as string[] | null) ?? [],
+            strengthDay: computeWeeklyStrength(profile).day,
+            crosstrainingTools: (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [],
+            timezone: userTimezone,
+            isMetric: isMetricUser,
+            weekMileageSoFar,
+            avgWeeklyMileage,
+            ranToday: hasRunLoggedToday,
+          });
+          if (scheduleText) {
+            if (!dry_run) {
+              if (chatId) await startTyping(chatId);
+              await new Promise((r) => setTimeout(r, 1200));
+              await sendSMS(user.phone_number, scheduleText);
+            }
+            await insertConversation({
+              user_id: userId,
+              role: "assistant",
+              content: scheduleText,
+              message_type: "initial_plan",
+            });
+            void trackEvent(userId, "initial_plan_schedule_sent", { trigger });
+          }
+        }
+      } catch (scheduleErr) {
+        // Never let the schedule bubble break the rest of the onboarding close.
+        console.error(`[initial_plan] schedule bubble failed userId=${userId}:`, scheduleErr);
+      }
+    }
+
     // Send a follow-up confirmation bubble after the plan description. An open-ended
     // "How does this look?" right after a dense plan dump gives the athlete nothing to
     // react to but free text — most go quiet instead of replying (see the 60%-silent
@@ -4938,9 +5071,18 @@ OUTPUT CONTRACT:
                   : undefined;
                 if (anchor) {
                   const anchorIdx = DAY_ORDER[normalizeDay(anchor.day)];
-                  const anchorDate = new Date(anchor.date + "T12:00:00Z");
+                  // Stored dates are "M/D" (computeArcWeekSkeleton's dateFor). This used to
+                  // write an ISO "YYYY-MM-DD" instead, so one array could hold two date
+                  // formats and any consumer parsing them had to handle both (2026-08-09).
+                  const anchorDate = parseStoredSessionDate(anchor.date);
+                  if (!anchorDate) {
+                    console.warn(`[coach/respond] SESSION_SWAP: could not parse anchor date "${anchor.date}" — skipping insert for ${swap.day}`);
+                    void trackEvent(userId, "session_swap_failed", { day: swap.day, to: swap.to, reason: "unparseable_anchor_date" });
+                    continue;
+                  }
                   anchorDate.setUTCDate(anchorDate.getUTCDate() + (targetIdx - anchorIdx));
-                  sessions.push({ day: targetDay, date: anchorDate.toISOString().slice(0, 10), label: swap.to });
+                  const newDate = `${anchorDate.getUTCMonth() + 1}/${anchorDate.getUTCDate()}`;
+                  sessions.push({ day: targetDay, date: newDate, label: swap.to });
                   changed = true;
                   console.log(`[coach/respond] SESSION_SWAP: created new session for day="${targetDay}" → "${swap.to}"`);
                   void trackEvent(userId, "session_swapped", { day: swap.day, to: swap.to, created: true });
@@ -4965,10 +5107,20 @@ OUTPUT CONTRACT:
               const newEntries = tagSessionSwaps.map(swap => `${swap.day} → "${swap.to}" (${todayLabel})`);
               const priorEntries = ((adjState?.plan_adjustments as string | null) ?? "").split("\n").filter(Boolean);
               const updatedAdjustments = [...priorEntries, ...newEntries].slice(-5).join("\n");
+              // A swap changes what's actually planned, so the week's stored totals have to
+              // follow it — otherwise the day-by-day schedule and weekly_mileage_target
+              // disagree, and Dean quotes a target the sessions no longer add up to.
+              const { totalMiles, longRunMiles } = recomputeWeekTotalsFromSessions(sessions);
               await supabase.from("training_state").update({
                 weekly_plan_sessions: sessions as unknown as import("@/lib/database.types").Json,
                 plan_adjustments: updatedAdjustments,
+                ...(totalMiles != null ? { weekly_mileage_target: totalMiles } : {}),
+                ...(longRunMiles != null ? { weekly_long_run_miles: longRunMiles } : {}),
               }).eq("user_id", userId);
+              if (totalMiles != null) {
+                console.log(`[coach/respond] SESSION_SWAP: recomputed week totals — ${totalMiles}mi, long run ${longRunMiles}mi`);
+                void trackEvent(userId, "session_swap_totals_recomputed", { total_miles: totalMiles, long_run_miles: longRunMiles });
+              }
             }
           } catch (err) {
             console.error("[coach/respond] SESSION_SWAP failed:", err);
@@ -5168,30 +5320,6 @@ OUTPUT CONTRACT:
  * as a sanity cap — if Claude states a projection that's >50% over the target,
  * replace it with the target to prevent alarming numbers like "on track for 77mi".
  */
-/**
- * Post-processing guard: if the message states a week-to-date total ("X mi for the week",
- * "you're at X mi this week", etc.) that differs from the system-computed weekMileageSoFar,
- * rewrite the number. Skips projection phrasings ("on track for", "projected") which are
- * handled by correctProjectedTotal.
- */
-function correctWeekToDateTotal(message: string, weekMileageSoFar: number | null, isMetric: boolean): string {
-  if (weekMileageSoFar == null || weekMileageSoFar < 0) return message;
-  const correctValue = isMetric
-    ? Math.round(weekMileageSoFar * 1.60934 * 10) / 10
-    : Math.round(weekMileageSoFar * 10) / 10;
-  const unitGroup = isMetric ? "km" : "mi(?:les?)?";
-  const projectionLeadIn = /(?:on\s+track\s+for|on\s+pace\s+for|projected|aiming\s+for|target(?:ing)?|to\s+hit|should\s+hit|expecting|projecting)\s+~?\s*$/i;
-  const pattern = new RegExp(`(\\d+(?:\\.\\d+)?)(\\s*${unitGroup}[ \\t]*(?:for|this)[ \\t]+(?:the[ \\t]+)?week\\b)`, "gi");
-  return message.replace(pattern, (full, num, suffix, offset) => {
-    const stated = parseFloat(num);
-    if (Math.abs(stated - correctValue) <= 0.4) return full;
-    const before = message.slice(Math.max(0, offset - 40), offset);
-    if (projectionLeadIn.test(before)) return full;
-    console.warn(`[correctWeekToDateTotal] stated ${stated} WTD, system says ${correctValue} — correcting`);
-    return `${correctValue}${suffix}`;
-  });
-}
-
 function correctProjectedTotal(message: string, projectedWeekMiles: number | null, weeklyMileageTarget?: number | null): string {
   // Fallback cap: when session data is unavailable (projectedWeekMiles = null),
   // use the weekly target to catch wildly wrong Claude projections.
@@ -6674,6 +6802,14 @@ function buildSystemPrompt(
     : "";
   const tsEasyGuard = paceCtx.easyGuard;
   const tsTempoPaceGuard = paceCtx.tempoPaceGuard;
+  // Does this athlete's stored plan actually assign days? Everything below that used to
+  // assert "the plan is day-agnostic / you pick your days" is conditioned on this: that was
+  // true before the arc skeleton work, and false afterwards for anyone with training_days —
+  // the prompt was injecting dated sessions and telling Dean in the same breath that no
+  // schedule existed, which is why plan answers kept coming back as "doesn't matter what
+  // day" prose (2026-08-09).
+  const hasDatedSessions =
+    Array.isArray(state?.weekly_plan_sessions) && (state!.weekly_plan_sessions as unknown[]).length > 0;
   const { sessionRows, projectedWeekMiles, remainingPlanLine } = (() => {
     const sessions = (state?.weekly_plan_sessions as Array<{ day: string; date: string; label: string }> | null) ?? [];
     if (!sessions || sessions.length === 0) return { sessionRows: "", projectedWeekMiles: weekMileageSoFar, remainingPlanLine: "" };
@@ -6943,7 +7079,7 @@ PRINCIPLES — these apply to every response. They are stated once here and not 
 5. PRE-COMPUTED VALUES ARE AUTHORITATIVE. VDOT, training paces, weekly mileage totals, race timeline (days/weeks until race), and taper percentages are computed by the system and shown in FACTS / CURRENT TRAINING STATE / DATE CONTEXT. Never recalculate, never web-search VDOT tables, never convert between weeks/months. Use stored values verbatim. The stored easy pace is always correct.
 6. RECENCY — USE THE LABELS. Past activities in RECENT WORKOUTS include a server-computed "(N days ago)" label. That label is authoritative. Never say "yesterday" for anything 2+ days ago — use the day name ("Monday's run", "Sunday's long run").
 7. SPECIFIC CALENDAR DATES for future references — pull from DATE CONTEXT (e.g. "Friday, Feb 27"). Never invent a date. "This week" and "next week" are fine for general structure; "tomorrow" and "next Monday" are not — messages may be read after the day they're sent.
-8. DAY-AGNOSTIC PLANNING. Weekly plans (initial_plan, weekly_recap) have NO day-by-day schedule. Present the week as a framework: weekly total + long run + quality session(s) + spacing guidance. The athlete picks when to run each. Morning/nightly reminders never prescribe a specific "today's workout" — they only mention what's still outstanding this week.
+8. THE SCHEDULE IS SYSTEM-OWNED. Never write a day-by-day list yourself — the system renders this athlete's schedule from the stored plan and sends it as its own text. ${hasDatedSessions ? `This athlete's week HAS assigned days (see THIS WEEK'S PLAN and the session lists in this prompt): answer from those days, name the session that falls on a day when they ask about it, and never tell them the plan is day-agnostic or that they pick their own days.` : `This athlete has no day assignments on file: present the week as a framework — weekly total + long run + quality session(s) + spacing guidance — and let them pick when to run each. Morning/nightly reminders name what's still outstanding this week, not a specific "today's workout".`}
 9. MILEAGE FORMAT. Never additive — "22 planned + 10 done = 32" is wrong in every context. State completed and planned separately. The weekly target is a ceiling that already includes completed miles. Running miles only — strength, cross-training, mobility, and any non-running session contribute zero. Cross-training sessions use "min", never "mi" (writing "mi" causes them to be counted as running volume).
 10. CONSISTENCY GATES — verify before sending:
     - Quality pace (tempo/threshold/interval) MUST be faster than easy pace. Any quality pace at or slower than easy is a documented error.
@@ -8069,6 +8205,9 @@ function buildUserMessage(
   goalType: string | null = null,
   recentPostRunVerbatim: string[] = [],
   suggestedInjuryCheckQuestion: string | null = null,
+  // True when training_state.weekly_plan_sessions assigns days. Gates every statement below
+  // that used to assert the plan is day-agnostic — see the same flag in buildSystemPrompt.
+  hasDatedSessions = false,
 ): string {
   const umUseMetric = preferredUnits === "metric";
   switch (trigger) {
@@ -8412,7 +8551,7 @@ PROJECTED vs TARGET DIRECTION: When comparing a projected total to the weekly ta
 
 PLAN CONSISTENCY RULES — follow these exactly:
 - Week-to-date mileage: use the WEEK-TO-DATE figure from CURRENT TRAINING STATE as the already-completed figure. Do not manually sum runs from conversation history or include runs from previous weeks.
-- Remaining work: reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (weekly target, long run, quality session). Note what key sessions (long run, quality session) still need to happen — the athlete picks when. Do NOT reference dated sessions or prescribe a specific day.${storedPlanWeek?.key_workout_2 ? `\n- SECONDARY QUALITY SESSION this week: ${storedPlanWeek.key_workout_2} — this is a second quality session on top of the primary one. Mention it when relevant (e.g. "you still have the tempo and the short interval session this week").` : ""}
+- Remaining work: reference THIS WEEK'S PLAN from CURRENT TRAINING STATE (weekly target, long run, quality session). Note what key sessions (long run, quality session) still need to happen${hasDatedSessions ? ", naming the day each falls on — the schedule above is the athlete's actual week, not a suggestion" : " — the athlete picks when, so do NOT prescribe a specific day"}.${storedPlanWeek?.key_workout_2 ? `\n- SECONDARY QUALITY SESSION this week: ${storedPlanWeek.key_workout_2} — this is a second quality session on top of the primary one. Mention it when relevant (e.g. "you still have the tempo and the short interval session this week").` : ""}
 - Do NOT mention NEXT WEEK'S PLAN in post-run feedback — that belongs in the Sunday recap.
 
 ${isAnalystMode ? `\n<rule>ANALYST MODE — NO PLAN: This athlete has no training plan and does not want one. Do NOT reference any plan, weekly mileage target, upcoming sessions, or training schedule. Do NOT say anything like "remaining sessions this week", "your plan calls for", or "THIS WEEK'S PLAN". The PLAN CONSISTENCY RULES and WORKOUT STRUCTURE sections do not apply. Focus purely on analyzing this run and end with one forward-looking observation — but no session prescriptions.</rule>\n` : ""}${isComplementMode ? `\n<rule>COMPLEMENT MODE — EXTERNAL PLAN: This athlete follows their own external training plan (Runna, TrainingPeaks, coach-written, uploaded PDF, etc.). For non-injury reasons, do NOT prescribe new sessions, alter their schedule, or suggest changing their upcoming workouts — that's their plan's job, not yours. If CURRENT TRAINING STATE lists sessions, they belong to their external plan — reference them as context only.
@@ -8549,7 +8688,7 @@ SILENCE GAPS: If the athlete notes you've been out of touch (e.g. "haven't heard
 
 WEEKLY PROJECTION ACCURACY: When stating "on track for X mi" or any weekly total projection, X must equal miles already done PLUS the sum of your remaining planned session distances. Do not quote the stored weekly target if the actual remaining sessions sum to a different total. Example: if 11mi are done and remaining sessions total 18mi, say "on track for 29mi" — not "32mi" just because the stored target says so.
 
-PLAN CONSISTENCY: THIS WEEK'S PLAN in CURRENT TRAINING STATE is the active plan (weekly mileage target, long run, quality session). When the athlete asks about their week or what's left to do, reference that stored plan first — don't reconstruct from memory or guess at different distances. Do NOT quote dated sessions; the plan has no day-by-day schedule. If the athlete asks which day to run something, remind them the plan is day-agnostic — they pick their days, leaving at least one easy or rest day between hard sessions.
+PLAN CONSISTENCY: THIS WEEK'S PLAN in CURRENT TRAINING STATE is the active plan (weekly mileage target, long run, quality session). When the athlete asks about their week or what's left to do, reference that stored plan first — don't reconstruct from memory or guess at different distances. When dated sessions appear above (UPCOMING SESSIONS THIS WEEK / NEXT WEEK'S PLANNED SESSIONS), those days ARE the plan — answer from them, and never tell the athlete the plan is day-agnostic or that they pick their own days. A separate bubble lists the full day-by-day schedule right after your message, so give the shape and the reasoning rather than re-listing every day yourself. Only when no dated sessions appear at all is the week day-agnostic — then say so, and remind them to leave at least one easy or rest day between hard sessions.
 
 PROJECTED vs TARGET DIRECTION: When comparing a projected total to the weekly target (e.g. "on track for ~X — slightly [lighter/heavier] than Y target"), verify the arithmetic before writing: if projected X > target Y, say "above target" or "over target" — NEVER "lighter than target." If projected X < target Y, say "slightly under" or "below target" — NEVER "above target." Getting the direction backwards gives contradictory coaching advice and confuses the athlete about whether they are on track.
 
@@ -8570,7 +8709,7 @@ FULL PLAN REQUESTS (ON injury hold): If the athlete asks to SEE the plan, schedu
 
 EXCEPTION: If the athlete mentions the plan in the context of asking to CHANGE it (e.g. "my plan has me running Sunday, can we switch?", "can we move Thursday's run?", "swap my rest day"), this is a session swap request — NOT a plan view request. Handle it using the THIS WEEK SESSION SWAP rules below.
 
-WEEK-LEVEL PLAN CHANGES: The weekly mileage target, long run, and quality session are day-agnostic — don't invent a day-by-day schedule from scratch. But if the athlete asks to move, swap, or reschedule a SPECIFIC session that's already tracked in THIS WEEK'S PLAN sessions (e.g. "can we move Thursday's run to Friday", "I want to run Thursday instead of Friday"), that's an actionable request — use plan_action.session_swaps per the THIS WEEK SESSION SWAP rules below, not a redirect. Confirm the move plainly (e.g. "Done — moved to Thursday.") only once the swap has actually been set. No [WEEK_OVERRIDE] or [SKIP_DAY] tags. If they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load instead of a specific day-move, treat that as plan_action.lighter_week per the rules below.
+WEEK-LEVEL PLAN CHANGES: Never invent a day-by-day schedule from scratch — day assignments come from the stored plan, not from you. But if the athlete asks to move, swap, or reschedule a SPECIFIC session that's already tracked in THIS WEEK'S PLAN sessions (e.g. "can we move Thursday's run to Friday", "I want to run Thursday instead of Friday"), that's an actionable request — use plan_action.session_swaps per the THIS WEEK SESSION SWAP rules below, not a redirect. Confirm the move plainly (e.g. "Done — moved to Thursday.") only once the swap has actually been set. No [WEEK_OVERRIDE] or [SKIP_DAY] tags. If they're telling you they can't run much this week (travel, illness, fatigue) and want a reduced load instead of a specific day-move, treat that as plan_action.lighter_week per the rules below.
 
 WEEKLY TARGET INCREASE/DECREASE REQUEST: If the athlete asks to raise or lower this week's overall mileage target itself (e.g. "I'd like to go to 19 miles this week", "can we bump up the volume", "let's dial back the total") — this is NOT a session swap and NOT a lighter_week setback. Never compute or state a new day-by-day breakdown or a new weekly total yourself — you cannot safely apply the injury/layoff caps and long-run-percentage math that the plan generator does, and doing it free-hand is exactly how a session list stops summing to the stated total. Treat this the same as a FULL PLAN REBUILD below: acknowledge the request in 1-2 sentences without committing to a specific number, end with "Reply UPDATE PLAN to confirm," and do NOT set plan_action.rebuild_plan until they confirm. Once confirmed, the system regenerates this week's schedule (respecting the injury/long-run caps) and sends the real breakdown — your confirmation message after that point should stay conversational, not restate numbers from memory.
 
@@ -8602,13 +8741,13 @@ MANUALLY-REPORTED ACTIVITY: If earlier in RECENT CONVERSATION you told the athle
 
 MILEAGE DISPUTE: If the athlete corrects a mileage figure ("I didn't do that run", "that was a rest day", "I only ran X not Y"), do NOT rearrange the existing narrative or reinterpret the same data differently. Re-anchor immediately to the authoritative figure from CURRENT TRAINING STATE: "You're right — Strava shows X mi so far this week." If you stated a week total the athlete disputes, trust the correction and restate only what Strava has confirmed. A planned run is not a completed run until it appears in Strava.
 
-SESSION REFERENCES: The plan is day-agnostic — it has a weekly mileage target, long run, and quality session, but no day-by-day schedule. Do NOT refer to "today's run" or "tomorrow's session" as if a specific workout is prescribed. If the athlete asks what to run on a given day, suggest options from THIS WEEK'S PLAN that haven't happened yet (e.g. "You could knock out the tempo today, or keep it easy and save tempo for later in the week").
+SESSION REFERENCES: ${hasDatedSessions ? `The sessions above are dated — "today's run" and "tomorrow's session" mean whatever the schedule assigns to that day. If a day has no session, say so plainly rather than inventing one for it.` : `This athlete's plan has a weekly mileage target, long run, and quality session but no day assignments. Do NOT refer to "today's run" or "tomorrow's session" as if a specific workout is prescribed. If they ask what to run on a given day, suggest options from THIS WEEK'S PLAN that haven't happened yet (e.g. "You could knock out the tempo today, or keep it easy and save tempo for later in the week").`}
 
 LENGTH IN CONVERSATION: Check RECENT CONVERSATION. If there are already 4+ messages from today (active back-and-forth), keep this reply to 1 bubble — 2 at most. Answer the question directly and stop. Don't pad with context that was already covered.
 
 NO REPEAT SCHEDULE PREVIEW: If RECENT CONVERSATION already contains a message from you today that mentioned tomorrow's session, next session, or upcoming workouts — do NOT mention it again in this reply. The athlete already has that information. Answer what they asked, then stop. Only re-mention the schedule if they specifically asked about it.
 
-SCHEDULE DAYS: Plans are day-agnostic — you do NOT assign runs to specific days. If the athlete says "X days a week", acknowledge the count but don't suggest which days. They choose. Just encourage leaving at least one easy or rest day between hard sessions.
+SCHEDULE DAYS: You never assign days yourself — the stored plan does. ${hasDatedSessions ? `If the athlete wants to run different days than the schedule shows, that's a plan change: handle it under the session-swap or plan-rebuild rules, don't just agree in prose.` : `If the athlete says "X days a week", acknowledge the count but don't suggest which days — they choose. Encourage leaving at least one easy or rest day between hard sessions.`}
 
 CONTEXT RETENTION — DO NOT RE-ASK FOR KNOWN DATA: If ATHLETE HISTORY already contains the athlete's race, race date, or goal time, do NOT ask for that information again. Use the stored data. Asking "what distance are you training for?" when you already have their race in ATHLETE HISTORY is a trust failure.
 
@@ -8929,7 +9068,7 @@ Rules:
       }
       return `${macroPositionContext}${recapWinsBlock}${recapAntiRepBlock}${recapForbiddenBlock}${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
 
-PLAN FORMAT (per principle 8 — no day-by-day schedule):
+PLAN FORMAT (per principle 8 — the day-by-day schedule is sent separately, so keep it out of your prose):
 - Weekly mileage target (e.g. "~34 mi this week")
 - Long run: distance + character (e.g. "Long run: 9mi easy on trails")
 - Quality session(s): 1–2 sessions — type, structure, and paces (e.g. "Tempo: 1mi WU + 3mi @ 7:50/mi + 1mi CD"). Include the "why" in one short clause.
@@ -8940,7 +9079,7 @@ Example shape for the second text:
 "This week: ~34 mi total.
 Long run: 9mi easy on trails.
 Quality: Tempo 5mi (1mi WU + 3mi @ 7:50/mi + 1mi CD) — threshold work, the engine for your goal pace.
-Leave at least one easy or rest day between the long run and the tempo; fit the rest of the easy miles in wherever suits your week."
+Leave at least one easy or rest day between the long run and the tempo."
 
 COACHING THREADS — WEAVE IN ONE WHEN RELEVANT:
 If "WHAT YOU'RE WATCHING" appears under ATHLETE HISTORY, the first text must reference one of those threads naturally — confirm progress, note a setback, or update the thread with a new observation. The threads are the through-line story; this is where Dean differentiates from Strava. Example weaves: "Cadence climbed another 2 spm this week — 174 now, on track for the 178 target we set." / "Long-run drift was 6% on Saturday — best of the build. We'll keep nudging total volume up." If no thread is currently relevant, do not force one. After the recap, you'll update the threads via the [THREADS:] tag.
@@ -9066,6 +9205,8 @@ BUBBLE 1: One sentence grounding them in where they are and where this is going 
 
 BUBBLE 2: How you're thinking about the next 1-2 weeks. Conversational, not a day-by-day schedule. ${weekBudgetExhausted ? `The week is essentially done — just orient them to next week's structure (weekly mileage, one quality session). Keep it brief.` : `Three things: what the weekly mileage target looks like this week, one quality session to slot in, and what the long run should be. Frame it as your thinking, not a prescription — "this week I'd aim for X miles, one quality session mid-week, and a longer easy run on the weekend." Invite them to push back: "Text me if anything needs adjusting."` }
 
+A separate bubble listing the day-by-day schedule (day, date, session) is sent right after yours, built from the plan itself — so give the shape and the reasoning, never the day list or a per-day distance.
+
 This is not a plan delivery. Dean calibrates every week based on what actually happens. The Sunday recap will be the primary touchpoint for week-to-week structure going forward.
 
 BREVITY: This is a lot for an athlete to absorb right after onboarding — 2 bubbles total, no restating anything already confirmed earlier in this conversation (training days, race name/timeline, injury details). Do NOT explain how check-ins or reminders work, and do not close with "I'll check in after your runs" or similar — a separate message sent right after yours covers that verbatim, so saying it here just duplicates it.
@@ -9174,11 +9315,11 @@ Write as EXACTLY 2 SMS bubbles separated by a blank line — no more, no less. E
 
 First bubble: 3-4 sentences max. If the athlete has a race date, open with a 1-2 sentence training arc orientation — briefly sketch the shape of the journey from now to race day (e.g. "You've got ~18 weeks — first 6 or so we're building your aerobic base, then we'll layer in quality work and sharpen into goal pace in the final month before the taper"). Then one sentence on why this specific first week is structured the way it is — e.g. "Starting with all easy miles to build your aerobic base before introducing quality work." If no race date, skip the arc and just explain the week's rationale. Do NOT open with "Got it" or any generic acknowledgment phrase. Do NOT restate their goal back to them.
 
-Second bubble: this week's framework — NO DATES, NO DAY-BY-DAY SCHEDULE. Present it as:
+Second bubble: this week's framework — NO DATES, NO DAY-BY-DAY LIST in your prose (the schedule bubble sent right after yours covers the days). Present it as:
 - Weekly mileage target (e.g. "~${umUseMetric ? "32 km" : "20 mi"} this week")
 - Long run: distance + character (e.g. "Long run: ${umUseMetric ? "10 km easy" : "6mi easy"}")
 - Quality session(s): 0–2 sessions with type, structure, and paces, plus a short "why" clause. For week 1 of a new athlete, zero or one quality session is usually right. Example: "Tempo ${umUseMetric ? "6.5 km (1 km WU + 4 km @ 5:10/km + 1.5 km CD)" : "4mi (1mi WU + 2mi @ 8:45/mi + 1mi CD)"} — threshold work, the engine for your goal pace."
-- Spacing guidance: one short line — "Leave at least one easy or rest day between hard sessions; fit the rest of the easy miles in wherever suits your week."
+- Spacing guidance: one short line on leaving an easy or rest day between hard sessions. Do NOT tell them to fit the miles in "wherever suits your week" — the schedule that follows assigns the days.
 - Strength/cross-training mention (if relevant) as a weekly count, not a specific day.
 
 Example shape:
@@ -9186,7 +9327,7 @@ Example shape:
 Long run: ${umUseMetric ? "10 km easy" : "6mi easy"}.
 Quality: Tempo ${umUseMetric ? "6.5 km (1 km WU + 4 km @ 5:10/km + 1.5 km CD)" : "4mi (1mi WU + 2mi @ 8:45/mi + 1mi CD)"} — builds lactate threshold, the engine for your goal pace.
 Plus 2× strength + mobility this week.
-Leave a gap between the long run and the tempo; easy miles fill the rest."
+Leave a gap between the long run and the tempo."
 
 SESSION DISTANCE FORMAT: Running distances in ${umUseMetric ? "km" : "miles"}. Run/walk interval sessions (time-based beginner workouts) include an approximate distance: e.g. "Run 2 min, walk 2 min × 6 (~24 min, ~${umUseMetric ? "2.9 km" : "1.8mi"})". Estimate at ~${umUseMetric ? "8 min/km" : "13 min/mile"} for beginner run/walk pace. Non-running sessions (strength, cross-training, swimming, cycling, yoga) must NEVER include distance — use duration or activity name only.
 QUALITY SESSION MILEAGE — ALWAYS INCLUDE WARMUP AND COOLDOWN: For any quality session that requires a warmup or cooldown (tempo, intervals, hill repeats, fartlek, threshold), the stated session distance must be the TOTAL including warmup and cooldown — not just the hard portion. Use defaults of 1mi WU and 0.5–1mi CD if not specified. Show the breakdown in parentheses:

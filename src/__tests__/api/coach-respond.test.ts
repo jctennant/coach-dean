@@ -1275,12 +1275,40 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
     const systemPrompt = systemText(calls[0][0].system);
     const userMsg = calls[0][0].messages[0].content as string;
 
-    // Guard must be present — reminders never prescribe a specific today's workout
-    // (stated once in PRINCIPLES principle 8 in the system prompt, applies to all reminder branches).
-    expect(systemPrompt).toContain("never prescribe a specific");
+    // Guard must be present — with no dated sessions on file, reminders name what's
+    // outstanding this week rather than a specific today's workout (principle 8's
+    // no-day-assignments branch in the system prompt, applies to all reminder branches).
+    expect(systemPrompt).toContain("no day assignments on file");
+    expect(systemPrompt).toContain(`not a specific "today's workout"`);
     // No-plan branch must be active in the user message — not the normal reminder text
     expect(userMsg).toContain("plan for next week is coming tonight");
     expect(userMsg).not.toContain("Heads up —");
+  });
+
+  it("tells Claude the week HAS assigned days when dated sessions are stored", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Mon", date: "8/10", label: "Easy 4mi", type: "run" },
+          { day: "Sat", date: "8/15", label: "Long run 7mi", type: "run" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+    // The day-agnostic framing must NOT be offered to an athlete whose plan has days —
+    // that contradiction is what produced "doesn't matter what day" answers (2026-08-09).
+    expect(systemPrompt).toContain("HAS assigned days");
+    expect(systemPrompt).not.toContain("no day assignments on file");
+    expect(systemPrompt).not.toContain("The plan is day-agnostic");
+    expect(systemPrompt).not.toContain("Plans are day-agnostic");
   });
 
   it("does NOT activate the guard when a week-level plan exists", async () => {
@@ -1825,7 +1853,46 @@ describe("coach/respond — plan_action structured dispatch", () => {
     expect(sessions.find((s) => s.day === "Friday")?.label).toBe("rest");
     const thursday = sessions.find((s) => s.day === "thursday");
     expect(thursday?.label).toBe("Tempo 5mi");
-    expect(thursday?.date).toBe("2026-07-30");
+    // "M/D", matching what computeArcWeekSkeleton writes — this insert used to emit ISO
+    // dates, so one sessions array could hold two formats (2026-08-09).
+    expect(thursday?.date).toBe("7/30");
+  });
+
+  it("session_swaps: recomputes the week's stored totals so the schedule and target agree", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Done — Wednesday is your long run now.",
+        plan_action: { session_swaps: [{ day: "Wednesday", to: "Long run 9mi" }] },
+      } }],
+    });
+    const { stateChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_mileage_target: 10,
+        weekly_long_run_miles: 7,
+        weekly_plan_sessions: [
+          { day: "Wednesday", date: "7/29", label: "Easy 3mi", type: "run" },
+          { day: "Saturday", date: "8/1", label: "Long run 7mi", type: "run" },
+        ],
+      }),
+      conversations: [
+        { role: "user", content: "can my long run move to Wednesday", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush();
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const swapUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => Array.isArray(p?.weekly_plan_sessions));
+    expect(swapUpdate).toBeDefined();
+    // Sessions now read 9mi + 7mi, longest 9 — both totals follow the swap rather than
+    // staying at the pre-swap 10/7.
+    expect(swapUpdate![0].weekly_mileage_target).toBe(16);
+    expect(swapUpdate![0].weekly_long_run_miles).toBe(9);
   });
 
   it("lighter_week: fires the lighter_week loopback trigger", async () => {
