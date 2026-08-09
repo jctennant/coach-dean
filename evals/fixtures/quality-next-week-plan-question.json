@@ -1,0 +1,55 @@
+{
+  "id": "quality-next-week-plan-question",
+  "description": "Athlete asks what next week's plan is, and next week's sessions are already assigned to days. Dean must answer from those days — not tell them to spread the mileage across days of their own choosing.",
+  "category": "response_quality",
+  "trigger": "user_message",
+  "today": "2026-08-08",
+  "inbound_sms": "What is the plan for this next week?",
+  "user": {
+    "name": "Jake",
+    "timezone": "America/Denver",
+    "strava_connected": true,
+    "goal": "trail_race",
+    "goal_race": "Teton Crest Trail",
+    "goal_race_date": "2026-08-28",
+    "goal_time_minutes": null,
+    "current_week": 1,
+    "current_phase": "taper",
+    "vdot": 44,
+    "easy_pace": "9:45/mi",
+    "tempo_pace": "8:05/mi",
+    "interval_pace": "7:20/mi",
+    "training_days": ["monday", "wednesday", "thursday", "saturday"],
+    "preferred_units": "imperial",
+    "weekly_mileage_target": 20.5,
+    "miles_logged_this_week": 20.3,
+    "runs_this_week": 4,
+    "recent_activities": [
+      { "date": "2026-08-08", "type": "Run", "distance_miles": 4.2, "pace": "10:30/mi" },
+      { "date": "2026-08-06", "type": "Run", "distance_miles": 5.4, "pace": "9:55/mi" },
+      { "date": "2026-08-05", "type": "Run", "distance_miles": 6.6, "pace": "10:10/mi" },
+      { "date": "2026-08-04", "type": "Run", "distance_miles": 4.0, "pace": "9:50/mi" }
+    ],
+    "plan_sessions_remaining": [
+      { "day": "Mon", "date": "8/10", "label": "Easy 2.5mi + 5x20sec strides" },
+      { "day": "Wed", "date": "8/12", "label": "Easy 3.5mi" },
+      { "day": "Thu", "date": "8/13", "label": "Easy 4mi" },
+      { "day": "Sat", "date": "8/15", "label": "Long run 7mi easy" }
+    ],
+    "recent_conversation": []
+  },
+  "ground_truth": {
+    "weekly_target": 17,
+    "notes": "Next week's sessions are already assigned to specific days and appear in the prompt as NEXT WEEK'S PLANNED SESSIONS: Mon 8/10 easy 2.5mi + strides, Wed 8/12 easy 3.5mi, Thu 8/13 easy 4mi, Sat 8/15 long run 7mi. That's 17 mi.\n\nCorrect behavior:\n1. Answer from the assigned days — the athlete should be able to read which session falls on which day without assembling it themselves. Naming the days ('Monday's the strides day, Saturday's the long run') is right; so is a compact day-by-day answer.\n2. Any weekly total stated must be 17 mi, matching the sum of the four sessions.\n3. It's fine (and good) to add the reasoning — why the volume is where it is with the race on 8/28.\n\nDo NOT:\n- Tell the athlete to 'spread these across Mon/Wed/Thu/Sat' or otherwise hand the day assignment back to them. The days are already decided; presenting them as the athlete's choice is the specific failure this fixture exists to catch.\n- Say the plan is day-agnostic, that it 'doesn't matter what day', that they should 'fit the miles in wherever suits your week', or that they pick when to run.\n- State a weekly total that doesn't equal 17.\n- Invent a session on a day that has none (Tue, Fri, Sun are not running days here).",
+    "forbidden_phrases": [
+      "day-agnostic",
+      "spread these across",
+      "spread them across",
+      "wherever suits",
+      "doesn't matter what day",
+      "you pick",
+      "your call which day",
+      "whichever days"
+    ]
+  }
+}

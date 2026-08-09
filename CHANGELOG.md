@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-09 — Eval for "what's the plan for next week", and a duplicate-schedule guard
+
+**Type:** Improvement
+**Reported by:** Jake ("you can also run an eval if there is one against the 'what is my plan for the next week'")
+
+**What happened:** no fixture covered a plan question against a week whose sessions are already assigned to days — the case that produced the "spread these across Mon/Wed/Thu/Sat" answer. Added `quality-next-week-plan-question` (`response_quality`), frozen from Jake's real state: Saturday, taper, four dated sessions for Mon 8/10–Sat 8/15 totalling 17 mi, asking "What is the plan for this next week?". `forbidden_phrases` covers the day-agnostic escapes ("spread these across", "wherever suits", "doesn't matter what day", "you pick").
+
+**Result:** 10/10 on the first run against the corrected prompt. Dean answered with `Monday, Aug 10: Easy 2.5 mi + 5×20sec strides` / `Wednesday, Aug 12: Easy 3.5 mi` / … / `Total: 17 mi` — the shape the athlete asked for, with the taper reasoning attached.
+
+**Follow-on fix the eval exposed:** the eval harness doesn't render the deterministic schedule bubble, so it showed something production would have gotten wrong — Dean now writes the day list himself on plan questions, and the bubble would have repeated it immediately afterward. Added `countDayLabeledLines` and suppressed the bubble when Dean's message already contains two or more day-labeled lines (one is a passing mention of a single day, not a schedule). The bubble remains the fallback for prose answers that don't lay the week out.
+
+**Files changed:** `evals/fixtures/quality-next-week-plan-question.json` (new), `src/lib/schedule-digest.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/schedule-digest.test.ts`
+
+---
+
 ## 2026-08-09 — Session swaps left the week's totals stale; plan answers were day-agnostic prose
 
 **Type:** Bug Fix + Improvement

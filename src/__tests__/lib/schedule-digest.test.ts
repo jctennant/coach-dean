@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildScheduleDigest, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
+import { buildScheduleDigest, countDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 
 // Sat Aug 8 2026, 18:00 UTC = 12:00 MDT. Week of Mon Aug 3; next week Mon Aug 10–Sun Aug 16.
 const SAT = Date.UTC(2026, 7, 8, 18, 0, 0);
@@ -115,5 +115,37 @@ describe("buildScheduleDigest", () => {
     const lines = out.split("\n").slice(1);
     expect(lines.length).toBeGreaterThanOrEqual(4);
     for (const line of lines) expect(line).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d+\/\d+ — .+/);
+  });
+});
+
+describe("countDayLabeledLines", () => {
+  it("counts a day-by-day schedule Dean wrote himself", () => {
+    const msg = [
+      "Next week (3 weeks out from Teton Crest):",
+      "",
+      "Monday, Aug 10: Easy 2.5 mi + 5×20sec strides",
+      "Wednesday, Aug 12: Easy 3.5 mi",
+      "Thursday, Aug 13: Easy 4 mi",
+      "Saturday, Aug 15: Long run 7 mi easy",
+      "",
+      "Total: 17 mi.",
+    ].join("\n");
+    expect(countDayLabeledLines(msg)).toBe(4);
+  });
+
+  it("counts the abbreviated dash form too", () => {
+    expect(countDayLabeledLines("Mon - Easy 4mi\nWed - Tempo 5mi\nSat - Long run 9mi")).toBe(3);
+  });
+
+  it("does not count a passing mention of a single day", () => {
+    expect(countDayLabeledLines("Saturday's long run is the one that matters this week."))
+      .toBeLessThan(2);
+    expect(countDayLabeledLines("You could move Thursday to Friday if that works better."))
+      .toBeLessThan(2);
+  });
+
+  it("returns 0 for prose with no day lines", () => {
+    expect(countDayLabeledLines("17 mi next week — long run 7, one strides session, rest easy."))
+      .toBe(0);
   });
 });

@@ -130,3 +130,14 @@ function rangeLabel(y: number, m: number, d: number, todayIndex: number): string
     : sunday.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   return `${mon}–${sun}`;
 }
+
+/**
+ * How many lines of a message read as "<day> … <separator>" — i.e. a day-by-day schedule
+ * the athlete can already read off. Used to suppress the schedule bubble when Dean's own
+ * message already listed the days, which is now the expected shape for plan answers.
+ */
+export function countDayLabeledLines(message: string): number {
+  return (message.match(
+    /^\s*(?:mon|tues?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?\b[^\n]*[:—–-]/gim
+  ) ?? []).length;
+}

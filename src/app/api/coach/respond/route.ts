@@ -35,7 +35,7 @@ import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
 import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
-import { buildScheduleDigest, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
+import { buildScheduleDigest, countDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
@@ -4690,10 +4690,14 @@ OUTPUT CONTRACT:
   // those apply in after(), so anything rendered here would show the pre-change week.
   const planMutationInFlight =
     tagSessionSwaps.length > 0 || wantsRebuild || wantsLighterWeek || wantsInjuryHold || wantsInjuryClear || wantsRtrAdvance;
+  // If Dean already answered with the day list himself, the bubble would only repeat it.
+  // Two or more day-labeled lines is a schedule; one is a passing mention of a single day.
+  const messageAlreadyListsDays = countDayLabeledLines(coachMessage) >= 2;
   if (
     trigger === "user_message" &&
     classifiedIntent.intent === "plan_question" &&
     !planMutationInFlight &&
+    !messageAlreadyListsDays &&
     !(state?.injury_hold_since as string | null) &&
     !isComplementMode && !isAnalystMode &&
     storedPlanAllWeeks.length > 0
@@ -4734,6 +4738,8 @@ OUTPUT CONTRACT:
     } catch (scheduleErr) {
       console.error(`[coach/respond] plan-question schedule bubble failed userId=${userId}:`, scheduleErr);
     }
+  } else if (trigger === "user_message" && classifiedIntent.intent === "plan_question" && messageAlreadyListsDays) {
+    void trackEvent(userId, "plan_question_schedule_skipped", { reason: "message_already_lists_days" });
   }
 
   if (trigger === "initial_plan") {
