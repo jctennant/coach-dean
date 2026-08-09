@@ -3,7 +3,7 @@
  * Evaluates the quality of Dean's post-Strava synthesis message.
  */
 
-export function buildStravaAnalysisJudgePrompt(fixture, deanResponse) {
+export function buildStravaAnalysisJudgePrompt(fixture, deanResponse, deepReadText = "") {
   const { athlete, strava, ground_truth } = fixture;
 
   const stravaLines = [
@@ -33,11 +33,12 @@ export function buildStravaAnalysisJudgePrompt(fixture, deanResponse) {
 ATHLETE:
 - Name: ${athlete.name}
 - Goal: ${athlete.goal.replace(/_/g, " ")}
-- Race: ${athlete.race_name ?? "none"} on ${athlete.race_date ?? "no date"} (${athlete.weeks_until_race} weeks away)
+- Race: ${athlete.race_name ?? "none"} on ${athlete.race_date ?? "no date"} (${athlete.weeks_until_race} weeks away)${athlete.injury_flagged ? `\n- Injury already flagged before Strava connected: ${athlete.injury_flagged}` : ""}
 
 STRAVA DATA DEAN CAN SEE:
 ${stravaLines.join("\n")}${raceHistoryStr}
 
+${deepReadText ? `\nRUN-LEVEL HISTORY DEAN CAN SEE:${deepReadText}\n` : ""}
 DEAN'S RESPONSE TO EVALUATE:
 """
 ${deanResponse}
@@ -65,12 +66,18 @@ EVALUATION CRITERIA:
 5. closes_with_injury_question: Does the response end with the injury question?
    - true = ends with something close to "Has injury ever been a factor for you, or anything you're managing right now?"
    - false = missing the injury question, or it's buried in the middle
+   - EXCEPTION — when the ATHLETE section above includes an "Injury already flagged" line, the athlete has ALREADY answered that question, and Dean is instructed to close with a body-part-specific follow-up instead ("What are you doing for the shins right now?"). In that case, true = ends with a single question about what they're currently doing for that specific injury; the generic injury question would be the WRONG close and should score false.
 
 6. uses_race_history: (only scored when a "RACE HISTORY DEAN CAN SEE:" section appears in this prompt)
    - true = references at least one specific race from the RACE HISTORY section (by name or result)
    - false = ignores the race history entirely despite it being present
    - null = NO "RACE HISTORY DEAN CAN SEE:" section appears above — MUST be null, DO NOT penalize
    - NOTE: A "Best race" entry in the STRAVA DATA section is NOT the same as RACE HISTORY. If only "Best race" appears (no RACE HISTORY section), set this to null.
+
+8. uses_deep_read: (only scored when a "RUN-LEVEL HISTORY DEAN CAN SEE:" section appears in this prompt)
+   - true = Dean anchors on something only visible in the run-level history: a specific week and its dates, a week-over-week jump or drop, or one of the athlete's own run titles quoted or paraphrased
+   - false = Dean cites only aggregate figures (8-week average, HR zone split, longest run) that were already available without it
+   - null = NO "RUN-LEVEL HISTORY DEAN CAN SEE:" section appears above — MUST be null, DO NOT penalize
 
 7. uses_pace_trend: (only scored when easy_pace_trend is present in the Strava data)
    - true = mentions the pace trend signal (improving/declining) in a meaningful way
@@ -98,6 +105,7 @@ Return ONLY valid JSON — no preamble:
   "closes_with_injury_question": true | false,
   "uses_race_history": true | false | null,
   "uses_pace_trend": true | false | null,
+  "uses_deep_read": true | false | null,
   "flags": ["list any specific failures with exact quoted text"],
   "score": 0,
   "score_rationale": "one sentence"

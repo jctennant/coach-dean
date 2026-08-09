@@ -381,6 +381,12 @@ function getInjuryAction(bodyPart) {
 // ─────────────────────────────────────────────
 // Mirrors handleDataAnalysis's system prompt in onboarding/handle/route.ts —
 // fires once, right after Strava connects, before the injury_intake stage.
+// Does NOT mirror the DEEPER READ block (src/lib/onboarding-strava-analysis.ts):
+// simulation personas define aggregate Strava stats only, with no run-level
+// activity rows to build it from. The run-level path is covered by the
+// strava-analysis runner instead (evals/fixtures/strava-analysis/*.json with an
+// `activities` array). Give a persona real activities and this should import
+// buildDeepStravaRead the same way that runner does.
 // ─────────────────────────────────────────────
 function buildStravaAnalysisPrompt(collected, stravaContext, firstName, today) {
   const raceName = collected.race_name;

@@ -8,6 +8,29 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-08 — Post-Strava analysis now reads run-by-run, not just 8-week averages
+
+**Type:** Improvement
+**Reported by:** Jake (internal review of onboarding)
+**User feedback:** "I think once strava is connected does Dean have enough info to do a bit closer of an analysis? Maybe the format of this should be: if injury --> look at mileage and identify increases in load or where the injury may have occurred. Also look at most recent week for details. May also be able to look at strava activity titles/description for details on injury. If race --> look at mileage build, speed averages, titles. Try to get some sense of what the build looks like and if it's on the right track for given goals. then share back analysis."
+
+**Root cause:** `handleDataAnalysis` — the first message after Strava connects, and the moment Dean has to earn trust — only ever saw aggregates: an 8-week average, a bare weekly-miles array with no dates attached, an HR zone split, and one spike percentage. There was nothing in the prompt that could say *when* load jumped, what the athlete had written on the run where it hurt, or how the long run sat inside the week around it. So the best available message was a restatement of numbers the athlete can already read off their own Strava profile. This was a data-availability gap, not a prompt-quality gap — no amount of prompt rules can surface run-level detail that was never passed in.
+
+**Fix / Change:**
+- New `src/lib/onboarding-strava-analysis.ts` — `buildDeepStravaRead()`, a pure function over activity rows producing a DEEPER READ prompt block: a dated Monday–Sunday weekly build table (with run counts and longest run), the last 7 days run by run (distance, pace, HR, elevation, title), LOAD FLAGS (biggest week-over-week jump, biggest drop, consecutive build weeks with no down week, long run out of proportion to its week — each named with the week it happened), run titles matching pain/injury words, and — on the race lens — quality sessions inferred from titles plus an easy-pace comparison across halves of the window.
+- Lens follows the branch the prompt already had: `injury` when an injury was flagged before Strava (quality/pace sections omitted, header points at load breakdown), `race` when a race date is known, else `general`.
+- `handleDataAnalysis` queries 12 weeks of activities and injects the block; the two YOUR JOB branches now tell Dean to prefer a DEEPER READ specific (the week volume jumped, a run the athlete titled themselves) over the 8-week average, and to frame injury timing as a question to confirm rather than a verdict.
+- The function returns every figure it states alongside the text, and those numbers are merged into the fact-check allow-list (`checkStravaAnalysisNumbers`) — without that, the existing gate would have rejected Dean for citing numbers we had just handed him. The `save_analysis` tool description now also excludes calendar dates and clock paces from the echoed figures, so "week of Jul 7" can't be read as a mileage claim.
+- Titles are labeled in-band as the athlete's own words and "a lead to ask about, not a diagnosis" — Dean reads them, but can't treat a run title as a diagnosis.
+- Eval harness: `evals/run-strava-analysis-evals.mjs` now **imports** `buildDeepStravaRead` (runs via `tsx`; `eval:strava` switched from `node`) rather than mirroring it, injects the block for fixtures that supply an `activities` array, and mirrors production's injury-lens branch. New fixture `injury-onset-week-half` freezes an athlete whose 8-week average (26 mi/week) describes none of the weeks she actually ran. New judge criterion `uses_deep_read` (null when a fixture has no activities) checks Dean anchors on something only the run-level history shows. Judge criterion 5 was also corrected: on the injury lens, production deliberately closes with a body-part-specific question, so the generic injury question is the wrong close there.
+- Simulation runner deliberately does not mirror the block (personas have no run-level rows) — noted inline next to `buildStravaAnalysisPrompt`.
+
+**Result:** `npm run eval:strava` 5/5, avg 9.0/10; the new fixture scores 10/10 with Dean naming the 24.6→38 mi jump in the week of Jul 13 and quoting "Shins tight, cut it short" back to the athlete.
+
+**Files changed:** `src/lib/onboarding-strava-analysis.ts` (new), `src/app/api/onboarding/handle/route.ts`, `src/__tests__/lib/onboarding-strava-analysis.test.ts` (new), `evals/run-strava-analysis-evals.mjs`, `evals/judges/strava-analysis-quality.mjs`, `evals/fixtures/strava-analysis/injury-onset-week-half.json` (new), `evals/run-simulation-evals.mjs`, `package.json`
+
+---
+
 ## 2026-08-08 — Goal poll opened with no intro; shin red flag over-fired and kept repeating
 
 **Type:** Bug Fix
