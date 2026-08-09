@@ -8,6 +8,40 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-09 — Injury-aware week structure, rehab scheduled properly, routines sent as text
+
+**Type:** Bug Fix + Feature
+**Reported by:** Jake (recovering from posterior shin splints while still running)
+**User feedback:** "I just want to confirm that the actual structure of the plan takes into account injury status and running context of the past week. The strength and whatever is focused on for recovery is probably something we should consider as an important part of what we share as the weekly plan too." … "I know we currently have the images that we share for the strength workouts, but I think it would make sense if we are able to share a summarized version of this in a cleanly structured and formatted message. If the user asks, 'Oh, how do I do that?' we could send the images. The images just take up a ton of space in a chat."
+
+**Answer to the question, honestly:** plan *math* was partly injury-aware (`computeMileageArc`'s 1.05 vs 1.10 build factor, the week-one and long-run caps, `injury_notes` in the enrichment prompt, the 1.15× clamp against last week's actual miles). Plan *structure* was not aware of it at all.
+
+**Root causes (three separate ones):**
+
+1. *Structure.* `computeArcWeekSkeleton` had no injury parameter and hardcoded `safeModalitiesFor(null, tools)`, so `CROSS_TRAINING_ALTERNATIVES` — which knows what to avoid per body part — was unreachable in any normal week. Verified against the real function: a shin-splints athlete with a rower on file was prescribed **rowing**, the one modality that table says to avoid. All structural injury handling was also gated on `injury_hold_since` alone, so three states fell through to the injury-blind path: running through an injury with no hold (the most common state), every return-to-run week once `handleInjuryClear` clears the hold, and RTR phase 1 — which got a full arc week with a long run and a quality session while the prompt told Dean "walk/run intervals only, max 3 sessions, zero long run". `syncWeekFromArc` never consulted the hold at all, so held athletes had a running week persisted to `weekly_plan_sessions` and read back by the reminders, the dashboard and the plan-deviation check.
+
+2. *Rehab dose.* `computeWeeklyStrength` scheduled exactly one strength day — "the first day of the week you don't run" — while the routine it selected said "3–5× per week". An athlete who runs all seven days got **zero** strength days, since there was no rest day to place one on. All twelve rehab routines also shared one frequency string despite differing sharply in load: shin/calf/foot/ankle are low-load loading and mobility where daily is standard, while the hamstring routine is Nordic curls and hip thrusts. `injury_severity` was stored and never read by anything.
+
+3. *Delivery.* There was no text renderer for a routine anywhere in the codebase — every athlete-facing path was Claude's prose or images — and the send path was one MMS per exercise: 9–13 media bubbles over ~16 seconds. It had no fallback either: when none of the exercises had art, the athlete got nothing at all.
+
+**Fix / Change:**
+- New `src/lib/week-mode.ts` — `resolveWeekMode()` decides week shape (which skeleton, how many quality sessions) from hold + RTR phase + `active_injury` in one place. Deliberately never touches load: injury already discounts it in three upstream places, and discounting again would double-apply it silently.
+- `computeArcWeekSkeleton` takes `injuryBodyPart` (injury-safe cross-training) and `qualityPolicy` (one quality session while injured, none in RTR phase 2). Dropped quality mileage flows into the existing easy-day pool, so weekly totals are preserved.
+- `syncWeekFromArc` now persists the recovery week for held athletes and zeroes the running target, leaves RTR phase 1's sessions alone, and carries the injury context into the arc path.
+- Per-routine `frequencyPerWeek` replaces the single shared string; `rehabSessionsPerWeek()` picks within it from `injury_severity` — the first time that column influences anything. `computeRehabSchedule()` places those sessions, seeded from the dedicated day, spread by maximum minimum-gap, avoiding the long run and quality days while the dose leaves room. Jake goes from 1 day to 6; a seven-day-a-week runner goes from 0 to their target. An athlete with **no active injury** stays on one day regardless — `composeStrengthRoutine` matches on `injury_notes`, which never expires.
+- Rehab attaches to days as an additive `rehab` field rather than a new slot type, because four consumers map the skeleton one row per day. It flows to the digest (`› + Shin splints rehab (~15 min)` sub-lines, the convention `formatRecoveryWeekDigest` already used), the card (a `+REHAB` tag), and `weekly_plan_sessions` — which means the daily reminders name it for free. `arcWeekSlotLabel` now names the routine instead of the bare "Strength + mobility" that was the entire strength representation in every surface.
+- `routineExerciseIds()` makes `hip_core`'s "skip these if returning from injury" note executable — the three plyometric drills are dropped for injured athletes.
+- New `src/lib/strength-digest.ts` — `formatStrengthDigest()` renders the routine as one SMS bubble (every routine in the catalog fits under 480 chars), and the image loop is replaced by that text plus an invite. `parseStrengthFollowUp` + `isStrengthDigest` handle "how do I do that?" / "show me" / a bare yes deterministically ahead of the classifier, modelled on `isCadenceOffer`/`parseCadenceReply`; naming one exercise sends just that one. State lives in the message text, so the follow-up works for adapted routines too. `exerciseNamesAreUnambiguous()` is asserted in tests so a future catalog addition that would break the reverse lookup fails loudly.
+- Extracted `sendExerciseImages()`, which also fixes the old numbering gaps (`1, 2, 5, 7` when art was missing mid-routine).
+- Removed both `/plan/<token>` link sends per the SMS-only decision — the `[STRENGTH_POSTER]` strip's URL append (the only reason most athletes ever saw that link) and the injury-hold Sunday recovery-progress link. The prompt lines saying no dashboard link exists are now true as written.
+- Prompt is a net reduction: deleted "Athletes consistently love receiving the poster… Lead toward sending it" and the "SEND THE FULL ROUTINE (every exercise with complete specs/cues)" instruction, since the system now renders that list deterministically and Dean enumerating it was pure duplication.
+
+**Also fixed while here:** `coach-respond.test.ts` fully mocked `@/lib/training-plan`, so every plan-related assertion in that file was running against stubs. It's a partial mock now — the pure computation helpers are the real ones.
+
+**Files changed:** `src/lib/week-mode.ts` (new), `src/lib/strength-digest.ts` (new), `src/lib/training-plan.ts`, `src/lib/strength-library.ts`, `src/lib/schedule-card.ts`, `src/lib/schedule-digest.ts`, `src/app/api/coach/respond/route.ts`, plus tests: `week-mode.test.ts` (new), `strength-digest.test.ts` (new), `sync-week-from-arc.test.ts` (new), `training-plan.test.ts`, `strength-library.test.ts`, `coach-respond.test.ts`
+
+---
+
 ## 2026-08-09 — Eval for "what's the plan for next week", and a duplicate-schedule guard
 
 **Type:** Improvement

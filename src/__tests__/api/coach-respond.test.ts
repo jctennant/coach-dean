@@ -37,6 +37,7 @@ vi.mock("@/lib/anthropic", () => ({
 
 vi.mock("@/lib/linq", () => ({
   sendSMS: vi.fn().mockResolvedValue({ chatId: null }),
+  sendMediaSMS: vi.fn().mockResolvedValue(undefined),
   startTyping: vi.fn().mockResolvedValue(undefined),
   typingDurationMs: vi.fn().mockReturnValue(0),
 }));
@@ -50,7 +51,11 @@ vi.mock("@/lib/weather", () => ({
   buildWeatherBlock: vi.fn().mockReturnValue(""),
 }));
 
-vi.mock("@/lib/training-plan", () => ({
+// Partial mock: only the DB/LLM-touching plan functions are stubbed. The pure computation
+// helpers (skeletons, rehab scheduling, digests) are the real ones — stubbing them would make
+// these tests assert against fabricated schedules rather than the ones athletes actually get.
+vi.mock("@/lib/training-plan", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/training-plan")>()),
   generateAndSaveFullPlan: vi.fn().mockResolvedValue("new-token-abc"),
   computePhaseForPlan: vi.fn().mockReturnValue("base"),
   computeRacePreparedness: vi.fn().mockReturnValue({ flag: null }),
@@ -2124,5 +2129,91 @@ describe("coach/respond — post_run_onboarding message shape", () => {
     expect(prompt).toContain("ONLY AN OPTIONAL SECOND LINE");
     expect(prompt).toContain("[NO_REPLY]");
     expect(prompt).toMatch(/Looking forward to/); // named as a forbidden sign-off
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Strength routine delivery — text first, images on request
+// ---------------------------------------------------------------------------
+describe("coach/respond — strength routine delivery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("sends the routine as one text bubble and no images", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Here's the routine that rebuilds shin tolerance. [STRENGTH_POSTER]",
+      } }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin", active_injury: true, injury_severity: "moderate", training_days: ["monday", "wednesday", "thursday", "saturday"] }),
+      state: baseState(),
+      conversations: [{ role: "user", content: "what should I do for my shins?", created_at: "2026-08-09T10:00:00Z" }],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const { sendSMS, sendMediaSMS } = await import("@/lib/linq");
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    // The routine goes out as text...
+    expect(sentText).toContain("Shin splints routine");
+    expect(sentText).toContain("Want to see how any of these look? Just ask.");
+    // ...and not as 9-13 separate image bubbles.
+    expect((sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    // The dashboard URL the token used to append is gone — SMS is the surface.
+    expect(sentText).not.toContain("/plan/");
+  });
+
+  it("sends the images when the athlete asks how to do them", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin", active_injury: true }),
+      state: baseState(),
+      conversations: [
+        { role: "assistant", content: "Shin splints routine — daily this week, ~15 min:\n› Toe taps on a stair — 2×20\n› Tibialis anterior raises — 3×15\nWant to see how any of these look? Just ask.", created_at: "2026-08-09T10:00:00Z" },
+        { role: "user", content: "how do I do that?", created_at: "2026-08-09T10:01:00Z" },
+      ],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const { sendMediaSMS } = await import("@/lib/linq");
+    const mediaCalls = (sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls;
+    expect(mediaCalls.length).toBe(2);
+    expect(mediaCalls[0][1]).toContain("Toe taps on a stair");
+    // Handled deterministically — Claude is never called for this turn.
+    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it("leaves an unrelated reply to coaching, even right after a digest", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: { message: "Moved it." } }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ injury_notes: "shin splints", active_injury: true }),
+      state: baseState(),
+      conversations: [
+        { role: "assistant", content: "Shin splints routine — daily this week, ~15 min:\n› Toe taps on a stair — 2×20\nWant to see how any of these look? Just ask.", created_at: "2026-08-09T10:00:00Z" },
+        { role: "user", content: "can we move the long run to Sunday?", created_at: "2026-08-09T10:01:00Z" },
+      ],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const { sendMediaSMS } = await import("@/lib/linq");
+    expect((sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
   });
 });

@@ -14,7 +14,7 @@ import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
 import type { PeriodizationContext } from "@/lib/periodization";
-import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeStarterWeekSkeleton, arcWeekSlotLabel, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc } from "@/lib/training-plan";
+import { computePhaseForPlan, generateAndSaveFullPlan, computeRacePreparedness, syncWeekFromArc, syncWeekFromUploadedPlan, computeArcWeekSkeleton, computeStarterWeekSkeleton, arcWeekSlotLabel, computeWeeklyStrength, formatWeeklyPlanDigest, computeRecoveryWeekSkeleton, formatRecoveryWeekDigest, computeMileageArc, computeRehabSchedule } from "@/lib/training-plan";
 import type { ArcWeekSlot, RecoveryWeekSlot } from "@/lib/training-plan";
 import { buildRecoveryCardPayload, buildRegularCardPayload, encodeCardPayload } from "@/lib/schedule-card";
 
@@ -49,7 +49,8 @@ import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
 import { onboardingNudgeQuestion } from "@/lib/onboarding-pending";
 import { inferTrainingDaysFromActivities, deriveTrainingDaysFallback, type InferableActivity, type TrainingDaysFallback } from "@/lib/infer-training-days";
-import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds } from "@/lib/strength-library";
+import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds, routineExerciseIds } from "@/lib/strength-library";
+import { formatStrengthDigest, isStrengthDigest, exerciseIdsFromDigest, parseStrengthFollowUp } from "@/lib/strength-digest";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
@@ -58,7 +59,6 @@ import { classifyIntent } from "@/lib/intent-classifier";
 import { buildCadenceOffer, isCadenceOffer, parseCadenceReply } from "@/lib/cadence-offer";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
 import type { ReminderContext } from "@/lib/reminder-prompt";
-import { signPlanToken } from "@/lib/session-token";
 import { computeReturnToRunRamp } from "@/lib/injury-return";
 
 export const maxDuration = 120;
@@ -1435,19 +1435,9 @@ async function handleInjuryCheckin(userId: string, dryRun: boolean, requestChatI
   }
 
   const bodyPart = ((profileResult.data?.injury_body_part as string | null) ?? "injury area").replace(/_/g, " ");
-  const timezone = (user.timezone as string | null) ?? "UTC";
-  const todayDow = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: timezone }).format(new Date());
-  const isSunday = todayDow === "Sunday";
-
   const messages: string[] = [
     `Morning check-in — how's the ${bodyPart} today? Pain level 1–10, and did you do yesterday's protocol?`,
   ];
-
-  // On Sundays, send a weekly recovery progress link as a second bubble
-  if (isSunday) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://coachdean.ai";
-    messages.push(`Here's your recovery progress this week: ${appUrl}/plan/${signPlanToken(userId)}`);
-  }
 
   if (!dryRun) {
     const chatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
@@ -1995,6 +1985,45 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
         // Fall through to normal coaching so it gets a real reply.
       }
 
+      // STRENGTH DIGEST FOLLOW-UP — deterministic, ahead of the classifier, same shape as the
+      // cadence offer above. The routine now goes out as one text bubble ending in "Want to see
+      // how any of these look? Just ask." — this is what answers that invitation with the
+      // illustrations. Pinning it to "the previous assistant message was that digest" is what
+      // makes a bare "yes" unambiguous, and reading the ids back out of the digest text is what
+      // makes it work for adapted routines too.
+      const lastAssistantForStrength = [...recentMessages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      if (lastAssistantForStrength && isStrengthDigest(lastAssistantForStrength.content as string)) {
+        const digestText = lastAssistantForStrength.content as string;
+        const followUp = parseStrengthFollowUp(latestMsg.content, digestText);
+        if (followUp) {
+          const idsToSend = followUp.exerciseIds?.length
+            ? followUp.exerciseIds
+            : exerciseIdsFromDigest(digestText);
+          const strengthChatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+          const sent = await sendExerciseImages({
+            phoneNumber: user.phone_number as string,
+            exerciseIds: idsToSend,
+            chatId: strengthChatId,
+            dryRun: !!dry_run,
+          });
+          if (sent > 0) {
+            await insertConversation({
+              user_id: userId,
+              role: "assistant",
+              content: `[Sent strength exercise images: ${sent} exercise${sent === 1 ? "" : "s"}]`,
+              message_type: "coach_response",
+            });
+            void trackEvent(userId, "strength_images_sent", { exercise_count: sent, source: "digest_follow_up" });
+            return NextResponse.json({ ok: true, images_sent: sent, dry_run: !!dry_run });
+          }
+          // No art for anything requested — fall through to normal coaching rather than
+          // leaving the athlete with silence, which is what the old image-only path did.
+          console.warn(`[coach/respond] strength follow-up matched but no illustrations available userId=${userId}`);
+        }
+      }
+
       // Run profile extraction and intent classification in parallel — both are Haiku calls
       const injuryCtx = {
         activeInjury: !!(profile?.active_injury),
@@ -2310,14 +2339,14 @@ Use this data to:
     strengthPosterRoutineKey = sr.routine_key ?? null;
     const lines = sr.exercises.map(ex => `- ${ex.name}: ${ex.specs}${ex.reason ? ` (${ex.reason})` : ""}`).join("\n");
     const posterNote = strengthPosterRoutineKey
-      ? `\nWHEN you list the FULL routine (above), append the token [STRENGTH_POSTER] at the very end of your message — the system strips it and texts the athlete an illustrated poster of this exact routine they can save or print. Athletes consistently love receiving the poster — it's a concrete, savable artifact, not just text. Lead toward sending it whenever you list the routine. Only include the token when you actually list the routine; never otherwise. If instead you're swapping in a lighter or different exercise (e.g. the athlete said one hurt or was too hard), skip the token and pass the \`exercise_ids\` argument on deliver_message with just the exercise(s) you actually named — same illustrated-image follow-up, matched to what you prescribed.`
+      ? `\nWHEN the athlete should get this routine, append the token [STRENGTH_POSTER] at the very end of your message and do NOT list the exercises yourself — the system appends the full structured list as its own text, and repeating it in your prose just doubles it. Give 1-2 sentences of framing (why this routine, what it's rebuilding) and the token. Only include the token when the routine should actually go out; never otherwise. If instead you're swapping in a lighter or different exercise (e.g. the athlete said one hurt or was too hard), skip the token and pass the \`exercise_ids\` argument on deliver_message with just the exercise(s) you actually named — the same structured list is built from those instead.`
       : "";
     // sr.frequency is a whole-routine dosage (all ${sr.exercises.length} exercises as one circuit) —
     // it does not describe any subset of exercises taken on their own. Keeping it out of the
     // always-shown block and scoped only to the "send the full routine" instruction stops it from
     // being carried over when Dean cites just 1-2 exercises, where each exercise's own specs
     // (sets×reps, already in `lines`) is the only dosage that actually applies.
-    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${lines}\n${trigger === "initial_plan" ? `THIS IS THE ATHLETE'S FIRST PLAN — an active injury is on file. Do NOT include the full routine in this plan-delivery message; a plan message plus a full exercise list plus poster images is too much for one delivery. Instead, after delivering the plan, ask ONE plain yes/no question offering it as a separate follow-up (e.g. "Want a strength routine for the [body part] baked in too?") — one short sentence, no exercise names or specs yet. Do NOT append [STRENGTH_POSTER] on this message. The full routine goes out as its own message once the athlete confirms yes.` : `SEND THE FULL ROUTINE (every exercise with complete specs/cues${sr.frequency ? ` + frequency: ${sr.frequency}` : ""}) AND the poster whenever ANY of these is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most; OR (3) your own PRIOR message (see RECENT CONVERSATION) asked whether they want a strength routine and this message is an affirmative reply (e.g. "yes", "sure", "sounds good") — that offer-and-confirm exchange is exactly what this routine is for, deliver it now rather than asking again. Don't wait to be asked twice. When you're just referencing it in passing, or naming only 1-2 specific exercises (e.g. a routine post-run note or recap), you don't need to dump the full list or the routine-level frequency — use only the sets×reps already given for the exercise(s) you name. Never lecture about it with no injury signal.`}${posterNote}`;
+    return `\n\nPRESCRIBED STRENGTH ROUTINE (generated from this athlete's injury history):\n${lines}\n${trigger === "initial_plan" ? `THIS IS THE ATHLETE'S FIRST PLAN — an active injury is on file. Do NOT include the full routine in this plan-delivery message; a plan message plus a full exercise list plus poster images is too much for one delivery. Instead, after delivering the plan, ask ONE plain yes/no question offering it as a separate follow-up (e.g. "Want a strength routine for the [body part] baked in too?") — one short sentence, no exercise names or specs yet. Do NOT append [STRENGTH_POSTER] on this message. The full routine goes out as its own message once the athlete confirms yes.` : `SEND THE ROUTINE (append the token — the system writes out the exercises) whenever ANY of these is true: (1) the athlete directly asks about strength, exercises, rehab, or what to do for their injury; (2) the athlete reports a specific new pain, soreness, or flare-up at a body part this routine targets — proactively offering "here's a routine for that" is exactly the high-value help athletes engage with most; OR (3) your own PRIOR message (see RECENT CONVERSATION) asked whether they want a strength routine and this message is an affirmative reply (e.g. "yes", "sure", "sounds good") — that offer-and-confirm exchange is exactly what this routine is for, deliver it now rather than asking again. Don't wait to be asked twice. When you're just referencing it in passing, or naming only 1-2 specific exercises (e.g. a routine post-run note or recap), skip the token and use only the sets×reps already given for the exercise(s) you name. Never lecture about it with no injury signal.`}${posterNote}`;
   })();
 
   // Hip & core injury prevention protocol — inject when coaching triggers where injury or load signals
@@ -4213,12 +4242,10 @@ OUTPUT CONTRACT:
       .replace(/\[PHYSIO_REFERRAL\]/gi, "")
       .replace(/\[RTR_ADVANCE\]/gi, "")
       .replace(/\[CADENCE:[^\]]+\]/gi, "")
-      .replace(/\[STRENGTH_POSTER\]/gi, (() => {
-        if (!strengthPosterRoutineKey) return "";
-        const token = signPlanToken(userId);
-        const base = process.env.NEXT_PUBLIC_APP_URL?.startsWith("https://") ? process.env.NEXT_PUBLIC_APP_URL : "https://coachdean.ai";
-        return `\n${base}/plan/${token}`;
-      })())
+      // The token is Dean's signal that the routine should go out; the send path below writes
+      // the structured list. It used to also append a /plan/<token> dashboard URL, which is the
+      // only reason most athletes ever saw that link — SMS is the surface, so it just goes.
+      .replace(/\[STRENGTH_POSTER\]/gi, "")
       .trim()
   );
 
@@ -4594,40 +4621,54 @@ OUTPUT CONTRACT:
   const routineForPoster = strengthPosterRoutineKey ? getRoutine(strengthPosterRoutineKey) : null;
   const exerciseIdsToSend = deliverExerciseIds.length > 0
     ? deliverExerciseIds
-    : (wantsStrengthPoster && routineForPoster ? routineForPoster.exerciseIds : []);
+    : (wantsStrengthPoster && routineForPoster
+        ? routineExerciseIds(strengthPosterRoutineKey!, { activeInjury: !!(profile?.active_injury) })
+        : []);
   if (exerciseIdsToSend.length > 0) {
-    // Linq requires a public HTTPS URL and re-hosts the image. NEXT_PUBLIC_APP_URL is
-    // http://localhost in dev — never send that; fall back to the prod origin so a
-    // misconfigured/dev env can't silently ship a broken (or rejected) image URL.
-    const envUrl = process.env.NEXT_PUBLIC_APP_URL;
-    const appUrl = envUrl?.startsWith("https://") ? envUrl : "https://coachdean.ai";
-    const activeChatId = chatId ?? learnedChatId;
-    let sentCount = 0;
-    for (const [i, exerciseId] of exerciseIdsToSend.entries()) {
-      const ex = EXERCISES[exerciseId];
-      // Art rolls out incrementally — skip exercises with no illustration yet rather
-      // than sending a URL that 404s (which fails the whole Linq attachment).
-      if (!ex || !hasExerciseImage(exerciseId)) continue;
-      try {
-        const imageUrl = `${appUrl}${exercisePosterUrl(exerciseId)}`;
-        if (activeChatId) await startTyping(activeChatId);
-        await new Promise((r) => setTimeout(r, 1200));
-        await sendMediaSMS(user.phone_number, `${i + 1}. ${ex.name} — ${ex.specs}`, imageUrl, "image/png");
-        sentCount++;
-      } catch (posterErr) {
-        console.error(`[coach/respond] strength exercise image send failed userId=${userId} exercise=${exerciseId}:`, posterErr);
-      }
-    }
-    if (sentCount > 0) {
-      const routineLabel = deliverExerciseIds.length > 0 ? "adapted" : (strengthPosterRoutineKey ?? "adapted");
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: `[Sent strength routine images: ${routineLabel} (${sentCount}/${exerciseIdsToSend.length} exercises)]`,
-        message_type: "coach_response",
-        strava_activity_id: activityId || null,
+    // Text first, images only on request. This used to send one MMS per exercise — 9 to 13
+    // media bubbles over ~16 seconds — which buried the rest of the conversation, and had no
+    // fallback at all when none of the exercises had art yet (the athlete got nothing).
+    // The digest is deterministic string templating over already-structured routine data, so
+    // it can't disagree with what the schedule says the athlete is doing.
+    try {
+      const rehabForDigest = computeRehabSchedule({
+        trainingDays: (profile?.training_days as string[] | null) ?? [],
+        dedicatedDay: computeWeeklyStrength(profile).day,
+        routineKey: strengthPosterRoutineKey,
+        severity: (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null,
+        activeInjury: !!(profile?.active_injury),
       });
-      void trackEvent(userId, "strength_poster_sent", { routine_key: routineLabel, trigger, exercise_count: sentCount });
+      const digest = formatStrengthDigest({
+        routineKey: strengthPosterRoutineKey,
+        exerciseIds: deliverExerciseIds.length > 0 ? deliverExerciseIds : null,
+        days: rehabForDigest.days,
+        activeInjury: !!(profile?.active_injury),
+      });
+      if (digest) {
+        const activeChatId = chatId ?? learnedChatId;
+        if (!dry_run) {
+          if (activeChatId) await startTyping(activeChatId);
+          await new Promise((r) => setTimeout(r, 1200));
+          await sendSMS(user.phone_number, digest.text);
+        }
+        // Stored so the follow-up handler can find it as the previous assistant message and
+        // read back exactly which exercises it listed.
+        await insertConversation({
+          user_id: userId,
+          role: "assistant",
+          content: digest.text,
+          message_type: "coach_response",
+          strava_activity_id: activityId || null,
+        });
+        void trackEvent(userId, "strength_digest_sent", {
+          routine_key: deliverExerciseIds.length > 0 ? "adapted" : (strengthPosterRoutineKey ?? "adapted"),
+          trigger,
+          exercise_count: digest.exerciseIds.length,
+          truncated: digest.truncated,
+        });
+      }
+    } catch (digestErr) {
+      console.error(`[coach/respond] strength digest send failed userId=${userId}:`, digestErr);
     }
   }
 
@@ -9602,4 +9643,45 @@ export function buildSplitAnalysis(
   }
 
   return `Splits: ${splitLabels}${comparisonLine}`;
+}
+
+
+/**
+ * Send one illustration per exercise. Extracted from the old inline strength-poster loop so the
+ * digest follow-up ("how do I do that?") and any future path share one implementation.
+ *
+ * Best-effort throughout: art rolls out incrementally, so an exercise without an illustration is
+ * skipped rather than sent as a URL that 404s (which fails the whole Linq attachment), and one
+ * failed send never blocks the rest of the set. Returns how many actually went out.
+ */
+async function sendExerciseImages(params: {
+  phoneNumber: string;
+  exerciseIds: string[];
+  chatId?: string | null;
+  dryRun?: boolean;
+}): Promise<number> {
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const appUrl = envUrl?.startsWith("https://") ? envUrl : "https://coachdean.ai";
+  let sent = 0;
+  for (const exerciseId of params.exerciseIds) {
+    const ex = EXERCISES[exerciseId];
+    if (!ex || !hasExerciseImage(exerciseId)) continue;
+    try {
+      if (params.dryRun) { sent++; continue; }
+      if (params.chatId) await startTyping(params.chatId);
+      await new Promise((r) => setTimeout(r, 1200));
+      // Numbered off the sent count, not the loop index — numbering off the unfiltered index
+      // produced gaps (1, 2, 5, 7) whenever art was missing for an exercise in the middle.
+      await sendMediaSMS(
+        params.phoneNumber,
+        `${sent + 1}. ${ex.name} — ${ex.specs}`,
+        `${appUrl}${exercisePosterUrl(exerciseId)}`,
+        "image/png"
+      );
+      sent++;
+    } catch (err) {
+      console.error(`[coach/respond] exercise image send failed exercise=${exerciseId}:`, err);
+    }
+  }
+  return sent;
 }
