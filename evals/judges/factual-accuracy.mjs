@@ -49,7 +49,7 @@ ATHLETE CONTEXT (ground truth — these are authoritative):
 ${user.plan_sessions_remaining ? `- Remaining sessions: ${user.plan_sessions_remaining.map(s => s.label).join(", ")}` : ""}
 ${user.activity_details ? buildActivityGroundTruth(user.activity_details) : ""}${recentActivitiesBlock}${recentConvBlock}
 GROUND TRUTH EXPECTATIONS:
-${buildGroundTruthBlock(ground_truth)}
+${buildGroundTruthBlock(ground_truth, planAction)}
 `.trim();
 
   return `You are evaluating a coaching response from "Coach Dean", an AI running coach that communicates via SMS.
@@ -164,7 +164,7 @@ function buildActivityGroundTruth(activity) {
   return out;
 }
 
-function buildGroundTruthBlock(gt) {
+function buildGroundTruthBlock(gt, planAction = null) {
   if (!gt) return "No specific ground truth expectations.";
   const lines = [];
   if (gt.correct_weekly_mileage_target != null) lines.push(`- Correct weekly target: ${gt.correct_weekly_mileage_target} mi`);
