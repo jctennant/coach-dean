@@ -1825,7 +1825,46 @@ describe("coach/respond — plan_action structured dispatch", () => {
     expect(sessions.find((s) => s.day === "Friday")?.label).toBe("rest");
     const thursday = sessions.find((s) => s.day === "thursday");
     expect(thursday?.label).toBe("Tempo 5mi");
-    expect(thursday?.date).toBe("2026-07-30");
+    // "M/D", matching what computeArcWeekSkeleton writes — this insert used to emit ISO
+    // dates, so one sessions array could hold two formats (2026-08-09).
+    expect(thursday?.date).toBe("7/30");
+  });
+
+  it("session_swaps: recomputes the week's stored totals so the schedule and target agree", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "Done — Wednesday is your long run now.",
+        plan_action: { session_swaps: [{ day: "Wednesday", to: "Long run 9mi" }] },
+      } }],
+    });
+    const { stateChain } = setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_mileage_target: 10,
+        weekly_long_run_miles: 7,
+        weekly_plan_sessions: [
+          { day: "Wednesday", date: "7/29", label: "Easy 3mi", type: "run" },
+          { day: "Saturday", date: "8/1", label: "Long run 7mi", type: "run" },
+        ],
+      }),
+      conversations: [
+        { role: "user", content: "can my long run move to Wednesday", created_at: "2026-07-30T10:00:00Z" },
+      ],
+    });
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+    await flush();
+
+    const updateCalls = (stateChain.update as ReturnType<typeof vi.fn>).mock.calls;
+    const swapUpdate = updateCalls.find(([p]: [Record<string, unknown>]) => Array.isArray(p?.weekly_plan_sessions));
+    expect(swapUpdate).toBeDefined();
+    // Sessions now read 9mi + 7mi, longest 9 — both totals follow the swap rather than
+    // staying at the pre-swap 10/7.
+    expect(swapUpdate![0].weekly_mileage_target).toBe(16);
+    expect(swapUpdate![0].weekly_long_run_miles).toBe(9);
   });
 
   it("lighter_week: fires the lighter_week loopback trigger", async () => {

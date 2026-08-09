@@ -1,5 +1,6 @@
 /**
- * Day-by-day schedule bubble for the end of onboarding (`initial_plan`).
+ * Day-by-day schedule bubble — sent at the end of onboarding (`initial_plan`) and
+ * whenever an athlete asks about their plan (`user_message`, plan_question intent).
  *
  * `weekly_recap` has sent a deterministic day/date/distance schedule since the
  * 2026-04-16 redesign (computeArcWeekSkeleton → formatWeeklyPlanDigest, plus the
@@ -21,7 +22,8 @@
  * Which week it shows: onboarding lands on an arbitrary weekday and the tail of the
  * current week is often already spent (Jake onboarded Saturday having already run 20 of
  * his ~20 mi). When too little of the week is left to schedule — or the week's mileage
- * budget is already met — it shows the upcoming Mon–Sun week instead.
+ * budget is already met, or the athlete literally asked about next week — it shows the
+ * upcoming Mon–Sun week instead.
  */
 
 import { computeArcWeekSkeleton, formatWeeklyPlanDigest } from "@/lib/training-plan";
@@ -50,7 +52,7 @@ function dayIndexOf(day: string): number | null {
   return key in DAY_INDEX ? DAY_INDEX[key] : null;
 }
 
-export function buildInitialPlanSchedule(params: {
+export function buildScheduleDigest(params: {
   weeks: SchedulePlanWeek[];
   currentWeekNumber: number;
   /** training_state.weekly_plan_sessions — the already-sliced, already-labeled current week. */
@@ -66,6 +68,8 @@ export function buildInitialPlanSchedule(params: {
   avgWeeklyMileage: number | null;
   /** True when a run is already logged today — today's session isn't prescribed back. */
   ranToday: boolean;
+  /** Athlete explicitly asked about next week — skip the current-week path entirely. */
+  preferNextWeek?: boolean;
   nowMs?: number;
 }): string | null {
   const {
@@ -85,7 +89,7 @@ export function buildInitialPlanSchedule(params: {
     weekMileageSoFar >= avgWeeklyMileage * 0.75;
 
   // Current week first, from what's actually stored.
-  if (daysRemaining >= MIN_DAYS_REMAINING && !budgetMet && persistedSessions?.length) {
+  if (!params.preferNextWeek && daysRemaining >= MIN_DAYS_REMAINING && !budgetMet && persistedSessions?.length) {
     const firstIndex = ranToday ? todayIndex + 1 : todayIndex;
     const lines = persistedSessions
       .map((s) => ({ ...s, idx: dayIndexOf(s.day) }))

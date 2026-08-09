@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInitialPlanSchedule, type SchedulePlanWeek, type PersistedSession } from "@/lib/initial-plan-schedule";
+import { buildScheduleDigest, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 
 // Sat Aug 8 2026, 18:00 UTC = 12:00 MDT. Week of Mon Aug 3; next week Mon Aug 10–Sun Aug 16.
 const SAT = Date.UTC(2026, 7, 8, 18, 0, 0);
@@ -33,30 +33,30 @@ const base = {
   ranToday: false,
 };
 
-describe("buildInitialPlanSchedule", () => {
+describe("buildScheduleDigest", () => {
   describe("rest of the current week", () => {
     it("renders the persisted sessions rather than re-deriving them", () => {
-      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4 })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4 })!;
       expect(out).toContain("Rest of this week:");
       expect(out).toContain("Tue 8/4 — Strength + mobility");
       expect(out).toContain("Sat 8/8 — Long run 7mi");
     });
 
     it("drops today when the athlete has already run today", () => {
-      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, ranToday: true })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, ranToday: true })!;
       expect(out).not.toContain("Tue 8/4");
       expect(out).toContain("Wed 8/5");
     });
 
     it("never shows a day that's already passed", () => {
       const withMonday = [{ day: "Mon", date: "8/3", label: "Easy 4mi" }, ...persisted];
-      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: withMonday })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: withMonday })!;
       expect(out).not.toContain("Mon 8/3");
     });
 
     it("orders lines Mon→Sun regardless of stored order", () => {
       const shuffled = [persisted[3], persisted[1], persisted[0], persisted[2]];
-      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: shuffled })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: shuffled })!;
       const days = out.split("\n").slice(1).map((l) => l.slice(0, 3));
       expect(days).toEqual(["Tue", "Wed", "Thu", "Sat"]);
     });
@@ -64,13 +64,13 @@ describe("buildInitialPlanSchedule", () => {
 
   describe("falling through to next week", () => {
     it("shows next week when the current week's mileage budget is already met", () => {
-      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 20.3, avgWeeklyMileage: 8 })!;
       expect(out).toContain("Next week (Aug 10–16):");
       expect(out).toContain("Long run 8mi"); // week 2's, not week 1's
     });
 
     it("shows next week when too few days remain", () => {
-      const out = buildInitialPlanSchedule({ ...base, nowMs: SAT })!;
+      const out = buildScheduleDigest({ ...base, nowMs: SAT })!;
       expect(out).toContain("Next week (Aug 10–16):");
       expect(out).toContain("Mon 8/10");
       expect(out).toContain("Sat 8/15");
@@ -78,34 +78,40 @@ describe("buildInitialPlanSchedule", () => {
 
     it("shows next week when nothing is left in the persisted current week", () => {
       const spent = [{ day: "Mon", date: "8/3", label: "Easy 4mi" }];
-      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: spent })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: spent })!;
       expect(out).toContain("Next week (Aug 10–16):");
     });
 
+    it("skips the current week when the athlete asked about next week", () => {
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, preferNextWeek: true })!;
+      expect(out).toContain("Next week (Aug 10–16):");
+      expect(out).not.toContain("Rest of this week");
+    });
+
     it("shows next week when no sessions were persisted at all", () => {
-      const out = buildInitialPlanSchedule({ ...base, nowMs: TUE, persistedSessions: null })!;
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, persistedSessions: null })!;
       expect(out).toContain("Next week (Aug 10–16):");
     });
 
     it("renders distances in km for metric athletes", () => {
-      const out = buildInitialPlanSchedule({ ...base, nowMs: SAT, isMetric: true })!;
+      const out = buildScheduleDigest({ ...base, nowMs: SAT, isMetric: true })!;
       expect(out).toContain("Long run 12.9km");
       // key_workout text keeps whatever units it was generated in — see arcWeekSlotLabel.
       expect(out).toContain("Fartlek 6mi");
     });
 
     it("returns null when next week isn't in the plan", () => {
-      expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, weeks: [weeks[0]] })).toBeNull();
-      expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, weeks: [] })).toBeNull();
+      expect(buildScheduleDigest({ ...base, nowMs: SAT, weeks: [weeks[0]] })).toBeNull();
+      expect(buildScheduleDigest({ ...base, nowMs: SAT, weeks: [] })).toBeNull();
     });
 
     it("returns null when the athlete has no training days set", () => {
-      expect(buildInitialPlanSchedule({ ...base, nowMs: SAT, trainingDays: [] })).toBeNull();
+      expect(buildScheduleDigest({ ...base, nowMs: SAT, trainingDays: [] })).toBeNull();
     });
   });
 
   it("lists one line per session with day, date and label", () => {
-    const out = buildInitialPlanSchedule({ ...base, nowMs: SAT })!;
+    const out = buildScheduleDigest({ ...base, nowMs: SAT })!;
     const lines = out.split("\n").slice(1);
     expect(lines.length).toBeGreaterThanOrEqual(4);
     for (const line of lines) expect(line).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d+\/\d+ — .+/);

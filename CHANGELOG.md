@@ -8,6 +8,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-09 — Session swaps left the week's totals stale; plan answers were day-agnostic prose
+
+**Type:** Bug Fix + Improvement
+**Reported by:** Jake (internal testing)
+**User feedback:** "I'm still seeing more 'shoot for this much mileage, this much on your long run, doesn't matter what day' but we should be giving more structured schedules … Should be clean in a text message. Mon - X, Tues - Y, etc"
+
+The message that prompted it, in full: *"Next week starts tomorrow (Mon 8/10 through Sun 8/16): 17 mi planned. Long run 7 mi easy, quality session Easy 2.5mi + 5×20sec strides, plus 2 shorter easy runs. Spread these across Mon/Wed/Thu/Sat, leaving at least a day between the long run and strides."* — the athlete has to assemble their own week out of a paragraph.
+
+**Root cause (day-agnostic answers):** the `user_message` prompt's PLAN CONSISTENCY rule said, verbatim: *"Do NOT quote dated sessions; the plan has no day-by-day schedule. If the athlete asks which day to run something, remind them the plan is day-agnostic."* That stopped being true when the arc skeleton work landed — `training_state.weekly_plan_sessions` holds dated sessions, and the prompt already injects them as UPCOMING SESSIONS THIS WEEK / NEXT WEEK'S PLANNED SESSIONS. Dean was being handed the schedule and told in the same prompt that it didn't exist, so he answered around it. This was a stale instruction to correct, not a new rule to add.
+
+**Root cause (swap math):** `session_swaps` rewrote the label on a day and nothing else. Moving a 4mi easy day to a 7mi long run left `weekly_mileage_target` and `weekly_long_run_miles` at their pre-swap values, so the schedule the athlete could see no longer added up to the target Dean quoted them. Separately, the swap's insert path wrote `date` as ISO `YYYY-MM-DD` while `computeArcWeekSkeleton` writes `M/D` — one sessions array could hold both formats, and any consumer parsing them had to handle both.
+
+**Fix / Change:**
+- PLAN CONSISTENCY rewritten: when dated sessions appear, those days ARE the plan — answer from them and never call the week day-agnostic. The day-agnostic framing survives only for athletes with no stored sessions.
+- Plan questions now get the same deterministic day-by-day bubble the Sunday recap and the onboarding close send (`buildScheduleDigest`, renamed from `buildInitialPlanSchedule` now that two triggers use it). Gated on the `plan_question` intent the classifier already produces. Skipped when a plan mutation is in flight (swap / rebuild / lighter week / injury hold) — those apply in `after()`, so anything rendered inline would show the pre-change week. "next week" in the athlete's message routes past the current-week path via `preferNextWeek`.
+- `recomputeWeekTotalsFromSessions` (new, in `session-mileage.ts`, reusing the existing `parseSessionMiles`) recomputes `weekly_mileage_target` and `weekly_long_run_miles` from the session labels after every swap. Long run is the largest single run in the week rather than the label prefix, so a swap that renames the session is still counted.
+- `parseStoredSessionDate` (new) accepts both `M/D` and legacy ISO rows, resolving `M/D` against today with a ±1-year shift so a Dec/Jan boundary doesn't land a session eleven months out. The swap insert now writes `M/D`, and bails with telemetry instead of producing an `Invalid Date` when the anchor is unparseable.
+
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/session-mileage.ts`, `src/lib/schedule-digest.ts` (renamed from `initial-plan-schedule.ts`), `src/__tests__/lib/session-mileage.test.ts`, `src/__tests__/lib/schedule-digest.test.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-08 — Initial plan restated a session distance as miles already run, and had no day-by-day schedule
 
 **Type:** Bug Fix + Improvement

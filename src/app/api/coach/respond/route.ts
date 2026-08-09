@@ -35,14 +35,14 @@ import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { gateProactiveResponse } from "@/lib/response-gate";
 import { checkStatedFacts, buildFactCorrection, normalizeActivityType, type FactGroundTruth } from "@/lib/fact-check";
 import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
-import { buildInitialPlanSchedule, type SchedulePlanWeek, type PersistedSession } from "@/lib/initial-plan-schedule";
+import { buildScheduleDigest, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 import { splitIntoMessages } from "@/lib/message-split";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
 import { buildFitnessTierBlock } from "@/lib/coach-fitness-tier";
 import { computePaceContext } from "@/lib/coach-pace-context";
-import { parseSessionMiles } from "@/lib/session-mileage";
+import { parseSessionMiles, recomputeWeekTotalsFromSessions, parseStoredSessionDate } from "@/lib/session-mileage";
 import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
@@ -4682,6 +4682,60 @@ OUTPUT CONTRACT:
 
   void trackEvent(userId, "coaching_response_sent", { trigger, onboarding: false });
 
+  // Plan questions get the same deterministic day-by-day schedule the Sunday recap and
+  // the onboarding close send. Asked "what's the plan for next week?", Dean's prose
+  // answered with a shape ("spread these across Mon/Wed/Thu/Sat") rather than a schedule —
+  // the athlete has to assemble the week themselves from a paragraph (2026-08-09).
+  // Skipped when a plan mutation is in flight (swap, rebuild, lighter week, injury hold):
+  // those apply in after(), so anything rendered here would show the pre-change week.
+  const planMutationInFlight =
+    tagSessionSwaps.length > 0 || wantsRebuild || wantsLighterWeek || wantsInjuryHold || wantsInjuryClear || wantsRtrAdvance;
+  if (
+    trigger === "user_message" &&
+    classifiedIntent.intent === "plan_question" &&
+    !planMutationInFlight &&
+    !(state?.injury_hold_since as string | null) &&
+    !isComplementMode && !isAnalystMode &&
+    storedPlanAllWeeks.length > 0
+  ) {
+    try {
+      const lastUserMsgForSchedule = [...recentMessages].reverse().find((m) => m.role === "user");
+      const askedAboutNextWeek = /\bnext week\b/i.test((lastUserMsgForSchedule?.content as string) ?? "");
+      const scheduleText = buildScheduleDigest({
+        weeks: storedPlanAllWeeks as unknown as SchedulePlanWeek[],
+        currentWeekNumber: periodization.effectiveWeek,
+        persistedSessions: (state?.weekly_plan_sessions as PersistedSession[] | null) ?? null,
+        trainingDays: (profile?.training_days as string[] | null) ?? [],
+        strengthDay: computeWeeklyStrength(profile).day,
+        crosstrainingTools: (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [],
+        timezone: userTimezone,
+        isMetric: isMetricUser,
+        weekMileageSoFar,
+        // No budget-met fallback outside onboarding: an athlete mid-week asking about the
+        // plan wants what's left of it, however many miles they've already run.
+        avgWeeklyMileage: null,
+        ranToday: hasRunLoggedToday,
+        preferNextWeek: askedAboutNextWeek,
+      });
+      if (scheduleText) {
+        if (!dry_run) {
+          if (chatId) await startTyping(chatId);
+          await new Promise((r) => setTimeout(r, 1200));
+          await sendSMS(user.phone_number, scheduleText);
+        }
+        await insertConversation({
+          user_id: userId,
+          role: "assistant",
+          content: scheduleText,
+          message_type: "coach_response",
+        });
+        void trackEvent(userId, "plan_question_schedule_sent", { next_week: askedAboutNextWeek });
+      }
+    } catch (scheduleErr) {
+      console.error(`[coach/respond] plan-question schedule bubble failed userId=${userId}:`, scheduleErr);
+    }
+  }
+
   if (trigger === "initial_plan") {
     void trackEvent(userId, "plan_generated", { plan_type: "initial" });
     const _ipStart = Date.now();
@@ -4740,7 +4794,7 @@ OUTPUT CONTRACT:
           .eq("user_id", userId)
           .maybeSingle();
         if (planForSchedule?.weeks && Array.isArray(planForSchedule.weeks) && planForSchedule.plan_source !== "uploaded") {
-          const scheduleText = buildInitialPlanSchedule({
+          const scheduleText = buildScheduleDigest({
             weeks: planForSchedule.weeks as unknown as SchedulePlanWeek[],
             currentWeekNumber: periodization.effectiveWeek,
             persistedSessions: (scheduleState?.weekly_plan_sessions as PersistedSession[] | null) ?? null,
@@ -5017,9 +5071,18 @@ OUTPUT CONTRACT:
                   : undefined;
                 if (anchor) {
                   const anchorIdx = DAY_ORDER[normalizeDay(anchor.day)];
-                  const anchorDate = new Date(anchor.date + "T12:00:00Z");
+                  // Stored dates are "M/D" (computeArcWeekSkeleton's dateFor). This used to
+                  // write an ISO "YYYY-MM-DD" instead, so one array could hold two date
+                  // formats and any consumer parsing them had to handle both (2026-08-09).
+                  const anchorDate = parseStoredSessionDate(anchor.date);
+                  if (!anchorDate) {
+                    console.warn(`[coach/respond] SESSION_SWAP: could not parse anchor date "${anchor.date}" — skipping insert for ${swap.day}`);
+                    void trackEvent(userId, "session_swap_failed", { day: swap.day, to: swap.to, reason: "unparseable_anchor_date" });
+                    continue;
+                  }
                   anchorDate.setUTCDate(anchorDate.getUTCDate() + (targetIdx - anchorIdx));
-                  sessions.push({ day: targetDay, date: anchorDate.toISOString().slice(0, 10), label: swap.to });
+                  const newDate = `${anchorDate.getUTCMonth() + 1}/${anchorDate.getUTCDate()}`;
+                  sessions.push({ day: targetDay, date: newDate, label: swap.to });
                   changed = true;
                   console.log(`[coach/respond] SESSION_SWAP: created new session for day="${targetDay}" → "${swap.to}"`);
                   void trackEvent(userId, "session_swapped", { day: swap.day, to: swap.to, created: true });
@@ -5044,10 +5107,20 @@ OUTPUT CONTRACT:
               const newEntries = tagSessionSwaps.map(swap => `${swap.day} → "${swap.to}" (${todayLabel})`);
               const priorEntries = ((adjState?.plan_adjustments as string | null) ?? "").split("\n").filter(Boolean);
               const updatedAdjustments = [...priorEntries, ...newEntries].slice(-5).join("\n");
+              // A swap changes what's actually planned, so the week's stored totals have to
+              // follow it — otherwise the day-by-day schedule and weekly_mileage_target
+              // disagree, and Dean quotes a target the sessions no longer add up to.
+              const { totalMiles, longRunMiles } = recomputeWeekTotalsFromSessions(sessions);
               await supabase.from("training_state").update({
                 weekly_plan_sessions: sessions as unknown as import("@/lib/database.types").Json,
                 plan_adjustments: updatedAdjustments,
+                ...(totalMiles != null ? { weekly_mileage_target: totalMiles } : {}),
+                ...(longRunMiles != null ? { weekly_long_run_miles: longRunMiles } : {}),
               }).eq("user_id", userId);
+              if (totalMiles != null) {
+                console.log(`[coach/respond] SESSION_SWAP: recomputed week totals — ${totalMiles}mi, long run ${longRunMiles}mi`);
+                void trackEvent(userId, "session_swap_totals_recomputed", { total_miles: totalMiles, long_run_miles: longRunMiles });
+              }
             }
           } catch (err) {
             console.error("[coach/respond] SESSION_SWAP failed:", err);
@@ -8604,7 +8677,7 @@ SILENCE GAPS: If the athlete notes you've been out of touch (e.g. "haven't heard
 
 WEEKLY PROJECTION ACCURACY: When stating "on track for X mi" or any weekly total projection, X must equal miles already done PLUS the sum of your remaining planned session distances. Do not quote the stored weekly target if the actual remaining sessions sum to a different total. Example: if 11mi are done and remaining sessions total 18mi, say "on track for 29mi" — not "32mi" just because the stored target says so.
 
-PLAN CONSISTENCY: THIS WEEK'S PLAN in CURRENT TRAINING STATE is the active plan (weekly mileage target, long run, quality session). When the athlete asks about their week or what's left to do, reference that stored plan first — don't reconstruct from memory or guess at different distances. Do NOT quote dated sessions; the plan has no day-by-day schedule. If the athlete asks which day to run something, remind them the plan is day-agnostic — they pick their days, leaving at least one easy or rest day between hard sessions.
+PLAN CONSISTENCY: THIS WEEK'S PLAN in CURRENT TRAINING STATE is the active plan (weekly mileage target, long run, quality session). When the athlete asks about their week or what's left to do, reference that stored plan first — don't reconstruct from memory or guess at different distances. When dated sessions appear above (UPCOMING SESSIONS THIS WEEK / NEXT WEEK'S PLANNED SESSIONS), those days ARE the plan — answer from them, and never tell the athlete the plan is day-agnostic or that they pick their own days. A separate bubble lists the full day-by-day schedule right after your message, so give the shape and the reasoning rather than re-listing every day yourself. Only when no dated sessions appear at all is the week day-agnostic — then say so, and remind them to leave at least one easy or rest day between hard sessions.
 
 PROJECTED vs TARGET DIRECTION: When comparing a projected total to the weekly target (e.g. "on track for ~X — slightly [lighter/heavier] than Y target"), verify the arithmetic before writing: if projected X > target Y, say "above target" or "over target" — NEVER "lighter than target." If projected X < target Y, say "slightly under" or "below target" — NEVER "above target." Getting the direction backwards gives contradictory coaching advice and confuses the athlete about whether they are on track.
 
