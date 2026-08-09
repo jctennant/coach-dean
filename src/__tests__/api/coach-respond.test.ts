@@ -1275,12 +1275,40 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
     const systemPrompt = systemText(calls[0][0].system);
     const userMsg = calls[0][0].messages[0].content as string;
 
-    // Guard must be present — reminders never prescribe a specific today's workout
-    // (stated once in PRINCIPLES principle 8 in the system prompt, applies to all reminder branches).
-    expect(systemPrompt).toContain("never prescribe a specific");
+    // Guard must be present — with no dated sessions on file, reminders name what's
+    // outstanding this week rather than a specific today's workout (principle 8's
+    // no-day-assignments branch in the system prompt, applies to all reminder branches).
+    expect(systemPrompt).toContain("no day assignments on file");
+    expect(systemPrompt).toContain(`not a specific "today's workout"`);
     // No-plan branch must be active in the user message — not the normal reminder text
     expect(userMsg).toContain("plan for next week is coming tonight");
     expect(userMsg).not.toContain("Heads up —");
+  });
+
+  it("tells Claude the week HAS assigned days when dated sessions are stored", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState({
+        weekly_plan_sessions: [
+          { day: "Mon", date: "8/10", label: "Easy 4mi", type: "run" },
+          { day: "Sat", date: "8/15", label: "Long run 7mi", type: "run" },
+        ],
+      }),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+    // The day-agnostic framing must NOT be offered to an athlete whose plan has days —
+    // that contradiction is what produced "doesn't matter what day" answers (2026-08-09).
+    expect(systemPrompt).toContain("HAS assigned days");
+    expect(systemPrompt).not.toContain("no day assignments on file");
+    expect(systemPrompt).not.toContain("The plan is day-agnostic");
+    expect(systemPrompt).not.toContain("Plans are day-agnostic");
   });
 
   it("does NOT activate the guard when a week-level plan exists", async () => {

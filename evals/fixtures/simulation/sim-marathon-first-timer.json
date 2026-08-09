@@ -25,6 +25,6 @@
     "goal_should_be": "marathon",
     "race_date_should_be": "2026-10-11",
     "target_turns": 8,
-    "notes": "Dean should collect the half marathon PR as the fitness baseline. Goal should be 'marathon', not 'half_marathon'. Race date should be October 11, 2026 (specific date, not October 1). Dean should not ask about Strava again after Alex skips. Dean is intentionally instructed to ask only HOW MANY days a week (days_per_week), never which specific days — plans are day-agnostic by design (see route.ts:503,547) — so training_days is not a required field. Timezone is intentionally NOT collected at this stage for non-Strava users — that happens in a separate post-plan 'awaiting_timezone' step (see handleTimezone in onboarding/handle/route.ts), so it is not required here either."
+    "notes": "Dean should collect the half marathon PR as the fitness baseline. Goal should be 'marathon', not 'half_marathon'. Race date should be October 11, 2026 (specific date, not October 1). Dean should not ask about Strava again after Alex skips. training_days is not a required field for [READY] — Dean may ask which days, but the completion gate only needs the count. Timezone is intentionally NOT collected at this stage for non-Strava users — that happens in a separate post-plan 'awaiting_timezone' step (see handleTimezone in onboarding/handle/route.ts), so it is not required here either."
   }
 }
