@@ -2107,7 +2107,8 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
     trigger,
     (state?.current_week as number | null) ?? null,
     (profile?.race_date as string | null) ?? null,
-    periodizationMileage
+    periodizationMileage,
+    { totalWeeks: planTotalWeeks }
   );
 
   // Load context block: session impact load vs recent baseline (trend coaching), spike detection,

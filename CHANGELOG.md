@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-10 — Every weekly recap aged the plan by a week, whether or not a week had passed
+
+**Type:** Bug Fix
+**Reported by:** Jake (noticed the volume collapse after re-triggering a recap)
+
+**Root cause:** `buildPeriodization` computed the recap's week as `storedWeek + 1` — a blind increment anchored to nothing. Running the recap twice advanced the athlete two weeks. There's no idempotency anywhere in the path: a manual re-trigger, a retried cron, or a duplicate invocation all age the plan permanently, and nothing ever reconciles the week number against the calendar.
+
+It bit live. Two recaps roughly 90 minutes apart moved an athlete from week 2 of 4 to week 4 of 4 — race week — eighteen days before his race. His stored target dropped from 17 mi to 6 mi with a **2 mi long run**, and that's what the schedule he received was built from. The same increment also means a cron that fails one Sunday leaves the athlete a week behind for the rest of the arc, with nothing to correct it.
+
+**Fix / Change:** with a race date and a plan length, the recap's week is now derived from the calendar — count back from race week to the week starting tomorrow (the same formula onboarding already uses to place an uploaded plan). That makes it idempotent, so re-running lands on the same week, and self-correcting, so a drifted `current_week` snaps back on the next recap in either direction. Clamped to the plan's bounds. Without both a race date and a plan length there's nothing to anchor to, so the increment stands unchanged — and it also stands once the race has passed, where the arc no longer applies.
+
+**Files changed:** `src/lib/periodization.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/periodization.test.ts`
+
+---
+
 ## 2026-08-09 — Sunday recap was dated a week behind, and flagged overtraining against a one-day-old plan
 
 **Type:** Bug Fix

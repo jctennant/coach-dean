@@ -58,14 +58,57 @@ describe("buildPeriodization — effectiveWeek", () => {
     expect(p.effectiveWeek).toBe(1);
   });
 
-  it("increments by 1 for weekly_recap", () => {
+  it("increments by 1 for weekly_recap when there's nothing to anchor to", () => {
+    // No race date and/or no plan length — the calendar can't say which week this is.
     const p = buildPeriodization("weekly_recap", 3, null, null);
     expect(p.effectiveWeek).toBe(4);
+    expect(buildPeriodization("weekly_recap", 3, "2026-09-30", null, { totalWeeks: null }).effectiveWeek).toBe(4);
   });
 
   it("defaults stored week to 1 when null for weekly_recap", () => {
     const p = buildPeriodization("weekly_recap", null, null, null);
     expect(p.effectiveWeek).toBe(2);
+  });
+
+  describe("with a race date and a plan length, the recap week comes from the calendar", () => {
+    // 4-week plan, race Friday 2026-08-28, recap firing Sunday evening 2026-08-09.
+    const RACE = "2026-08-28";
+    const sundayEvening = new Date("2026-08-10T02:47:00Z");
+
+    it("is idempotent — running the recap twice does not age the plan", () => {
+      // The bug this replaced: effectiveWeek was storedWeek + 1, so two recaps 90 minutes
+      // apart moved an athlete from week 2 to week 4 and dropped him onto race-week volume
+      // (6 mi, a 2 mi long run) eighteen days out (2026-08-09).
+      for (const stored of [1, 2, 3, 4]) {
+        const p = buildPeriodization("weekly_recap", stored, RACE, 20, { totalWeeks: 4, now: sundayEvening });
+        expect(p.effectiveWeek, `stored ${stored}`).toBe(2);
+      }
+    });
+
+    it("advances one week per calendar week", () => {
+      const at = (iso: string) =>
+        buildPeriodization("weekly_recap", 2, RACE, 20, { totalWeeks: 4, now: new Date(iso) }).effectiveWeek;
+      expect(at("2026-08-10T02:47:00Z")).toBe(2); // planning Aug 10–16
+      expect(at("2026-08-16T23:00:00Z")).toBe(3); // planning Aug 17–23
+      expect(at("2026-08-23T23:00:00Z")).toBe(4); // planning race week
+    });
+
+    it("self-corrects a stored week that drifted, in either direction", () => {
+      expect(buildPeriodization("weekly_recap", 1, RACE, 20, { totalWeeks: 4, now: sundayEvening }).effectiveWeek).toBe(2);
+      expect(buildPeriodization("weekly_recap", 9, RACE, 20, { totalWeeks: 4, now: sundayEvening }).effectiveWeek).toBe(2);
+    });
+
+    it("never runs off either end of the plan", () => {
+      const farOut = buildPeriodization("weekly_recap", 1, "2027-01-01", 20, { totalWeeks: 4, now: sundayEvening });
+      expect(farOut.effectiveWeek).toBe(1);
+      const raceWeek = buildPeriodization("weekly_recap", 1, "2026-08-12", 20, { totalWeeks: 4, now: sundayEvening });
+      expect(raceWeek.effectiveWeek).toBe(4);
+    });
+
+    it("falls back to incrementing once the race has passed", () => {
+      const p = buildPeriodization("weekly_recap", 3, "2026-08-01", 20, { totalWeeks: 4, now: sundayEvening });
+      expect(p.effectiveWeek).toBe(4);
+    });
   });
 
   it("uses stored week as-is for other triggers", () => {
