@@ -5236,6 +5236,11 @@ OUTPUT CONTRACT:
                   // Mid-week: what's left of the week is exactly what they asked to change.
                   avgWeeklyMileage: null,
                   ranToday: hasRunLoggedToday,
+                  rehab: {
+                    routineKey: computeWeeklyStrength(profile).routineKey,
+                    severity: (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null,
+                    activeInjury: !!(profile?.active_injury),
+                  },
                 });
                 if (refreshed) {
                   await sendScheduleWithRoutine({

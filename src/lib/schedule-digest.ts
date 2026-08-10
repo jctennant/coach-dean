@@ -27,6 +27,8 @@
  */
 
 import { computeArcWeekSkeleton, formatWeeklyPlanDigest } from "@/lib/training-plan";
+import { parseStoredSessionDate } from "@/lib/session-mileage";
+import { getRoutine } from "@/lib/strength-library";
 import type { QualityPolicy } from "@/lib/week-mode";
 
 export type SchedulePlanWeek = {
@@ -48,17 +50,7 @@ export interface ScheduleDigest {
 }
 
 const ORDERED_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
-const DAY_INDEX: Record<string, number> = {
-  mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6,
-};
-
-/** Minimum days left in the current week for a "rest of this week" schedule to be worth sending. */
-const MIN_DAYS_REMAINING = 3;
-
-function dayIndexOf(day: string): number | null {
-  const key = day.toLowerCase().trim().slice(0, 3);
-  return key in DAY_INDEX ? DAY_INDEX[key] : null;
-}
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function buildScheduleDigest(params: {
   weeks: SchedulePlanWeek[];
@@ -94,35 +86,56 @@ export function buildScheduleDigest(params: {
   const now = params.nowMs != null ? new Date(params.nowMs) : new Date();
   const localStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone || "America/New_York" }).format(now);
   const [ty, tm, td] = localStr.split("-").map(Number);
-  const dow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
+  const todayMs = Date.UTC(ty, tm - 1, td);
+  const dow = new Date(todayMs).getUTCDay(); // 0=Sun
   const todayIndex = dow === 0 ? 6 : dow - 1; // Mon=0 … Sun=6
-  const daysRemaining = 7 - todayIndex; // includes today
+  const endOfThisWeekMs = todayMs + (6 - todayIndex) * DAY_MS;
 
   const budgetMet =
     weekMileageSoFar > 0 && avgWeeklyMileage != null && avgWeeklyMileage > 0 &&
     weekMileageSoFar >= avgWeeklyMileage * 0.75;
 
-  // Current week first, from what's actually stored.
-  if (!params.preferNextWeek && daysRemaining >= MIN_DAYS_REMAINING && !budgetMet && persistedSessions?.length) {
-    const firstIndex = ranToday ? todayIndex + 1 : todayIndex;
-    const lines = persistedSessions
-      .map((s) => ({ ...s, idx: dayIndexOf(s.day) }))
-      .filter((s): s is PersistedSession & { idx: number } => s.idx != null && s.idx >= firstIndex)
-      .sort((a, b) => a.idx - b.idx)
-      .map((s) => `${ORDERED_DAYS[s.idx]} ${s.date} — ${s.label}`);
-    if (lines.length > 0) {
-      const withRehab = persistedSessions.filter((p) => p.rehab_routine_key);
+  // Whatever is stored wins, whenever it still has days ahead of it.
+  //
+  // Selection used to hinge on how many days were left in the calendar week, which broke on
+  // Sunday evening — the one moment the stored week is ALREADY next week's. With one day
+  // "remaining" it fell through to recomputing from the arc, which threw away the athlete's
+  // just-applied session swaps and rendered week N+1's mileage against next week's dates.
+  // Jake asked to move bike to Monday and elliptical to Tuesday, both of which were stored
+  // correctly, and got back a schedule showing neither (2026-08-10). Reading the dates the
+  // sessions actually carry answers "is there anything left to show?" directly.
+  if (!params.preferNextWeek && !budgetMet && persistedSessions?.length) {
+    const earliestMs = ranToday ? todayMs + DAY_MS : todayMs;
+    const upcoming = persistedSessions
+      .map((s) => ({ session: s, date: parseStoredSessionDate(s.date, now.getTime()) }))
+      .filter((x): x is { session: PersistedSession; date: Date } => x.date != null)
+      .filter((x) => x.date.getTime() >= earliestMs)
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    if (upcoming.length > 0) {
+      const lines = upcoming.map(({ session, date }) => {
+        // Day label comes from the date itself, so a stored day/date pair that drifted apart
+        // can't render a weekday that contradicts its own date.
+        const day = ORDERED_DAYS[(date.getUTCDay() + 6) % 7];
+        // Stored labels carry the session only; the rehab routine rides in its own column, so
+        // append it here exactly as formatWeeklyPlanDigest does for the computed path — the two
+        // paths otherwise describe the same day differently depending on which one rendered it.
+        const routine = session.rehab_routine_key ? getRoutine(session.rehab_routine_key) : null;
+        const alreadyNamed = routine && session.label.toLowerCase().includes(routine.shortLabel.toLowerCase());
+        const suffix = routine && !alreadyNamed ? ` + ${routine.shortLabel} routine` : "";
+        return `${day} ${session.date} — ${session.label}${suffix}`;
+      });
+      const startsAfterThisWeek = upcoming[0].date.getTime() > endOfThisWeekMs;
+      const heading = startsAfterThisWeek
+        ? `Next week (${rangeFromDates(upcoming[0].date, upcoming[upcoming.length - 1].date)}):`
+        : "Rest of this week:";
+      const withRehab = upcoming.filter((x) => x.session.rehab_routine_key);
       return {
-        text: `Rest of this week:\n${lines.join("\n")}`,
-        rehabRoutineKey: withRehab[0]?.rehab_routine_key ?? null,
-        rehabDays: withRehab
-          .map((p) => ({ p, idx: dayIndexOf(p.day) }))
-          .filter((x): x is { p: PersistedSession; idx: number } => x.idx != null && x.idx >= firstIndex)
-          .sort((a, b) => a.idx - b.idx)
-          .map((x) => ORDERED_DAYS[x.idx]),
+        text: `${heading}\n${lines.join("\n")}`,
+        rehabRoutineKey: withRehab[0]?.session.rehab_routine_key ?? null,
+        rehabDays: withRehab.map((x) => ORDERED_DAYS[(x.date.getUTCDay() + 6) % 7]),
       };
     }
-    // Nothing left to run this week — fall through to next week rather than send nothing.
   }
 
   if (!weeks.length || trainingDays.length === 0) return null;
@@ -151,6 +164,15 @@ export function buildScheduleDigest(params: {
     rehabRoutineKey: rehabSlots[0]?.rehab?.routineKey ?? null,
     rehabDays: rehabSlots.map((slot) => slot.day),
   };
+}
+
+/** "Aug 10–16" from the first and last dates actually being shown. */
+function rangeFromDates(first: Date, last: Date): string {
+  const start = first.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const end = last.getUTCMonth() === first.getUTCMonth()
+    ? String(last.getUTCDate())
+    : last.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return `${start}–${end}`;
 }
 
 /** "Aug 10–16" for the Mon–Sun week after the one containing the given local date. */

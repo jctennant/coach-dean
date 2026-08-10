@@ -8,6 +8,24 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-10 — A schedule sent after a swap showed neither the swap nor the right week
+
+**Type:** Bug Fix
+**Reported by:** Jake (live)
+**User feedback:** "not sure if this was clear that I'm still biking on Monday...and Elliptical on tuesday.."
+
+Jake asked to move bike to Monday and elliptical to Tuesday before a London trip. Dean confirmed it, and the schedule that followed showed neither — Monday read "Easy 2mi + 3×20sec strides", Tuesday "Strength + mobility", with bike and elliptical still parked on Friday and Sunday.
+
+**Root cause:** the swaps were applied and stored correctly — `weekly_plan_sessions` held "Easy run (treadmill) 2mi + bike" on Monday and "Elliptical 30 min + strength" on Tuesday. The *rendering* threw them away. `buildScheduleDigest` chose between "the stored week" and "recompute next week from the arc" using how many days were left in the calendar week, and on Sunday evening — the one moment the stored week is already next week's — one day "remaining" sent it down the recompute path. That discarded the swaps and rendered arc week N+1's numbers (a 3.5mi long run) against next week's dates.
+
+**Fix / Change:** selection is driven by the dates the stored sessions carry, not by a day count. If anything stored is still ahead of the athlete, that's what renders — stored plan wins, which is the same principle as stripping Dean's free-handed day lists. The heading comes from the dates being shown ("Next week (Aug 10–15)"), and the weekday label is derived from each session's own date, so a stored day/date pair that drifted apart can't render a weekday contradicting its date. The `MIN_DAYS_REMAINING` heuristic is gone; the budget-met check that onboarding relies on stays.
+
+**Two gaps this exposed, also fixed:** stored session lines didn't name the rehab routine (it lives in its own column, so the computed and stored paths described the same day differently), and the post-swap refresh didn't pass rehab context at all — which is why Tuesday came back as a bare "Strength + mobility".
+
+**Files changed:** `src/lib/schedule-digest.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/schedule-digest.test.ts`
+
+---
+
 ## 2026-08-10 — Every weekly recap aged the plan by a week, whether or not a week had passed
 
 **Type:** Bug Fix

@@ -69,16 +69,14 @@ describe("buildScheduleDigest", () => {
       expect(out).toContain("Long run 8mi"); // week 2's, not week 1's
     });
 
-    it("shows next week when too few days remain", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: SAT })!.text;
-      expect(out).toContain("Next week (Aug 10–16):");
-      expect(out).toContain("Mon 8/10");
-      expect(out).toContain("Sat 8/15");
-    });
-
     it("shows next week when nothing is left in the persisted current week", () => {
       const spent = [{ day: "Mon", date: "8/3", label: "Easy 4mi" }];
       const out = buildScheduleDigest({ ...base, nowMs: TUE, weekMileageSoFar: 4, persistedSessions: spent })!.text;
+      expect(out).toContain("Next week (Aug 10–16):");
+    });
+
+    it("shows next week when no sessions were persisted at all", () => {
+      const out = buildScheduleDigest({ ...base, nowMs: TUE, persistedSessions: null })!.text;
       expect(out).toContain("Next week (Aug 10–16):");
     });
 
@@ -88,30 +86,71 @@ describe("buildScheduleDigest", () => {
       expect(out).not.toContain("Rest of this week");
     });
 
-    it("shows next week when no sessions were persisted at all", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: TUE, persistedSessions: null })!.text;
-      expect(out).toContain("Next week (Aug 10–16):");
-    });
-
     it("renders distances in km for metric athletes", () => {
-      const out = buildScheduleDigest({ ...base, nowMs: SAT, isMetric: true })!.text;
+      const out = buildScheduleDigest({ ...base, nowMs: SAT, persistedSessions: null, isMetric: true })!.text;
       expect(out).toContain("Long run 12.9km");
       // key_workout text keeps whatever units it was generated in — see arcWeekSlotLabel.
       expect(out).toContain("Fartlek 6mi");
     });
 
     it("returns null when next week isn't in the plan", () => {
-      expect(buildScheduleDigest({ ...base, nowMs: SAT, weeks: [weeks[0]] })).toBeNull();
-      expect(buildScheduleDigest({ ...base, nowMs: SAT, weeks: [] })).toBeNull();
+      expect(buildScheduleDigest({ ...base, nowMs: SAT, persistedSessions: null, weeks: [weeks[0]] })).toBeNull();
+      expect(buildScheduleDigest({ ...base, nowMs: SAT, persistedSessions: null, weeks: [] })).toBeNull();
     });
 
     it("returns null when the athlete has no training days set", () => {
-      expect(buildScheduleDigest({ ...base, nowMs: SAT, trainingDays: [] })).toBeNull();
+      expect(buildScheduleDigest({ ...base, nowMs: SAT, persistedSessions: null, trainingDays: [] })).toBeNull();
+    });
+  });
+
+  describe("Sunday evening, when the stored week is already next week's", () => {
+    // The recap runs Sunday evening and stores the UPCOMING week, so on Sunday the stored
+    // sessions are dated Mon–Sun of the week ahead. Deciding by "days left in the calendar
+    // week" sent this case to the arc instead, which discarded the athlete's just-applied
+    // swaps and rendered week N+1's numbers against next week's dates (2026-08-10).
+    const SUN = Date.UTC(2026, 7, 9, 20, 0, 0); // Sunday Aug 9, 2pm MDT
+    const nextWeek: PersistedSession[] = [
+      { day: "Mon", date: "8/10", label: "Easy run (treadmill) 2mi + bike", rehab_routine_key: "shin" },
+      { day: "Tue", date: "8/11", label: "Elliptical 30 min + strength", rehab_routine_key: "shin" },
+      { day: "Sat", date: "8/15", label: "Long run 7mi" },
+    ];
+
+    it("renders the stored week rather than recomputing it from the arc", () => {
+      const out = buildScheduleDigest({ ...base, nowMs: SUN, persistedSessions: nextWeek })!;
+      expect(out.text).toContain("Easy run (treadmill) 2mi + bike");
+      expect(out.text).toContain("Elliptical 30 min + strength");
+      expect(out.text).toContain("Long run 7mi");
+    });
+
+    it("names the rehab routine on stored lines, same as the computed path", () => {
+      const out = buildScheduleDigest({ ...base, nowMs: SUN, persistedSessions: nextWeek })!;
+      expect(out.text).toContain("Easy run (treadmill) 2mi + bike + shin routine");
+      // Saturday has no rehab stored — no suffix invented for it.
+      expect(out.text).toContain("Sat 8/15 — Long run 7mi");
+      expect(out.rehabRoutineKey).toBe("shin");
+      expect(out.rehabDays).toEqual(["Mon", "Tue"]);
+    });
+
+    it("does not repeat the routine when the stored label already names it", () => {
+      const named = [{ day: "Tue", date: "8/11", label: "Shin routine", rehab_routine_key: "shin" }];
+      const out = buildScheduleDigest({ ...base, nowMs: SUN, persistedSessions: named })!;
+      expect(out.text).toBe("Next week (Aug 11–11):\nTue 8/11 — Shin routine");
+    });
+
+    it("labels it as next week, from the dates being shown", () => {
+      const out = buildScheduleDigest({ ...base, nowMs: SUN, persistedSessions: nextWeek })!;
+      expect(out.text).toContain("Next week (Aug 10–15):");
+    });
+
+    it("derives the weekday from the date, so a drifted day label can't contradict it", () => {
+      const drifted = [{ day: "Fri", date: "8/10", label: "Easy 3mi" }];
+      const out = buildScheduleDigest({ ...base, nowMs: SUN, persistedSessions: drifted })!;
+      expect(out.text).toContain("Mon 8/10 — Easy 3mi");
     });
   });
 
   it("lists one line per session with day, date and label", () => {
-    const out = buildScheduleDigest({ ...base, nowMs: SAT })!.text;
+    const out = buildScheduleDigest({ ...base, nowMs: SAT, persistedSessions: null })!.text;
     const lines = out.split("\n").slice(1);
     expect(lines.length).toBeGreaterThanOrEqual(4);
     for (const line of lines) expect(line).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d+\/\d+ — .+/);
