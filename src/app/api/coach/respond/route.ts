@@ -2516,6 +2516,20 @@ Apply this to bias which metric lens you pick and what advice you give proactive
     isAnalystMode,
   });
   const injuryBodyPartForWeek = (profile?.injury_body_part as string | null) ?? null;
+  // The Sunday recap plans the week that STARTS TOMORROW, but computeArcWeekSkeleton dates
+  // from the current local week's Monday — so on Sunday evening (when the cron actually runs,
+  // Mon 01:00 UTC) it dated the upcoming week to the week that was just ending. The card Jake
+  // received on Aug 9 read "MON 8/3 … SUN 8/9" for a week that hadn't happened yet, and
+  // syncWeekFromArc persisted those same stale dates into weekly_plan_sessions for the whole
+  // following week (2026-08-09).
+  const recapWeekOffsetDays = (() => {
+    const localDow = new Date(
+      `${new Intl.DateTimeFormat("en-CA", { timeZone: userTimezone }).format(new Date())}T12:00:00Z`
+    ).getUTCDay(); // 0=Sun, 1=Mon
+    // Monday: the current week already IS the week being planned. Any other day: next Monday.
+    return localDow === 1 ? 0 : 7;
+  })();
+
   if (trigger === "weekly_recap" && storedPlanWeek && weekMode.mode === "arc") {
     const trainingDaysForSkeleton = (profile?.training_days as string[] | null) ?? [];
     const crosstrainingToolsForSkeleton = (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [];
@@ -2529,6 +2543,7 @@ Apply this to bias which metric lens you pick and what advice you give proactive
       strengthDay: strengthForSkeleton.day,
       crosstrainingTools: crosstrainingToolsForSkeleton,
       timezone: userTimezone,
+      weekOffsetDays: recapWeekOffsetDays,
       injuryBodyPart: injuryBodyPartForWeek,
       qualityPolicy: weekMode.qualityPolicy,
       rehab: {
@@ -2565,6 +2580,7 @@ Apply this to bias which metric lens you pick and what advice you give proactive
       bodyPart: (profile?.injury_body_part as string | null) ?? null,
       strengthDay: strengthForRecovery.day,
       timezone: userTimezone,
+      weekOffsetDays: recapWeekOffsetDays,
     });
     recoveryWeekSkeleton = skeleton.length > 0 ? skeleton : null;
   }
@@ -2778,11 +2794,32 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     const plannedCompletedMiles = pastSessions.reduce((sum, s) => sum + parseSessionMiles(s.label), 0);
     // Need meaningful planned data to compare against
     if (plannedCompletedMiles < 2) return null;
-    const overPlanPct = (weekMileageSoFar - plannedCompletedMiles) / plannedCompletedMiles;
+
+    // Compare like for like. weekMileageSoFar covers the whole Mon–Sun week, but a plan created
+    // mid-week only covers the days from its first session onward — so every mile run before the
+    // plan existed counted as "over plan". An athlete who onboarded on Saturday was told he'd
+    // "been going longer than the plan all week" on Sunday, about a plan one day old
+    // (2026-08-09). Only miles inside the planned window can deviate from the plan.
+    const planStartUTC = pastSessions
+      .map(s => {
+        const [m, d] = (s.date ?? "").split("/").map(Number);
+        return new Date(Date.UTC(ty, m - 1, d)).getTime();
+      })
+      .sort((a, b) => a - b)[0];
+    const runsInPlanWindow = recentActivities.filter(a => {
+      if (!RUN_TYPES.has(a.activity_type)) return false;
+      const dateStr = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(a.start_date));
+      const [ay, am, ad] = dateStr.split("-").map(Number);
+      const runUTC = Date.UTC(ay, am - 1, ad);
+      return runUTC >= planStartUTC && runUTC < localTodayUTC.getTime();
+    });
+    const actualMilesInWindow = runsInPlanWindow.reduce((sum, a) => sum + (a.distance_meters || 0) / 1609.34, 0);
+
+    const overPlanPct = (actualMilesInWindow - plannedCompletedMiles) / plannedCompletedMiles;
     // Only flag when athlete has run ≥30% more than planned across ≥3 runs — a pattern, not a one-off
-    if (overPlanPct > 0.30 && weekRunCount >= 3) {
-      const extraMiles = (weekMileageSoFar - plannedCompletedMiles).toFixed(1);
-      return `PLAN DEVIATION PATTERN: The athlete has logged ${weekMileageSoFar.toFixed(1)}mi this week but only ${plannedCompletedMiles.toFixed(1)}mi was planned for the sessions completed so far — that's ${extraMiles}mi (${Math.round(overPlanPct * 100)}%) over plan across ${weekRunCount} runs. This is a pattern, not a single over-effort. A good coach addresses this directly but without criticism. Include one honest question about it in your response: e.g. "You've been going longer than the plan all week — is the plan too conservative for where you are right now, or is something else driving it?" Then offer to recalibrate the plan upward if they want. Do not skip this — consistent overtraining without acknowledgment is how injuries happen.`;
+    if (overPlanPct > 0.30 && runsInPlanWindow.length >= 3) {
+      const extraMiles = (actualMilesInWindow - plannedCompletedMiles).toFixed(1);
+      return `PLAN DEVIATION PATTERN: The athlete has logged ${actualMilesInWindow.toFixed(1)}mi against this plan but only ${plannedCompletedMiles.toFixed(1)}mi was planned for the sessions completed so far — that's ${extraMiles}mi (${Math.round(overPlanPct * 100)}%) over plan across ${runsInPlanWindow.length} runs. This is a pattern, not a single over-effort. A good coach addresses this directly but without criticism. Include one honest question about it in your response: e.g. "You've been going longer than the plan all week — is the plan too conservative for where you are right now, or is something else driving it?" Then offer to recalibrate the plan upward if they want. Do not skip this — consistent overtraining without acknowledgment is how injuries happen.`;
     }
     return null;
   })();
@@ -4370,8 +4407,9 @@ OUTPUT CONTRACT:
     trigger === "initial_plan" ||
     trigger === "weekly_recap" ||
     (trigger === "user_message" &&
-      classifiedIntent.intent === "plan_question" &&
-      !planMutationInFlight &&
+      // A session swap also ends with a schedule — sent from after(), once the swap has landed.
+      (classifiedIntent.intent === "plan_question" || tagSessionSwaps.length > 0) &&
+      !(planMutationInFlight && tagSessionSwaps.length === 0) &&
       !(state?.injury_hold_since as string | null) &&
       !isComplementMode &&
       !isAnalystMode &&
@@ -4500,10 +4538,9 @@ OUTPUT CONTRACT:
   // Claude's own prose free of a day-by-day list. This can't drift from what the schema-
   // validated slot_annotations already committed to, since no model call produces it (see
   // 2026-04-16 changelog on why day-by-day schedules generated freeform were unreliable).
-  // Not sent as a text bubble by default — the schedule-card MMS image below (built from
-  // this exact same data) is the athlete's primary view now. Kept only as the fallback text
-  // sent if that image send fails, so a schedule always reaches the athlete one way or another.
-  const scheduleDigestFallback = trigger === "weekly_recap" && arcWeekSkeleton
+  // This is what the athlete actually receives — the MMS card was the primary view for a
+  // while and is currently switched off (see the weekly schedule send below).
+  const weeklyScheduleText = trigger === "weekly_recap" && arcWeekSkeleton
     ? formatWeeklyPlanDigest(arcWeekSkeleton, arcSlotAnnotations, isMetricUser)
     : trigger === "weekly_recap" && recoveryWeekSkeleton
     ? formatRecoveryWeekDigest(recoveryWeekSkeleton, recoverySlotAnnotations, recoveryProbe)
@@ -4697,67 +4734,33 @@ OUTPUT CONTRACT:
     }
   }
 
-  // Weekly schedule card (MMS): renders the same deterministic skeleton/annotations that
-  // would have built the text digest bubble into a PNG via /api/coach/schedule-card and
-  // sends it as an image — this is now the athlete's primary view of the week's schedule,
-  // not a supplement to a text list (that was redundant: two views of the same thing).
-  // Best-effort, same pattern as the strength-poster images above — a failure here must
-  // never break the rest of the coaching flow, and falls back to the plain-text digest
-  // (built above but not sent by default) so the athlete isn't left with no schedule at all.
-  if (trigger === "weekly_recap" && !dry_run && (arcWeekSkeleton || recoveryWeekSkeleton)) {
+  // Weekly schedule: sent as text, not the MMS card. The card renders the same deterministic
+  // skeleton, but it arrived instead of a readable message and its per-row detail lines come
+  // from Claude's slot_annotations, which contradicted the deterministic labels in a real
+  // recap ("Bike" captioned "Swim or elliptical", the shin routine captioned "Hip & core
+  // strength work"). Text has no such second source (2026-08-09, Jake: "he sent me the image
+  // card for my plan instead of the message. Maybe we keep the message for now"). The card
+  // builders stay wired and tested for when it comes back.
+  if (trigger === "weekly_recap" && weeklyScheduleText) {
     try {
-      const envUrl = process.env.NEXT_PUBLIC_APP_URL;
-      const appUrl = envUrl?.startsWith("https://") ? envUrl : "https://coachdean.ai";
-      const weekLabelText = storedPlanWeek && storedPlanAllWeeks.length > 0
-        ? `WEEK ${storedPlanWeek.week_number} OF ${storedPlanAllWeeks.length}`
-        : `WEEK ${(state?.current_week as number | null) ?? periodization.effectiveWeek ?? 1}`;
-      const injuryBodyPartForCard = (profile?.injury_body_part as string | null) ?? null;
-      const cardPayload = arcWeekSkeleton
-        ? buildRegularCardPayload({
-            weekLabel: weekLabelText,
-            skeleton: arcWeekSkeleton,
-            annotations: arcSlotAnnotations,
-            isMetric: isMetricUser,
-          })
-        : buildRecoveryCardPayload({
-            weekLabel: weekLabelText,
-            skeleton: recoveryWeekSkeleton!,
-            annotations: recoverySlotAnnotations,
-            probe: recoveryProbe,
-            shinRoutineNote: injuryBodyPartForCard
-              ? `${capitalizeBodyPartForCard(injuryBodyPartForCard)} routine 3-5x this week — that's what rebuilds tolerance`
-              : undefined,
-          });
-      const cardUrl = `${appUrl}/api/coach/schedule-card?data=${encodeCardPayload(cardPayload)}`;
-      const activeChatIdForCard = chatId ?? learnedChatId;
-      if (activeChatIdForCard) await startTyping(activeChatIdForCard);
-      await new Promise((r) => setTimeout(r, 1200));
-      await sendMediaSMS(user.phone_number, "", cardUrl, "image/png");
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: "[Sent weekly schedule card image]",
-        message_type: msgType,
-        strava_activity_id: activityId || null,
+      const rehabDaysForRecap = (arcWeekSkeleton ?? []).filter(slot => slot.rehab);
+      await sendScheduleWithRoutine({
+        schedule: {
+          text: weeklyScheduleText,
+          rehabRoutineKey: rehabDaysForRecap[0]?.rehab?.routineKey ?? null,
+          rehabDays: rehabDaysForRecap.map(slot => slot.day),
+        },
+        phoneNumber: user.phone_number as string,
+        userId,
+        chatId: chatId ?? learnedChatId,
+        dryRun: !!dry_run,
+        activeInjury: !!(profile?.active_injury),
+        messageType: msgType,
+        event: "weekly_schedule_sent",
+        eventProps: { trigger, kind: arcWeekSkeleton ? "regular" : "recovery" },
       });
-      void trackEvent(userId, "schedule_card_sent", { trigger, kind: arcWeekSkeleton ? "regular" : "recovery" });
-    } catch (cardErr) {
-      console.error(`[coach/respond] schedule card send failed userId=${userId}:`, cardErr);
-      void trackEvent(userId, "schedule_card_send_failed", { trigger, error: String(cardErr) });
-      if (scheduleDigestFallback) {
-        try {
-          await sendSMS(user.phone_number, scheduleDigestFallback);
-          await insertConversation({
-            user_id: userId,
-            role: "assistant",
-            content: scheduleDigestFallback,
-            message_type: msgType,
-            strava_activity_id: activityId || null,
-          });
-        } catch (fallbackErr) {
-          console.error(`[coach/respond] schedule digest fallback send failed userId=${userId}:`, fallbackErr);
-        }
-      }
+    } catch (scheduleErr) {
+      console.error(`[coach/respond] weekly schedule send failed userId=${userId}:`, scheduleErr);
     }
   }
 
@@ -5029,7 +5032,7 @@ OUTPUT CONTRACT:
             console.log(`[weekly_recap] synced uploaded plan week ${periodization.effectiveWeek} to training_state`);
           } else {
             // Advance simplified week-level plan state from the training arc.
-            await syncWeekFromArc(userId, periodization.effectiveWeek, userTimezone);
+            await syncWeekFromArc(userId, periodization.effectiveWeek, userTimezone, { weekOffsetDays: recapWeekOffsetDays });
             console.log(`[weekly_recap] synced arc week ${periodization.effectiveWeek} to training_state`);
           }
         }
@@ -5211,6 +5214,43 @@ OUTPUT CONTRACT:
               if (totalMiles != null) {
                 console.log(`[coach/respond] SESSION_SWAP: recomputed week totals — ${totalMiles}mi, long run ${longRunMiles}mi`);
                 void trackEvent(userId, "session_swap_totals_recomputed", { total_miles: totalMiles, long_run_miles: longRunMiles });
+              }
+
+              // Send the updated schedule now that the swap has actually landed. The inline
+              // path can't do this — the swap applies here, in after(), so anything rendered
+              // during the response would show the pre-change week — which left Dean's own
+              // prose as the only summary of a changed week, free to disagree with what got
+              // stored (2026-08-09: he listed rehab on 3 days when the stored week had 5).
+              try {
+                const refreshed = buildScheduleDigest({
+                  weeks: storedPlanAllWeeks as unknown as SchedulePlanWeek[],
+                  currentWeekNumber: periodization.effectiveWeek,
+                  persistedSessions: sessions as PersistedSession[],
+                  trainingDays: (profile?.training_days as string[] | null) ?? [],
+                  strengthDay: computeWeeklyStrength(profile).day,
+                  crosstrainingTools: (profile?.crosstraining_tools as string[] | null)?.filter(Boolean) ?? [],
+                  timezone: userTimezone,
+                  isMetric: isMetricUser,
+                  weekMileageSoFar,
+                  // Mid-week: what's left of the week is exactly what they asked to change.
+                  avgWeeklyMileage: null,
+                  ranToday: hasRunLoggedToday,
+                });
+                if (refreshed) {
+                  await sendScheduleWithRoutine({
+                    schedule: refreshed,
+                    phoneNumber: user.phone_number as string,
+                    userId,
+                    chatId: chatId ?? learnedChatId,
+                    dryRun: !!dry_run,
+                    activeInjury: !!(profile?.active_injury),
+                    messageType: "coach_response",
+                    event: "session_swap_schedule_sent",
+                    eventProps: { swaps: tagSessionSwaps.length },
+                  });
+                }
+              } catch (refreshErr) {
+                console.error("[coach/respond] post-swap schedule send failed:", refreshErr);
               }
             }
           } catch (err) {

@@ -2295,3 +2295,106 @@ describe("coach/respond — plan question schedule", () => {
     expect(routine).toContain("Toe taps on a stair");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Plan deviation — only miles the plan actually covered can deviate from it
+// ---------------------------------------------------------------------------
+describe("coach/respond — plan deviation window", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  function setupRecap(opts: { sessions: Array<Record<string, unknown>>; activities: Array<Record<string, unknown>> }) {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: { message: "Recap." } }],
+    });
+    const stateChain = makeChain({ data: baseState({ weekly_plan_sessions: opts.sessions }), error: null });
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return makeChain({ data: baseProfile({ training_days: ["monday", "wednesday", "thursday", "saturday"] }), error: null });
+      if (table === "training_state") return stateChain;
+      if (table === "activities") return makeChain({ data: opts.activities, error: null });
+      return makeChain({ data: null, error: null });
+    });
+  }
+
+  const run = (date: string, miles: number) => ({
+    activity_type: "Run", distance_meters: miles * 1609.34, start_date: `${date}T13:00:00Z`,
+    moving_time_seconds: miles * 540, average_heartrate: 150, source: "strava",
+  });
+
+  it("does not accuse an athlete of overrunning a plan that didn't exist yet", async () => {
+    // Onboarded Saturday: the plan covers 8/8 onward, but the week's runs start 8/4. Those
+    // earlier miles used to count as "over plan" and produced "you've been going longer than
+    // the plan all week" about a one-day-old plan.
+    setupRecap({
+      sessions: [{ day: "Sat", date: "8/8", label: "Long run 6.5mi", type: "run" }],
+      activities: [run("2026-08-04", 4), run("2026-08-05", 6.6), run("2026-08-06", 5.4), run("2026-08-08", 4.2)],
+    });
+    await POST(mockRequest({ userId: "user-001", trigger: "weekly_recap" }));
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const prompt = calls.map((c: [{ system?: unknown; messages?: Array<{ content?: unknown }> }]) =>
+      systemText(c[0].system) + String(c[0].messages?.[0]?.content ?? "")).join("\n");
+    expect(prompt).not.toContain("PLAN DEVIATION PATTERN");
+  });
+
+  it("still flags a real pattern of running past the plan", async () => {
+    setupRecap({
+      sessions: [
+        { day: "Mon", date: "8/3", label: "Easy 3mi", type: "run" },
+        { day: "Wed", date: "8/5", label: "Easy 3mi", type: "run" },
+        { day: "Thu", date: "8/6", label: "Easy 3mi", type: "run" },
+      ],
+      activities: [run("2026-08-03", 6), run("2026-08-05", 7), run("2026-08-06", 6.5)],
+    });
+    await POST(mockRequest({ userId: "user-001", trigger: "weekly_recap" }));
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const prompt = calls.map((c: [{ system?: unknown; messages?: Array<{ content?: unknown }> }]) =>
+      systemText(c[0].system) + String(c[0].messages?.[0]?.content ?? "")).join("\n");
+    expect(prompt).toContain("PLAN DEVIATION PATTERN");
+  });
+});
+
+describe("coach/respond — weekly recap schedule surface", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("sends the week as text, not as the MMS card", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: { message: "Solid week." } }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({
+        training_days: ["monday", "wednesday", "thursday", "saturday"],
+        injury_notes: "shin splints", injury_body_part: "shin", active_injury: true, injury_severity: "moderate",
+        crosstraining_tools: ["bike"],
+      }),
+      state: baseState(),
+      // Cover every plausible effectiveWeek so the recap always finds its week.
+      plan: { weeks: Array.from({ length: 12 }, (_, i) => ({
+        week_number: i + 1, mileage_target: 17, long_run_target: 7, key_workout: "Easy 2.5mi + 5x20sec strides",
+      })) },
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "weekly_recap" }));
+    await flush();
+
+    const { sendSMS, sendMediaSMS } = await import("@/lib/linq");
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string);
+    expect(sent.some((t: string) => /(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d+\/\d+ — /.test(t))).toBe(true);
+    expect((sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    // Rehab is on the day line, and the routine follows as its own message.
+    expect(sent.join("\n")).toContain("shin routine");
+    expect(sent.some((t: string) => t.includes("Want to see how any of these look?"))).toBe(true);
+  });
+});

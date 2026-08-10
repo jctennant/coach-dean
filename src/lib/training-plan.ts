@@ -1482,7 +1482,12 @@ export async function syncWeekFromUploadedPlan(
   return true;
 }
 
-export async function syncWeekFromArc(userId: string, weekNum: number, timezone = "America/New_York"): Promise<void> {
+export async function syncWeekFromArc(
+  userId: string,
+  weekNum: number,
+  timezone = "America/New_York",
+  opts: { weekOffsetDays?: number } = {}
+): Promise<void> {
   const { data: plan } = await supabase
     .from("training_plans")
     .select("weeks, plan_source")
@@ -1589,6 +1594,7 @@ export async function syncWeekFromArc(userId: string, weekNum: number, timezone 
               strengthDay: strength.day,
               crosstrainingTools,
               timezone,
+              weekOffsetDays: opts.weekOffsetDays ?? 0,
               injuryBodyPart: injuryBodyPartForSync,
               qualityPolicy: weekMode.qualityPolicy,
               rehab: {
@@ -1718,8 +1724,10 @@ export function computeRecoveryWeekSkeleton(params: {
   bodyPart: string | null; // training_profiles.injury_body_part
   strengthDay: string | null; // "Mon".."Sun", from computeWeeklyStrength()
   timezone: string;
+  /** Days to shift the Mon–Sun window — 7 when planning next week (see computeArcWeekSkeleton). */
+  weekOffsetDays?: number;
 }): RecoveryWeekSlot[] {
-  const { trainingDays, crosstrainingDays, crosstrainingTools, bodyPart, strengthDay, timezone } = params;
+  const { trainingDays, crosstrainingDays, crosstrainingTools, bodyPart, strengthDay, timezone, weekOffsetDays = 0 } = params;
 
   const dayOffset: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const tz = timezone || "America/New_York";
@@ -1727,7 +1735,7 @@ export function computeRecoveryWeekSkeleton(params: {
   const [ty, tm, td] = localStr.split("-").map(Number);
   const todayDow = new Date(Date.UTC(ty, tm - 1, td)).getUTCDay(); // 0=Sun
   const daysFromMonday = todayDow === 0 ? 6 : todayDow - 1;
-  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday));
+  const mondayUTC = new Date(Date.UTC(ty, tm - 1, td - daysFromMonday + weekOffsetDays));
   const dateFor = (abbrev: string) => {
     const offset = dayOffset[abbrev]!;
     const d = new Date(Date.UTC(

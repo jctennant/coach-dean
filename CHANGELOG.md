@@ -8,6 +8,26 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-09 — Sunday recap was dated a week behind, and flagged overtraining against a one-day-old plan
+
+**Type:** Bug Fix
+**Reported by:** Jake (live Sunday recap)
+**User feedback:** "Said I've been going longer than plan but we just started the plan recently. Also thinking - should we include the cross training in the schedule? … Also he sent me the image card for my plan instead of the message. Maybe we keep the message for now, just to keep it simple??"
+
+**Root cause 1 — the recap's schedule was dated to the week that just ended.** `computeArcWeekSkeleton` dates from the current local week's Monday, and the sunday-recap cron fires Mon 01:00 UTC — Sunday evening for the athlete. So the "next week" card read `MON 8/3 … SUN 8/9`, a week already over, and `syncWeekFromArc` persisted those same stale dates into `weekly_plan_sessions` for the whole following week. Every consumer that matches sessions by date — the reminders, the plan-deviation check, the skipped-session check — was reading a week-old schedule. Both skeletons take a `weekOffsetDays` now, and the recap passes 7 on any day except Monday (when the current week already is the week being planned).
+
+**Root cause 2 — plan deviation compared a whole week of running against a one-day-old plan.** `weekMileageSoFar` covers Mon–Sun, but a plan created mid-week only covers its own days. An athlete who onboarded Saturday had four runs from Tuesday onward measured against Saturday's single planned session and was told he'd "been going longer than the plan all week — 13.8 mi over". Now only runs inside the planned window count, and the ≥3-run threshold counts runs in that window too.
+
+**Root cause 3 — the card replaced the message.** The MMS schedule card was made the primary surface on 2026-07-??; it arrives instead of a readable text schedule. Its per-row detail also comes from Claude's `slot_annotations`, which contradicted the deterministic labels in this very recap: Friday's row read "Bike" captioned *"Swim or elliptical — aerobic base maintenance"*, and the shin routine was captioned *"Hip & core strength work — injury prevention focus"*. The recap now sends the text schedule (which has no second source to disagree with) followed by the routine. The card builders stay wired and tested for when it comes back.
+
+**Also in this change — post-swap schedule refresh.** A session swap applies in `after()`, so the inline path couldn't render the updated week and Dean's own prose was the only summary of a changed week — free to disagree with what got stored (he listed rehab on 3 days when the stored week had 5). The swap handler now sends the refreshed schedule once the swap has actually landed, and the day-list strip covers swap turns too.
+
+**On cross-training:** it was already in the schedule — Fri Bike / Sun Swim appear as their own rows, in both the text and the card. What made it look absent was Dean's prose naming different days than the stored plan, which the day-list strip now removes.
+
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/training-plan.ts`, plus tests in `training-plan.test.ts` and `coach-respond.test.ts`
+
+---
+
 ## 2026-08-09 — Two disagreeing schedules in one reply, and rehab sub-lines made the week unreadable
 
 **Type:** Bug Fix

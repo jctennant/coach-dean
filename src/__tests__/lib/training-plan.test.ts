@@ -1075,3 +1075,45 @@ describe("computeArcWeekSkeleton — rehab", () => {
     expect(formatWeeklyPlanDigest(build(), null, false).length).toBeLessThan(480);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Week offset — the Sunday recap plans the week that starts tomorrow
+// ---------------------------------------------------------------------------
+describe("computeArcWeekSkeleton — weekOffsetDays", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const params = {
+    trainingDays: ["monday", "wednesday", "thursday", "saturday"],
+    weeklyTotalMiles: 17,
+    longRunMiles: 7,
+    keyWorkoutText: "Easy 2.5mi + 5x20sec strides",
+    strengthDay: "Tue",
+    timezone: "UTC",
+  };
+
+  it("dates the coming week, not the one ending, when told to look ahead", () => {
+    // Sunday 2026-08-09 — when the recap cron actually fires (Mon 01:00 UTC). Without the
+    // offset the athlete's "next week" card read MON 8/3 … SUN 8/9, a week already over.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-09T23:00:00Z"));
+    const thisWeek = computeArcWeekSkeleton(params);
+    const nextWeek = computeArcWeekSkeleton({ ...params, weekOffsetDays: 7 });
+    expect(thisWeek.find(s => s.day === "Mon")!.date).toBe("8/3");
+    expect(nextWeek.find(s => s.day === "Mon")!.date).toBe("8/10");
+    expect(nextWeek.find(s => s.day === "Sun")!.date).toBe("8/16");
+  });
+
+  it("carries the offset through the recovery skeleton too", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-09T23:00:00Z"));
+    const slots = computeRecoveryWeekSkeleton({
+      trainingDays: params.trainingDays,
+      crosstrainingTools: ["bike"],
+      bodyPart: "shin",
+      strengthDay: "Tue",
+      timezone: "UTC",
+      weekOffsetDays: 7,
+    });
+    expect(slots.find(s => s.day === "Mon")!.date).toBe("8/10");
+  });
+});
