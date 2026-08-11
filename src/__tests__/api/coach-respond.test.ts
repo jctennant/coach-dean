@@ -2196,6 +2196,63 @@ describe("coach/respond — strength routine delivery", () => {
     expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
   });
 
+  it("sends the image when the athlete names an exercise outside a digest reply", async () => {
+    // The real failure (2026-08-11): Dean had named the exercises in prose, not a digest, so the
+    // ask fell through to coaching — the athlete got a written description followed by a digest
+    // closing with "Want to see how any of these look? Just ask.", the question they just asked.
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin", active_injury: true }),
+      state: baseState(),
+      conversations: [
+        { role: "assistant", content: "Bring the band and knock out a few of the exercises when you're able. Dorsiflexion, tib raises, and the calf stretch travel well.", created_at: "2026-08-09T10:00:00Z" },
+        { role: "user", content: "Pretty good at rest. Can you show me how the ankle alphabet goes?", created_at: "2026-08-09T10:01:00Z" },
+      ],
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const { sendSMS, sendMediaSMS } = await import("@/lib/linq");
+    const mediaCalls = (sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls;
+    expect(mediaCalls.length).toBe(1);
+    expect(mediaCalls[0][1]).toContain("Ankle alphabet");
+    // A lone illustration carries the form cue, since the image alone doesn't say it.
+    expect(mediaCalls[0][1]).toContain("trace each letter");
+    expect(mediaCalls[0][2]).toContain("/strength-exercises/ankle_alphabet.png");
+    // No digest re-inviting the question the athlete just asked.
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sentText).not.toContain("Want to see how any of these look?");
+    expect((anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it("illustrates rather than digests when Dean names exercises answering a 'show me'", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        message: "That one's a mobility drill — here's what it looks like.",
+        exercise_ids: ["ankle_alphabet"],
+      } }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin", active_injury: true }),
+      state: baseState(),
+      conversations: [
+        { role: "assistant", content: "Keep the routine going this week.", created_at: "2026-08-09T10:00:00Z" },
+        { role: "user", content: "show me the one where you draw with your foot", created_at: "2026-08-09T10:01:00Z" },
+      ],
+    });
+
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
+    await flush();
+
+    const { sendSMS, sendMediaSMS } = await import("@/lib/linq");
+    expect((sendMediaSMS as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    const sentText = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sentText).not.toContain("Want to see how any of these look?");
+  });
+
   it("leaves an unrelated reply to coaching, even right after a digest", async () => {
     (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
       stop_reason: "tool_use",

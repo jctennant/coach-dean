@@ -50,7 +50,7 @@ import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeek
 import { onboardingNudgeQuestion } from "@/lib/onboarding-pending";
 import { inferTrainingDaysFromActivities, deriveTrainingDaysFallback, type InferableActivity, type TrainingDaysFallback } from "@/lib/infer-training-days";
 import { composeStrengthRoutine, getRoutine, EXERCISES, exercisePosterUrl, hasExerciseImage, illustratedExerciseIds, routineExerciseIds } from "@/lib/strength-library";
-import { formatStrengthDigest, isStrengthDigest, exerciseIdsFromDigest, parseStrengthFollowUp } from "@/lib/strength-digest";
+import { formatStrengthDigest, isStrengthDigest, parseExerciseImageRequest, wantsExerciseImages } from "@/lib/strength-digest";
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
@@ -190,7 +190,8 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                   "Strength/rehab exercise IDs you specifically named in `message` this turn — whether the full " +
                   "prescribed routine or an adapted/lighter substitute (e.g. the athlete said an exercise hurt or " +
                   "was too hard). Only include IDs for exercises you actually described; omit entirely if you " +
-                  "didn't name any of these. The system texts an illustrated image for each one.",
+                  "didn't name any of these. The system texts the structured list for each one, or " +
+                  "the illustrations when the athlete asked to see the movement.",
                 items: { type: "string" as const, enum: illustratedIds },
               },
             }
@@ -1918,6 +1919,9 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
   const originalProfile = profile; // preserve for crosstraining merge in persistence
   // classifiedIntent is used below to route injury queries to a focused prompt
   let classifiedIntent: Awaited<ReturnType<typeof classifyIntent>> = { intent: "general", confidence: "low" };
+  // Set when this turn's inbound message asked to be shown a movement — read by the strength
+  // send path below to choose illustrations over the text digest.
+  let askedToSeeExercises = false;
 
   if (trigger === "user_message") {
     // Collect all user messages since the last assistant reply — the debounce can batch
@@ -1985,44 +1989,54 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
         // Fall through to normal coaching so it gets a real reply.
       }
 
-      // STRENGTH DIGEST FOLLOW-UP — deterministic, ahead of the classifier, same shape as the
-      // cadence offer above. The routine now goes out as one text bubble ending in "Want to see
-      // how any of these look? Just ask." — this is what answers that invitation with the
-      // illustrations. Pinning it to "the previous assistant message was that digest" is what
-      // makes a bare "yes" unambiguous, and reading the ids back out of the digest text is what
-      // makes it work for adapted routines too.
+      // EXERCISE ILLUSTRATION REQUEST — deterministic, ahead of the classifier, same shape as the
+      // cadence offer above. Two ways in (see parseExerciseImageRequest): naming a movement
+      // ("show me how the ankle alphabet goes") stands alone, while a bare "yes" only counts when
+      // the previous assistant message was the digest that invited one — that anchor is what
+      // makes it unambiguous, and reading the ids back out of the digest text is what makes it
+      // work for adapted routines too.
+      //
+      // This used to require the digest as the previous message for BOTH paths, which meant an
+      // athlete asking about an exercise Dean had just named in prose got a written description
+      // and then the digest bubble re-asking "want to see how any of these look?" — the exact
+      // question they had already asked (2026-08-11).
       const lastAssistantForStrength = [...recentMessages]
         .reverse()
         .find((m) => m.role === "assistant");
-      if (lastAssistantForStrength && isStrengthDigest(lastAssistantForStrength.content as string)) {
-        const digestText = lastAssistantForStrength.content as string;
-        const followUp = parseStrengthFollowUp(latestMsg.content, digestText);
-        if (followUp) {
-          const idsToSend = followUp.exerciseIds?.length
-            ? followUp.exerciseIds
-            : exerciseIdsFromDigest(digestText);
-          const strengthChatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
-          const sent = await sendExerciseImages({
-            phoneNumber: user.phone_number as string,
-            exerciseIds: idsToSend,
-            chatId: strengthChatId,
-            dryRun: !!dry_run,
+      const previousDigest =
+        lastAssistantForStrength && isStrengthDigest(lastAssistantForStrength.content as string)
+          ? (lastAssistantForStrength.content as string)
+          : null;
+      const imageRequest = parseExerciseImageRequest(latestMsg.content, { previousDigest });
+      if (imageRequest) {
+        const strengthChatId = requestChatId ?? (user.linq_chat_id as string | null) ?? null;
+        const sent = await sendExerciseImages({
+          phoneNumber: user.phone_number as string,
+          exerciseIds: imageRequest.exerciseIds,
+          chatId: strengthChatId,
+          dryRun: !!dry_run,
+        });
+        if (sent > 0) {
+          await insertConversation({
+            user_id: userId,
+            role: "assistant",
+            content: `[Sent strength exercise images: ${sent} exercise${sent === 1 ? "" : "s"}]`,
+            message_type: "coach_response",
           });
-          if (sent > 0) {
-            await insertConversation({
-              user_id: userId,
-              role: "assistant",
-              content: `[Sent strength exercise images: ${sent} exercise${sent === 1 ? "" : "s"}]`,
-              message_type: "coach_response",
-            });
-            void trackEvent(userId, "strength_images_sent", { exercise_count: sent, source: "digest_follow_up" });
-            return NextResponse.json({ ok: true, images_sent: sent, dry_run: !!dry_run });
-          }
-          // No art for anything requested — fall through to normal coaching rather than
-          // leaving the athlete with silence, which is what the old image-only path did.
-          console.warn(`[coach/respond] strength follow-up matched but no illustrations available userId=${userId}`);
+          void trackEvent(userId, "strength_images_sent", {
+            exercise_count: sent,
+            source: previousDigest ? "digest_follow_up" : "named_exercise",
+          });
+          return NextResponse.json({ ok: true, images_sent: sent, dry_run: !!dry_run });
         }
+        // No art for anything requested — fall through to normal coaching rather than
+        // leaving the athlete with silence, which is what the old image-only path did.
+        console.warn(`[coach/respond] exercise image request matched but no illustrations available userId=${userId}`);
       }
+      // Remembered for the send path below: when the athlete asked to SEE a movement and Dean
+      // still ends up naming exercises on deliver_message, they get the illustrations rather
+      // than a text digest that closes by inviting the question they just asked.
+      askedToSeeExercises = wantsExerciseImages(latestMsg.content);
 
       // Run profile extraction and intent classification in parallel — both are Haiku calls
       const injuryCtx = {
@@ -4687,7 +4701,35 @@ OUTPUT CONTRACT:
     : (wantsStrengthPoster && routineForPoster
         ? routineExerciseIds(strengthPosterRoutineKey!, { activeInjury: !!(profile?.active_injury) })
         : []);
-  if (exerciseIdsToSend.length > 0) {
+  // The athlete asked to be shown a movement and Dean answered by naming a small set of them:
+  // send the illustrations, not the digest. The digest closes with "Want to see how any of these
+  // look? Just ask." — sending it here answers a request to see an exercise by inviting the
+  // athlete to make that same request again. Only for a short set; a full 9-13 exercise routine
+  // is still too many media bubbles, so that keeps the digest.
+  const answerAskWithImages =
+    askedToSeeExercises && deliverExerciseIds.length > 0 && deliverExerciseIds.length <= 4;
+  if (answerAskWithImages) {
+    try {
+      const sent = await sendExerciseImages({
+        phoneNumber: user.phone_number as string,
+        exerciseIds: deliverExerciseIds,
+        chatId: chatId ?? learnedChatId,
+        dryRun: !!dry_run,
+      });
+      if (sent > 0) {
+        await insertConversation({
+          user_id: userId,
+          role: "assistant",
+          content: `[Sent strength exercise images: ${sent} exercise${sent === 1 ? "" : "s"}]`,
+          message_type: "coach_response",
+          strava_activity_id: activityId || null,
+        });
+        void trackEvent(userId, "strength_images_sent", { exercise_count: sent, source: "coach_named" });
+      }
+    } catch (imgErr) {
+      console.error(`[coach/respond] exercise image send failed userId=${userId}:`, imgErr);
+    }
+  } else if (exerciseIdsToSend.length > 0) {
     // Text first, images only on request. This used to send one MMS per exercise — 9 to 13
     // media bubbles over ~16 seconds — which buried the rest of the conversation, and had no
     // fallback at all when none of the exercises had art yet (the athlete got nothing).
@@ -9723,6 +9765,7 @@ async function sendExerciseImages(params: {
 }): Promise<number> {
   const envUrl = process.env.NEXT_PUBLIC_APP_URL;
   const appUrl = envUrl?.startsWith("https://") ? envUrl : "https://coachdean.ai";
+  const single = params.exerciseIds.filter(hasExerciseImage).length === 1;
   let sent = 0;
   for (const exerciseId of params.exerciseIds) {
     const ex = EXERCISES[exerciseId];
@@ -9733,9 +9776,14 @@ async function sendExerciseImages(params: {
       await new Promise((r) => setTimeout(r, 1200));
       // Numbered off the sent count, not the loop index — numbering off the unfiltered index
       // produced gaps (1, 2, 5, 7) whenever art was missing for an exercise in the middle.
+      // A single illustration isn't a numbered list, so it gets the form cue instead — that's
+      // usually the answer to "how do I do this?", and the image alone doesn't say it.
+      const caption = single
+        ? `${ex.name} — ${ex.specs}. ${ex.cue.charAt(0).toUpperCase()}${ex.cue.slice(1)}.`
+        : `${sent + 1}. ${ex.name} — ${ex.specs}`;
       await sendMediaSMS(
         params.phoneNumber,
-        `${sent + 1}. ${ex.name} — ${ex.specs}`,
+        caption,
         `${appUrl}${exercisePosterUrl(exerciseId)}`,
         "image/png"
       );

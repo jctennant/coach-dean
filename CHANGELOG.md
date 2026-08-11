@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-11 — Asking to see an exercise got a description and an invitation to ask again
+
+**Type:** Bug Fix
+**Reported by:** Jake (live)
+**User feedback:** "doesn't seem like it's doing a great job of sending the image when someone asks what an exercise looks like" — after asking "Can you show me how the ankle alphabet goes?", Dean replied with a written description, then a digest closing "Want to see how any of these look? Just ask."
+
+**Root cause:** two gates, both structural. (1) The deterministic image path fired only when the *immediately preceding assistant message* was a strength digest. Jake's ask came in an ordinary coaching turn — Dean had named the exercises in prose ("Dorsiflexion, tib raises, and the calf stretch travel well") — so the request never reached the image sender and fell through to Claude, which answered in words. (2) The send path then rendered the exercises Dean named on `deliver_message` as a *text digest*, which closes by inviting the athlete to ask to see them — the exact question just asked. The `deliver_message` tool description still promised "The system texts an illustrated image for each one", which had stopped being true when routine sends switched to digest-only. Art was not the blocker: all 53 catalog exercises, `ankle_alphabet` included, have committed illustrations.
+
+**Fix / Change:**
+- `parseExerciseImageRequest` (new, replaces `parseStrengthFollowUp` at the call site) splits the two ways in. Naming a movement stands on its own — no digest required, matched catalog-wide against exercise names plus a small alias map for real shorthand ("tib raises", "dorsiflexion", "clamshell"). A bare "yes"/"show me" still requires the previous message to be the digest that invited it, since without that anchor it's ambiguous. Leading-phrase matching ("toe taps" → "Toe taps on a stair") stays scoped to a digest's own list, where it's unambiguous; catalog-wide it isn't ("single leg" matches five exercises).
+- When the athlete asked to see a movement and Dean still answers by naming ≤4 exercise ids, the send path now sends the illustrations instead of the digest. A full 9–13 exercise routine still gets the digest — that many media bubbles is what the digest existed to fix.
+- A lone illustration now carries the form cue in its caption ("Ankle alphabet — draw A–Z, each foot. Slowly trace each letter with your foot, full range.") and drops the "1." numbering, which only makes sense for a set. That's usually the actual answer to "how do I do this?", and the image alone doesn't say it.
+- `deliver_message`'s `exercise_ids` description corrected to match what the system actually does.
+
+**Files changed:** `src/lib/strength-digest.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
 ## 2026-08-10 — A schedule sent after a swap showed neither the swap nor the right week
 
 **Type:** Bug Fix
