@@ -8,6 +8,22 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — Three test-suite failures traced to hardcoded calendar dates aging past "now"
+
+**Type:** Bug Fix (test infra)
+**Reported by:** Internal observation — `npm test` failures flagged during the prior-week-mileage/escalation commit, followed up per Jake's request.
+**Root cause:** Three unrelated tests hardcoded absolute calendar dates as fixture data instead of computing them relative to the real clock, and broke as real time caught up to those dates:
+- `infer-training-days.test.ts` built its activity fixtures from a fixed `NOW = 2026-08-02` reference via a local `daysAgo()` helper, but the function under test (`inferTrainingDaysFromActivities`) filters its lookback window using the real `Date.now()`. Once real time passed roughly two weeks beyond the fixture's `NOW`, the oldest fixture activity fell outside the (real-clock-relative) 28-day cutoff, changing which weekdays qualified as a "standing pattern."
+- `coach-respond-field-sync.test.ts`'s new-B-race tests hardcoded `date: "2026-08-15"` as a race that must read as *in the future* — the persistence gate is `r.date > todayStr`. Once real "today" reached 2026-08-15, the race no longer compared as future and the insert was silently skipped.
+- `coach-respond.test.ts`'s "plan question schedule" tests stored `weekly_plan_sessions` on fixed dates (Wed 8/12, Sat 8/15) relative to a fixed conversation date (Sun 8/9), but `buildScheduleDigest` reads the real wall clock when no `nowMs` is passed and only renders sessions still ahead of "today" — once real time passed 8/15, both stored sessions read as already-past and the digest came back empty.
+**Fix / Change:** No production code changed — these were all real production behaviors (correctly filtering by an actual current date) being exercised by fixtures that assumed the suite would always run near the date they were written. Two different fixes depending on what each function needed:
+- `infer-training-days.test.ts`: pinned the system clock to the fixture's fixed `NOW` with `vi.useFakeTimers()` / `vi.setSystemTime()` (`beforeAll`/`afterAll`), so the lookback window is computed relative to the same reference date the fixtures were built against, regardless of when the suite actually runs.
+- `coach-respond-field-sync.test.ts`: replaced the hardcoded B/A race dates with a `daysFromNow()` helper (mirroring the one already used in `coach-respond.test.ts` and `coach-respond-metric.test.ts`) so the B race stays 30 days out and the A race 75 days out relative to whenever the test runs.
+- `coach-respond.test.ts`: pinned the clock for the "plan question schedule" describe block to `2026-08-10T15:00:00Z`, matching the fixture's Sun 8/9 conversation and Wed 8/12 / Sat 8/15 sessions — using `toFake: ["Date"]` specifically (not the full fake-timer set) since faking `setTimeout`/`setInterval` too hung the route's real compose-delay and typing-indicator loops.
+**Files changed:** `src/__tests__/lib/infer-training-days.test.ts`, `src/__tests__/api/coach-respond-field-sync.test.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-14 — Dean invented a prior-week mileage number, and the injury escalation path defaulted to "see a physio" too readily
 
 **Type:** Bug Fix / Improvement

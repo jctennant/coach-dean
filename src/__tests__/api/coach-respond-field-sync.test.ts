@@ -79,6 +79,11 @@ import { anthropic } from "@/lib/anthropic";
 
 // ---------- helpers ----------
 
+function daysFromNow(n: number): string {
+  const d = new Date(Date.now() + n * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
 function makeChain(response: { data: unknown; error: unknown } = { data: null, error: null }) {
   const chain: Record<string, unknown> = {};
   const methods = [
@@ -538,6 +543,13 @@ describe("deterministic cadence short-circuit — asks which days when training_
 });
 
 describe("persistProfileUpdates — new B/C race extraction", () => {
+  // Relative to whenever the suite runs, not a hardcoded calendar date — the B race must
+  // stay in the future (the persistence gate filters on `date > today`) and the A race
+  // must stay after the B race. A fixed date like "2026-08-15" quietly stops being "in the
+  // future" once real time catches up to it, which is exactly what broke these tests.
+  const bRaceDate = daysFromNow(30);
+  const aRaceDate = daysFromNow(75);
+
   beforeEach(() => {
     vi.clearAllMocks();
     afterQueue.splice(0);
@@ -547,15 +559,15 @@ describe("persistProfileUpdates — new B/C race extraction", () => {
 
   it("inserts a new B race into the races table with its own goal type when extracted", async () => {
     mockExtractionThenCoach({
-      new_b_races: [{ date: "2026-08-15", name: "Summer Trail 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
+      new_b_races: [{ date: bRaceDate, name: "Summer Trail 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
     });
     const { racesChain } = setupSupabase({
       user: baseUser(),
       // A race is a marathon — B race goal should be "10k", not "marathon"
-      profile: baseProfile({ goal: "marathon", race_date: "2026-10-01" }),
+      profile: baseProfile({ goal: "marathon", race_date: aRaceDate }),
       state: baseState(),
-      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
-      conversations: baseConversations("I also signed up for a summer 10K on August 15th as a tune-up"),
+      races: [{ id: "race-1", priority: "A", race_date: aRaceDate }],
+      conversations: baseConversations("I also signed up for a summer 10K as a tune-up"),
     });
 
     await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
@@ -563,11 +575,11 @@ describe("persistProfileUpdates — new B/C race extraction", () => {
 
     const insertCalls = (racesChain.insert as ReturnType<typeof vi.fn>).mock.calls;
     const raceInsert = insertCalls.find(([rows]: [unknown]) =>
-      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === "2026-08-15")
+      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === bRaceDate)
     );
     expect(raceInsert).toBeDefined();
     expect(raceInsert?.[0][0]).toMatchObject({
-      race_date: "2026-08-15",
+      race_date: bRaceDate,
       race_name: "Summer Trail 10K",
       priority: "B",
       goal: "10k",          // B race's own type, not the A-race "marathon"
@@ -577,14 +589,14 @@ describe("persistProfileUpdates — new B/C race extraction", () => {
 
   it("falls back to A-race goal type when B race goal_race_type is null", async () => {
     mockExtractionThenCoach({
-      new_b_races: [{ date: "2026-08-15", name: "Local Race", priority: "C", goal_race_type: null, goal_distance_miles: null }],
+      new_b_races: [{ date: bRaceDate, name: "Local Race", priority: "C", goal_race_type: null, goal_distance_miles: null }],
     });
     const { racesChain } = setupSupabase({
       user: baseUser(),
-      profile: baseProfile({ goal: "marathon", race_date: "2026-10-01" }),
+      profile: baseProfile({ goal: "marathon", race_date: aRaceDate }),
       state: baseState(),
-      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
-      conversations: baseConversations("There's a fun local race on August 15th I want to do"),
+      races: [{ id: "race-1", priority: "A", race_date: aRaceDate }],
+      conversations: baseConversations("There's a fun local race I want to do too"),
     });
 
     await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
@@ -592,25 +604,25 @@ describe("persistProfileUpdates — new B/C race extraction", () => {
 
     const insertCalls = (racesChain.insert as ReturnType<typeof vi.fn>).mock.calls;
     const raceInsert = insertCalls.find(([rows]: [unknown]) =>
-      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === "2026-08-15")
+      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === bRaceDate)
     );
     expect(raceInsert?.[0][0]).toMatchObject({ goal: "marathon" }); // fallback to A-race goal
   });
 
   it("does not insert a B race that already exists in the races table", async () => {
     mockExtractionThenCoach({
-      new_b_races: [{ date: "2026-08-15", name: "Summer Trail 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
+      new_b_races: [{ date: bRaceDate, name: "Summer Trail 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
     });
     const { racesChain } = setupSupabase({
       user: baseUser(),
-      profile: baseProfile({ goal: "10k", race_date: "2026-10-01" }),
+      profile: baseProfile({ goal: "10k", race_date: aRaceDate }),
       state: baseState(),
       // Race already in DB — dedup should prevent a second insert
       races: [
-        { id: "race-1", priority: "A", race_date: "2026-10-01" },
-        { id: "race-2", priority: "B", race_date: "2026-08-15" },
+        { id: "race-1", priority: "A", race_date: aRaceDate },
+        { id: "race-2", priority: "B", race_date: bRaceDate },
       ],
-      conversations: baseConversations("Reminder — I have that 10K on August 15th too"),
+      conversations: baseConversations("Reminder — I have that 10K too"),
     });
 
     await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
@@ -618,7 +630,7 @@ describe("persistProfileUpdates — new B/C race extraction", () => {
 
     const insertCalls = (racesChain.insert as ReturnType<typeof vi.fn>).mock.calls;
     const raceInsert = insertCalls.find(([rows]: [unknown]) =>
-      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === "2026-08-15")
+      Array.isArray(rows) && rows.some((r: Record<string, unknown>) => r.race_date === bRaceDate)
     );
     expect(raceInsert).toBeUndefined();
   });
@@ -628,14 +640,14 @@ describe("persistProfileUpdates — new B/C race extraction", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     mockExtractionThenCoach({
-      new_b_races: [{ date: "2026-08-15", name: "Summer 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
+      new_b_races: [{ date: bRaceDate, name: "Summer 10K", priority: "B", goal_race_type: "10k", goal_distance_miles: 6.214 }],
     });
     setupSupabase({
       user: baseUser(),
-      profile: baseProfile({ goal: "10k", race_date: "2026-10-01" }),
+      profile: baseProfile({ goal: "10k", race_date: aRaceDate }),
       state: baseState(),
-      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
-      conversations: baseConversations("I signed up for a 10K on August 15th"),
+      races: [{ id: "race-1", priority: "A", race_date: aRaceDate }],
+      conversations: baseConversations("I signed up for a 10K"),
     });
 
     await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
@@ -657,9 +669,9 @@ describe("persistProfileUpdates — new B/C race extraction", () => {
     });
     setupSupabase({
       user: baseUser(),
-      profile: baseProfile({ goal: "10k", race_date: "2026-10-01" }),
+      profile: baseProfile({ goal: "10k", race_date: aRaceDate }),
       state: baseState(),
-      races: [{ id: "race-1", priority: "A", race_date: "2026-10-01" }],
+      races: [{ id: "race-1", priority: "A", race_date: aRaceDate }],
       conversations: baseConversations("I did a race back in 2020"),
     });
 

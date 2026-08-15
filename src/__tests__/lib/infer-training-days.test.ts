@@ -1,12 +1,24 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { inferTrainingDaysFromActivities } from "@/lib/infer-training-days";
 
 // Fixed reference date so "lookbackDays" windows are deterministic regardless of when
-// the suite runs. All dates below are within 28 days of this.
+// the suite runs. All dates below are within 28 days of this. inferTrainingDaysFromActivities
+// computes its lookback cutoff from the real wall clock (Date.now()), so the fixture dates
+// only stay valid if the system clock is pinned to match — otherwise the cutoff drifts away
+// from NOW as real time passes and activities silently fall outside the lookback window.
 const NOW = new Date("2026-08-02T12:00:00Z"); // a Sunday
 function daysAgo(n: number): string {
   return new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
 }
+
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 describe("inferTrainingDaysFromActivities", () => {
   it("returns null when there's no run history", () => {

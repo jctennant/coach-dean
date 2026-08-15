@@ -2285,6 +2285,18 @@ describe("coach/respond — plan question schedule", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     afterQueue.splice(0);
+    // buildScheduleDigest reads the real wall clock (Date.now()) when no nowMs is passed, and
+    // filters the stored sessions to "still ahead of today" — so the fixture's session dates
+    // (Wed 8/12, Sat 8/15, in the week following the Sun 8/9 conversation) only stay "upcoming"
+    // if the clock is pinned nearby. Monday 8/10 keeps both sessions ahead of "today".
+    // Only fake Date — leaving setTimeout/setInterval real, since the route's compose-delay
+    // and typing-indicator loops rely on real timers to resolve during the test.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-10T15:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   function setupPlanQuestion() {
