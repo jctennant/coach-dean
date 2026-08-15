@@ -9,7 +9,7 @@ import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { sendSMS, sendMediaSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { sendPoll, isPhotonProvider } from "@/lib/photon";
-import { RTR_GATE_POLL, STRENGTH_ROUTINE_POLL, PAIN_CHECKIN_POLL } from "@/lib/polls";
+import { RTR_GATE_POLL, STRENGTH_ROUTINE_POLL, PAIN_CHECKIN_POLL, type AppPoll } from "@/lib/polls";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
@@ -402,6 +402,55 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
       ],
     },
   };
+}
+
+/**
+ * Send a poll with a guaranteed-coherent plain-text fallback, and log both to
+ * conversation history. Best-effort — a failure here must never break the coaching
+ * message that already sent successfully.
+ *
+ * The plain-text follow-up is ALWAYS the full "{title} {fallbackHint}", never just the
+ * bare fallbackHint, and it's sent whether or not sendPoll() threw. This looks redundant
+ * on a device that renders the poll fine, but it's the only reliable option: Spectrum
+ * exposes no signal for whether the RECIPIENT's OS/Messages build actually supports
+ * polls (iOS 26 / macOS Tahoe+) — sendPoll() not throwing only means the send API call
+ * to Apple's push service succeeded, not that anything rendered on the other end. Jake
+ * hit this directly on 2026-08-15: sendPoll succeeded server-side, but his Mac's Messages
+ * build didn't render the poll, and the bare fallbackHint alone ("(Or just give me a
+ * number, 0-10.)") isn't an answerable question without the title attached — he saw
+ * nothing coherent. onboarding/handle/route.ts's sendPollAndStore had the same class of
+ * bug (only handled the sendPoll-throws case, from a 2026-08-07 incident) until this fix.
+ */
+async function sendPollWithFallback(
+  userId: string,
+  phone: string,
+  pollDef: AppPoll,
+  pollChatId: string | null,
+  trigger: string,
+  pollType: string
+): Promise<void> {
+  try {
+    if (pollChatId) await startTyping(pollChatId);
+    await sendPoll(phone, pollDef.title, pollDef.options);
+    await insertConversation({
+      user_id: userId,
+      role: "assistant",
+      content: `[Poll] ${pollDef.title}`,
+      message_type: "coach_response",
+    });
+  } catch (err) {
+    console.error(`[coach/respond] ${pollType} poll failed:`, err);
+    const { captureException } = await import("@sentry/nextjs");
+    captureException(err, { tags: { trigger, pollType } });
+  }
+  const fallbackText = `${pollDef.title} ${pollDef.fallbackHint}`;
+  await sendSMS(phone, fallbackText);
+  await insertConversation({
+    user_id: userId,
+    role: "assistant",
+    content: fallbackText,
+    message_type: "coach_response",
+  });
 }
 
 /** Execute the get_rehab_protocol tool — returns the tool_result string for Claude. */
@@ -4716,89 +4765,25 @@ OUTPUT CONTRACT:
   // sent successfully above.
   const rtrPhaseForPoll = (state as Record<string, unknown> | null)?.return_to_run_phase as number | null;
   if (trigger === "post_run" && isPhotonProvider() && (rtrPhaseForPoll === 1 || rtrPhaseForPoll === 2)) {
-    try {
-      const pollChatId = chatId ?? learnedChatId;
-      if (pollChatId) await startTyping(pollChatId);
-      await sendPoll(user.phone_number, RTR_GATE_POLL.title, RTR_GATE_POLL.options);
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: `[Poll] ${RTR_GATE_POLL.title}`,
-        message_type: "coach_response",
-      });
-      await sendSMS(user.phone_number, RTR_GATE_POLL.fallbackHint);
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: RTR_GATE_POLL.fallbackHint,
-        message_type: "coach_response",
-      });
-    } catch (err) {
-      console.error("[coach/respond] RTR gate poll failed:", err);
-      const { captureException } = await import("@sentry/nextjs");
-      captureException(err, { tags: { trigger, pollType: "rtr_gate" } });
-    }
+    await sendPollWithFallback(userId, user.phone_number, RTR_GATE_POLL, chatId ?? learnedChatId, trigger, "rtr_gate");
   }
 
   // Injury pain check-in poll: mirrors the RTR gate poll above — for Photon/iMessage athletes,
   // the free-text "how's the [body part] feeling" question was suppressed from the message
   // above (see the INJURY CHECK-IN block in the post_run prompt) whenever
   // suggestedInjuryCheckQuestion would otherwise have fired — send the bucketed pain-scale
-  // poll here instead as a separate bubble. Best-effort, same as the RTR gate poll.
+  // poll here instead as a separate bubble.
   if (trigger === "post_run" && isPhotonProvider() && suggestedInjuryCheckQuestion) {
-    try {
-      const pollChatId = chatId ?? learnedChatId;
-      if (pollChatId) await startTyping(pollChatId);
-      await sendPoll(user.phone_number, PAIN_CHECKIN_POLL.title, PAIN_CHECKIN_POLL.options);
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: `[Poll] ${PAIN_CHECKIN_POLL.title}`,
-        message_type: "coach_response",
-      });
-      await sendSMS(user.phone_number, PAIN_CHECKIN_POLL.fallbackHint);
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: PAIN_CHECKIN_POLL.fallbackHint,
-        message_type: "coach_response",
-      });
-    } catch (err) {
-      console.error("[coach/respond] pain check-in poll failed:", err);
-      const { captureException } = await import("@sentry/nextjs");
-      captureException(err, { tags: { trigger, pollType: "pain_checkin" } });
-    }
+    await sendPollWithFallback(userId, user.phone_number, PAIN_CHECKIN_POLL, chatId ?? learnedChatId, trigger, "pain_checkin");
   }
 
   // Strength routine offer poll: for Photon/iMessage athletes, initial_plan with an active
   // injury on file now asks a plain yes/no instead of dumping the full routine into the plan
   // message (see the initial_plan branch of the strength-routine prompt block) — send that
   // ask as a poll bubble here. Only fires when Dean actually asked (a routine exists to offer)
-  // and didn't already deliver it this turn (no [STRENGTH_POSTER] tag). Best-effort, same as
-  // the RTR gate poll above.
+  // and didn't already deliver it this turn (no [STRENGTH_POSTER] tag).
   if (trigger === "initial_plan" && isPhotonProvider() && strengthPosterRoutineKey && !wantsStrengthPoster) {
-    try {
-      const pollChatId = chatId ?? learnedChatId;
-      if (pollChatId) await startTyping(pollChatId);
-      await sendPoll(user.phone_number, STRENGTH_ROUTINE_POLL.title, STRENGTH_ROUTINE_POLL.options);
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: `[Poll] ${STRENGTH_ROUTINE_POLL.title}`,
-        message_type: "coach_response",
-      });
-      await sendSMS(user.phone_number, STRENGTH_ROUTINE_POLL.fallbackHint);
-      await insertConversation({
-        user_id: userId,
-        role: "assistant",
-        content: STRENGTH_ROUTINE_POLL.fallbackHint,
-        message_type: "coach_response",
-      });
-    } catch (err) {
-      console.error("[coach/respond] strength routine offer poll failed:", err);
-      const { captureException } = await import("@sentry/nextjs");
-      captureException(err, { tags: { trigger, pollType: "strength_routine" } });
-    }
+    await sendPollWithFallback(userId, user.phone_number, STRENGTH_ROUTINE_POLL, chatId ?? learnedChatId, trigger, "strength_routine");
   }
 
   // Strength routine images: either Dean emitted [STRENGTH_POSTER] after listing the full

@@ -24,6 +24,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — Poll fallback text left pre-iOS 26 recipients with no coherent question at all
+
+**Type:** Bug Fix
+**Reported by:** Jake (live)
+**User feedback:** "does this handle users not yet on iOS 26 - i'm seeing this on my laptop iMessage and I don't see the poll or the question"
+**Root cause:** Every poll site treated "`sendPoll()` didn't throw" as a proxy for "the recipient's device rendered the poll" — but Spectrum's API only confirms the send call to Apple's push service succeeded, not that anything rendered on the other end. Native iMessage polls require iOS 26 / macOS Tahoe+ to display at all. In `coach/respond/route.ts`'s three poll sites (RTR gate, strength routine, pain check-in), the plain-text follow-up was always just the bare `fallbackHint` ("(Or just give me a number, 0-10.)") — an unanswerable fragment with no question attached when the poll itself doesn't render, which is exactly what Jake saw on his Mac. `onboarding/handle/route.ts`'s `sendPollAndStore` had a *related* fix already (from a 2026-08-07 incident) but only for the case where `sendPoll()` throws — not the case where it succeeds server-side but the recipient can't see it, which has no detectable signal at all.
+**Fix / Change:** Both send paths now always send the full `"{title} {fallbackHint}"` as the plain-text follow-up, regardless of whether `sendPoll()` succeeded — the only reliable way to guarantee every recipient gets an answerable question, since capability can't be detected ahead of time. Extracted the three duplicated poll-send blocks in `coach/respond/route.ts` into a shared `sendPollWithFallback` helper (was about to be a 4th near-identical inline block otherwise). Devices that do support polls now see a small amount of redundancy (interactive poll + a plain-text restatement) — an acceptable tradeoff for guaranteed delivery.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-15 — Two poll follow-ups: redundant free-text question, uneven option font sizes
 
 **Type:** Bug Fix / Improvement

@@ -141,11 +141,15 @@ async function sendPollAndStore(userId: string, phone: string, poll: AppPoll, pr
   // the intro that normally rides along with the first question has to be sent separately —
   // otherwise Dean's opening line to a stranger is a bare multiple-choice question.
   if (preface) await sendAndStore(userId, phone, preface, "onboarding");
-  let pollRendered = isDryRun;
   if (!isDryRun) {
     try {
       await sendPoll(phone, poll.title, poll.options);
-      pollRendered = true;
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: `[Poll] ${poll.title}`,
+        message_type: "onboarding",
+      });
     } catch (err) {
       // A poll is a rendering affordance, never the question itself — the same ask has to
       // survive the interactive layer failing. Letting this throw stranded a real athlete on
@@ -157,18 +161,14 @@ async function sendPollAndStore(userId: string, phone: string, poll: AppPoll, pr
       console.error("[onboarding] sendPoll failed, falling back to plain text:", poll.title, err);
     }
   }
-  if (pollRendered) {
-    await insertConversation({
-      user_id: userId,
-      role: "assistant",
-      content: `[Poll] ${poll.title}`,
-      message_type: "onboarding",
-    });
-  }
-  // fallbackHint is a parenthetical addendum ("(Or just reply...)") — meaningless on its own,
-  // so when the poll didn't render, the title has to carry the question.
-  const text = pollRendered ? poll.fallbackHint : `${poll.title} ${poll.fallbackHint}`;
-  await sendAndStore(userId, phone, text, "onboarding");
+  // Always send the full "{title} {fallbackHint}" text, regardless of whether sendPoll
+  // threw. sendPoll not throwing only means the send API call to Apple's push service
+  // succeeded — Spectrum exposes no signal for whether the RECIPIENT's device actually
+  // rendered the poll (requires iOS 26 / macOS Tahoe+). A bare fallbackHint fragment
+  // ("Or just reply...") isn't an answerable question without the title attached — Jake
+  // hit exactly this on 2026-08-15: sendPoll succeeded server-side, but his Mac's Messages
+  // build didn't render the poll and the fallback alone left him with nothing coherent.
+  await sendAndStore(userId, phone, `${poll.title} ${poll.fallbackHint}`, "onboarding");
 }
 
 /**

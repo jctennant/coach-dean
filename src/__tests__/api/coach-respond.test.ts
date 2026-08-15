@@ -80,6 +80,7 @@ import { POST } from "@/app/api/coach/respond/route";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
 import { sendPoll, isPhotonProvider } from "@/lib/photon";
+import { sendSMS } from "@/lib/linq";
 import { PAIN_CHECKIN_POLL } from "@/lib/polls";
 
 // ---------- helpers ----------
@@ -1676,6 +1677,35 @@ describe("coach/respond — injury check-in pain poll", () => {
     const userMsg = calls[calls.length - 1][0].messages[0].content as string;
     expect(userMsg).toContain("that check-in is sent separately as a poll");
     expect(userMsg).not.toContain("INJURY CHECK-IN QUESTION:");
+  });
+
+  it("sends the full title + fallbackHint as plain text even when sendPoll succeeds — recipient device support can't be detected", async () => {
+    (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    setupRecoveryAthlete();
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const fallbackCall = smsCalls.find(([, body]) => typeof body === "string" && body.includes(PAIN_CHECKIN_POLL.fallbackHint));
+    expect(fallbackCall).toBeDefined();
+    expect(fallbackCall![1]).toBe(`${PAIN_CHECKIN_POLL.title} ${PAIN_CHECKIN_POLL.fallbackHint}`);
+  });
+
+  it("still sends the full title + fallbackHint as plain text when sendPoll throws (e.g. stale sidecar deploy)", async () => {
+    (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (sendPoll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Sidecar /send-poll error: 404 404 Not Found"));
+    setupRecoveryAthlete();
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
+    const fallbackCall = smsCalls.find(([, body]) => typeof body === "string" && body.includes(PAIN_CHECKIN_POLL.fallbackHint));
+    expect(fallbackCall).toBeDefined();
+    expect(fallbackCall![1]).toBe(`${PAIN_CHECKIN_POLL.title} ${PAIN_CHECKIN_POLL.fallbackHint}`);
   });
 
   it("does NOT send the poll and keeps the free-text question on Linq (non-Photon)", async () => {
