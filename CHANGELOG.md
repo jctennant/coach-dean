@@ -24,6 +24,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — Sidecar's /send-poll route existed in code since 2026-07-26 but was never actually deployed
+
+**Type:** Infra
+**Reported by:** Jake (live, testing PAIN_CHECKIN_POLL after upgrading the Spectrum plan)
+**User feedback:** "didn't get a poll" — followed by pasted Vercel logs showing `[coach/respond] pain check-in poll failed: Error: Sidecar /send-poll error: 404 404 Not Found`.
+**Root cause:** Not a bug in `coach-dean` — `sidecar/src/index.ts` (in this same repo, deployed separately to Railway) has had a `/send-poll` route since commit `197f5d8a` (2026-07-26, "polling in onboarding"), used by `RTR_GATE_POLL`/`STRENGTH_ROUTINE_POLL` already. But the live Railway deployment (`coach-dean-sidecar`, project `a85e188e...`) was still serving a build from before that commit — `/send` and `/send-media` worked fine (those routes predate the stale window), `/send-poll` 404'd because the route simply didn't exist in whatever was actually running. Three weeks of poll-dependent features (RTR gate, strength routine offer) were silently falling back to their plain-text paths on Photon the whole time, and nothing surfaced it because the failure is caught and only `console.error`'d, never sent to Sentry.
+**Fix / Change:** Redeployed the sidecar via `railway up` (Railway CLI was already linked to the project locally) — no code change needed there, the fix was already committed, just never shipped. Confirmed via a live post_run trigger: poll now sends successfully. Also wired `captureException` into all three poll-send catch blocks (RTR gate, strength routine offer, pain check-in) in `coach/respond/route.ts` — they were `console.error`-only, which is exactly why this was invisible for three weeks; Sentry will now surface it immediately if a poll send starts failing again.
+**Files changed:** `src/app/api/coach/respond/route.ts` (Sentry capture on poll failures) — the sidecar fix itself was a redeploy of already-committed code in `sidecar/src/index.ts`, no new sidecar commit.
+
+---
+
 ## 2026-08-15 — Stripped a generic filler sentence the OUTPUT CONTRACT already banned but Dean used anyway
 
 **Type:** Bug Fix

@@ -4735,6 +4735,8 @@ OUTPUT CONTRACT:
       });
     } catch (err) {
       console.error("[coach/respond] RTR gate poll failed:", err);
+      const { captureException } = await import("@sentry/nextjs");
+      captureException(err, { tags: { trigger, pollType: "rtr_gate" } });
     }
   }
 
@@ -4763,6 +4765,8 @@ OUTPUT CONTRACT:
       });
     } catch (err) {
       console.error("[coach/respond] pain check-in poll failed:", err);
+      const { captureException } = await import("@sentry/nextjs");
+      captureException(err, { tags: { trigger, pollType: "pain_checkin" } });
     }
   }
 
@@ -4792,6 +4796,8 @@ OUTPUT CONTRACT:
       });
     } catch (err) {
       console.error("[coach/respond] strength routine offer poll failed:", err);
+      const { captureException } = await import("@sentry/nextjs");
+      captureException(err, { tags: { trigger, pollType: "strength_routine" } });
     }
   }
 
