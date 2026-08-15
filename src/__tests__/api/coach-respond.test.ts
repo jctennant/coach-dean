@@ -1751,6 +1751,46 @@ describe("coach/respond — injury check-in pain poll", () => {
   });
 });
 
+describe("coach/respond — generic recovery filler is stripped", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  it("strips 'This is exactly what recovery looks like' padding from a post_run message", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "This is exactly what recovery looks like right now. Staying aerobic while the shin heals. How's the shin feeling today?" }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ goal: "return_to_running", injury_body_part: "shin" }),
+      state: baseState(),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999, dry_run: true });
+    const res = await POST(req) as unknown as { data: { message: string } };
+
+    expect(res.data.message).not.toMatch(/this is exactly what recovery looks like/i);
+    expect(res.data.message).toContain("How's the shin feeling today?");
+  });
+
+  it("strips the phrase without 'exactly' or 'right now' too", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "That's what recovery looks like. Keep it up." }],
+    });
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ goal: "return_to_running", injury_body_part: "shin" }),
+      state: baseState(),
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999, dry_run: true });
+    const res = await POST(req) as unknown as { data: { message: string } };
+
+    expect(res.data.message).not.toMatch(/what recovery looks like/i);
+  });
+});
+
 describe("coach/respond — rehab protocol tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();

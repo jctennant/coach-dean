@@ -5939,6 +5939,12 @@ function stripBoilerplateSignoffs(text: string): string {
     /[.!]?\s*If you (?:have|need|want) (?:any (?:other |more )?)?questions?[^.!?]*[.!?]?/gi,
     // "Reply (?:anytime|if)..." style
     /[.!]?\s*Reply (?:anytime|if you)[^.!?]*[.!?]?/gi,
+    // "This is exactly what recovery looks like (right now)." / "That's what recovery looks
+    // like." — the OUTPUT CONTRACT already names this exact phrase as the wrong-example for
+    // padding an injury gate question with a restated-analysis sentence (2026-08-15: Jake
+    // flagged it live — Dean used it anyway despite the explicit prompt prohibition), so this
+    // is belt-and-suspenders enforcement, not the primary defense.
+    /[.!]?\s*(?:This|That)(?:'s| is)\s+(?:exactly\s+)?what\s+recovery\s+looks?\s+like(?:\s+right\s+now)?[.!]?/gi,
   ];
   let cleaned = text;
   for (const pattern of signoffPatterns) {

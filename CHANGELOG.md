@@ -24,6 +24,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — Stripped a generic filler sentence the OUTPUT CONTRACT already banned but Dean used anyway
+
+**Type:** Bug Fix
+**Reported by:** Jake (live)
+**User feedback:** "I got a message from coach-dean... I'm also kind of annoyed by 'this is exactly what recovery looks like right now.' Can we shorten some of these posts for our messages? he's too repetitive some times like this."
+**Root cause:** `postRunOutputContract`'s rule 5 (`coach/respond/route.ts`) already explicitly names this exact phrase as the wrong example — "Wrong: '...This is exactly what recovery looks like. How did the [body part] feel?'" — and instructs Dean not to pair the gate question with a restated-analysis/generic-framing sentence. Dean used it anyway. A stated prompt rule with an explicit counter-example still isn't a structural guarantee; per the project's fix philosophy this is exactly the "response quality issue (length, boilerplate)" category that gets a deterministic post-processing pass rather than more prompt text — `stripBoilerplateSignoffs` already exists for this exact purpose (stripping "let me know if you have questions" style sign-offs that survive despite prompt instructions).
+**Fix / Change:** Added a pattern to `stripBoilerplateSignoffs`'s regex list matching "This is/That's (exactly) what recovery looks like (right now)." Belt-and-suspenders with the existing prompt rule, not a replacement for it — narrowly scoped to this specific phrase (not a general filler classifier) so it can't strip the legitimate use of similar framing elsewhere in the prompt (e.g. the Z1/Z2 HR-zone lens's approved "...which is exactly what easy miles are for" exemplar, a different context this pattern doesn't match).
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-15 — The recurring injury check-in only fired for goal=return_to_running, missing athletes training through an injury toward a different goal
 
 **Type:** Bug Fix
