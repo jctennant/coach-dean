@@ -1094,10 +1094,26 @@ function computeFactTruth(fixture) {
     const race = new Date(user.goal_race_date + "T12:00:00Z");
     daysUntilRace = Math.round((race.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
   }
+  // Most recent COMPLETE week's running-only mileage (mirrors production's computeLoadTrend
+  // last-element read) — ground truth for any "last week you ran X" claim in the message.
+  let priorWeekDistance = null;
+  if (user.recent_activities && user.recent_activities.length > 0) {
+    const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun", "Treadmill"]);
+    const thisWeekMonday = getWeekMonday(todayDateStr);
+    const weeklyRunTotals = {};
+    for (const a of user.recent_activities) {
+      if (a.type && !RUN_TYPES.has(a.type)) continue;
+      const weekKey = getWeekMonday(a.date);
+      weeklyRunTotals[weekKey] = (weeklyRunTotals[weekKey] || 0) + a.distance_miles;
+    }
+    const priorWeeks = Object.keys(weeklyRunTotals).filter((k) => k < thisWeekMonday).sort().reverse();
+    if (priorWeeks.length > 0) priorWeekDistance = Math.round(weeklyRunTotals[priorWeeks[0]] * 10) / 10;
+  }
   return {
     week_number: trigger === "initial_plan" ? null : (user.current_week ?? null),
     weekly_target: injuryHoldActive || trigger === "initial_plan" ? null : toDisplay(user.weekly_mileage_target ?? null),
     week_distance_completed: toDisplay(user.miles_logged_this_week ?? 0),
+    prior_week_distance: toDisplay(priorWeekDistance),
     days_until_race: daysUntilRace,
     injuryHoldActive,
     unit: isMetric ? "km" : "mi",
@@ -1123,6 +1139,7 @@ function buildFactGateTool() {
             week_number: { type: ["number", "null"], description: "The training-week number your message states, else null." },
             weekly_target: { type: ["number", "null"], description: "This week's total planned mileage/km target as stated, else null." },
             week_distance_completed: { type: ["number", "null"], description: "Distance already completed this week as stated, else null." },
+            prior_week_distance: { type: ["number", "null"], description: "Last week's (the prior COMPLETE week, not the current in-progress week) total running distance as stated, else null." },
             days_until_race: { type: ["number", "null"], description: "Days until the athlete's race as stated, else null." },
             plan_source: { type: ["string", "null"], enum: ["return_to_run", "full_arc", null] },
             activity_type: {
@@ -1131,7 +1148,7 @@ function buildFactGateTool() {
               description: "If your message describes a specific just-logged activity, its broad category, else null.",
             },
           },
-          required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source", "activity_type"],
+          required: ["week_number", "weekly_target", "week_distance_completed", "prior_week_distance", "days_until_race", "plan_source", "activity_type"],
         },
         // Mirrors production's plan_action field (coach/respond/route.ts buildDeliverMessageTool)
         // — plan-mutation signals reported as structured data, not appended bracket tags, so the

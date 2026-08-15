@@ -44,7 +44,7 @@ import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-conte
 import { buildFitnessTierBlock } from "@/lib/coach-fitness-tier";
 import { computePaceContext } from "@/lib/coach-pace-context";
 import { parseSessionMiles, recomputeWeekTotalsFromSessions, parseStoredSessionDate } from "@/lib/session-mileage";
-import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern } from "@/lib/training-analytics";
+import { buildLongitudinalBlock, buildRunExecutionAnalysis, buildLongitudinalSignals, detectIntervalPattern, computeLoadTrend } from "@/lib/training-analytics";
 import type { ActivityForAnalytics } from "@/lib/training-analytics";
 import { buildCrossTrainingContext, buildWeeklyCrossTrainingSummary, computeWeekCrossTrainingAerobicMinutes, computeRunGapSignal, computeWeekActivityTotals, buildPostRunMileageLine, RUN_TYPES } from "@/lib/cross-training";
 import { onboardingNudgeQuestion } from "@/lib/onboarding-pending";
@@ -257,6 +257,10 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                     type: ["number", "null"],
                     description: "Distance already completed this week as stated in your message (e.g. '12 of 25 mi done' → 12), else null.",
                   },
+                  prior_week_distance: {
+                    type: ["number", "null"],
+                    description: "Last week's (the prior COMPLETE Mon-Sun week, not the current in-progress week) total running distance as stated in your message (e.g. 'you ran 20 miles last week' → 20), else null.",
+                  },
                   days_until_race: {
                     type: ["number", "null"],
                     description: "Days until the athlete's race as stated in your message (e.g. '10 days out' → 10), else null.",
@@ -276,7 +280,7 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
                       "If your message describes what the athlete just did in a specific just-logged activity (e.g. 'that run', 'the walk felt good'), the broad category of it — else null. Never guess from earlier conversation; only report this from the activity data given to you for the CURRENT session.",
                   },
                 },
-                required: ["week_number", "weekly_target", "week_distance_completed", "days_until_race", "plan_source", "activity_type"],
+                required: ["week_number", "weekly_target", "week_distance_completed", "prior_week_distance", "days_until_race", "plan_source", "activity_type"],
               },
             }
           : {}),
@@ -2211,23 +2215,53 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const recent = symptomHistory.filter(e => e.date >= thirtyDaysAgo);
     if (recent.length < 2) return "";
-    // Count occurrences per body part
+    // Count occurrences AND track worst reported severity per body part.
+    const SEVERITY_RANK: Record<string, number> = { soreness: 0, mild: 0, moderate: 1, severe: 2 };
     const counts: Record<string, number> = {};
+    const worstSeverity: Record<string, string> = {};
     for (const e of recent) {
       counts[e.body_part] = (counts[e.body_part] ?? 0) + 1;
+      const rank = SEVERITY_RANK[e.severity] ?? 0;
+      if (!(e.body_part in worstSeverity) || rank > (SEVERITY_RANK[worstSeverity[e.body_part]] ?? 0)) {
+        worstSeverity[e.body_part] = e.severity;
+      }
     }
     const recurring = Object.entries(counts).filter(([, n]) => n >= 2).map(([bp]) => bp);
     if (recurring.length === 0) return "";
+    // Bone-adjacent sites where recurring pain can mean a stress reaction/fracture, not just
+    // soft-tissue overuse — self-management alone risks missing something that genuinely needs
+    // imaging. Everywhere else, a professional referral is one option among several, not the
+    // default answer, since most athletes using Dean are specifically trying to avoid a PT
+    // visit — the job is to give them the best self-managed path, and only push a referral when
+    // there's a concrete reason self-management isn't enough.
+    const BONE_RISK_PARTS = new Set(["shin", "tibia", "foot", "metatarsal"]);
     const tripleThreshold = Object.entries(counts).filter(([, n]) => n >= 3).map(([bp]) => bp);
+    const severeNow = recurring.filter((bp) => worstSeverity[bp] === "severe");
+    const boneRiskFlagged = recurring.filter((bp) => BONE_RISK_PARTS.has(bp) && (counts[bp] >= 3 || worstSeverity[bp] !== "mild"));
+    const requiresReferral = new Set([...severeNow, ...boneRiskFlagged]);
+    const selfManageable = recurring.filter((bp) => !requiresReferral.has(bp));
+
     const parts: string[] = [
       `SYMPTOM RECURRENCE DETECTED — the following body parts have been reported in the last 30 days: ${recurring.join(", ")}.`,
       `When any of these areas come up in this message or conversation:`,
       `1. Acknowledge this as a pattern, not a one-off: "You've mentioned your [X] a couple times now — that pattern matters more than a single-session soreness."`,
-      `2. Recommend specific load modification: swap or reduce the next hard session, not just a vague "take it easy."`,
-      `3. Set plan_action.lighter_week = true if the recurrence is moderate severity or unclear, or use plan_action.session_swaps to swap a specific hard session.`,
     ];
-    if (tripleThreshold.length > 0) {
-      parts.push(`MANDATORY ESCALATION: ${tripleThreshold.join(", ")} has been flagged 3+ times. You MUST include a clear recommendation to see a sports physio. Say: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run." Then set plan_action.injury_hold = true on your deliver_message call.`);
+    if (selfManageable.length > 0) {
+      parts.push(
+        `2. For ${selfManageable.join(", ")}: this does NOT need a professional referral yet — most athletes texting a coach are specifically trying to avoid that cost/hassle, so give them the best self-managed path instead of defaulting to "go see someone." Call get_rehab_protocol for the body part and prescribe from it: (a) a concrete load cut for the next 1-2 weeks (specific %, or which session to drop/swap — set plan_action.lighter_week = true or use plan_action.session_swaps), (b) 2-3 targeted exercises from the protocol, (c) a specific cross-training substitute if a session is being swapped, (d) an explicit re-check point: "if it's not clearly better in a week or two of doing this, or it worsens, that's when it's worth getting looked at" — a clear off-ramp, not a vague reassurance.`
+      );
+    }
+    if (requiresReferral.size > 0) {
+      const list = Array.from(requiresReferral);
+      const reasonParts = list.map((bp) => {
+        if (severeNow.includes(bp)) return `${bp} (severe pain reported)`;
+        return `${bp} (recurring pain at a site where a stress reaction/fracture is a real possibility — self-management risks missing that)`;
+      });
+      parts.push(
+        `3. For ${reasonParts.join(", ")}: this is a genuine case for professional eyes — self-management isn't the responsible answer here. Still call get_rehab_protocol and give concrete interim guidance (cross-training substitute, pain-scale threshold for stopping) so the athlete has something actionable while they book an appointment — never a referral with no interim plan. Say something like: "What you're describing is past the point where I should be your only resource — I'd really encourage you to get in front of a sports physio before your next run." Then set plan_action.injury_hold = true on your deliver_message call.`
+      );
+    } else if (tripleThreshold.length > 0) {
+      parts.push(`3. ${tripleThreshold.join(", ")} has now come up 3+ times — tighten the load cut and re-check timeline from point 2 above rather than escalating language; a referral still isn't warranted on count alone without a severity or bone-risk reason.`);
     }
     return `\n\n${parts.join("\n")}`;
   })();
@@ -3858,12 +3892,21 @@ OUTPUT CONTRACT:
       const todayMs = new Date(`${todayStr}T12:00:00Z`).getTime();
       return Math.round((raceMs - todayMs) / (24 * 60 * 60 * 1000));
     })();
+    // Most recent COMPLETE week's running mileage (excludes the current in-progress week) —
+    // ground truth for any "last week you ran X" claim. Without this check, Dean has no
+    // structural guardrail against inventing a prior-week figure (e.g. confusing a single
+    // day's run with the whole prior week's total) the way he does for the current week.
+    const priorWeekTrend = computeLoadTrend(recentActivities as ActivityForAnalytics[], userTimezone);
+    const priorWeekMilesTruth = priorWeekTrend.weeklyMiles.length > 0
+      ? priorWeekTrend.weeklyMiles[priorWeekTrend.weeklyMiles.length - 1]
+      : null;
     const factTruth: FactGroundTruth = {
       week_number: trigger === "initial_plan" ? null : ((state?.current_week as number | null) ?? periodization.effectiveWeek ?? null),
       weekly_target: injuryHoldActiveForFacts || trigger === "initial_plan"
         ? null
         : toDisplay((state?.weekly_mileage_target as number | null) ?? null),
       week_distance_completed: toDisplay(weekMileageSoFar),
+      prior_week_distance: toDisplay(priorWeekMilesTruth),
       days_until_race: daysUntilRaceTruth,
       injuryHoldActive: injuryHoldActiveForFacts,
       unit: isMetricUser ? "km" : "mi",

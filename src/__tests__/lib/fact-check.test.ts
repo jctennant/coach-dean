@@ -5,6 +5,7 @@ const truth: FactGroundTruth = {
   week_number: 7,
   weekly_target: 25,
   week_distance_completed: 12.4,
+  prior_week_distance: 20.3,
   days_until_race: 38,
   injuryHoldActive: false,
   unit: "mi",
@@ -60,6 +61,20 @@ describe("checkStatedFacts", () => {
     expect(checkStatedFacts({ week_distance_completed: 20 }, truth)).toEqual([
       { fact: "week_distance_completed", stated: 20, actual: 12.4 },
     ]);
+  });
+
+  it("catches a hallucinated prior-week mileage figure (the confused-with-today's-run bug)", () => {
+    // Regression: Dean once conflated a single day's run (4.2mi) with the ENTIRE prior
+    // week's total (actually 20.3mi) when a user pushed back on a load-spike claim.
+    expect(checkStatedFacts({ prior_week_distance: 21 }, truth)).toEqual([]);
+    expect(checkStatedFacts({ prior_week_distance: 4.2 }, truth)).toEqual([
+      { fact: "prior_week_distance", stated: 4.2, actual: 20.3 },
+    ]);
+  });
+
+  it("skips the prior-week check when there isn't a full completed week of history", () => {
+    const sparseTruth: FactGroundTruth = { ...truth, prior_week_distance: null };
+    expect(checkStatedFacts({ prior_week_distance: 4.2 }, sparseTruth)).toEqual([]);
   });
 
   it("skips facts whose ground truth is null (e.g. weekly target during injury hold)", () => {

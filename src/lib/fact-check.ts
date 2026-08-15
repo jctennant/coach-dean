@@ -23,6 +23,7 @@ export interface StatedFacts {
   week_number?: number | null;
   weekly_target?: number | null;
   week_distance_completed?: number | null;
+  prior_week_distance?: number | null;
   days_until_race?: number | null;
   plan_source?: "return_to_run" | "full_arc" | null;
   activity_type?: ActivityCategory | null;
@@ -32,6 +33,8 @@ export interface FactGroundTruth {
   week_number: number | null;
   weekly_target: number | null;
   week_distance_completed: number | null;
+  /** Total running distance for the last COMPLETE week (Mon-Sun), not the current partial week. Null = insufficient history, skip the check. */
+  prior_week_distance: number | null;
   days_until_race: number | null;
   /** true when the athlete is on an active injury hold — the only valid plan_source is "return_to_run". */
   injuryHoldActive: boolean;
@@ -89,7 +92,7 @@ export function checkStatedFacts(
   ) {
     mismatches.push({ fact: "days_until_race", stated: s.days_until_race, actual: truth.days_until_race });
   }
-  for (const key of ["weekly_target", "week_distance_completed"] as const) {
+  for (const key of ["weekly_target", "week_distance_completed", "prior_week_distance"] as const) {
     const statedVal = s[key];
     const actualVal = truth[key];
     if (isNum(statedVal) && actualVal != null) {
@@ -112,6 +115,7 @@ const FACT_LABELS: Record<keyof StatedFacts, (unit: string) => string> = {
   week_number: () => "the current training week number",
   weekly_target: (unit) => `this week's mileage target (${unit})`,
   week_distance_completed: (unit) => `distance completed so far this week (${unit})`,
+  prior_week_distance: (unit) => `last week's total running distance (${unit})`,
   days_until_race: () => "days until the race",
   plan_source: () => "which context block a future-week mileage figure came from",
   activity_type: () => "what type of activity this message is about",

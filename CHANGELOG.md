@@ -8,6 +8,21 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-14 — Dean invented a prior-week mileage number, and the injury escalation path defaulted to "see a physio" too readily
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (live)
+**User feedback:** Jake pushed back on a load-spike claim mid-conversation ("But my load went down" / "Hmm no I ran like 20 mi last week"). Dean's second reply stated "the running distance alone jumped from 4.2mi the previous week to 7.4mi this week" — conflating that day's single run (4.2mi) with the entire prior week's total, when the real prior-week total was 20.3mi. Separately, after 3 shin reports Dean issued a full running hold and pushed a sports-physio referral as the only path forward, with no self-managed option offered — even though most athletes texting a coach are specifically trying to avoid that cost/hassle.
+**Root cause:**
+1. The Phase B fact gate (`fact-check.ts`) already equality-checks `week_number`, `weekly_target`, `week_distance_completed`, and `days_until_race` against system ground truth before a message is allowed to send — but it had no ground-truth field for a *prior*-week mileage claim. Dean's current-week and target numbers are always checkable; a claim about "last week" had no structural guardrail at all, so a hallucinated figure sailed through undetected.
+2. The recurring-symptom escalation block (`symptomEscalationBlock` in `coach/respond/route.ts`) triggered "MANDATORY ESCALATION" — a hard-coded push to see a sports physio plus `injury_hold = true` — purely on report *count* (3+ times in 30 days), regardless of severity or body part. It had no self-managed tier at all, even though the codebase already has a working pattern for exactly this distinction: onboarding's shin/tibia red-flag screen (diffuse ache vs. pinpoint/rest pain) that decides self-manageable vs. needs-a-doctor. That pattern was never carried over to the live coaching engine.
+**Fix / Change:**
+- Added `prior_week_distance` as a checkable fact: `fact-check.ts` gained the field on `StatedFacts`/`FactGroundTruth` (±10%/±1 tolerance, same as the other distance facts), and `coach/respond/route.ts` now computes real ground truth for it via `computeLoadTrend` (already existed in `training-analytics.ts`, just wasn't imported into the fact gate) — the most recent *complete* week's running mileage, not the current partial week. A hallucinated "last week you ran X" claim now gets rejected and retried exactly like a wrong current-week number already does. `evals/run-evals.mjs` mirrors the same field so the eval harness exercises the same guardrail.
+- Rewrote `symptomEscalationBlock` to be severity- and site-aware instead of count-only: recurring symptoms at ordinary soft-tissue sites (mild/moderate) now get a concrete self-managed protocol as the primary path — a specific load cut, 2-3 exercises pulled from `get_rehab_protocol`, a cross-training substitute, and an explicit re-check point ("if it's not better in 1-2 weeks, that's when it's worth getting looked at"). A professional-referral push is now reserved for severe pain or recurring pain at bone-risk sites (shin/tibia/foot/metatarsal) where self-management genuinely risks missing a stress reaction — and even then, Dean must still give concrete interim self-care guidance alongside the referral, never a referral with nothing else.
+**Files changed:** `src/lib/fact-check.ts`, `src/app/api/coach/respond/route.ts`, `evals/run-evals.mjs`, `src/__tests__/lib/fact-check.test.ts`
+
+---
+
 ## 2026-08-11 — Asking to see an exercise got a description and an invitation to ask again
 
 **Type:** Bug Fix
