@@ -88,15 +88,20 @@ export const RTR_GATE_POLL: AppPoll = {
 export const PAIN_CHECKIN_POLL: AppPoll = {
   id: "pain_checkin",
   title: "How's the pain today?",
-  options: ["Pain-free", "Mild (1-2/10)", "Noticeable (3-4/10) — had to ease off", "Significant (5+/10)"],
+  // Kept close in length (9-17 chars) on purpose — native iMessage polls auto-shrink each
+  // option's font to fit its bubble, so a big length spread (the old "Noticeable (3-4/10) —
+  // had to ease off" at 38 chars next to "Pain-free" at 9) renders as visibly mismatched
+  // font sizes across options. The nuance that used to live in the label (e.g. "had to ease
+  // off") moved into optionToMessage's text instead, where length doesn't affect rendering.
+  options: ["Pain-free", "Mild (1-2)", "Moderate (3-4)", "Significant (5+)"],
   fallbackHint: "(Or just give me a number, 0-10.)",
   optionToMessage: (optionTitle) => {
     switch (optionTitle) {
       case "Pain-free":
         return "No pain today — 0 out of 10.";
-      case "Mild (1-2/10)":
+      case "Mild (1-2)":
         return "Mild pain today, around a 2 out of 10 — I kept going without trouble.";
-      case "Noticeable (3-4/10) — had to ease off":
+      case "Moderate (3-4)":
         return "Noticeable pain today, around a 4 out of 10 — I had to ease off.";
       default:
         return "Significant pain today, 6 or higher out of 10.";

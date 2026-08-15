@@ -24,6 +24,18 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — Two poll follow-ups: redundant free-text question, uneven option font sizes
+
+**Type:** Bug Fix / Improvement
+**Reported by:** Jake (live, reviewing the live poll test)
+**User feedback:** "want to take a look at that last message? Also the font is different sizes in the poll... seems like it resizes to the options lets make them uniform."
+**Root cause (redundant question):** The live test message asked "How's the shin feeling today at rest..." in text AND sent the pain poll — the free-text version should have been suppressed. `postRunOutputContract`'s rule 5 (appended last in the prompt, closest to generation) unconditionally says "there's an active injury... you still need to ask it," with no awareness of the separate INJURY CHECK-IN suppression instruction added earlier in the prompt for the poll case — the two rules directly contradicted each other, and the later one won.
+**Root cause (font sizing):** Native iMessage polls (rendered by the Spectrum SDK's `poll()` call, not controllable via our API) auto-shrink each option's font to fit its bubble. `PAIN_CHECKIN_POLL`'s options ranged from 9 to 38 characters ("Pain-free" vs. "Noticeable (3-4/10) — had to ease off"), so the longer option rendered visibly smaller than the others.
+**Fix / Change:** Added a one-sentence exception to rule 5: if the INJURY CHECK-IN instruction says the check-in is going out as a poll this turn, don't also ask it in text. Shortened and evened out `PAIN_CHECKIN_POLL`'s option labels (9-17 chars now, was 9-38) — the "had to ease off" nuance moved into `optionToMessage`'s translated text, where length doesn't affect rendering.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/lib/polls.ts`, `src/__tests__/lib/polls.test.ts`
+
+---
+
 ## 2026-08-15 — Sidecar's /send-poll route existed in code since 2026-07-26 but was never actually deployed
 
 **Type:** Infra

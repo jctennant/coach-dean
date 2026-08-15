@@ -41,15 +41,20 @@ describe("PAIN_CHECKIN_POLL", () => {
   });
 
   it("maps the mild bucket to a value inside the PAIN THRESHOLD RULE's 0-2 monitor range", () => {
-    expect(PAIN_CHECKIN_POLL.optionToMessage("Mild (1-2/10)")).toMatch(/2 out of 10/);
+    expect(PAIN_CHECKIN_POLL.optionToMessage("Mild (1-2)")).toMatch(/2 out of 10/);
   });
 
-  it("maps the noticeable bucket to a value at/above the PAIN THRESHOLD RULE's stop threshold (3/10)", () => {
-    expect(PAIN_CHECKIN_POLL.optionToMessage("Noticeable (3-4/10) — had to ease off")).toMatch(/4 out of 10/);
+  it("maps the moderate bucket to a value at/above the PAIN THRESHOLD RULE's stop threshold (3/10)", () => {
+    expect(PAIN_CHECKIN_POLL.optionToMessage("Moderate (3-4)")).toMatch(/4 out of 10/);
   });
 
   it("maps the significant bucket to a clearly elevated value", () => {
-    expect(PAIN_CHECKIN_POLL.optionToMessage("Significant (5+/10)")).toMatch(/6 or higher/);
+    expect(PAIN_CHECKIN_POLL.optionToMessage("Significant (5+)")).toMatch(/6 or higher/);
+  });
+
+  it("keeps option label lengths close together so native iMessage polls don't auto-shrink one option's font relative to the others", () => {
+    const lengths = PAIN_CHECKIN_POLL.options.map((o) => o.length);
+    expect(Math.max(...lengths) - Math.min(...lengths)).toBeLessThanOrEqual(10);
   });
 });
 
