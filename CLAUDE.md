@@ -125,6 +125,7 @@ Crons → POST /api/coach/respond (various triggers)
 | `activities` | `strava_activity_id`, `activity_type`, `distance_meters`, `average_pace`, `average_heartrate`, `workout_type` (1=race), `start_date`, `summary` (splits/laps JSON) |
 | `races` | `race_date`, `race_name`, `goal`, `priority` (A/B/C), `goal_time_minutes`, `goal_distance_miles` |
 | `conversations` | `role`, `content`, `message_type`, `strava_activity_id`, `created_at` |
+| `pain_checkins` | `user_id`, `date`, `pain_level` (0-10, one row per day, upserted) — extracted from conversation via `pain_level` field on the injury-update Haiku call; read back via `src/lib/pain-trend.ts` to build the PAIN TREND prompt block and gate the return-to-run functional test |
 
 ### conversations.message_type allowlist
 

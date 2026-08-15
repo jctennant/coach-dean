@@ -114,6 +114,8 @@ function setupSupabase(opts: {
   conversations?: Array<Record<string, unknown>>;
   /** training_plans row — needed by paths that read the stored arc (e.g. plan questions). */
   plan?: Record<string, unknown> | null;
+  /** pain_checkins rows — {date, pain_level} — for the pain-trend block. */
+  painCheckins?: Array<Record<string, unknown>>;
 }) {
   // Reuse the same chain for training_state so we can inspect all update() calls.
   const stateChain = makeChain({ data: opts.state ?? null, error: null });
@@ -125,6 +127,7 @@ function setupSupabase(opts: {
     if (table === "races") return makeChain({ data: opts.races ?? null, error: null });
     if (table === "conversations") return makeChain({ data: opts.conversations ?? null, error: null });
     if (table === "training_plans" && opts.plan) return makeChain({ data: opts.plan, error: null });
+    if (table === "pain_checkins") return makeChain({ data: opts.painCheckins ?? null, error: null });
     // activities, training_plans etc. — return empty/null data
     return makeChain({ data: null, error: null });
   });
@@ -1460,6 +1463,164 @@ describe("coach/respond — skipped non-run session detection on post_run", () =
     const userMsg = coachingCall[0].messages[0].content as string;
 
     expect(userMsg).not.toContain("PLAN DEVIATION — NON-RUN DAY");
+  });
+});
+
+describe("coach/respond — injury hold broken via post_run", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Great run!" }],
+    });
+  });
+
+  function setupWithActivity(activityType: string) {
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return makeChain({ data: baseProfile(), error: null });
+      if (table === "training_state") return makeChain({ data: baseState({ injury_hold_since: "2026-08-14" }), error: null });
+      if (table === "activities") {
+        // Same split as setupOnboardingSupabase above: range/list queries need an array,
+        // the .single() lookup by strava_activity_id needs the one triggering activity.
+        const chain = makeChain({ data: [], error: null }) as Record<string, unknown>;
+        chain.single = vi.fn().mockResolvedValue({
+          data: { activity_type: activityType, distance_meters: 6116, moving_time_seconds: 2200, average_heartrate: 130, average_pace: "8:51", elevation_gain: 50 },
+          error: null,
+        });
+        return chain;
+      }
+      return makeChain({ data: null, error: null });
+    });
+  }
+
+  it("tells Dean to address the broken hold instead of the standard analysis when a Run comes in during a hold", async () => {
+    setupWithActivity("Run");
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+
+    expect(userMsg).toContain("INJURY HOLD WAS ACTIVE FOR THIS RUN");
+    expect(userMsg).toContain("2026-08-14");
+  });
+
+  it("does NOT inject the guard for a cross-training activity during a hold", async () => {
+    setupWithActivity("Ride");
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+
+    expect(userMsg).not.toContain("INJURY HOLD WAS ACTIVE FOR THIS RUN");
+  });
+
+  it("does NOT inject the guard for a Run when no hold is active", async () => {
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return makeChain({ data: baseProfile(), error: null });
+      if (table === "training_state") return makeChain({ data: baseState({ injury_hold_since: null }), error: null });
+      if (table === "activities") {
+        const chain = makeChain({ data: [], error: null }) as Record<string, unknown>;
+        chain.single = vi.fn().mockResolvedValue({
+          data: { activity_type: "Run", distance_meters: 6116, moving_time_seconds: 2200, average_heartrate: 130, average_pace: "8:51", elevation_gain: 50 },
+          error: null,
+        });
+        return chain;
+      }
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+
+    expect(userMsg).not.toContain("INJURY HOLD WAS ACTIVE FOR THIS RUN");
+  });
+});
+
+describe("coach/respond — pain trend block", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Sounds like it's settling down." }],
+    });
+  });
+
+  it("injects the pain trend with real logged numbers when an injury is active", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin" }),
+      state: baseState(),
+      painCheckins: [
+        { date: "2026-08-10", pain_level: 4 },
+        { date: "2026-08-12", pain_level: 2 },
+        { date: "2026-08-14", pain_level: 1 },
+      ],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+
+    expect(systemPrompt).toContain("PAIN TREND");
+    expect(systemPrompt).toContain("2026-08-10: 4/10");
+    expect(systemPrompt).toContain("2026-08-14: 1/10");
+  });
+
+  it("fires the progression gate with the shin functional test once the low-pain streak hits 3", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin" }),
+      state: baseState(),
+      painCheckins: [
+        { date: "2026-08-12", pain_level: 1 },
+        { date: "2026-08-13", pain_level: 0 },
+        { date: "2026-08-14", pain_level: 1 },
+      ],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+
+    expect(systemPrompt).toContain("PROGRESSION GATE MET");
+    expect(systemPrompt).toContain("Single-leg hop in place");
+  });
+
+  it("does NOT inject a pain trend block when there's no active injury", async () => {
+    setupSupabase({
+      user: baseUser(),
+      profile: baseProfile(),
+      state: baseState(),
+      painCheckins: [{ date: "2026-08-14", pain_level: 1 }],
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "user_message" });
+    await POST(req);
+    await flush();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+
+    expect(systemPrompt).not.toContain("PAIN TREND");
   });
 });
 

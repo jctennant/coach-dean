@@ -5,6 +5,8 @@ import {
   normalizeBodyPart,
   BODY_PART_EXERCISES,
   CROSS_TRAINING_ALTERNATIVES,
+  FUNCTIONAL_TESTS,
+  getFunctionalTest,
 } from "@/lib/exercise-library";
 
 describe("exercise-library — catalog integrity", () => {
@@ -77,5 +79,23 @@ describe("normalizeBodyPart", () => {
     expect(normalizeBodyPart("shoulder")).toBeNull();
     expect(normalizeBodyPart("wrist")).toBeNull();
     expect(normalizeBodyPart("elbow")).toBeNull();
+  });
+});
+
+describe("getFunctionalTest", () => {
+  it("has a functional test for every known rehab body part", () => {
+    for (const part of KNOWN_REHAB_PARTS) {
+      expect(FUNCTIONAL_TESTS[part], `${part} is missing a functional test`).toBeTruthy();
+    }
+  });
+
+  it("resolves aliases the same way normalizeBodyPart does", () => {
+    expect(getFunctionalTest("achilles")).toBe(FUNCTIONAL_TESTS.calf);
+    expect(getFunctionalTest("IT band")).toBe(FUNCTIONAL_TESTS.it_band);
+    expect(getFunctionalTest("plantar fasciitis")).toBe(FUNCTIONAL_TESTS.foot);
+  });
+
+  it("returns null for unrecognized parts", () => {
+    expect(getFunctionalTest("shoulder")).toBeNull();
   });
 });

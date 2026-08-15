@@ -24,6 +24,31 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — Pain check-ins were logged but never read back; added a functional-test progression gate
+
+**Type:** Feature
+**Reported by:** Jake (live, reviewing conversation history)
+**User feedback:** Following up on the shin-splint conversation review, Jake flagged that the rehab routine never progressed or got measured — Dean kept resending the same 9-exercise list verbatim without ever checking whether it was working, and asked for a way to actually track progress and keep the athlete moving forward, closer to how a real PT would.
+**Root cause:** `training_state.last_pain_level`/`pain_reported_at` and a dedicated `pain_checkins(user_id, date, pain_level)` table already existed and were being written on every Haiku-extracted pain rating — but nothing in `coach/respond/route.ts` ever read them back. The data was write-only: Dean had no access to a real pain trend and fell back on whatever the conversation happened to recall, and there was no defined next step once symptoms settled (no test, no explicit go/no-go signal, no criteria for progressing the rehab exercises or lifting a hold).
+**Fix / Change:**
+- Added `src/lib/pain-trend.ts` (`computePainTrend` / `buildPainTrendBlock`): turns the raw `pain_checkins` rows into a real trend (chronological history, improving/worsening/flat direction, trailing low-pain streak) and a prompt block that gives Dean the actual logged numbers instead of conversational memory.
+- Added `FUNCTIONAL_TESTS` to `src/lib/exercise-library.ts` — one self-administered return-to-load test per body part (e.g. shin: single-leg hop ×10 each side, pain during/after = fail), in the same style as the existing rehab-exercise and cross-training libraries.
+- Wired both into `coach/respond/route.ts`: a `pain_checkins` query runs alongside the existing user-context fetch for `post_run`/`user_message`/`weekly_recap`, and a new `painTrendBlock` (only rendered when there's an active injury) shows Dean the trend and — once the low-pain streak hits 3 consecutive check-ins — instructs Dean to prescribe the relevant functional test as the concrete next step, rather than a vague "keep going." A pass is real grounds to progress; Dean is told explicitly not to claim readiness from the pain trend alone without the test.
+**Files changed:** `src/lib/pain-trend.ts` (new), `src/lib/exercise-library.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/pain-trend.test.ts` (new), `src/__tests__/lib/exercise-library.test.ts`, `src/__tests__/api/coach-respond.test.ts`, `CLAUDE.md` (documented the previously-undocumented `pain_checkins` table)
+
+---
+
+## 2026-08-15 — A logged run during an active injury hold got standard splits praise instead of being addressed
+
+**Type:** Bug Fix
+**Reported by:** Jake (live, reviewing conversation history)
+**User feedback:** Jake asked for a scan of his own shin-splint conversation for PT-quality gaps. On 2026-08-14 Dean set a full running hold ("No runs until you've seen a sports physio and they've cleared you"). Under 16 hours later a `post_run` webhook came in for a 3.8mi run — Dean's reply was standard splits/pace praise ("Excellent negative split... exactly where easy miles build the engine") with no acknowledgment the hold had just been broken, and no check on physio status. Minutes later, when Jake floated running short distances daily, Dean engaged with the idea as reasonable — a silent reversal of "no running until cleared."
+**Root cause:** `injury_hold_since` gates plan generation (weekly mileage target zeroes out, sessions clear) but the `post_run` prompt branch in `coach/respond/route.ts` never checked it at all. The only hold-aware prompt context (`fullArcContext`/`RETURN-TO-RUN CONTEXT`) lives in the `user_message` case, for answering "what's the plan" questions — nothing connected an active hold to an incoming Run activity on the `post_run` path, so a broken hold fell through to the same 5-lens analysis (load, HR, efficiency, pacing, cadence) as any normal training run.
+**Fix / Change:** Added a guard in the `post_run` case: when `injury_hold_since` is set and the incoming activity is a Run/TrailRun/VirtualRun/Treadmill, skip the standard analysis lenses entirely and instead instruct Dean to (1) acknowledge plainly that the athlete ran during the hold, (2) ask where things stand with the physio, (3) ask how the injury felt during this specific run, (4) restate that the hold stays in effect until the athlete confirms they've been cleared. Cross-training activities (bike, swim, etc.) during a hold are unaffected — the guard only fires on actual running.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-14 — Dean invented a prior-week mileage number, and the injury escalation path defaulted to "see a physio" too readily
 
 **Type:** Bug Fix / Improvement

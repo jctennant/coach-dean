@@ -54,7 +54,8 @@ import { formatStrengthDigest, isStrengthDigest, parseExerciseImageRequest, want
 import type { ActivityWeatherData } from "@/lib/weather";
 import { computeRecentFatigueLoad } from "@/lib/load-score";
 import { createLogger } from "@/lib/logger";
-import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, getRehabData, buildTimelinePromptText, getRecoveryEstimate } from "@/lib/exercise-library";
+import { BODY_PART_EXERCISES, CROSS_TRAINING_ALTERNATIVES, CROSS_TRAINING_WORKOUTS, INJURY_TIMELINES, KNOWN_REHAB_PARTS, MODALITY_PATTERNS, MODALITY_DISPLAY_NAMES, getRehabData, buildTimelinePromptText, getRecoveryEstimate, getFunctionalTest } from "@/lib/exercise-library";
+import { computePainTrend, buildPainTrendBlock } from "@/lib/pain-trend";
 import { classifyIntent } from "@/lib/intent-classifier";
 import { buildCadenceOffer, isCadenceOffer, parseCadenceReply } from "@/lib/cadence-offer";
 import { buildReminderDynamic } from "@/lib/reminder-prompt";
@@ -1520,6 +1521,19 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
         .in("activity_type", ["Run", "TrailRun", "VirtualRun", "Treadmill"])
     : Promise.resolve({ data: null, error: null });
 
+  // Trailing 21-day pain check-in history — used to compute a real pain trend instead of
+  // trusting conversational memory ("felt better than yesterday"). Only queried on triggers
+  // where an injury conversation is plausible; the block itself no-ops if there's no active
+  // injury context or no entries, so fetching for other triggers would just be wasted work.
+  const painCheckinsPromise = (trigger === "post_run" || trigger === "user_message" || trigger === "weekly_recap")
+    ? supabase
+        .from("pain_checkins")
+        .select("date, pain_level")
+        .eq("user_id", userId)
+        .gte("date", new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
+        .order("date", { ascending: true })
+    : Promise.resolve({ data: null, error: null });
+
   // Fetch user context in parallel
   const [
     userResult,
@@ -1531,6 +1545,7 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
     upcomingRacesResult,
     planTotalWeeksResult,
     ytdActivitiesResult,
+    painCheckinsResult,
   ] = await Promise.all([
     supabase.from("users").select("*").eq("id", userId).single(),
     supabase
@@ -1584,6 +1599,7 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
       .limit(1)
       .maybeSingle(),
     ytdActivitiesPromise,
+    painCheckinsPromise,
   ]);
 
   const user = userResult.data;
@@ -2278,6 +2294,19 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
     return `\n\nPHYSIO PRESCRIPTION ACTIVE: The athlete's physical therapist or sports physician has given specific guidance. Coach within these constraints and explicitly defer to this professional guidance:\n${physioNotes}${restrictionLines}\nDo not prescribe anything that conflicts with these restrictions. If the athlete's goals conflict with the physio's prescription, side with the physio.`;
   })();
 
+  // Pain trend block: only meaningful when there's an active injury to track against.
+  // See pain-trend.ts — this is what turns "pain has been logged" from a write-only record
+  // into something Dean actually references and acts on (progression gate + functional test).
+  const painTrendBlock = (() => {
+    const hasInjuryContext = !!(profile?.injury_notes) || !!(state?.injury_hold_since);
+    if (!hasInjuryContext) return "";
+    const trend = computePainTrend((painCheckinsResult.data as { date: string; pain_level: number }[] | null) ?? []);
+    if (trend.entries.length === 0) return "";
+    const bodyPart = (profile?.injury_body_part as string | null) ?? null;
+    const functionalTest = bodyPart ? getFunctionalTest(bodyPart) : null;
+    return buildPainTrendBlock(trend, functionalTest);
+  })();
+
   // Aerobic metrics trend block — last 10 runs with efficiency + decoupling.
   // Included for post_run and user_message so Dean can spot improvements or overreaching.
   let aerobicTrendBlock = "";
@@ -2482,7 +2511,7 @@ NO GENERIC OPENERS. Never start with "Great week!", "Nice work!", "Awesome sessi
 4. INJURY & LOAD ARE THE PRIORITY LENS. If LOAD CONTEXT shows a spike or a recovery signal, or the athlete mentioned any tightness/soreness/pain (now or recently), lead with or weave in the specific load-management or recovery read — even unprompted. That proactive injury-prevention insight is the highest-value thing you can give them. Translate load numbers into plain English; never cite raw "units".
 5. If the athlete asked a narrow question, answer it precisely and stop — don't pad to hit these. Specificity beats completeness.`
     : "";
-  const systemDynamic = builtPrompt.dynamic + aerobicTrendBlock + strengthRoutineBlock + hipCoreProtocolBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + (coachingFocus
+  const systemDynamic = builtPrompt.dynamic + aerobicTrendBlock + strengthRoutineBlock + hipCoreProtocolBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + painTrendBlock + (coachingFocus
     ? `\n\nATHLETE COACHING FOCUS (stored from a previous conversation — use this to weight your coaching lens):
 Focus: ${coachingFocus}
 - "aerobic_base_and_zones": Athlete wants to understand and build their aerobic base. HR zone analysis, cardiac drift, and aerobic efficiency trends are welcome.
@@ -8558,7 +8587,17 @@ function buildUserMessage(
               : null,
           }
         : activityData;
-      const injuryReminder = "";
+      // An injury hold means "no running until cleared" — if a Run/TrailRun/VirtualRun/Treadmill
+      // activity shows up here anyway, the athlete ran despite that instruction. Nothing else in
+      // the post_run path checks injuryHoldSince, so without this the standard 5-lens analysis
+      // below would praise splits and pace on a run that shouldn't have happened, silently
+      // dropping the hold instead of addressing that it was broken.
+      const injuryReminder = (() => {
+        if (!injuryHoldSince) return "";
+        const actType = (activityData?.activity_type as string | null) ?? "";
+        if (!["Run", "TrailRun", "VirtualRun", "Treadmill"].includes(actType)) return "";
+        return `\n\nINJURY HOLD WAS ACTIVE FOR THIS RUN: The athlete is on a running hold since ${injuryHoldSince} and logged a run anyway. Do NOT run the standard 5-lens analysis or praise splits/pace/effort as if this were a normal training session — that reads as ignoring your own guidance. Instead, in 2-3 sentences: (1) acknowledge plainly that they ran during the hold, no lecture, (2) ask where things stand with the physio — have they gone, is it scheduled, (3) ask how the injury felt during this specific run (pain scale, better/worse/same). Restate that the hold stays in effect until they tell you they've been cleared — you can't lift it from this message, but their next reply can confirm it. Skip the load/HR/pacing/cadence lenses entirely this turn.\n\n`;
+      })();
       const isRecoveryGoal = goalType === "return_to_running" || goalType === "injury_recovery";
 
       // Build data availability guards to prevent Claude from hallucinating specific values

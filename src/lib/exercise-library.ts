@@ -91,6 +91,33 @@ export const CROSS_TRAINING_ALTERNATIVES: Record<string, string[]> = {
 
 export const KNOWN_REHAB_PARTS = Object.keys(BODY_PART_EXERCISES);
 
+// A single self-administered functional test per body part — the concrete go/no-go step
+// between "pain has settled" and "safe to load back up." Standard return-to-run screening
+// tests, phrased for an athlete to try on their own and report back on (pain during/after,
+// and whether they completed the full test). Not a diagnosis — a practical readiness check.
+export const FUNCTIONAL_TESTS: Record<string, string> = {
+  it_band:    "Single-leg squat to a chair, 10 reps each side, controlled — any pain or the knee visibly caving inward on the affected side is a fail.",
+  hamstring:  "Single-leg Romanian deadlift (bodyweight), 10 reps each side, controlled 3-second lowering — any sharp or pulling pain is a fail; a stretch sensation is fine.",
+  knee:       "Step down from a 6-8 inch step, single-leg, slow 3-second descent, 10 reps each side — any pain or the knee buckling/wobbling is a fail.",
+  shin:       "Single-leg hop in place, 10 reps each side — any pain during or in the hours after is a fail. Do this on a hard, flat surface, not grass.",
+  calf:       "Single-leg calf raise, full range, 20 reps each side without stopping — inability to complete 20, or any pain, is a fail.",
+  foot:       "Walk barefoot on toes for 20 steps, then single-leg hop in place ×10 — any pain is a fail.",
+  hip:        "Single-leg bridge, 10 reps each side, 2-second hold at the top — any pinching or sharp pain is a fail.",
+  piriformis: "Single-leg hop in place, 10 reps each side — deep glute/hip pain during or after is a fail.",
+  glute:      "Single-leg bridge, 10 reps each side, 2-second hold — any pain, or the hip visibly dropping on the unsupported side, is a fail.",
+  back:       "Stand and touch toes (or as far as comfortable), then 10 bodyweight squats — any sharp pain (not general stiffness) is a fail.",
+  ankle:      "Single-leg hop in place, 10 reps each side, plus 10 single-leg calf raises — any pain or instability is a fail.",
+  groin:      "Standing adduction: bring the affected leg across the body against light resistance (a hand or band), 10 reps — any sharp groin pain is a fail; mild tightness is fine.",
+};
+
+/** Look up the return-to-load functional test for a body part, or null if not in the library. */
+export function getFunctionalTest(bodyPart: string): string | null {
+  const key = bodyPart.toLowerCase().replace(/[^a-z_]/g, "_");
+  if (FUNCTIONAL_TESTS[key]) return FUNCTIONAL_TESTS[key];
+  const normalized = normalizeBodyPart(bodyPart);
+  return normalized ? FUNCTIONAL_TESTS[normalized] ?? null : null;
+}
+
 // Realistic return-to-run timelines by body part and severity.
 // Used on day 1 of injury hold to set honest expectations.
 export const INJURY_TIMELINES: Record<string, Record<"mild" | "moderate" | "severe", string>> = {
