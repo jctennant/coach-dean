@@ -2298,8 +2298,11 @@ Use this prediction as the foundation of your answer. Acknowledge the confidence
   // See pain-trend.ts — this is what turns "pain has been logged" from a write-only record
   // into something Dean actually references and acts on (progression gate + functional test).
   const painTrendBlock = (() => {
-    const hasInjuryContext = !!(profile?.injury_notes) || !!(state?.injury_hold_since);
-    if (!hasInjuryContext) return "";
+    // active_injury (not raw injury_notes) — a resolved injury keeps injury_notes on file
+    // (prefixed "Past (resolved): ...") rather than clearing it, so checking injury_notes
+    // directly would keep showing a pain trend for an injury that's no longer active.
+    const hasActiveInjuryForTrend = !!(profile?.active_injury) || !!(state?.injury_hold_since);
+    if (!hasActiveInjuryForTrend) return "";
     const trend = computePainTrend((painCheckinsResult.data as { date: string; pain_level: number }[] | null) ?? []);
     if (trend.entries.length === 0) return "";
     const bodyPart = (profile?.injury_body_part as string | null) ?? null;
@@ -3313,18 +3316,26 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
         .map(m => (m.content as string) || "")
         .filter(Boolean)
     : [];
-  // For return_to_running/injury_recovery athletes, the "how's the [body part] feeling"
-  // closing question is really a fixed data query dressed as prose — free-generating its
-  // wording every time is exactly what produced 8+ near word-for-word repeats in production
-  // (e.g. "Still at the 0.5-1/10 level, or back down closer to 0/10?" asked verbatim across a
-  // week of recovery walks). Pulling it out of free generation into a rotating pool, indexed
-  // by how many times it's already been asked, makes the repeat structurally impossible
-  // instead of relying on Claude to notice and vary it.
+  // For athletes with an active injury on file — whether their overall goal IS recovery
+  // (return_to_running/injury_recovery) or they're managing an injury while still training
+  // toward something else (e.g. a trail_race athlete nursing a shin issue) — the "how's the
+  // [body part] feeling" closing question is really a fixed data query dressed as prose —
+  // free-generating its wording every time is exactly what produced 8+ near word-for-word
+  // repeats in production (e.g. "Still at the 0.5-1/10 level, or back down closer to 0/10?"
+  // asked verbatim across a week of recovery walks). Pulling it out of free generation into a
+  // rotating pool, indexed by how many times it's already been asked, makes the repeat
+  // structurally impossible instead of relying on Claude to notice and vary it.
+  // Originally gated on goal alone — an athlete training for a race while working through an
+  // injury got none of this (no rotating question, no poll), even though they're exactly who
+  // needs the recurring check-in. active_injury is the system's actual "currently managing an
+  // injury" signal (auto-set on moderate/severe reports, auto-cleared on resolution — see
+  // persistProfileUpdates) regardless of what the athlete's goal is, so it's the right gate.
   const suggestedInjuryCheckQuestion = (() => {
     if (trigger !== "post_run") return null;
     const goalIsRecovery = (profile?.goal as string | null) === "return_to_running" || (profile?.goal as string | null) === "injury_recovery";
+    const hasActiveInjury = !!(profile?.active_injury);
     const bodyPart = (profile?.injury_body_part as string | null) ?? null;
-    if (!goalIsRecovery || !bodyPart) return null;
+    if ((!goalIsRecovery && !hasActiveInjury) || !bodyPart) return null;
     const pool = [
       `How's the ${bodyPart} today — same baseline, or any change?`,
       `${bodyPart[0].toUpperCase()}${bodyPart.slice(1)} check: better, worse, or holding steady since last time?`,

@@ -24,6 +24,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — The recurring injury check-in only fired for goal=return_to_running, missing athletes training through an injury toward a different goal
+
+**Type:** Bug Fix
+**Reported by:** Jake (live)
+**User feedback:** After the poll work above, Jake asked to test it on his own number — but his goal is `trail_race`, not `return_to_running`/`injury_recovery`, so the poll (and the free-text question it replaces) never fired even though he has a real, actively-tracked shin injury (`active_injury: true`, `injury_body_part: "inner shin"`, `injury_severity: "moderate"`) he's working through toward that race. He said it plainly: "It really should be triggered for anyone that is working through an injury, even if their goal is to get to a race."
+**Root cause:** `suggestedInjuryCheckQuestion` in `coach/respond/route.ts` gated the recurring "how's the [body part] feeling" question (and, by extension, `PAIN_CHECKIN_POLL`) on `profile.goal === "return_to_running" || "injury_recovery"` — conflating "the athlete's overall goal IS injury recovery" with "the athlete currently has an injury to monitor." The codebase already has the right signal for the latter: `active_injury`, a boolean auto-set on moderate/severe symptom reports and auto-cleared on resolution (`persistProfileUpdates`), used everywhere else in the file (rehab tool offering, cadence flags, the ACTIVE INJURY prompt block) — this one check just never picked it up. Separately, the pain-trend block added earlier today had the same shape of bug one level down: it gated on raw `injury_notes` presence, which stays populated (prefixed "Past (resolved): ...") even after an injury resolves, instead of `active_injury`.
+**Fix / Change:** Changed `suggestedInjuryCheckQuestion`'s gate to fire when EITHER the goal is recovery-type OR `active_injury` is true (still requires a known body part). Changed the pain-trend block's gate from `injury_notes` to `active_injury` (plus `injury_hold_since`) to match. No poll/prompt-text changes needed — same `PAIN_CHECKIN_POLL`, just reachable for the population it was actually meant for.
+**Files changed:** `src/app/api/coach/respond/route.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-15 — Added a native poll for the recurring pain check-in question
 
 **Type:** Feature

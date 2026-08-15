@@ -1568,7 +1568,7 @@ describe("coach/respond — pain trend block", () => {
   it("injects the pain trend with real logged numbers when an injury is active", async () => {
     setupSupabase({
       user: baseUser(),
-      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin" }),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin", active_injury: true }),
       state: baseState(),
       painCheckins: [
         { date: "2026-08-10", pain_level: 4 },
@@ -1592,7 +1592,7 @@ describe("coach/respond — pain trend block", () => {
   it("fires the progression gate with the shin functional test once the low-pain streak hits 3", async () => {
     setupSupabase({
       user: baseUser(),
-      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin" }),
+      profile: baseProfile({ injury_notes: "shin splints", injury_body_part: "shin", active_injury: true }),
       state: baseState(),
       painCheckins: [
         { date: "2026-08-12", pain_level: 1 },
@@ -1690,6 +1690,64 @@ describe("coach/respond — injury check-in pain poll", () => {
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
     const userMsg = calls[calls.length - 1][0].messages[0].content as string;
     expect(userMsg).toContain("INJURY CHECK-IN QUESTION:");
+  });
+
+  it("also fires for a race-goal athlete who is managing an active injury (not just goal=return_to_running)", async () => {
+    (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return makeChain({
+        data: baseProfile({ goal: "trail_race", injury_body_part: "shin", active_injury: true }),
+        error: null,
+      });
+      if (table === "training_state") return makeChain({ data: baseState(), error: null });
+      if (table === "activities") {
+        const chain = makeChain({ data: [], error: null }) as Record<string, unknown>;
+        chain.single = vi.fn().mockResolvedValue({
+          data: { activity_type: "Run", distance_meters: 4828, moving_time_seconds: 1800, average_heartrate: 128, average_pace: "9:00", elevation_gain: 20 },
+          error: null,
+        });
+        return chain;
+      }
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    expect(sendPoll).toHaveBeenCalledWith(
+      "+12025550001",
+      PAIN_CHECKIN_POLL.title,
+      PAIN_CHECKIN_POLL.options
+    );
+  });
+
+  it("does NOT fire for a race-goal athlete with no active injury on file", async () => {
+    (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return makeChain({
+        data: baseProfile({ goal: "trail_race" }),
+        error: null,
+      });
+      if (table === "training_state") return makeChain({ data: baseState(), error: null });
+      if (table === "activities") {
+        const chain = makeChain({ data: [], error: null }) as Record<string, unknown>;
+        chain.single = vi.fn().mockResolvedValue({
+          data: { activity_type: "Run", distance_meters: 4828, moving_time_seconds: 1800, average_heartrate: 128, average_pace: "9:00", elevation_gain: 20 },
+          error: null,
+        });
+        return chain;
+      }
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    expect(sendPoll).not.toHaveBeenCalled();
   });
 });
 
