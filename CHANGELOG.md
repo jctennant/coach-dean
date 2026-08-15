@@ -24,6 +24,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-15 — Added a native poll for the recurring pain check-in question
+
+**Type:** Feature
+**Reported by:** Jake (live)
+**User feedback:** After the pain-trend work above, Jake asked whether the pain check-in used a poll — it didn't — and, having just upgraded the Spectrum/Photon plan tier to unlock native iMessage polls, asked for one, aligned with how Dean describes the pain scale in free text, with a plain-text fallback for Linq athletes.
+**Root cause:** N/A — new capability, not a bug. The rotating "how's the [body part] feeling" question (`suggestedInjuryCheckQuestion` in `coach/respond/route.ts`) was identified in `polls.ts`'s own docs as exactly the kind of fixed, deterministic, single-purpose question polls are meant for — a repeated free-text ask that had already been pulled out of open generation once (into a rotating pool) specifically to stop it drifting into near-duplicate phrasing.
+**Fix / Change:** Added `PAIN_CHECKIN_POLL` to `src/lib/polls.ts` — 4 bucketed options (Pain-free / Mild 1-2 / Noticeable 3-4 / Significant 5+) with boundaries matching the existing PAIN THRESHOLD RULE Dean states in free text elsewhere (0-2/10 ok with monitoring, 3/10 = stop), so a poll tap and a typed "pain is a 2" land on the same read. Each option's `optionToMessage` includes an explicit number so the existing `pain_level` extraction picks it up with no separate structured path — same pattern as every other poll in the file. Wired into `coach/respond/route.ts`: on Photon, the post_run prompt now tells Dean not to ask the free-text version (the poll covers it) and a new best-effort block sends the poll + a plain-text fallback hint as a separate bubble, following the exact same pattern as the existing `RTR_GATE_POLL`/`STRENGTH_ROUTINE_POLL` sends. Linq athletes are unaffected — `isPhotonProvider()` gates both the suppression and the send, so they keep getting the free-text rotating question exactly as before.
+**Files changed:** `src/lib/polls.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/polls.test.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-15 — Pain check-ins were logged but never read back; added a functional-test progression gate
 
 **Type:** Feature

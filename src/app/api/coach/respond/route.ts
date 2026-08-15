@@ -9,7 +9,7 @@ import { anthropic } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { sendSMS, sendMediaSMS, startTyping, typingDurationMs } from "@/lib/linq";
 import { sendPoll, isPhotonProvider } from "@/lib/photon";
-import { RTR_GATE_POLL, STRENGTH_ROUTINE_POLL } from "@/lib/polls";
+import { RTR_GATE_POLL, STRENGTH_ROUTINE_POLL, PAIN_CHECKIN_POLL } from "@/lib/polls";
 import { trackEvent } from "@/lib/track";
 import { fetchWeekWeather, buildWeatherBlock } from "@/lib/weather";
 import { buildPeriodization, computePhase } from "@/lib/periodization";
@@ -4727,6 +4727,34 @@ OUTPUT CONTRACT:
     }
   }
 
+  // Injury pain check-in poll: mirrors the RTR gate poll above — for Photon/iMessage athletes,
+  // the free-text "how's the [body part] feeling" question was suppressed from the message
+  // above (see the INJURY CHECK-IN block in the post_run prompt) whenever
+  // suggestedInjuryCheckQuestion would otherwise have fired — send the bucketed pain-scale
+  // poll here instead as a separate bubble. Best-effort, same as the RTR gate poll.
+  if (trigger === "post_run" && isPhotonProvider() && suggestedInjuryCheckQuestion) {
+    try {
+      const pollChatId = chatId ?? learnedChatId;
+      if (pollChatId) await startTyping(pollChatId);
+      await sendPoll(user.phone_number, PAIN_CHECKIN_POLL.title, PAIN_CHECKIN_POLL.options);
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: `[Poll] ${PAIN_CHECKIN_POLL.title}`,
+        message_type: "coach_response",
+      });
+      await sendSMS(user.phone_number, PAIN_CHECKIN_POLL.fallbackHint);
+      await insertConversation({
+        user_id: userId,
+        role: "assistant",
+        content: PAIN_CHECKIN_POLL.fallbackHint,
+        message_type: "coach_response",
+      });
+    } catch (err) {
+      console.error("[coach/respond] pain check-in poll failed:", err);
+    }
+  }
+
   // Strength routine offer poll: for Photon/iMessage athletes, initial_plan with an active
   // injury on file now asks a plain yes/no instead of dumping the full routine into the plan
   // message (see the initial_plan branch of the strength-routine prompt block) — send that
@@ -8799,7 +8827,9 @@ ${recentPostRunQuestions.length > 0
   : ""}
 
 ${suggestedInjuryCheckQuestion
-  ? `INJURY CHECK-IN QUESTION: if you ask a closing question this turn, use exactly this wording (it's rotated automatically each time so it won't repeat): "${suggestedInjuryCheckQuestion}"\n\n`
+  ? (isPhotonProvider() && trigger === "post_run"
+      ? `INJURY CHECK-IN: Do NOT ask a "how's the ${injuryBodyPart ?? "injury"} feeling" question this turn — that check-in is sent separately as a poll.\n\n`
+      : `INJURY CHECK-IN QUESTION: if you ask a closing question this turn, use exactly this wording (it's rotated automatically each time so it won't repeat): "${suggestedInjuryCheckQuestion}"\n\n`)
   : ""}When a question IS warranted: one specific angle — injury history, pace execution, upcoming key session, load management. NOT generic ("how are you feeling?", "how'd it feel?"). Examples: "Any tightness in the quads after that tempo effort?" / "Was that effort sustainable given the heat?" / "Ready for the long run later this week?"
 
 Always skip when: the injury_reminder block already ends with a question; this is a cross-training or rest-substitute session; the run data is self-explanatory; or you have nothing specific to learn.

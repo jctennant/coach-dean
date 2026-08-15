@@ -42,6 +42,11 @@ vi.mock("@/lib/linq", () => ({
   typingDurationMs: vi.fn().mockReturnValue(0),
 }));
 
+vi.mock("@/lib/photon", () => ({
+  sendPoll: vi.fn().mockResolvedValue(undefined),
+  isPhotonProvider: vi.fn().mockReturnValue(false),
+}));
+
 vi.mock("@/lib/track", () => ({
   trackEvent: vi.fn().mockResolvedValue(undefined),
 }));
@@ -74,6 +79,8 @@ vi.mock("next/server", () => ({
 import { POST } from "@/app/api/coach/respond/route";
 import { supabase } from "@/lib/supabase";
 import { anthropic } from "@/lib/anthropic";
+import { sendPoll, isPhotonProvider } from "@/lib/photon";
+import { PAIN_CHECKIN_POLL } from "@/lib/polls";
 
 // ---------- helpers ----------
 
@@ -1621,6 +1628,68 @@ describe("coach/respond — pain trend block", () => {
     const systemPrompt = systemText(calls[calls.length - 1][0].system);
 
     expect(systemPrompt).not.toContain("PAIN TREND");
+  });
+});
+
+describe("coach/respond — injury check-in pain poll", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: [{ type: "text", text: "Solid recovery run." }],
+    });
+    (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(false);
+  });
+
+  function setupRecoveryAthlete() {
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return makeChain({ data: baseProfile({ goal: "return_to_running", injury_body_part: "shin" }), error: null });
+      if (table === "training_state") return makeChain({ data: baseState(), error: null });
+      if (table === "activities") {
+        const chain = makeChain({ data: [], error: null }) as Record<string, unknown>;
+        chain.single = vi.fn().mockResolvedValue({
+          data: { activity_type: "Run", distance_meters: 4828, moving_time_seconds: 1800, average_heartrate: 128, average_pace: "9:00", elevation_gain: 20 },
+          error: null,
+        });
+        return chain;
+      }
+      return makeChain({ data: null, error: null });
+    });
+  }
+
+  it("sends the pain check-in poll and suppresses the free-text question on Photon", async () => {
+    (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    setupRecoveryAthlete();
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    expect(sendPoll).toHaveBeenCalledWith(
+      "+12025550001",
+      PAIN_CHECKIN_POLL.title,
+      PAIN_CHECKIN_POLL.options
+    );
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+    expect(userMsg).toContain("that check-in is sent separately as a poll");
+    expect(userMsg).not.toContain("INJURY CHECK-IN QUESTION:");
+  });
+
+  it("does NOT send the poll and keeps the free-text question on Linq (non-Photon)", async () => {
+    setupRecoveryAthlete();
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    expect(sendPoll).not.toHaveBeenCalled();
+
+    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
+    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+    expect(userMsg).toContain("INJURY CHECK-IN QUESTION:");
   });
 });
 

@@ -29,7 +29,7 @@
 // itself, since poll options can't be templated per-athlete.
 
 export interface AppPoll {
-  id: "goal" | "rtr_gate" | "training_days_confirm" | "strength_routine_offer";
+  id: "goal" | "rtr_gate" | "training_days_confirm" | "strength_routine_offer" | "pain_checkin";
   title: string;
   options: string[];
   /** One-line plain-text fallback appended after the poll, for clients that can't render it. */
@@ -76,6 +76,34 @@ export const RTR_GATE_POLL: AppPoll = {
       : "I felt some pain during or after that.",
 };
 
+// Recurring injury pain check-in (coach/respond, post_run trigger): fires as a separate
+// bubble in place of the rotating free-text "how's the [body part] feeling" question
+// (suggestedInjuryCheckQuestion in coach/respond/route.ts) for recovery-goal athletes with
+// a body part on file. Bucketed rather than a raw 0-10 scale because a native poll needs a
+// short fixed option list — the boundaries mirror the PAIN THRESHOLD RULE Dean states in
+// free text elsewhere (0-2/10 ok with monitoring, 3/10 = stop), so a poll reply and a typed
+// reply describing the same pain level land in the same place. Each option's message
+// includes an explicit number so the existing pain_level extraction (route.ts) picks it up
+// exactly like a typed "pain is a 2" would — no separate structured path.
+export const PAIN_CHECKIN_POLL: AppPoll = {
+  id: "pain_checkin",
+  title: "How's the pain today?",
+  options: ["Pain-free", "Mild (1-2/10)", "Noticeable (3-4/10) — had to ease off", "Significant (5+/10)"],
+  fallbackHint: "(Or just give me a number, 0-10.)",
+  optionToMessage: (optionTitle) => {
+    switch (optionTitle) {
+      case "Pain-free":
+        return "No pain today — 0 out of 10.";
+      case "Mild (1-2/10)":
+        return "Mild pain today, around a 2 out of 10 — I kept going without trouble.";
+      case "Noticeable (3-4/10) — had to ease off":
+        return "Noticeable pain today, around a 4 out of 10 — I had to ease off.";
+      default:
+        return "Significant pain today, 6 or higher out of 10.";
+    }
+  },
+};
+
 // Schedule/preferences checkpoint (onboarding, awaiting_schedule_confirm state):
 // fired once diagnosis (Strava synthesis + injury intake) is done, stating the
 // Strava-inferred (or previously stated) training days and asking for a quick
@@ -111,4 +139,5 @@ export const POLLS_BY_TITLE: Record<string, AppPoll> = {
   [RTR_GATE_POLL.title]: RTR_GATE_POLL,
   [TRAINING_DAYS_POLL.title]: TRAINING_DAYS_POLL,
   [STRENGTH_ROUTINE_POLL.title]: STRENGTH_ROUTINE_POLL,
+  [PAIN_CHECKIN_POLL.title]: PAIN_CHECKIN_POLL,
 };
