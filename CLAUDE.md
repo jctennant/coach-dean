@@ -372,6 +372,18 @@ node evals/run-simulation-evals.mjs --fixture sim-trail-multi-race --verbose
 
 ---
 
+## Voice Evals (`/evals/fixtures/voice.json`)
+
+`npm run eval:voice` — measures whether `src/lib/voice-check.ts` can replace a maintained phrase list.
+
+27 labeled cases. The `flagged` set is drawn directly from prompt blocks that were deleted (the `weekly_recap` FORBIDDEN PHRASES list, the NO SIGN-OFFS / NO GENERIC OPENERS contract lines) — recall on those is the deletion criterion. The `clean` set measures precision, which matters equally: a validator that flags blunt, specific coaching would gate real messages into blandness. Current: 18/18 recall, 9/9 precision.
+
+`npm run eval:voice -- --backtest` runs the validator over real assistant messages from `conversations` (read-only, scoped to gated message types). Strongest precision signal available, since everything in it shipped with the phrase lists in force.
+
+**Before deleting any remaining voice rule from the prompt, add its content to `voice.json` as a labeled case and confirm recall first.** Do not reintroduce a phrase list — extend the fixtures and the judge instead.
+
+---
+
 ## Database Schema Rule
 
 Whenever a DB migration is needed (new column, table, index, etc.):

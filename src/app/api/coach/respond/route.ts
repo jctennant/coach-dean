@@ -133,6 +133,21 @@ const REHAB_TOOL = {
 //   the skeleton's actual open days — never one already assigned a fixed activity.
 type DeliverMessageMode = "none" | "plan_facts" | "skeleton_annotations" | "recovery_annotations";
 
+/**
+ * Triggers whose send is BLOCKED on the validator gate (response-gate.ts). All are
+ * proactive — cron-driven or end-of-onboarding — so nobody is waiting on the reply and
+ * a repair round-trip costs nothing the athlete can feel. post_run and user_message are
+ * deliberately absent: they sit on the live inbound path where the checks run advisory.
+ *
+ * Membership here has a second consequence. Because the voice validator blocks these
+ * sends, they no longer need the NO SIGN-OFFS / NO GENERIC OPENERS prompt rules — the
+ * validator catches those semantically, including phrasings a list would miss. See
+ * proactiveOutputContract below, and evals/fixtures/voice.json for the evidence.
+ */
+const GATED_PROACTIVE_TRIGGERS = [
+  "morning_plan", "weekly_recap", "nightly_reminder", "morning_reminder", "initial_plan",
+] as const;
+
 /** Shape of deliver_message's optional `plan_action` field — see buildDeliverMessageTool. */
 interface PlanActionInput {
   session_swaps?: Array<{ day?: unknown; to?: unknown }>;
@@ -2559,11 +2574,17 @@ Do NOT surface this every message. Once is enough — reinforce only 4+ weeks la
   // reply read like a real coach: data-driven opener, one concrete individualized takeaway,
   // injury/load as the priority lens, no filler. Only for run-review triggers — plans and
   // reminders have their own structure rules.
-  const proactiveOutputContract = !["post_run", "user_message"].includes(trigger)
-    ? `\n\nOUTPUT CONTRACT — read this last, check before sending:
+  // Only for proactive triggers that are NOT gated (workout_image, reengagement, …).
+  // The gated ones had these same two rules until 2026-08-16; they were deleted there
+  // because voice-check.ts blocks their send and catches both semantically. These
+  // triggers have no blocking validator, so they keep the generation-side rules.
+  const proactiveOutputContract =
+    !["post_run", "user_message"].includes(trigger) &&
+    !(GATED_PROACTIVE_TRIGGERS as readonly string[]).includes(trigger)
+      ? `\n\nOUTPUT CONTRACT — read this last, check before sending:
 NO SIGN-OFFS. Never end with "Let me know if you have questions", "Feel free to reach out", "Don't hesitate to ask", "You've got this!", or any variation. The message ends on the coaching point. If the athlete wants to follow up, they will.
 NO GENERIC OPENERS. Never start with "Great week!", "Nice work!", "Awesome session!" or any praise that isn't tied to a specific data observation.`
-    : "";
+      : "";
   const postRunOutputContract = trigger === "post_run"
     ? `\n\nOUTPUT CONTRACT — this is the last thing you read before replying, and your message is judged against it. Check each before sending:
 1. YOUR MESSAGE IS ONLY AN OPTIONAL SECOND LINE. Today's activity and the week's mileage-by-category are already sent automatically as a separate first message, computed directly from Strava data — do NOT restate, estimate, or recompute distance, pace, or weekly mileage yourself; you have no role in that line at all.
@@ -4729,8 +4750,7 @@ OUTPUT CONTRACT:
     })
   );
 
-  const isGatedProactive =
-    trigger === "morning_plan" || trigger === "weekly_recap" || trigger === "nightly_reminder";
+  const isGatedProactive = (GATED_PROACTIVE_TRIGGERS as readonly string[]).includes(trigger);
   if (isGatedProactive) {
     try {
       const gate = await gateProactiveResponse({
@@ -9420,16 +9440,15 @@ Pick a different lens. If the same trend keeps being the most actionable, find a
 
 `
         : "";
-      const recapForbiddenBlock = `FORBIDDEN PHRASES — DO NOT WRITE ANY OF THESE IN THE RECAP, EVER:
-- "great week!" / "solid week!" / "huge week!" / "killer week!" (as a standalone opener — earn the adjective with a specific stat or observation)
-- "keep crushing it" / "keep up the great work" / "stay consistent" / "keep grinding" / "you're doing amazing"
-- "way to show up" / "love to see it" / "proud of the work"
-- "keep easy days easy" / "make sure to recover" / "listen to your body" (as filler — only use if there's a specific reason rooted in this week's data)
-- "trust the process" / "the work is paying off" (without a specific data point that proves it)
-- Generic build-week affirmations like "another solid block" or "another good week in the books" — replace with a specific observation about WHAT made it solid.
-If your draft contains any of these, rewrite the sentence with a specific number, trend, or named workout outcome — or cut it entirely.
-
-`;
+      // A FORBIDDEN PHRASES list used to sit here ("great week!", "keep crushing it",
+      // "trust the process", …). Deleted 2026-08-16: every entry is now caught
+      // semantically by voice-check.ts, which BLOCKS the send on weekly_recap (see
+      // isGatedProactive) with a repair-and-recheck pass. Verified before deleting rather
+      // than assumed — evals/fixtures/voice.json encodes each former entry as a labeled
+      // case and `npm run eval:voice` scored 18/18 recall at 0 false positives across
+      // three consecutive runs. The validator also catches phrasings no list contained,
+      // which is the whole point (see the `signoff-novel-phrasing` fixture). Do not
+      // reintroduce a phrase list here; extend the fixtures and the judge instead.
       // When computeArcWeekSkeleton() already built the upcoming week's day/date/distance
       // skeleton, present it as fixed context and ask Claude only for descriptive content
       // per slot (via slot_annotations — see buildDeliverMessageTool). This replaces the
@@ -9506,9 +9525,9 @@ Rules:
 - The tag is stripped before the athlete sees the message — they will never see it
 `;
       if (isAnalystMode) {
-        return `${recapWinsBlock}${recapAntiRepBlock}${recapForbiddenBlock}${weekMileageContext}${crossTrainRecapBlock}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts reflecting on last week's training. First text: what stood out — lead with the most notable signal (a milestone, a trend, a specific run). Include the total mileage figure. Second text: 1–2 training observations or coaching notes based on what you saw in the data — pacing, aerobic efficiency, recovery quality, or a pattern worth watching. Do NOT prescribe next week's sessions, a mileage target, or a training schedule. This athlete runs without a structured plan; keep it observational and forward-looking without locking them into a schedule.`;
+        return `${recapWinsBlock}${recapAntiRepBlock}${weekMileageContext}${crossTrainRecapBlock}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts reflecting on last week's training. First text: what stood out — lead with the most notable signal (a milestone, a trend, a specific run). Include the total mileage figure. Second text: 1–2 training observations or coaching notes based on what you saw in the data — pacing, aerobic efficiency, recovery quality, or a pattern worth watching. Do NOT prescribe next week's sessions, a mileage target, or a training schedule. This athlete runs without a structured plan; keep it observational and forward-looking without locking them into a schedule.`;
       }
-      return `${macroPositionContext}${recapWinsBlock}${recapAntiRepBlock}${recapForbiddenBlock}${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
+      return `${macroPositionContext}${recapWinsBlock}${recapAntiRepBlock}${storedPlanContext}${weekMileageContext}${crossTrainRecapBlock}${injuryHoldInstruction}${planDeviationFlag ? `${planDeviationFlag}\n\n` : ""}Send 2 short texts recapping last week and previewing the coming week. Each text under 480 characters, separated by a blank line. First text: last week summary (mileage, one specific observation that connects to training trajectory) plus one sentence on what this week is targeting and why. Second text: this week's framework — weekly mileage target, long run, and quality session(s). No intro fluff.
 
 PLAN FORMAT (per principle 8 — the day-by-day schedule is sent separately, so keep it out of your prose):
 - Weekly mileage target (e.g. "~34 mi this week")

@@ -100,3 +100,28 @@ describe("checkVoice", () => {
     expect(await checkVoice("anything")).toEqual({ ok: true, category: null, issue: null });
   });
 });
+
+describe("checkVoice — link-dominated messages", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("skips a message that is essentially just a URL", async () => {
+    const linkOnly = "https://coachdean.ai/plan/eyJ1IjoiNjYwZDY4MGUtNWZiNy00MWYwIn0~35394d0b";
+    expect(await checkVoice(linkOnly)).toEqual({ ok: true, category: null, issue: null });
+    expect(create()).not.toHaveBeenCalled();
+  });
+
+  it("still judges a URL that comes with real prose", async () => {
+    mockReport({ ok: false, category: "filler", issue: "sign-off" });
+    const withProse =
+      "Your updated plan is live. Long run moves to Saturday and Thursday drops to an easy 4. " +
+      "Let me know if you have questions! https://coachdean.ai/plan/abc";
+    expect((await checkVoice(withProse)).ok).toBe(false);
+    expect(create()).toHaveBeenCalled();
+  });
+
+  it("does NOT skip short prose — brevity is not a reason to go unjudged", async () => {
+    mockReport({ ok: false, category: "sycophancy", issue: "unearned praise" });
+    expect((await checkVoice("Great job!!")).ok).toBe(false);
+    expect(create()).toHaveBeenCalled();
+  });
+});
