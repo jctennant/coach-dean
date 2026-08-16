@@ -8,6 +8,28 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-16 — Measured the voice validator, then deleted the FORBIDDEN PHRASES list it replaces
+
+**Type:** Improvement
+**Reported by:** Jake
+**User feedback:** "is there a way to test the voice_issues_detected and the delete those forbidden phrases, etc/"
+**Root cause:** The previous entry shipped the voice validator but kept the phrase lists, because deleting them on faith would move generation and enforcement at once. What was missing was evidence.
+**Fix / Change:**
+- **New eval: `npm run eval:voice`** (`evals/run-voice-evals.mjs`, `evals/fixtures/voice.json`). 27 labeled cases where the "should flag" set is drawn *directly from the phrase lists we wanted to delete* — if the validator can't catch its own replacement list, the list can't go. The "clean" set measures precision, which matters just as much: a validator with perfect recall and poor precision would gate real coaching into blandness. Includes `signoff-novel-phrasing`, a sign-off worded in a way no list contains, which is the entire argument for a semantic judge.
+- **`--backtest` mode** runs the validator over real assistant messages from `conversations` (read-only), scoped to the message types the gate actually sees. This is the strongest precision signal available, since every message in it shipped with the phrase lists already in force.
+- **Iterated the judge on the evidence, three misses at a time.** Started at 72% recall. The misses shared a cause — the judge was reading "great week!" followed by real data as acceptable — so the rules gained: praise placed *before* any specific observation is sycophancy even when specifics follow; generic affirmation is filler (the "could this sentence be pasted to a different athlete unchanged?" test); preamble that announces the message instead of being it; jokes at the athlete's expense including gentle rhetorical ones. Final: **18/18 recall, 9/9 precision, stable across three consecutive runs.**
+- **Backtest surfaced three real false-positive classes, now carved out:** functional requests (an injury check-in or a "reply UPDATE PLAN to confirm" is coaching content, not a sign-off — the distinction is whether a reply is NEEDED or merely INVITED); medical referrals (the deliberately careful "I'd really encourage you to see a physio" phrasing must never be flagged); and clinical explanation of anatomy (precision about the body is substance, not corporate register). Also added "quote it verbatim or it isn't a violation" after the judge invented a sentence for a link-only message, plus a pre-call skip for link-dominated sends.
+- **Deleted the `weekly_recap` FORBIDDEN PHRASES block** (~8 lines) and the `NO SIGN-OFFS` / `NO GENERIC OPENERS` rules for every gated trigger.
+- **Extended the blocking gate** to `morning_reminder` and `initial_plan` via a new `GATED_PROACTIVE_TRIGGERS` constant — both are proactive, so blocking costs nothing the athlete feels, and gating them is what made their prompt rules deletable.
+
+**Deliberately NOT deleted:** the `post_run` and `user_message` output-contract rules. Those triggers sit on the live inbound path where the validator runs *advisory*, so removing the generation-side rule would leave nothing enforcing it. They come out only if those paths ever gate too — which is a latency tradeoff, not a correctness one.
+
+**Backtest finding worth its own note:** flag rate by month was 70% (June), 2.9% (July), 3.5% (August). The validator independently reproduces the direction of months of prompt evolution — it heavily flags the old verbose post-run style and rarely flags current output. Roughly half the remaining recent flags are genuine slips the phrase lists never caught.
+
+**Files changed:** `evals/run-voice-evals.mjs` (new), `evals/fixtures/voice.json` (new), `package.json`, `src/lib/voice-check.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/voice-check.test.ts`
+
+---
+
 ## 2026-08-16 — Dean gets a voice: a coach a few years older, with structurally-throttled humor and a semantic validator
 
 **Type:** Feature

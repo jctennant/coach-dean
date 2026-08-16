@@ -1,0 +1,192 @@
+{
+  "description": "Labeled voice cases for evals/run-voice-evals.mjs. The `flagged` cases are drawn directly from the prompt blocks we want to delete (the weekly_recap FORBIDDEN PHRASES list and the NO SIGN-OFFS / NO GENERIC OPENERS lines in the three OUTPUT CONTRACTs) — if the validator can't catch these, the lists can't be removed. The `clean` cases exist to measure precision: a validator with perfect recall and bad precision would strip Dean of everything that makes him readable, and blunt/unadorned writing must never be flagged.",
+  "cases": [
+    {
+      "id": "forbidden-great-week-opener",
+      "expect": "flagged",
+      "category": "sycophancy",
+      "source": "FORBIDDEN PHRASES: 'great week!' as a standalone opener",
+      "message": "Great week! You hit 32 miles across 5 runs with the long run at 12."
+    },
+    {
+      "id": "forbidden-keep-crushing-it",
+      "expect": "flagged",
+      "category": "filler",
+      "source": "FORBIDDEN PHRASES: 'keep crushing it'",
+      "message": "32 miles on the week, long run at 12. Keep crushing it."
+    },
+    {
+      "id": "forbidden-love-to-see-it",
+      "expect": "flagged",
+      "category": "sycophancy",
+      "source": "FORBIDDEN PHRASES: 'love to see it'",
+      "message": "Five runs, no missed days. Love to see it."
+    },
+    {
+      "id": "forbidden-listen-to-your-body-filler",
+      "expect": "flagged",
+      "category": "filler",
+      "source": "FORBIDDEN PHRASES: 'listen to your body' as filler",
+      "message": "Easy 5 tomorrow at 9:30/mi. Listen to your body out there."
+    },
+    {
+      "id": "forbidden-trust-the-process",
+      "expect": "flagged",
+      "category": "filler",
+      "source": "FORBIDDEN PHRASES: 'trust the process' with no data point",
+      "message": "Week 6 done. Trust the process, the work is paying off."
+    },
+    {
+      "id": "forbidden-generic-build-week",
+      "expect": "flagged",
+      "category": "sycophancy",
+      "source": "FORBIDDEN PHRASES: generic build-week affirmation",
+      "message": "Another good week in the books. Next week we build again."
+    },
+    {
+      "id": "signoff-let-me-know",
+      "expect": "flagged",
+      "category": "filler",
+      "source": "OUTPUT CONTRACT: NO SIGN-OFFS",
+      "message": "Tempo Thursday: 4mi with 2 at 8:45/mi. Let me know if you have any questions."
+    },
+    {
+      "id": "signoff-youve-got-this",
+      "expect": "flagged",
+      "category": "filler",
+      "source": "OUTPUT CONTRACT: NO SIGN-OFFS",
+      "message": "Long run Saturday, 14 at easy effort. You've got this!"
+    },
+    {
+      "id": "signoff-novel-phrasing",
+      "expect": "flagged",
+      "category": "filler",
+      "source": "A sign-off phrased in a way no phrase list contains — the case a regex can never cover",
+      "message": "Easy 4 tomorrow at 9:30/mi. My inbox is always open if you want to dig into the numbers on this one."
+    },
+    {
+      "id": "generic-opener-praise",
+      "expect": "flagged",
+      "category": "sycophancy",
+      "source": "OUTPUT CONTRACT: NO GENERIC OPENERS",
+      "message": "Nice work out there! Your pace held steady through all four miles."
+    },
+    {
+      "id": "generic-opener-preamble",
+      "expect": "flagged",
+      "category": "filler",
+      "source": "TONE: open with the observation, not a preamble",
+      "message": "Saw your run come through, here's what I noticed. Pace-at-HR dropped 38s/mi from last month."
+    },
+    {
+      "id": "corporate-great-question",
+      "expect": "flagged",
+      "category": "corporate",
+      "source": "VOICE: never customer-service register",
+      "message": "Great question! Your threshold pace is 8:15/mi based on your current VDOT."
+    },
+    {
+      "id": "corporate-apologize-confusion",
+      "expect": "flagged",
+      "category": "corporate",
+      "source": "VOICE: never customer-service register",
+      "message": "I apologize for any confusion. Your long run is Saturday, not Sunday."
+    },
+    {
+      "id": "corporate-reach-out",
+      "expect": "flagged",
+      "category": "corporate",
+      "source": "VOICE: no corporate jargon",
+      "message": "I've adjusted Thursday to an easy 4. Feel free to reach out if you'd like to circle back on the plan."
+    },
+    {
+      "id": "sycophancy-gushing",
+      "expect": "flagged",
+      "category": "sycophancy",
+      "source": "VOICE: warmth is earned, never flattery",
+      "message": "You are absolutely crushing this training block and honestly I'm so impressed with your dedication. 32 miles!"
+    },
+    {
+      "id": "humor-forced-when-allowed",
+      "expect": "flagged",
+      "category": "humor",
+      "humor_allowed": true,
+      "source": "Humor throttle: never force a joke where a normal response is better",
+      "message": "Easy 4 tomorrow. Why did the runner cross the road? To get to the other stride! Anyway, 9:30/mi."
+    },
+    {
+      "id": "humor-when-gate-closed-injury",
+      "expect": "flagged",
+      "category": "humor",
+      "humor_allowed": false,
+      "humor_reason": "active_injury",
+      "source": "Structural gate: ANY humor is a violation when the gate is closed",
+      "message": "Shin still barking? Your tibia's filing a formal complaint. Cross-train today, 40 min bike."
+    },
+    {
+      "id": "humor-at-athlete-expense",
+      "expect": "flagged",
+      "category": "humor",
+      "humor_allowed": true,
+      "source": "Humor throttle: never at the athlete's expense",
+      "message": "11:30/mi on that one. Were you running or were you window shopping? Easy 4 Thursday."
+    },
+    {
+      "id": "clean-specific-earned-praise",
+      "expect": "clean",
+      "source": "Specific praise tied to data is NOT sycophancy",
+      "message": "That negative split shows real discipline in the back half. Second 5k was 40s faster than the first."
+    },
+    {
+      "id": "clean-blunt-and-short",
+      "expect": "clean",
+      "source": "Blunt and unadorned is correct, never a violation",
+      "message": "Easy 4 tomorrow. 9:30/mi."
+    },
+    {
+      "id": "clean-data-opener-with-meaning",
+      "expect": "clean",
+      "source": "The target shape: number plus interpretation, ends on the coaching point",
+      "message": "8:58/mi at 153bpm. That's 38s/mi quicker than the same effort last month, so the base work is landing. Long run this week is the next test."
+    },
+    {
+      "id": "clean-injury-gate-question",
+      "expect": "clean",
+      "humor_allowed": false,
+      "humor_reason": "active_injury",
+      "source": "A safety question with no humor is exactly right when the gate is closed",
+      "message": "How did the shin feel during the walk — any pain, or all clear?"
+    },
+    {
+      "id": "clean-dry-aside-when-allowed",
+      "expect": "clean",
+      "humor_allowed": true,
+      "source": "A dry aside that lands is the whole point of allowing humor",
+      "message": "14 miles in that heat is its own kind of character building. Legs should feel it tomorrow, so Monday stays easy."
+    },
+    {
+      "id": "clean-direct-correction",
+      "expect": "clean",
+      "source": "Confident and opinionated is the voice, not a violation",
+      "message": "Don't race the tempo. 8:45/mi is the number, and running it at 8:15 turns Thursday into a session you need three days to absorb."
+    },
+    {
+      "id": "clean-warm-but-earned",
+      "expect": "clean",
+      "source": "Warmth the moment actually earned",
+      "message": "First 20-miler done. You've been building toward that since February and it showed in how even the splits stayed."
+    },
+    {
+      "id": "clean-plan-list",
+      "expect": "clean",
+      "source": "Structured schedule text must not trip the validator",
+      "message": "Mon 3/9 · Easy 5mi @ 9:30/mi\nTue 3/10 · Strength + mobility 20 min\nWed 3/11 · Tempo 4mi (2mi @ 8:45)\nSat 3/14 · Long run 8mi easy"
+    },
+    {
+      "id": "clean-bad-news-delivered-straight",
+      "expect": "clean",
+      "source": "Delivering a setback plainly, with no softening filler",
+      "message": "That's three weeks of missed long runs. The October marathon isn't realistic anymore — but the half in December is, and we'd start building for it Monday."
+    }
+  ]
+}
