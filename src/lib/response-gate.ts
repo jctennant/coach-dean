@@ -22,6 +22,7 @@ import { anthropic } from "./anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { checkDateConsistency } from "./date-consistency-check";
 import { checkSemanticRepetition } from "./repetition-check";
+import { checkVoice, type VoiceIssueCategory } from "./voice-check";
 import type { DateFacts } from "./timezone";
 
 export interface GateEvent {
@@ -51,7 +52,8 @@ const REPAIR_TOOL = {
 
 type RepairProblem =
   | { kind: "date_consistency"; issue: string; dateFacts: DateFacts }
-  | { kind: "repetition"; angle: string; priorMessages: string[] };
+  | { kind: "repetition"; angle: string; priorMessages: string[] }
+  | { kind: "voice"; category: VoiceIssueCategory | null; issue: string };
 
 /**
  * One focused rewrite call. Returns the repaired message, or null on any
@@ -68,6 +70,12 @@ export async function repairCoachMessage(
           `"${problem.issue}". Fix ONLY the day/date references so they are internally consistent ` +
           "and consistent with the KNOWN DATE FACTS. Do not change distances, paces, workout content, " +
           "tone, or anything else. Keep the length nearly identical."
+        : problem.kind === "voice"
+        ? "A voice check flagged this coaching SMS: " +
+          `"${problem.issue}". Remove ONLY the flagged problem. Cutting is almost always the right fix — ` +
+          "delete the offending words rather than replacing them with different filler, and let the message " +
+          "end on its actual content. Keep every number, date, distance, pace, workout, and any injury or " +
+          "safety question EXACTLY as written. The result will usually be shorter; that's correct."
         : "A QA check flagged this coaching SMS as repeating a coaching angle the athlete was already " +
           `told recently: "${problem.angle}" (see PRIOR MESSAGES). Rewrite the repeated observation/advice ` +
           "to take a genuinely different angle grounded in the same run/plan. Keep every number, date, " +
@@ -77,6 +85,10 @@ export async function repairCoachMessage(
     const context =
       problem.kind === "date_consistency"
         ? `KNOWN DATE FACTS:\nToday: ${problem.dateFacts.today}\nYesterday: ${problem.dateFacts.yesterday}\nTomorrow: ${problem.dateFacts.tomorrow}`
+        : problem.kind === "voice"
+        ? "DEAN'S VOICE: a coach five to ten years older than the athlete. Experienced, direct, unhurried. " +
+          "Warm only when the moment earns it. Texts like a person, not a company. No sign-offs, no generic " +
+          "praise, no corporate register."
         : `PRIOR MESSAGES (most recent first):\n${problem.priorMessages.map((m, i) => `${i + 1}. ${m}`).join("\n")}`;
 
     const response = await anthropic.messages.create({
@@ -115,6 +127,8 @@ export async function gateProactiveResponse(params: {
   dateFacts: DateFacts;
   /** Prior assistant messages of the same message_type, most recent first. Empty = skip repetition check. */
   priorSameTypeMessages: string[];
+  /** Structural humor gate for this turn (coach-voice.ts). Omit to allow humor. */
+  humor?: { allowed: boolean; reason: string | null };
 }): Promise<GateResult> {
   const events: GateEvent[] = [];
   let message = params.message;
@@ -156,6 +170,33 @@ export async function gateProactiveResponse(params: {
       } else {
         events.push({ event: "gate_repetition_repair_failed_sent_original" });
       }
+    }
+  }
+
+  // Voice last, so it judges the text that will actually send — a date or repetition
+  // repair rewrites prose and can reintroduce a sign-off or a bit of flattery.
+  const voiceResult = await checkVoice(message, {
+    humorAllowed: params.humor?.allowed ?? true,
+    humorSuppressionReason: params.humor?.reason ?? null,
+  });
+  if (!voiceResult.ok) {
+    events.push({ event: "gate_voice_issue_detected", detail: `${voiceResult.category}: ${voiceResult.issue}` });
+    const repaired = await repairCoachMessage(message, {
+      kind: "voice",
+      category: voiceResult.category,
+      issue: voiceResult.issue ?? "off-voice",
+    });
+    const recheck = repaired
+      ? await checkVoice(repaired, {
+          humorAllowed: params.humor?.allowed ?? true,
+          humorSuppressionReason: params.humor?.reason ?? null,
+        })
+      : null;
+    if (repaired && recheck && recheck.ok) {
+      message = repaired;
+      events.push({ event: "gate_voice_repaired", detail: voiceResult.category });
+    } else {
+      events.push({ event: "gate_voice_repair_failed_sent_original", detail: voiceResult.category });
     }
   }
 

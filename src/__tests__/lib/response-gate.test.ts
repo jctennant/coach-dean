@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { gateProactiveResponse, repairCoachMessage } from "@/lib/response-gate";
 import { checkDateConsistency } from "@/lib/date-consistency-check";
 import { checkSemanticRepetition } from "@/lib/repetition-check";
+import { checkVoice } from "@/lib/voice-check";
 import { anthropic } from "@/lib/anthropic";
 
 vi.mock("@/lib/date-consistency-check", () => ({
@@ -10,12 +11,16 @@ vi.mock("@/lib/date-consistency-check", () => ({
 vi.mock("@/lib/repetition-check", () => ({
   checkSemanticRepetition: vi.fn(),
 }));
+vi.mock("@/lib/voice-check", () => ({
+  checkVoice: vi.fn(),
+}));
 vi.mock("@/lib/anthropic", () => ({
   anthropic: { messages: { create: vi.fn() } },
 }));
 
 const mockDateCheck = vi.mocked(checkDateConsistency);
 const mockRepCheck = vi.mocked(checkSemanticRepetition);
+const mockVoiceCheck = vi.mocked(checkVoice);
 const mockCreate = vi.mocked(anthropic.messages.create);
 
 const dateFacts = {
@@ -34,6 +39,8 @@ function repairResponse(message: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The voice check runs on every gated message, so every test needs a default.
+  mockVoiceCheck.mockResolvedValue({ ok: true, category: null, issue: null });
 });
 
 describe("gateProactiveResponse", () => {
@@ -177,5 +184,89 @@ describe("repairCoachMessage", () => {
       priorMessages: ["a"],
     });
     expect(result).toBeNull();
+  });
+});
+
+describe("gateProactiveResponse — voice check", () => {
+  beforeEach(() => {
+    mockDateCheck.mockResolvedValue({ inconsistent: false, issue: null });
+    mockRepCheck.mockResolvedValue({ repeats: false, angle: null });
+  });
+
+  it("passes the humor gate through to the checker", async () => {
+    await gateProactiveResponse({
+      message: "How's the shin today?",
+      dateFacts,
+      priorSameTypeMessages: [],
+      humor: { allowed: false, reason: "active_injury" },
+    });
+
+    expect(mockVoiceCheck).toHaveBeenCalledWith("How's the shin today?", {
+      humorAllowed: false,
+      humorSuppressionReason: "active_injury",
+    });
+  });
+
+  it("defaults to allowing humor when no gate is supplied", async () => {
+    await gateProactiveResponse({ message: "Solid week.", dateFacts, priorSameTypeMessages: [] });
+    expect(mockVoiceCheck).toHaveBeenCalledWith("Solid week.", {
+      humorAllowed: true,
+      humorSuppressionReason: null,
+    });
+  });
+
+  it("repairs an off-voice message and sends the repaired version", async () => {
+    mockVoiceCheck
+      .mockResolvedValueOnce({ ok: false, category: "filler", issue: "ends with a sign-off" })
+      .mockResolvedValueOnce({ ok: true, category: null, issue: null });
+    mockCreate.mockResolvedValue(repairResponse("Easy 4 tomorrow."));
+
+    const result = await gateProactiveResponse({
+      message: "Easy 4 tomorrow. Let me know if you have questions!",
+      dateFacts,
+      priorSameTypeMessages: [],
+    });
+
+    expect(result.message).toBe("Easy 4 tomorrow.");
+    expect(result.events.map((e) => e.event)).toEqual([
+      "gate_voice_issue_detected",
+      "gate_voice_repaired",
+    ]);
+  });
+
+  it("sends the ORIGINAL when the repair is still off-voice", async () => {
+    const original = "Easy 4 tomorrow. You've got this!";
+    mockVoiceCheck.mockResolvedValue({ ok: false, category: "sycophancy", issue: "unearned praise" });
+    mockCreate.mockResolvedValue(repairResponse("Easy 4 tomorrow. Keep it up!"));
+
+    const result = await gateProactiveResponse({
+      message: original, dateFacts, priorSameTypeMessages: [],
+    });
+
+    // Fail-open: the original has already been through every deterministic correction.
+    expect(result.message).toBe(original);
+    expect(result.events.map((e) => e.event)).toContain("gate_voice_repair_failed_sent_original");
+  });
+
+  it("judges the text produced by an earlier repair, not the original", async () => {
+    // A date/repetition rewrite can reintroduce a sign-off, so voice must run last.
+    mockDateCheck
+      .mockResolvedValueOnce({ inconsistent: true, issue: "said Friday, today is Thursday" })
+      .mockResolvedValueOnce({ inconsistent: false, issue: null });
+    mockCreate.mockResolvedValue(repairResponse("Easy 4 Thursday."));
+
+    await gateProactiveResponse({ message: "Easy 4 Friday.", dateFacts, priorSameTypeMessages: [] });
+
+    expect(mockVoiceCheck).toHaveBeenCalledWith("Easy 4 Thursday.", expect.anything());
+  });
+
+  it("propagates a checker error for the caller's fail-open handler", async () => {
+    // checkVoice fails open internally, so this only happens on a genuine crash. The
+    // gate deliberately doesn't swallow it — route.ts wraps gateProactiveResponse in a
+    // try/catch that sends the original message, matching the date/repetition checks.
+    mockVoiceCheck.mockRejectedValue(new Error("boom"));
+    await expect(
+      gateProactiveResponse({ message: "Solid week.", dateFacts, priorSameTypeMessages: [] })
+    ).rejects.toThrow("boom");
   });
 });
