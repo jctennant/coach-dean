@@ -423,7 +423,9 @@ async function handleInboundMessage(
       );
     }
   }
-  const storedMsg = storedMsgId ? { id: storedMsgId } : null;
+  // created_at is carried through so the post-debounce guard below can ask whether a reply
+  // landed after THIS message, rather than whether Dean happened to speak recently.
+  const storedMsg = storedMsgId && storedCreatedAt ? { id: storedMsgId, created_at: storedCreatedAt } : null;
 
   // Feedback / refund commands — intercept before onboarding and coaching
   const isFeedback = /^FEEDBACK\b/i.test(body);
@@ -574,22 +576,31 @@ async function handleInboundMessage(
       }
     }
 
-    // Also guard against double-responses when two messages arrived >15s apart (both pass
-    // the newer-message check but fire coach/respond in rapid succession). If an assistant
-    // reply was already sent within the last 45 seconds, the first message already triggered
-    // a response — skip so we don't send two independent replies to a multi-part send.
-    const cutoff = new Date(Date.now() - 45_000).toISOString();
-    const { data: recentReply } = await supabase
+    // Guard against double-responses when two messages arrived >15s apart (both pass the
+    // newer-message check above, then fire coach/respond in rapid succession). The question
+    // that actually settles it is "has this message already been answered?" — i.e. did an
+    // assistant reply land AFTER it was stored. coach/respond batches every user message
+    // since the last assistant reply, so a reply newer than this message provably covered it.
+    //
+    // This used to ask a much blunter question — "did Dean say anything at all in the last
+    // 45 seconds?" — which is a different thing entirely, because Dean's reply always lands
+    // a few seconds before the athlete reads it and types back. Any athlete who answered
+    // quickly had their message silently dropped: Gwyneth asked "But why would the pain
+    // improve on a softer mattress" 26s after Dean's last bubble on 2026-08-02, the 15s
+    // debounce put the check at 41s, and she got no reply at all. Anchoring to the message's
+    // own timestamp keeps the double-response protection and can never suppress a genuinely
+    // new question, since a reply predating a message cannot be an answer to it.
+    const { data: replyAfterThisMessage } = await supabase
       .from("conversations")
       .select("id")
       .eq("user_id", user.id)
       .eq("role", "assistant")
-      .gte("created_at", cutoff)
+      .gt("created_at", storedMsg.created_at)
       .limit(1)
       .maybeSingle();
 
-    if (recentReply) {
-      console.log("[linq-webhook] debounce: assistant reply sent within last 45s, skipping double-response for", storedMsg.id);
+    if (replyAfterThisMessage) {
+      console.log("[linq-webhook] debounce: this message was already answered, skipping double-response for", storedMsg.id);
       return;
     }
   }

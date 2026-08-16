@@ -6,6 +6,21 @@ import { fetchActivityWeatherByCoords } from "@/lib/weather";
 import { estimateLTHRFromRaces } from "@/lib/hr-zones";
 import { estimateMaxHR } from "@/lib/hr-utils";
 import { computeLoadScores, computeRolling30dMaxRunningLoad } from "@/lib/load-score";
+import {
+  claimPostRunBatch,
+  collectPostRunBatch,
+  releasePostRunBatch,
+  selectPrimaryActivity,
+  BATCH_DEBOUNCE_MS,
+} from "@/lib/post-run-batch";
+import { parseStravaTimezone, syncTimezoneFromActivities } from "@/lib/timezone-drift";
+
+/**
+ * The batch leader holds this invocation open for BATCH_DEBOUNCE_MS before it even calls
+ * coach/respond, and that call is awaited through generation and send. The default function
+ * budget doesn't cover the two together.
+ */
+export const maxDuration = 300;
 
 /**
  * GET /api/webhooks/strava
@@ -69,7 +84,7 @@ async function processStravaEvent(body: {
     // Look up user by Strava athlete ID
     const { data: user } = await supabase
       .from("users")
-      .select("id, phone_number, onboarding_step, messaging_opted_out")
+      .select("id, phone_number, onboarding_step, messaging_opted_out, timezone")
       .eq("strava_athlete_id", owner_id)
       .single();
 
@@ -140,6 +155,7 @@ async function processStravaEvent(body: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           best_efforts: (activity.best_efforts?.length ? activity.best_efforts : null) as any,
           start_date: activity.start_date,
+          activity_timezone: parseStravaTimezone(activity.timezone),
           start_lat: startLat,
           start_lng: startLng,
           summary: {
@@ -234,6 +250,14 @@ async function processStravaEvent(body: {
           // Load scoring is best-effort — never block coaching on a load score failure
           console.warn("[strava-webhook] load score compute failed (non-fatal):", loadErr);
         }
+      }
+
+      // Refresh the athlete's stored timezone if their recent activities consistently
+      // report a different one. Runs before coaching so this message is already scheduled
+      // and dated against the corrected zone. See src/lib/timezone-drift.ts for why this
+      // needs several agreeing activities rather than acting on this one.
+      if (isNew) {
+        await syncTimezoneFromActivities(supabase, user.id, user.timezone ?? null);
       }
 
       // Fetch and store historical weather for this activity.
@@ -344,24 +368,13 @@ async function processStravaEvent(body: {
         if (existingPostRunConv) {
           console.log(`[strava-webhook] post_run already sent for activity ${activity.id} for user ${user.id}, suppressing duplicate`);
           suppressCoaching = true;
-        } else {
-          // Fallback time-based guard for race conditions where the conversation
-          // row for this activity hasn't been stored yet (e.g., two events arrive
-          // within seconds before either completes its coach/respond call).
-          const recentCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-          const { data: recentPostRun } = await supabase
-            .from("conversations")
-            .select("id")
-            .eq("user_id", user.id)
-            .eq("message_type", "post_run")
-            .gte("created_at", recentCutoff)
-            .limit(1)
-            .maybeSingle();
-          if (recentPostRun) {
-            console.log(`[strava-webhook] post_run sent in last 10min for user ${user.id}, suppressing duplicate`);
-            suppressCoaching = true;
-          }
         }
+        // The time-based fallback that used to live here ("was any post_run sent in the last
+        // 10 minutes?") was a read-then-act check against a conversations row that isn't
+        // written until after generation and send, so two webhooks arriving in the same
+        // second both read an empty table and both proceeded — the athlete got interleaved
+        // half-messages and duplicate polls. Batch claiming below replaces it with a check
+        // that's atomic at the database level; see src/lib/post-run-batch.ts.
       }
 
       // Recompute LTHR + max HR when a new race or quality workout arrives.
@@ -435,17 +448,67 @@ async function processStravaEvent(body: {
         const trigger = user.onboarding_step && preReadyStates.has(user.onboarding_step)
           ? "post_run_onboarding"
           : "post_run";
-        await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: user.id,
-            trigger,
-            activityId: activity.id,
-          }),
-        });
+
+        if (trigger === "post_run_onboarding") {
+          // Lightweight nudge path — one short reaction, no poll, no analysis. Nothing here
+          // interleaves badly enough to be worth a 20s debounce on someone still setting up.
+          await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: user.id, trigger, activityId: activity.id }),
+          });
+        } else if (await claimPostRunBatch(supabase, user.id)) {
+          // We own the batch. Wait out the rest of the burst — Strava fans a bulk sync out
+          // as a rapid series of webhooks, and the sibling handlers have already stored
+          // their activity rows by the time they lose the claim, so anything arriving in
+          // this window is waiting to be collected below.
+          try {
+            await new Promise((r) => setTimeout(r, BATCH_DEBOUNCE_MS));
+            const batch = await collectPostRunBatch(supabase, user.id);
+            const primary = selectPrimaryActivity(batch);
+            if (!primary) {
+              // Only reachable if another path marked these coached in the interim.
+              console.warn(`[strava-webhook] batch for user ${user.id} collected 0 activities, nothing to coach`);
+            } else {
+              const companionActivityIds = batch
+                .filter((a) => a.strava_activity_id !== primary.strava_activity_id)
+                .map((a) => a.strava_activity_id);
+              console.log(
+                `[strava-webhook] coaching batch for user ${user.id}: primary=${primary.strava_activity_id}` +
+                  (companionActivityIds.length ? ` companions=${companionActivityIds.join(",")}` : " (single)")
+              );
+              await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/coach/respond`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  userId: user.id,
+                  trigger,
+                  activityId: primary.strava_activity_id,
+                  companionActivityIds,
+                }),
+              });
+            }
+          } finally {
+            // Always release, even if generation threw — otherwise this athlete gets no
+            // post-run message until the claim TTL expires.
+            await releasePostRunBatch(supabase, user.id);
+          }
+        } else {
+          // Someone else is leading. Our activity row is already stored and uncoached, so
+          // their collection pass will fold it into the single coalesced message.
+          console.log(`[strava-webhook] activity ${activity.id} folded into an in-flight batch for user ${user.id}`);
+        }
       } else if (!isNew || suppressCoaching) {
         console.log(`[strava-webhook] duplicate event for activity ${activity.id}, skipping coaching response`);
+        // A suppressed row would otherwise sit at post_run_coached_at IS NULL and get swept
+        // into the next batch, resurfacing as "you also did X" in an unrelated message.
+        // Suppression is a decision not to coach it, so record that decision.
+        if (isNew && suppressCoaching) {
+          await supabase
+            .from("activities")
+            .update({ post_run_coached_at: new Date().toISOString() })
+            .eq("strava_activity_id", activity.id);
+        }
       }
     } catch (err) {
       console.error("Error processing Strava activity webhook:", err);

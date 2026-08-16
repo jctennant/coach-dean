@@ -34,6 +34,23 @@ vi.mock("@/lib/strava", () => ({
   }),
 }));
 
+// The batch module has its own unit tests (post-run-batch.test.ts) covering claim atomicity
+// and collection. Mock it here so these tests exercise the webhook's branching without
+// sitting through the real 20s debounce.
+const mockClaim = vi.fn().mockResolvedValue(true);
+const mockCollect = vi.fn();
+const mockRelease = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/post-run-batch", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/post-run-batch")>();
+  return {
+    ...actual,
+    BATCH_DEBOUNCE_MS: 0,
+    claimPostRunBatch: (...args: unknown[]) => mockClaim(...args),
+    collectPostRunBatch: (...args: unknown[]) => mockCollect(...args),
+    releasePostRunBatch: (...args: unknown[]) => mockRelease(...args),
+  };
+});
+
 vi.mock("next/server", () => ({
   NextResponse: {
     json: (data: unknown, init?: ResponseInit) => ({ data, init }),
@@ -125,6 +142,12 @@ describe("POST /api/webhooks/strava", () => {
     afterQueue.splice(0);
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    mockClaim.mockResolvedValue(true);
+    mockRelease.mockResolvedValue(undefined);
+    // Default: this webhook's own activity is the only thing awaiting coaching.
+    mockCollect.mockResolvedValue([
+      { strava_activity_id: 999, activity_type: "Run", distance_meters: 8046.72, moving_time_seconds: 2400, start_date: "2026-03-23T13:00:00Z" },
+    ]);
   });
 
   it("always returns 200 immediately (Strava 2-second requirement)", async () => {
@@ -188,5 +211,75 @@ describe("POST /api/webhooks/strava", () => {
       expect.stringContaining("coach/respond"),
       expect.objectContaining({ method: "POST" })
     );
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.trigger).toBe("post_run");
+    expect(body.activityId).toBe(999);
+    expect(body.companionActivityIds).toEqual([]);
+  });
+
+  it("coalesces a bulk upload into one call carrying the companions", async () => {
+    // The 2026-08-16 bug: two activities uploaded in the same second produced two concurrent
+    // coach/respond invocations whose SMS bubbles and pain polls interleaved. The batch
+    // leader now answers for the whole burst in a single call.
+    setupSupabase({ existingActivity: null });
+    mockCollect.mockResolvedValue([
+      { strava_activity_id: 19771283402, activity_type: "Swim", distance_meters: 720, moving_time_seconds: 960, start_date: "2026-08-16T07:52:55Z" },
+      { strava_activity_id: 19771283481, activity_type: "Walk", distance_meters: 1448, moving_time_seconds: 1080, start_date: "2026-08-15T08:42:39Z" },
+    ]);
+
+    const req = mockRequest({ object_type: "activity", aspect_type: "create", owner_id: 12345, object_id: 999 });
+    await POST(req);
+    await flush();
+
+    const coachCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+      String(c[0]).includes("coach/respond")
+    );
+    expect(coachCalls).toHaveLength(1);
+    const body = JSON.parse(coachCalls[0][1].body);
+    // Most recent activity drives the analysis; the older one rides along as context.
+    expect(body.activityId).toBe(19771283402);
+    expect(body.companionActivityIds).toEqual([19771283481]);
+  });
+
+  it("does not fire coaching when another handler already owns the batch", async () => {
+    // The losing side of a concurrent burst. Its activity row is already stored and
+    // uncoached, so the leader's collection pass covers it — firing here is exactly the
+    // duplicate the claim exists to prevent.
+    setupSupabase({ existingActivity: null });
+    mockClaim.mockResolvedValue(false);
+
+    const req = mockRequest({ object_type: "activity", aspect_type: "create", owner_id: 12345, object_id: 999 });
+    await POST(req);
+    await flush();
+
+    const coachCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+      String(c[0]).includes("coach/respond")
+    );
+    expect(coachCalls).toHaveLength(0);
+    expect(mockCollect).not.toHaveBeenCalled();
+  });
+
+  it("releases the batch claim even when coach/respond throws", async () => {
+    // A stuck claim would suppress this athlete's post-run messages until the TTL expired.
+    setupSupabase({ existingActivity: null });
+    global.fetch = vi.fn().mockRejectedValue(new Error("coach/respond exploded"));
+
+    const req = mockRequest({ object_type: "activity", aspect_type: "create", owner_id: 12345, object_id: 999 });
+    await POST(req);
+    await flush();
+
+    expect(mockRelease).toHaveBeenCalledWith(expect.anything(), "user-001");
+  });
+
+  it("still fires immediately, unbatched, for users mid-onboarding", async () => {
+    setupSupabase({ user: mockUser({ onboarding_step: "onboarding" }), existingActivity: null });
+
+    const req = mockRequest({ object_type: "activity", aspect_type: "create", owner_id: 12345, object_id: 999 });
+    await POST(req);
+    await flush();
+
+    expect(mockClaim).not.toHaveBeenCalled();
+    const body = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.trigger).toBe("post_run_onboarding");
   });
 });

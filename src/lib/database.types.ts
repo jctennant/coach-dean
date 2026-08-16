@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           activity_fatigue_load: number | null
           activity_name: string | null
+          activity_timezone: string | null
           activity_type: string | null
           aerobic_efficiency: number | null
           average_cadence: number | null
@@ -36,6 +37,7 @@ export type Database = {
           id: string
           max_heartrate: number | null
           moving_time_seconds: number | null
+          post_run_coached_at: string | null
           running_impact_load: number | null
           source: string
           start_date: string | null
@@ -53,6 +55,7 @@ export type Database = {
         Insert: {
           activity_fatigue_load?: number | null
           activity_name?: string | null
+          activity_timezone?: string | null
           activity_type?: string | null
           aerobic_efficiency?: number | null
           average_cadence?: number | null
@@ -71,6 +74,7 @@ export type Database = {
           id?: string
           max_heartrate?: number | null
           moving_time_seconds?: number | null
+          post_run_coached_at?: string | null
           running_impact_load?: number | null
           source?: string
           start_date?: string | null
@@ -88,6 +92,7 @@ export type Database = {
         Update: {
           activity_fatigue_load?: number | null
           activity_name?: string | null
+          activity_timezone?: string | null
           activity_type?: string | null
           aerobic_efficiency?: number | null
           average_cadence?: number | null
@@ -106,6 +111,7 @@ export type Database = {
           id?: string
           max_heartrate?: number | null
           moving_time_seconds?: number | null
+          post_run_coached_at?: string | null
           running_impact_load?: number | null
           source?: string
           start_date?: string | null
@@ -604,6 +610,7 @@ export type Database = {
           physio_referral_sent_at: string | null
           physio_visit_confirmed: boolean | null
           plan_adjustments: string | null
+          post_run_batch_claimed_at: string | null
           pre_injury_mileage_target: number | null
           race_peak_load_flag: boolean | null
           return_to_run_gate_date: string | null
@@ -638,6 +645,7 @@ export type Database = {
           physio_referral_sent_at?: string | null
           physio_visit_confirmed?: boolean | null
           plan_adjustments?: string | null
+          post_run_batch_claimed_at?: string | null
           pre_injury_mileage_target?: number | null
           race_peak_load_flag?: boolean | null
           return_to_run_gate_date?: string | null
@@ -672,6 +680,7 @@ export type Database = {
           physio_referral_sent_at?: string | null
           physio_visit_confirmed?: boolean | null
           plan_adjustments?: string | null
+          post_run_batch_claimed_at?: string | null
           pre_injury_mileage_target?: number | null
           race_peak_load_flag?: boolean | null
           return_to_run_gate_date?: string | null

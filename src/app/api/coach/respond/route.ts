@@ -439,6 +439,24 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
 }
 
 /**
+ * UTC instant at which the athlete's current local day began — the lower bound for
+ * "have we already done this today?" queries against created_at.
+ *
+ * Derived by formatting now in the athlete's zone to get their calendar date, then walking
+ * back from that date's UTC midnight by the zone's offset. Handles both hemispheres and
+ * fractional-hour zones without a date library.
+ */
+function localDayStartUtc(timezone: string, now: Date = new Date()): string {
+  const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now);
+  // What UTC instant does local midnight correspond to? Probe with the zone's offset at now.
+  const asUtcMidnight = Date.parse(`${localDate}T00:00:00Z`);
+  const offsetMs =
+    new Date(now.toLocaleString("en-US", { timeZone: "UTC" })).getTime() -
+    new Date(now.toLocaleString("en-US", { timeZone: timezone })).getTime();
+  return new Date(asUtcMidnight + offsetMs).toISOString();
+}
+
+/**
  * Send a poll with a guaranteed-coherent plain-text fallback, and log both to
  * conversation history. Best-effort — a failure here must never break the coaching
  * message that already sent successfully.
@@ -461,8 +479,40 @@ async function sendPollWithFallback(
   pollDef: AppPoll,
   pollChatId: string | null,
   trigger: string,
-  pollType: string
+  pollType: string,
+  /**
+   * Skip entirely if this same poll already went out today in the athlete's local day.
+   *
+   * For the pain check-in this matches the data model exactly — pain_checkins holds one
+   * upserted row per day, so a second ask can't record anything the first didn't already
+   * capture, it just costs the athlete two more bubbles. Two separate uploads in one day
+   * (a morning walk and an evening swim, which is Gwyneth's normal pattern) produced
+   * exactly that on 2026-08-10. Batching handles the same-burst case; this handles the
+   * genuinely-separate-burst case that batching correctly declines to merge.
+   */
+  oncePerLocalDay: { timezone: string } | null = null
 ): Promise<void> {
+  if (oncePerLocalDay) {
+    // Fails open: if this lookup errors, send the poll. An extra check-in is a mild
+    // annoyance; suppressing an injury question because a dedup query timed out is not.
+    try {
+      const startOfLocalDay = localDayStartUtc(oncePerLocalDay.timezone);
+      const { data: alreadyAsked } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("role", "assistant")
+        .like("content", `%${pollDef.title}%`)
+        .gte("created_at", startOfLocalDay)
+        .limit(1);
+      if (alreadyAsked && alreadyAsked.length > 0) {
+        console.log(`[coach/respond] ${pollType} poll already sent today for user ${userId} — skipping`);
+        return;
+      }
+    } catch (err) {
+      console.warn(`[coach/respond] ${pollType} once-per-day check failed, sending anyway:`, err);
+    }
+  }
   try {
     if (pollChatId) await startTyping(pollChatId);
     await sendPoll(phone, pollDef.title, pollDef.options);
@@ -551,6 +601,10 @@ interface CoachRequest {
   userId: string;
   trigger: TriggerType;
   activityId?: number;
+  // Other activities uploaded in the same Strava burst, coalesced into this one message by
+  // the batch leader in webhooks/strava/route.ts. Named in line 1 and summarised for the
+  // prompt; the primary activityId above is the only one analysed in depth.
+  companionActivityIds?: number[];
   imageActivity?: Record<string, unknown>; // Pre-extracted workout data from image upload
   dry_run?: boolean;
   silent?: boolean; // For rebuild_plan: regenerates the arc without sending the "plan ready" SMS
@@ -1230,7 +1284,7 @@ async function handlePostRunOnboarding(
     activityId
       ? supabase
           .from("activities")
-          .select("activity_type, distance_meters, moving_time_seconds, average_heartrate, average_pace, elevation_gain")
+          .select("activity_type, distance_meters, moving_time_seconds, average_heartrate, average_pace, elevation_gain, start_date")
           .eq("strava_activity_id", activityId)
           .single()
       : Promise.resolve({ data: null }),
@@ -1351,10 +1405,15 @@ Plain text only. No lists, no markdown.`;
     onbTimezone
   );
   const onbLine1 = buildPostRunMileageLine(
-    (activity?.activity_type as string | null) ?? null,
-    (activity?.distance_meters as number | null) ?? null,
+    [{
+      activity_type: (activity?.activity_type as string | null) ?? null,
+      distance_meters: (activity?.distance_meters as number | null) ?? null,
+      moving_time_seconds: (activity?.moving_time_seconds as number | null) ?? null,
+      start_date: (activity?.start_date as string | null) ?? null,
+    }],
     onbWeekTotals,
-    onbIsMetric
+    onbIsMetric,
+    onbTimezone
   );
 
   const coachMessage = [onbLine1, onbLine2, nudgeQuestion]
@@ -1549,7 +1608,7 @@ async function handleInjuryCheckin(userId: string, dryRun: boolean, requestChatI
 }
 
 async function processCoachRequest(body: CoachRequest, correlationId: string): Promise<NextResponse> {
-  const { userId, trigger, activityId, imageActivity, dry_run, silent, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
+  const { userId, trigger, activityId, companionActivityIds, imageActivity, dry_run, silent, chatId: requestChatId, includeWorkoutCheckin, missedRunCheckin } = body;
   const log = createLogger({ agentName: "coach/respond", correlationId, userId, trigger });
   log.info("processCoachRequest started");
 
@@ -1773,6 +1832,17 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
 
   // If post_run, fetch the activity
   let activityData = null;
+  // Companions from the same upload burst — see CoachRequest.companionActivityIds. Fetched
+  // as lightweight rows (no splits/laps): they exist to be named accurately in line 1 and
+  // acknowledged in Dean's line 2, not to be analysed split-by-split. A message that
+  // dissects three sessions in depth is longer than anyone reads over SMS.
+  let companionActivities: Array<{
+    activity_type: string | null;
+    distance_meters: number | null;
+    moving_time_seconds: number | null;
+    start_date: string;
+    average_heartrate: number | null;
+  }> = [];
   if (trigger === "post_run" && activityId) {
     const { data } = await supabase
       .from("activities")
@@ -1780,6 +1850,16 @@ async function processCoachRequest(body: CoachRequest, correlationId: string): P
       .eq("strava_activity_id", activityId)
       .single();
     activityData = data;
+
+    if (companionActivityIds && companionActivityIds.length > 0) {
+      const { data: companions } = await supabase
+        .from("activities")
+        .select("activity_type, distance_meters, moving_time_seconds, start_date, average_heartrate")
+        .eq("user_id", userId)
+        .in("strava_activity_id", companionActivityIds)
+        .order("start_date", { ascending: false });
+      companionActivities = (companions ?? []) as typeof companionActivities;
+    }
   }
 
   // Build system prompt with activity trends
@@ -3447,6 +3527,30 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
     ).length;
     return pool[timesAsked % pool.length];
   })();
+  // Line 1 of a post-run message is deterministic (see buildPostRunMileageLine) and is
+  // prepended to whatever Dean writes. Compute it here, before generation, rather than only
+  // at composition time so the exact text can be shown to him below — he was previously told
+  // "don't restate the activity" without ever being shown what the activity line said, and
+  // on 2026-08-06 he opened his own line with a restatement carrying a distance that didn't
+  // match (line 1 said 1.3mi, his line said 1.5mi, the activity was 1.30mi). Showing him the
+  // real text removes the guesswork that produced the contradiction.
+  const postRunLine1 = trigger === "post_run"
+    ? buildPostRunMileageLine(
+        [
+          {
+            activity_type: (activityData?.activity_type as string | null) ?? null,
+            distance_meters: (activityData?.distance_meters as number | null) ?? null,
+            moving_time_seconds: (activityData?.moving_time_seconds as number | null) ?? null,
+            start_date: (activityData?.start_date as string | null) ?? null,
+          },
+          ...companionActivities,
+        ],
+        computeWeekActivityTotals(recentActivities, userTimezone, weekRefDate),
+        isMetricUser,
+        userTimezone
+      )
+    : "";
+
   let userMessage = buildUserMessage(trigger, activityData, imageActivity, includeWorkoutCheckin, injuryNotes, userTimezone, hasStrava, weekMileageSoFar, weekRunCount, missedRunCheckin, periodization, storedPlanWeek, storedNextPlanWeek, timezoneConfirmed, storedPlanAllWeeks, racePreparednessFlag, (profile?.preferred_units as string | undefined) ?? "imperial", daysSinceLastCoachMessage, wantsSpeedWork, mostRecentRunRef, initialPlanDaysConstraint, (state?.injury_hold_since as string | null) ?? null, nightlyNoSessions, skippedNonRunSession, planDeviationFlag, avgWeeklyMileage, activitiesQueryFailed, crossTrainingPostRunContext, crossTrainRecapBlock, (profile?.race_date as string | null) ?? null, recentPostRunInsights, nonObviousWins, recentRecapObservations, recapWeeklyWins, isAnalystMode, isComplementMode, mostRecentRunSplitsBlock, recentPostRunQuestions, isPositiveOnlyStyle, arcWeekSkeleton, recoveryWeekSkeleton, (state?.pre_injury_mileage_target as number | null) ?? null, (profile?.injury_body_part as string | null) ?? null, (profile?.injury_severity as "mild" | "moderate" | "severe" | null) ?? null, priorAssistantMessageForInitialPlan, (profile?.goal as string | null) ?? null, recentPostRunVerbatim, suggestedInjuryCheckQuestion, Array.isArray(state?.weekly_plan_sessions) && (state!.weekly_plan_sessions as unknown[]).length > 0);
 
   // Re-anchor today/tomorrow right next to the generation instructions. The full
@@ -3455,6 +3559,25 @@ The right response is NOT to prescribe a race-day run/walk strategy — that's p
   // improvise day arithmetic instead (e.g. calling Monday both a rest day and a test
   // day in the same reply). See formatDateAnchor in lib/timezone.ts.
   userMessage = `${formatDateAnchor(userTimezone)}\n\n${userMessage}`;
+
+  if (trigger === "post_run" && postRunLine1) {
+    userMessage += `\n\nFIRST LINE ALREADY WRITTEN — the athlete's message opens with this exact text, added by the system before yours:\n"${postRunLine1}"\nWhatever you write is appended below it as a second paragraph. Do not restate the distance, duration, sport, day, or weekly totals it already covers, and do not contradict them. Start from what it doesn't say.`;
+  }
+
+  if (trigger === "post_run" && companionActivities.length > 0) {
+    // Several activities were uploaded together and are being answered as one message.
+    // Without this, Dean sees only the primary activity and writes as though it were the
+    // only session, while line 1 names all of them — an internal contradiction inside a
+    // single SMS.
+    const companionLines = companionActivities.map((a) => {
+      const dist = a.distance_meters ? `${(a.distance_meters / 1609.34).toFixed(1)}mi` : "no distance recorded";
+      const mins = a.moving_time_seconds ? `${Math.round(a.moving_time_seconds / 60)}min` : "duration unknown";
+      const day = new Date(a.start_date).toLocaleDateString("en-US", { timeZone: userTimezone, weekday: "long", month: "short", day: "numeric" });
+      const hr = a.average_heartrate ? `, avg HR ${Math.round(a.average_heartrate)}bpm` : "";
+      return `- ${a.activity_type ?? "Session"}: ${dist}, ${mins}${hr} (${day})`;
+    });
+    userMessage += `\n\nALSO UPLOADED IN THIS BATCH (these landed at the same time as the session above and are covered by this same message — the athlete is not getting a separate one for them):\n${companionLines.join("\n")}\nDetailed splits are only available for the primary session. Treat these as context: acknowledge them if they change your read (a swim the day after a hard walk, a missed rest day), but keep your reply to one point. Do not analyse each one in turn.`;
+  }
 
   // Append longitudinal analysis block to post_run and weekly_recap prompts.
   if (longitudinalBlock) {
@@ -4708,15 +4831,8 @@ OUTPUT CONTRACT:
   // single time for no reason).
   let postRunLine2 = "";
   if (trigger === "post_run") {
-    const weekTotals = computeWeekActivityTotals(recentActivities, userTimezone, weekRefDate);
-    const line1 = buildPostRunMileageLine(
-      (activityData?.activity_type as string | null) ?? null,
-      (activityData?.distance_meters as number | null) ?? null,
-      weekTotals,
-      isMetricUser
-    );
     postRunLine2 = coachMessage.trim() === "[NO_REPLY]" ? "" : coachMessage.trim();
-    coachMessage = postRunLine2 ? `${line1}\n\n${postRunLine2}` : line1;
+    coachMessage = postRunLine2 ? `${postRunLine1}\n\n${postRunLine2}` : postRunLine1;
   }
 
   if (dry_run) return NextResponse.json({ ok: true, dry_run: true, message: coachMessage, strength_poster: (wantsStrengthPoster && strengthPosterRoutineKey) ? strengthPosterRoutineKey : null });
@@ -4930,7 +5046,7 @@ OUTPUT CONTRACT:
   // suggestedInjuryCheckQuestion would otherwise have fired — send the bucketed pain-scale
   // poll here instead as a separate bubble.
   if (trigger === "post_run" && isPhotonProvider() && suggestedInjuryCheckQuestion) {
-    await sendPollWithFallback(userId, user.phone_number, PAIN_CHECKIN_POLL, chatId ?? learnedChatId, trigger, "pain_checkin");
+    await sendPollWithFallback(userId, user.phone_number, PAIN_CHECKIN_POLL, chatId ?? learnedChatId, trigger, "pain_checkin", { timezone: userTimezone });
   }
 
   // Strength routine offer poll: for Photon/iMessage athletes, initial_plan with an active
@@ -8441,6 +8557,10 @@ async function persistProfileUpdates(
           elevation_gain: w.elevation_gain,
           start_date: activityDate.toISOString(),
           source: "manual",
+          // The athlete told us about this run in conversation and is getting a reply in
+          // this same turn — it must never also surface as an uncoached activity for the
+          // post-run batch collector (src/lib/post-run-batch.ts) to pick up later.
+          post_run_coached_at: new Date().toISOString(),
         });
       } else {
         console.log("[coach/respond] skipping duplicate manual activity for", dateStr);

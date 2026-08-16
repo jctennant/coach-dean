@@ -64,6 +64,9 @@ export async function POST(request: Request) {
       suffer_score: (a.suffer_score as number | null) ?? null,
       workout_type: 1,
       start_date: a.start_date as string,
+      // Backfilled history, never a live upload — see the same stamp in the Strava OAuth
+      // import. Keeps these out of the post-run batch collector.
+      post_run_coached_at: new Date().toISOString(),
     };
   });
 

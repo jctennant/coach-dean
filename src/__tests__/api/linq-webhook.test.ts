@@ -748,4 +748,75 @@ describe("POST /api/webhooks/linq — message routing", () => {
       vi.useRealTimers();
     }
   });
+
+  /**
+   * The post-debounce "already answered?" guard. It used to ask whether Dean had said
+   * anything in the last 45 seconds, which is a different question — Dean's reply always
+   * lands seconds before the athlete reads it and types back, so replying quickly meant
+   * being ignored. Gwyneth lost a real question this way on 2026-08-02.
+   */
+  function setupAnsweredCheck(assistantReply: { data: unknown; error: unknown }) {
+    mockTables({
+      conversations: [
+        { data: null, error: null },                                                       // pre-after dedup
+        { data: { id: "conv-001", created_at: "2026-08-02T16:34:28.000Z" }, error: null },  // insert storedMsg
+        { data: null, error: null },                                                       // post-insert content-dedup
+        { data: { id: "conv-001" }, error: null },                                         // no newer user message
+        { data: [{ id: "conv-001" }], error: null },                                       // no duplicate delivery
+        assistantReply,                                                                    // already-answered guard
+      ],
+      users: {
+        data: {
+          id: "user-001", onboarding_step: null, timezone: "America/New_York",
+          linq_chat_id: "chat-abc", messaging_opted_out: false,
+          reengagement_sent_at: null, strava_athlete_id: null,
+          dashboard_token: null,
+        },
+        error: null,
+      },
+    });
+  }
+
+  it("post-debounce: still answers when Dean's last reply predates the message", async () => {
+    vi.useFakeTimers();
+    try {
+      // No assistant row newer than the inbound message — nothing has answered it yet.
+      setupAnsweredCheck({ data: null, error: null });
+
+      const req = makeRequest("+12025551234", "But why would the pain improve on a softer mattress");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await flushPromise;
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.objectContaining({ method: "POST" })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("post-debounce: skips when a reply already landed after this message", async () => {
+    vi.useFakeTimers();
+    try {
+      // An earlier handler's coach/respond already replied, and coach/respond batches every
+      // user message since the last assistant reply — so this message was covered by it.
+      setupAnsweredCheck({ data: { id: "conv-reply" }, error: null });
+
+      const req = makeRequest("+12025551234", "and one more thing");
+      await POST(req);
+      const flushPromise = flush();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await flushPromise;
+
+      expect(global.fetch).not.toHaveBeenCalledWith(
+        expect.stringContaining("coach/respond"),
+        expect.anything()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

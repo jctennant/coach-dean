@@ -590,6 +590,10 @@ function buildActivityRow(userId: string, activity: Record<string, unknown>) {
     suffer_score: (activity.suffer_score as number | null) || null,
     workout_type: (activity.workout_type as number | null) ?? null,
     start_date: activity.start_date as string,
+    // Historical import, not a live upload — stamp it as already handled so the post-run
+    // batch collector (src/lib/post-run-batch.ts) never sweeps an athlete's whole back
+    // catalogue into a coaching message the first time they log a run after connecting.
+    post_run_coached_at: new Date().toISOString(),
   };
 }
 

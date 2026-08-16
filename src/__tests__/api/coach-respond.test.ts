@@ -127,7 +127,7 @@ function makeChain(response: { data: unknown; error: unknown } = { data: null, e
   const chain: Record<string, unknown> = {};
   const methods = [
     "select", "insert", "update", "upsert", "delete",
-    "eq", "neq", "is", "not", "gt", "gte", "lt", "lte", "in", "or", "order", "limit",
+    "eq", "neq", "is", "not", "gt", "gte", "lt", "lte", "in", "or", "like", "order", "limit",
   ];
   for (const m of methods) chain[m] = vi.fn().mockReturnValue(chain);
   chain.single = vi.fn().mockResolvedValue(response);
@@ -1762,6 +1762,41 @@ describe("coach/respond — injury check-in pain poll", () => {
     );
   });
 
+  it("asks at most once per local day, even across separate uploads", async () => {
+    // pain_checkins holds one upserted row per day, so a second ask records nothing the
+    // first didn't — it just costs the athlete two more bubbles. Gwyneth logs a morning walk
+    // and an evening swim as separate uploads (2026-08-10), which batching correctly declines
+    // to merge, so the dedup has to live at the poll itself.
+    (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table === "users") return makeChain({ data: baseUser(), error: null });
+      if (table === "training_profiles") return makeChain({
+        data: baseProfile({ goal: "trail_race", injury_body_part: "shin", active_injury: true }),
+        error: null,
+      });
+      if (table === "training_state") return makeChain({ data: baseState(), error: null });
+      if (table === "activities") {
+        const chain = makeChain({ data: [], error: null }) as Record<string, unknown>;
+        chain.single = vi.fn().mockResolvedValue({
+          data: { activity_type: "Run", distance_meters: 4828, moving_time_seconds: 1800, average_heartrate: 128, average_pace: "9:00", elevation_gain: 20 },
+          error: null,
+        });
+        return chain;
+      }
+      if (table === "conversations") {
+        // The morning upload's poll is already on record for today.
+        return makeChain({ data: [{ id: "conv-earlier-poll" }], error: null });
+      }
+      return makeChain({ data: null, error: null });
+    });
+
+    const req = mockRequest({ userId: "user-001", trigger: "post_run", activityId: 999 });
+    await POST(req);
+    await flush();
+
+    expect(sendPoll).not.toHaveBeenCalled();
+  });
+
   it("does NOT fire for a race-goal athlete with no active injury on file", async () => {
     (isPhotonProvider as ReturnType<typeof vi.fn>).mockReturnValue(true);
     (supabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
@@ -2423,7 +2458,10 @@ describe("coach/respond — post_run_onboarding message shape", () => {
           error: null,
         }) as Record<string, unknown>;
         chain.single = vi.fn().mockResolvedValue({
-          data: { activity_type: "Run", distance_meters: 8690, moving_time_seconds: 2800, average_heartrate: 151, average_pace: "8:45", elevation_gain: 100 },
+          // start_date is what line 1 dates itself from — without it the line can only say
+          // "5.4mi run." with no day, since it will not guess "today" for an activity whose
+          // timing it doesn't know.
+          data: { activity_type: "Run", distance_meters: 8690, moving_time_seconds: 2800, average_heartrate: 151, average_pace: "8:45", elevation_gain: 100, start_date: TODAY },
           error: null,
         });
         return chain;

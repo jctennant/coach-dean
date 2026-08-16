@@ -307,20 +307,105 @@ const ACTIVITY_LABELS: Record<string, string> = {
   WeightTraining: "Strength session", Crossfit: "Crossfit session", Elliptical: "Elliptical session", Rowing: "Row", StairStepper: "Stair-stepper session",
 };
 
+/** One activity as line 1 needs to see it. */
+export interface PostRunLineActivity {
+  activity_type: string | null;
+  distance_meters: number | null;
+  /** Used to describe sessions Strava records no distance for (strength, yoga, "Workout"). */
+  moving_time_seconds?: number | null;
+  /** UTC ISO start. Drives the day label; omit only if genuinely unknown. */
+  start_date?: string | null;
+}
+
+/** "0.9mi walk", "787yd swim", "22min strength session" — the sport phrase, no day, no week. */
+function activityPhrase(activity: PostRunLineActivity, isMetricUser: boolean): string {
+  const { activity_type: activityType, distance_meters: distanceMeters } = activity;
+  const fmtMi = (mi: number) => (isMetricUser ? `${(mi * 1.60934).toFixed(1)}km` : `${mi}mi`);
+
+  const isRun = !!activityType && RUN_TYPES.has(activityType);
+  const isBike = !!activityType && BIKE_TYPES.has(activityType);
+  const isWalk = activityType === "Walk" || activityType === "Hike";
+  const isSwim = !!activityType && SWIM_TYPES.has(activityType);
+  const miles = distanceMeters != null ? Math.round((distanceMeters / 1609.34) * 10) / 10 : null;
+
+  if ((isRun || isBike || isWalk) && miles != null && miles > 0) {
+    const verb = isRun ? "run" : isBike ? "bike" : activityType === "Hike" ? "hike" : "walk";
+    return `${fmtMi(miles)} ${verb}`;
+  }
+  if (isSwim && distanceMeters != null && distanceMeters > 0) {
+    // Strava reports swim distance in meters regardless of pool unit, so this is exact —
+    // yards is just the customary display unit for non-metric (largely US) swimmers.
+    const swimDistance = isMetricUser
+      ? `${Math.round(distanceMeters)}m`
+      : `${Math.round(distanceMeters * 1.09361)}yd`;
+    return `${swimDistance} ${activityType === "OpenWaterSwim" ? "open water swim" : "swim"}`;
+  }
+
+  const label = activityType ? (ACTIVITY_LABELS[activityType] ?? activityType) : "Session";
+  // Distance-less sessions (strength, yoga, Strava's generic "Workout") used to render as a
+  // bare "Workout today." — and when Dean's optional line 2 also came back empty, that one
+  // fragment was the entire message the athlete received (observed 2026-08-04). Duration is
+  // the only quantity Strava reliably has for these, so lead with it when it's there.
+  const minutes = activity.moving_time_seconds != null ? Math.round(activity.moving_time_seconds / 60) : null;
+  if (minutes != null && minutes > 0) return `${minutes}min ${label.toLowerCase()}`;
+  return label.toLowerCase();
+}
+
 /**
- * Deterministic post-run "line 1" — today's activity + the week's mileage-by-category so far,
- * computed entirely in code (never LLM-authored). This is the fact-accuracy fix applied to the
- * post-run message itself: rather than Dean writing "8:58/mi, X miles this week" in prose (a
- * repeated source of mileage-accuracy bugs — see fact-check.ts), the numbers are stated here and
- * Dean's own reply is limited to an optional second line (injury check-in or a genuine standout
- * observation). Also names the actual sport for non-run/non-bike sessions (swim, walk, strength,
- * etc.) instead of the message defaulting to running-shaped language regardless of activity type.
+ * "today" / "yesterday" / "Friday" / "Aug 8" for an activity, in the athlete's own timezone.
+ *
+ * Line 1 used to hardcode "today" regardless of when the activity actually happened, so a
+ * retroactive upload — a phone syncing a backlog, a watch that couldn't reach the network —
+ * was announced as if the athlete had just finished it. Gwyneth was told "0.9mi walk today"
+ * on 2026-08-16 about a walk from the 15th. The prompt already had a rule about this
+ * (route.ts's post_run dateNote), but that rule only governs Dean's own prose; line 1 is
+ * deterministic code and simply ignored it.
+ */
+function dayLabel(startDate: string, timezone: string, now: Date): string | null {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: timezone });
+  const activityDay = fmt.format(new Date(startDate));
+  const todayDay = fmt.format(now);
+  if (activityDay === todayDay) return "today";
+
+  // Compare as calendar dates in the athlete's zone, not as elapsed hours — a 9pm run and a
+  // 6am message the next morning are 9 hours apart but genuinely "yesterday".
+  const dayDiff = Math.round(
+    (Date.parse(`${todayDay}T00:00:00Z`) - Date.parse(`${activityDay}T00:00:00Z`)) / 86_400_000
+  );
+  if (dayDiff === 1) return "yesterday";
+  if (dayDiff > 1 && dayDiff < 7) {
+    return new Date(`${activityDay}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  }
+  if (dayDiff >= 7) {
+    return new Date(`${activityDay}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  }
+  // Future-dated relative to the athlete's clock — possible mid-flight across a date line.
+  // No honest label, so say nothing rather than guess.
+  return null;
+}
+
+/**
+ * Deterministic post-run "line 1" — the session(s) just logged plus the week's
+ * mileage-by-category so far, computed entirely in code (never LLM-authored). This is the
+ * fact-accuracy fix applied to the post-run message itself: rather than Dean writing
+ * "8:58/mi, X miles this week" in prose (a repeated source of mileage-accuracy bugs — see
+ * fact-check.ts), the numbers are stated here and Dean's own reply is limited to an optional
+ * second line (injury check-in or a genuine standout observation). Also names the actual
+ * sport for non-run/non-bike sessions (swim, walk, strength, etc.) instead of the message
+ * defaulting to running-shaped language regardless of activity type.
+ *
+ * Takes a list rather than one activity because Strava bulk-syncs backlogs, and a burst of
+ * webhooks used to become a burst of concurrent, interleaved coaching messages (see
+ * src/lib/post-run-batch.ts). Coalescing them into one message means line 1 has to be able
+ * to name all of them — and to date them separately when the batch spans days, which it
+ * routinely does for a backlog.
  */
 export function buildPostRunMileageLine(
-  activityType: string | null,
-  activityDistanceMeters: number | null,
+  activities: PostRunLineActivity[],
   weekTotals: WeekActivityTotals,
   isMetricUser: boolean,
+  timezone: string,
+  now: Date = new Date(),
 ): string {
   const fmtMi = (mi: number) => (isMetricUser ? `${(mi * 1.60934).toFixed(1)}km` : `${mi}mi`);
   const weekParts: string[] = [];
@@ -330,28 +415,26 @@ export function buildPostRunMileageLine(
     weekParts.push(`${weekTotals.crossTrainSessions} cross-training session${weekTotals.crossTrainSessions !== 1 ? "s" : ""}`);
   }
   const weekSummary = weekParts.length > 0 ? `${weekParts.join(", ")} this week` : "first session logged this week";
+  const weekSentence = `${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
 
-  const isRun = !!activityType && RUN_TYPES.has(activityType);
-  const isBike = !!activityType && BIKE_TYPES.has(activityType);
-  const isWalk = activityType === "Walk" || activityType === "Hike";
-  const isSwim = !!activityType && SWIM_TYPES.has(activityType);
-  const todayMiles = activityDistanceMeters != null ? Math.round((activityDistanceMeters / 1609.34) * 10) / 10 : null;
+  if (activities.length === 0) return weekSentence;
 
-  if ((isRun || isBike || isWalk) && todayMiles != null && todayMiles > 0) {
-    const verb = isRun ? "run" : isBike ? "bike" : activityType === "Hike" ? "hike" : "walk";
-    return `${fmtMi(todayMiles)} ${verb} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
-  }
-  if (isSwim && activityDistanceMeters != null && activityDistanceMeters > 0) {
-    // Strava reports swim distance in meters regardless of pool unit, so this is exact —
-    // yards is just the customary display unit for non-metric (largely US) swimmers.
-    const swimDistance = isMetricUser
-      ? `${Math.round(activityDistanceMeters)}m`
-      : `${Math.round(activityDistanceMeters * 1.09361)}yd`;
-    const label = activityType === "OpenWaterSwim" ? "Open water swim" : "Swim";
-    return `${swimDistance} ${label.toLowerCase()} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
-  }
-  const label = activityType ? (ACTIVITY_LABELS[activityType] ?? activityType) : "Session";
-  return `${label} today. ${weekSummary.charAt(0).toUpperCase()}${weekSummary.slice(1)}.`;
+  // Oldest first, so a multi-day batch reads in the order the athlete lived it.
+  const ordered = [...activities].sort(
+    (a, b) => new Date(a.start_date ?? 0).getTime() - new Date(b.start_date ?? 0).getTime()
+  );
+  const labels = ordered.map((a) => (a.start_date ? dayLabel(a.start_date, timezone, now) : null));
+  const phrases = ordered.map((a) => activityPhrase(a, isMetricUser));
+
+  // One shared day label when every activity landed on the same day (the overwhelmingly
+  // common case, including same-second bulk uploads of a single day's sessions); per-activity
+  // labels only when the batch actually spans days, where one shared label would be a lie.
+  const sameDay = labels.every((l) => l !== null && l === labels[0]);
+  const activityText = sameDay
+    ? `${phrases.join(" + ")} ${labels[0]}`
+    : ordered.map((_, i) => (labels[i] ? `${phrases[i]} ${labels[i]}` : phrases[i])).join(", ");
+
+  return `${activityText.charAt(0).toUpperCase()}${activityText.slice(1)}. ${weekSentence}`;
 }
 
 export interface RunGapSignal {
