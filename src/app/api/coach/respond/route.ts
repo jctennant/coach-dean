@@ -4521,6 +4521,13 @@ OUTPUT CONTRACT:
   const rawRaceCourseUpdateJson = raceCourseUpdateMatch ? raceCourseUpdateMatch[1].trim() : null;
   const strippedRaw = stripReasoningPreamble(
     rawText
+      // web_search citations can't be expressed through the tool_use "message" argument's
+      // native citation mechanism (that only applies to plain text blocks), so Claude
+      // sometimes falls back to writing inline <cite index="N-M">quoted text</cite> markup
+      // instead. This is a fixed API-shaped tag, not free-form phrasing, so unwrap it
+      // deterministically here rather than chasing it with prompt rules — keep the quoted
+      // text, drop the tag.
+      .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1")
       .replace(/\[NO_REPLY\]/gi, "")
       // The 7 plan-mutation signals below (REBUILD_PLAN/INJURY_HOLD/INJURY_CLEAR/
       // LIGHTER_WEEK/SESSION_SWAP/PHYSIO_REFERRAL/RTR_ADVANCE) are no longer read from

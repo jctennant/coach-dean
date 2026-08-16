@@ -8,6 +8,17 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-16 — Stripped web-search citation markup leaking into SMS
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "One unrelated bug I tripped over — A real coach_response from 2026-08-02 went out with citation markup in it: 'Your Today is <cite index=\"2-8\">7/10 firmness</cite>. <cite index=\"1-11\">firm overall but with a soft pillow top</cite>…' Web-search citation tags leaking into a live SMS."
+**Root cause:** `deliver_message`'s `message` argument is the only channel athlete-facing text ever travels through — Claude can't attach native structured citations to a tool_use input the way it can to a plain text block, so when `web_search` is enabled it sometimes falls back to writing inline `<cite index="N-M">quoted text</cite>` pseudo-XML directly into the message string instead. Nothing downstream ever stripped that markup — `stripReasoningPreamble()` only matches reasoning-scratchpad patterns, not citation tags.
+**Fix / Change:** Added `<cite ...>...</cite>` unwrapping to the existing chain of deterministic `.replace()` calls that strip bracket tokens (`[NO_REPLY]`, `[INJURY_HOLD]`, etc.) from `rawText` before it becomes `strippedRaw`. This is a fixed, API-shaped tag rather than free-form phrasing, so a one-line structural strip is the right fix per the prompt-engineering philosophy in CLAUDE.md — not a prompt rule, and not something that needed a validator. Keeps the quoted text, drops the markup, applies regardless of which code path produced `rawText` (deliver_message argument or the text-block fallback).
+**Files changed:** `src/app/api/coach/respond/route.ts`
+
+---
+
 ## 2026-08-16 — Measured the voice validator, then deleted the FORBIDDEN PHRASES list it replaces
 
 **Type:** Improvement
