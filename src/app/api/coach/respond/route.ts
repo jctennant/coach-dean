@@ -39,6 +39,8 @@ import { resolveWeekMode } from "@/lib/week-mode";
 import { buildScheduleDigest, countDayLabeledLines, stripDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 import { splitIntoMessages } from "@/lib/message-split";
 import { SHAPE_NAMES, resolveShape, checkShape, buildShapeCorrection, inferAthleteStyle } from "@/lib/message-shape";
+import { buildVoiceBlock, buildVoiceContext, computeHumorGate } from "@/lib/coach-voice";
+import { checkVoice } from "@/lib/voice-check";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
@@ -4712,6 +4714,21 @@ OUTPUT CONTRACT:
   // BLOCK the send, with a one-shot repair-and-recheck (see response-gate.ts). Nobody
   // is waiting on these messages, so the added latency is free, and any gate/repair
   // failure fails open to the original text.
+  // Same derivation the system prompt used, so the validator judges humor against the
+  // same gate Dean was given (see coach-voice.ts).
+  const sendTimeHumorGate = computeHumorGate(
+    buildVoiceContext({
+      profile,
+      state,
+      upcomingRaces,
+      // Mirrors the argument passed to buildSystemPrompt above — for non-user_message
+      // triggers there's no classified intent, so the injury framing stays unconditional.
+      askedAboutInjury: trigger !== "user_message" || classifiedIntent.intent === "injury_query",
+      messageCount: recentMessages.length,
+      timezone: userTimezone,
+    })
+  );
+
   const isGatedProactive =
     trigger === "morning_plan" || trigger === "weekly_recap" || trigger === "nightly_reminder";
   if (isGatedProactive) {
@@ -4720,6 +4737,7 @@ OUTPUT CONTRACT:
         message: coachMessage,
         dateFacts: getDateFacts(userTimezone),
         priorSameTypeMessages: priorSameTypeTexts,
+        humor: sendTimeHumorGate,
       });
       for (const e of gate.events) {
         log.warn("proactive validator gate event", { trigger, event: e.event, detail: e.detail ?? null });
@@ -4755,6 +4773,22 @@ OUTPUT CONTRACT:
         }
       })
       .catch((err) => log.error("date consistency check errored", { error: String(err) }));
+    // Voice is advisory here for the same reason as the checks above — an inbound reply
+    // has someone waiting on it, so a repair loop would be felt. v1 gathers telemetry on
+    // how often the persona slips on the live path before deciding whether to gate it.
+    void checkVoice(trigger === "post_run" ? postRunLine2 : coachMessage, {
+      humorAllowed: sendTimeHumorGate.allowed,
+      humorSuppressionReason: sendTimeHumorGate.reason,
+    })
+      .then((result) => {
+        if (!result.ok) {
+          log.warn("voice issue detected", { trigger, category: result.category, issue: result.issue });
+          void trackEvent(userId, "voice_issue_detected", {
+            trigger, category: result.category, issue: result.issue,
+          });
+        }
+      })
+      .catch((err) => log.error("voice check errored", { error: String(err) }));
   }
 
   // Re-run in case the gate above replaced coachMessage with a repaired version
@@ -6970,6 +7004,19 @@ function buildSystemPrompt(
     (avgWeeklyMileage ?? 0) > 8;
   // Sections useful when reviewing a completed run
   const isRunReview = isPostRun || isConversational;
+  // Persona + structural humor gate (coach-voice.ts). Derived from the same helper the
+  // send-time voice gate uses, so the prompt and the validator agree on whether humor
+  // was allowed on this turn.
+  const humorGate = computeHumorGate(
+    buildVoiceContext({
+      profile,
+      state,
+      upcomingRaces,
+      askedAboutInjury,
+      messageCount: recentMessages.length,
+      timezone: timezone || "America/New_York",
+    })
+  );
   // Unit helpers — available throughout buildSystemPrompt
   const spUseMetric = profile?.preferred_units === "metric";
   const spMi = (miles: number) => spUseMetric ? `${(miles * 1.60934).toFixed(1)} km` : `${miles.toFixed(1)} mi`;
@@ -7488,11 +7535,12 @@ LENGTH — this is the most important rule:
 - If the athlete's message asks more than one thing, keep each answer to a sentence or two — do not give one part a full paragraph. Depth on every part is not the goal; a fast, complete answer is.
 - If the athlete's message is really one topic asked two ways (e.g. "is X normal, and is Y also okay?"), give ONE direct answer that covers both, not a separate paragraph per phrasing.
 
+${buildVoiceBlock(humorGate)}
+
 TONE:
 - Open directly with the observation. The first sentence should be the insight, not a preamble. "Pace-at-HR dropped 38s/mi from last month at the same effort. That's the aerobic base paying off." beats "Saw your run come through, here's what I noticed." If there's a specific, earned compliment, lead with it: "That negative split shows real discipline in the back half." Generic praise ("Great job!", "Awesome!") isn't a compliment, it's a filler.
 - End on the insight, not after it. The last sentence should be the coaching point or forward-look — not a recap of what you just said. "8:58/mi at HR 153. Pace-at-HR has improved 38s/mi from the same effort a month ago, so the base work is landing. Long run this week is the next test." stops at the right place. Adding "Keep the momentum going" or "Your fitness is clearly on the rise" after that just dilutes it.
 - No sign-offs or passive invitations at the end — no "Let me know if you have questions", no "You've got this!", no "Reply if you want to dig into these numbers." The message is complete. If the athlete wants to ask something, they will.
-- Sound like a knowledgeable friend, not a customer service bot.
 - Use specific numbers for paces and distances.
 - One emoji max per response. Often none is better.
 - Prefer short sentences connected with a period, not a long clause stitched together with a dash.

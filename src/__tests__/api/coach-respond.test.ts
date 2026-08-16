@@ -15,6 +15,32 @@ function systemText(system: unknown): string {
   return "";
 }
 
+/**
+ * The coaching generation calls, identified by the one thing only they have: the
+ * deliver_message tool. Selecting them by system-prompt length or by "the last call"
+ * is brittle — coach/respond fires several focused validator calls (extraction,
+ * repetition, date-consistency, voice), some advisory and unawaited, and any of them
+ * can be long or land last. Adding a validator should not break unrelated assertions.
+ */
+function coachCalls(): unknown[][] {
+  return (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls.filter((c: unknown[]) =>
+    (((c[0] as { tools?: Array<{ name?: string }> }).tools) ?? []).some((t) => t?.name === "deliver_message")
+  );
+}
+
+/** System prompt of the most recent coaching call (a fact-gate retry reuses the same one). */
+function coachSystem(): string {
+  const calls = coachCalls();
+  return systemText((calls[calls.length - 1]?.[0] as Record<string, unknown> | undefined)?.system);
+}
+
+/** First user-turn content of the most recent coaching call. */
+function coachUserMessage(): string {
+  const calls = coachCalls();
+  const args = calls[calls.length - 1]?.[0] as { messages?: Array<{ content?: unknown }> } | undefined;
+  return String(args?.messages?.[0]?.content ?? "");
+}
+
 // ---------- Capture after() callbacks so tests can await background work ----------
 const afterQueue: Array<() => Promise<void>> = [];
 async function flush() {
@@ -638,10 +664,7 @@ describe("coach/respond — initial_plan beginner tier (stale Strava history)", 
 
     // Find the main Sonnet call — it has a long system prompt (not the short Haiku calls)
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const sonnetCall = calls.find((c: unknown[]) => {
-      const args = c[0] as Record<string, unknown>;
-      return systemText(args.system).length > 200;
-    });
+    const sonnetCall = coachCalls()[0];
     expect(sonnetCall).toBeDefined();
     const systemPrompt = systemText((sonnetCall![0] as Record<string, unknown>).system);
 
@@ -674,10 +697,7 @@ describe("coach/respond — structured plan.weekly_total (deliver_message plan f
     await flush();
 
     const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
-    const sonnetCall = create.mock.calls.find((c: unknown[]) => {
-      const args = c[0] as Record<string, unknown>;
-      return systemText(args.system).length > 200;
-    });
+    const sonnetCall = coachCalls()[0];
     expect(sonnetCall).toBeDefined();
     const tools = (sonnetCall![0] as { tools?: Array<{ name?: string; input_schema?: { required?: string[] } }> }).tools ?? [];
     const deliverTool = tools.find((t) => t.name === "deliver_message");
@@ -976,10 +996,7 @@ describe("coach/respond — initial_plan beginner tier (stale Strava history)", 
 
     // Find the main Sonnet call — it has a long system prompt (not the short Haiku calls)
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const sonnetCall = calls.find((c: unknown[]) => {
-      const args = c[0] as Record<string, unknown>;
-      return systemText(args.system).length > 200;
-    });
+    const sonnetCall = coachCalls()[0];
     expect(sonnetCall).toBeDefined();
     const systemPrompt = systemText((sonnetCall![0] as Record<string, unknown>).system);
 
@@ -1320,8 +1337,7 @@ describe("coach/respond — nightly_reminder end-of-week guard", () => {
     await POST(req);
     await flush();
 
-    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+    const systemPrompt = coachSystem();
     // The day-agnostic framing must NOT be offered to an athlete whose plan has days —
     // that contradiction is what produced "doesn't matter what day" answers (2026-08-09).
     expect(systemPrompt).toContain("HAS assigned days");
@@ -1442,8 +1458,7 @@ describe("coach/respond — skipped non-run session detection on post_run", () =
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
     // post_run with no conversations = 1 Claude call
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    const coachingCall = calls[calls.length - 1];
-    const userMsg = coachingCall[0].messages[0].content as string;
+    const userMsg = coachUserMessage();
 
     expect(userMsg).toContain("PLAN DEVIATION — NON-RUN DAY");
     expect(userMsg).toContain("Strength + mobility 30min");
@@ -1465,10 +1480,8 @@ describe("coach/respond — skipped non-run session detection on post_run", () =
     await POST(req);
     await flush();
 
-    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.length).toBeGreaterThanOrEqual(1);
-    const coachingCall = calls[calls.length - 1];
-    const userMsg = coachingCall[0].messages[0].content as string;
+    expect(coachCalls().length).toBeGreaterThanOrEqual(1);
+    const userMsg = coachUserMessage();
 
     expect(userMsg).not.toContain("PLAN DEVIATION — NON-RUN DAY");
   });
@@ -1509,9 +1522,8 @@ describe("coach/respond — injury hold broken via post_run", () => {
     await POST(req);
     await flush();
 
-    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.length).toBeGreaterThanOrEqual(1);
-    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+    expect(coachCalls().length).toBeGreaterThanOrEqual(1);
+    const userMsg = coachUserMessage();
 
     expect(userMsg).toContain("INJURY HOLD WAS ACTIVE FOR THIS RUN");
     expect(userMsg).toContain("2026-08-14");
@@ -1525,7 +1537,7 @@ describe("coach/respond — injury hold broken via post_run", () => {
     await flush();
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+    const userMsg = coachUserMessage();
 
     expect(userMsg).not.toContain("INJURY HOLD WAS ACTIVE FOR THIS RUN");
   });
@@ -1551,7 +1563,7 @@ describe("coach/respond — injury hold broken via post_run", () => {
     await flush();
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+    const userMsg = coachUserMessage();
 
     expect(userMsg).not.toContain("INJURY HOLD WAS ACTIVE FOR THIS RUN");
   });
@@ -1582,8 +1594,7 @@ describe("coach/respond — pain trend block", () => {
     await POST(req);
     await flush();
 
-    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+    const systemPrompt = coachSystem();
 
     expect(systemPrompt).toContain("PAIN TREND");
     expect(systemPrompt).toContain("2026-08-10: 4/10");
@@ -1606,8 +1617,7 @@ describe("coach/respond — pain trend block", () => {
     await POST(req);
     await flush();
 
-    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+    const systemPrompt = coachSystem();
 
     expect(systemPrompt).toContain("PROGRESSION GATE MET");
     expect(systemPrompt).toContain("Single-leg hop in place");
@@ -1625,8 +1635,7 @@ describe("coach/respond — pain trend block", () => {
     await POST(req);
     await flush();
 
-    const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const systemPrompt = systemText(calls[calls.length - 1][0].system);
+    const systemPrompt = coachSystem();
 
     expect(systemPrompt).not.toContain("PAIN TREND");
   });
@@ -1674,7 +1683,7 @@ describe("coach/respond — injury check-in pain poll", () => {
     );
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+    const userMsg = coachUserMessage();
     expect(userMsg).toContain("that check-in is sent separately as a poll");
     expect(userMsg).not.toContain("INJURY CHECK-IN QUESTION:");
   });
@@ -1718,7 +1727,7 @@ describe("coach/respond — injury check-in pain poll", () => {
     expect(sendPoll).not.toHaveBeenCalled();
 
     const calls = (anthropic.messages.create as ReturnType<typeof vi.fn>).mock.calls;
-    const userMsg = calls[calls.length - 1][0].messages[0].content as string;
+    const userMsg = coachUserMessage();
     expect(userMsg).toContain("INJURY CHECK-IN QUESTION:");
   });
 
@@ -1849,8 +1858,9 @@ describe("coach/respond — rehab protocol tool", () => {
     await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
     await flush();
 
-    // Round-trip: tool request + final response = two model calls
-    expect(create.mock.calls.length).toBe(2);
+    // Round-trip: tool request + final response = two coaching calls. Counted via
+    // coachCalls() rather than total calls, which also include advisory validators.
+    expect(coachCalls()).toHaveLength(2);
 
     // The rehab tool was offered on the first call
     const firstTools = (create.mock.calls[0][0] as { tools?: Array<{ name?: string }> }).tools ?? [];
@@ -1901,12 +1911,11 @@ describe("coach/respond — deliver_message tool (structural reasoning-leak fix)
     await POST(mockRequest({ userId: "user-001", trigger: "post_run" }));
     await flush();
 
-    // Two model calls: one to generate the message (tool_choice: any, deliver_message
-    // tool) — no fallback/retry needed once deliver_message is present — and one from
-    // the advisory date-consistency check (date-consistency-check.ts), which fires
-    // because the message mentions "today". That second call is a post-hoc validator,
-    // not a regeneration of the coaching message.
-    expect(create.mock.calls.length).toBe(2);
+    // Exactly ONE coaching generation (tool_choice: any, deliver_message tool) — no
+    // fallback or retry is needed once deliver_message is present. The other calls on
+    // this turn are advisory post-hoc validators (date-consistency, voice), not
+    // regenerations, so they're excluded rather than counted.
+    expect(coachCalls()).toHaveLength(1);
     const firstCallParams = create.mock.calls[0][0] as { tool_choice?: unknown; tools?: Array<{ name?: string }> };
     expect(firstCallParams.tool_choice).toEqual({ type: "any" });
     expect(firstCallParams.tools?.some((t) => t.name === "deliver_message")).toBe(true);
@@ -1956,7 +1965,7 @@ describe("coach/respond — deliver_message tool (structural reasoning-leak fix)
     await POST(mockRequest({ userId: "user-001", trigger: "user_message" }));
     await flush();
 
-    expect(create.mock.calls.length).toBe(2);
+    expect(coachCalls()).toHaveLength(2);
     const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
     expect(sent).toContain("clamshells");
   });
@@ -2846,10 +2855,7 @@ describe("coach/respond — shape gate (deliver_message declared length budget)"
     await POST(mockRequest({ userId: "user-001", trigger: "user_message", message: "hey" }));
     await flush();
 
-    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
-    const sonnetCall = create.mock.calls.find((c: unknown[]) =>
-      systemText((c[0] as Record<string, unknown>).system).length > 200
-    );
+    const sonnetCall = coachCalls()[0];
     const tools = (sonnetCall![0] as { tools?: Array<{ name?: string; input_schema?: { required?: string[]; properties?: Record<string, unknown> } }> }).tools ?? [];
     const deliverTool = tools.find((t) => t.name === "deliver_message");
     expect(deliverTool?.input_schema?.required).toContain("shape");
@@ -2871,10 +2877,7 @@ describe("coach/respond — shape gate (deliver_message declared length budget)"
     const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
     expect(sent).toContain("How'd the calf feel?");
     // Exactly one coaching generation — no rejection round-trip.
-    const coachCalls = create.mock.calls.filter((c: unknown[]) =>
-      systemText((c[0] as Record<string, unknown>).system).length > 200
-    );
-    expect(coachCalls).toHaveLength(1);
+    expect(coachCalls()).toHaveLength(1);
   });
 
   it("rejects an over-budget message once and sends the corrected re-delivery", async () => {
@@ -2882,7 +2885,8 @@ describe("coach/respond — shape gate (deliver_message declared length budget)"
     const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
     let coachTurn = 0;
     create.mockImplementation(async (args: Record<string, unknown>) => {
-      if (systemText(args.system).length <= 200) {
+      const isCoachCall = (((args.tools) as Array<{ name?: string }> | undefined) ?? []).some((t) => t?.name === "deliver_message");
+      if (!isCoachCall) {
         return { stop_reason: "end_turn", content: [{ type: "text", text: "{}" }] };
       }
       coachTurn++;
@@ -2908,7 +2912,8 @@ describe("coach/respond — shape gate (deliver_message declared length budget)"
     const bloated = "You ran well today and I want to walk you through it. ".repeat(6);
     const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
     create.mockImplementation(async (args: Record<string, unknown>) => {
-      if (systemText(args.system).length <= 200) {
+      const isCoachCall = (((args.tools) as Array<{ name?: string }> | undefined) ?? []).some((t) => t?.name === "deliver_message");
+      if (!isCoachCall) {
         return { stop_reason: "end_turn", content: [{ type: "text", text: "{}" }] };
       }
       return {

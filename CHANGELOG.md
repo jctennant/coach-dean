@@ -8,6 +8,27 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-16 — Dean gets a voice: a coach a few years older, with structurally-throttled humor and a semantic validator
+
+**Type:** Feature
+**Reported by:** Jake
+**User feedback:** "I'd like to try out this more friendly type of coach where he's texting more like a coach that's five to ten years older than me, has a good amount of experience, but also has some sense of humor. Let's try this out just to see how it goes. I think the voice validator is basically just the haiku call that runs after a message to confirm the meaning or intent of a certain message and blocks if it's off"
+**Root cause:** Persona had no owner in the architecture. Voice rules were duplicated across `COMMUNICATION STYLE`, `TONE`, and three separate `OUTPUT CONTRACT` blocks ("no sign-offs" appeared in at least three places), each defended by a maintained phrase list that needs a new entry every time the model finds new wording for the same failure — exactly the treadmill CLAUDE.md warns against. Separately, there was **nothing** about humor anywhere in the prompt; the only adjacent mention was a prohibition ("not even playfully" in the identity rule). Dean was never going to be funny by accident.
+**Fix / Change:**
+- **`src/lib/coach-voice.ts` (new)** — one concise `VOICE` block: a coach five to ten years older than the athlete, experienced, direct, warm only when earned, confident rather than deferential. Replaces the scattered tone lines (removed the now-redundant "Sound like a knowledgeable friend, not a customer service bot").
+- **Humor is throttled structurally, not by instruction.** `computeHumorGate` reads context the system already has — injury hold, active injury, pain raised this turn, race within 7 days, fewer than 6 messages of rapport — and when the gate is closed the prompt simply does not invite humor, naming the actual reason. The model is never asked to read the room itself. Poke can afford an unthrottled bit because it's a general assistant with no stakes; a punchline landing on "my shin is killing me" is a trust failure, not a tone miss. When the gate is open, the Poke throttles apply verbatim: dry not jokey, one at most, never two in a row unless the athlete jokes back, never at their expense.
+- **`src/lib/voice-check.ts` (new)** — a focused Haiku call judging four things semantically: sycophancy, bad/forced/ill-timed humor (and *any* humor when the gate is closed, which is how the gate is enforced rather than merely requested), filler/sign-offs, and corporate register. Judges meaning, so it needs no phrase list — a sign-off phrased in a way nobody has seen before is still a sign-off. Fails open.
+- **Wired blocking on proactive triggers** (`response-gate.ts`), with the existing repair-and-recheck loop and a new `voice` repair kind whose instruction is "cut, don't replace with different filler" and which pins numbers/dates/injury questions as unchangeable. Runs **last** in the gate, so it judges the text a date or repetition repair actually produced. Advisory-only on the latency-sensitive inbound path (`user_message`, `post_run`), matching how the other two checks shipped.
+- Telemetry: `gate_voice_issue_detected`, `gate_voice_repaired`, `gate_voice_repair_failed_sent_original`, `voice_issue_detected`.
+
+**Not done yet, deliberately:** the `FORBIDDEN PHRASES` block and the `NO SIGN-OFFS` / `NO GENERIC OPENERS` lines in the three output contracts are still in place. Deleting them is the actual payoff of having a validator, but doing it in the same change that adds the validator would move generation and enforcement at once with no way to attribute a regression. Delete them once `voice_issue_detected` telemetry shows the validator is catching what the lists were catching.
+
+**Test-suite note:** twelve existing `coach-respond` tests broke, all for the same reason — they identified "the coaching call" as either the *last* model call or any call with a system prompt over 200 characters, and the new advisory validator is both. Replaced those heuristics with `coachCalls()` / `coachSystem()` / `coachUserMessage()` helpers that select on the one thing only a coaching call has: the `deliver_message` tool. Adding a future validator will no longer break unrelated assertions.
+
+**Files changed:** `src/lib/coach-voice.ts` (new), `src/lib/voice-check.ts` (new), `src/lib/response-gate.ts`, `src/app/api/coach/respond/route.ts`, `src/__tests__/lib/coach-voice.test.ts` (new), `src/__tests__/lib/voice-check.test.ts` (new), `src/__tests__/lib/response-gate.test.ts`, `src/__tests__/api/coach-respond.test.ts`
+
+---
+
 ## 2026-08-16 — Paired em dashes were being shattered into sentence fragments
 
 **Type:** Bug Fix
