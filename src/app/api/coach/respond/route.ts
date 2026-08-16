@@ -38,6 +38,7 @@ import { correctWeekToDateTotal } from "@/lib/week-to-date-correction";
 import { resolveWeekMode } from "@/lib/week-mode";
 import { buildScheduleDigest, countDayLabeledLines, stripDayLabeledLines, type SchedulePlanWeek, type PersistedSession } from "@/lib/schedule-digest";
 import { splitIntoMessages } from "@/lib/message-split";
+import { SHAPE_NAMES, resolveShape, checkShape, buildShapeCorrection, inferAthleteStyle } from "@/lib/message-shape";
 import { buildDateContext } from "@/lib/coach-date-context";
 import { formatGoalLabel } from "@/lib/goal-labels";
 import { buildRaceContext, type UpcomingRaceInput } from "@/lib/coach-race-context";
@@ -179,6 +180,21 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
     input_schema: {
       type: "object" as const,
       properties: {
+        // Declared BEFORE message in the schema on purpose: the model fills arguments in
+        // order, so committing to a size first shapes the prose that follows, rather than
+        // labelling whatever it already wrote. See message-shape.ts.
+        shape: {
+          type: "string" as const,
+          enum: SHAPE_NAMES,
+          description:
+            "How long this reply should be — decide this BEFORE writing `message`, then write to it. " +
+            "\"ack\": one line, no analysis (acknowledgments, confirmations, a quick factual answer). " +
+            "\"brief\": a couple of sentences carrying one observation or one answer — this is the normal " +
+            "choice for a back-and-forth conversation. \"full\": several sentences across 2-3 bubbles, for " +
+            "a week's plan, a recap, real injury guidance, or a genuinely multi-part question. " +
+            "Pick the smallest shape that does the job. A reply that fits \"ack\" and is written as \"full\" " +
+            "reads like a form letter; most conversational turns are \"ack\" or \"brief\".",
+        },
         message: {
           type: "string",
           description: "The exact text to send the athlete, or the literal string [NO_REPLY].",
@@ -393,6 +409,7 @@ function buildDeliverMessageTool(mode: DeliverMessageMode, includeStatedFacts = 
           : {}),
       },
       required: [
+        "shape",
         ...(mode === "plan_facts"
           ? ["message", "plan"]
           : mode === "skeleton_annotations" || mode === "recovery_annotations"
@@ -2563,7 +2580,17 @@ NO GENERIC OPENERS. Never start with "Great week!", "Nice work!", "Awesome sessi
 4. INJURY & LOAD ARE THE PRIORITY LENS. If LOAD CONTEXT shows a spike or a recovery signal, or the athlete mentioned any tightness/soreness/pain (now or recently), lead with or weave in the specific load-management or recovery read — even unprompted. That proactive injury-prevention insight is the highest-value thing you can give them. Translate load numbers into plain English; never cite raw "units".
 5. If the athlete asked a narrow question, answer it precisely and stop — don't pad to hit these. Specificity beats completeness.`
     : "";
-  const systemDynamic = builtPrompt.dynamic + aerobicTrendBlock + strengthRoutineBlock + hipCoreProtocolBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + painTrendBlock + (coachingFocus
+  // Poke's leaked prompt says "match response length to the user's messaging style" as an
+  // instruction; the input for it is sitting in the conversations table, so it's computed
+  // from their actual inbound messages and passed in as a fact instead of a vibe.
+  const athleteStyleBlock = (() => {
+    const inbound = recentMessages
+      .filter((m) => m.role === "user")
+      .map((m) => (m.content as string) || "");
+    const block = inferAthleteStyle(inbound);
+    return block ? `\n\n${block}` : "";
+  })();
+  const systemDynamic = builtPrompt.dynamic + athleteStyleBlock + aerobicTrendBlock + strengthRoutineBlock + hipCoreProtocolBlock + loadContextBlock + symptomEscalationBlock + physioNotesBlock + painTrendBlock + (coachingFocus
     ? `\n\nATHLETE COACHING FOCUS (stored from a previous conversation — use this to weight your coaching lens):
 Focus: ${coachingFocus}
 - "aerobic_base_and_zones": Athlete wants to understand and build their aerobic base. HR zone analysis, cardiac drift, and aerobic efficiency trends are welcome.
@@ -4045,6 +4072,74 @@ OUTPUT CONTRACT:
       } catch (err) {
         log.error("fact-gate retry call failed — keeping original message", { trigger, error: String(err) });
       }
+    }
+  }
+
+  // ─── Shape gate ───────────────────────────────────────────────────────────────
+  // Dean declares `shape` on deliver_message before writing (see message-shape.ts);
+  // this checks the delivered text against that self-declared budget and rejects once
+  // on an overrun, same mechanics as the fact gate above. Skipped for [NO_REPLY] and
+  // for the annotation modes, whose `message` length is already constrained by their
+  // own schema/leak rules. Fail-open: a failed or missing re-delivery sends the
+  // original — an over-long message is a quality problem, a truncated one can drop an
+  // injury instruction.
+  const shapeGateApplies =
+    deliverMessageMode !== "skeleton_annotations" && deliverMessageMode !== "recovery_annotations";
+  if (deliverBlock && shapeGateApplies) {
+    const declaredText = String((deliverBlock.input as { message?: unknown }).message ?? "").trim();
+    const { shape, declared } = resolveShape((deliverBlock.input as { shape?: unknown }).shape);
+    if (!declared) {
+      log.warn("deliver_message omitted shape — skipping shape gate", { trigger });
+      void trackEvent(userId, "shape_missing", { trigger });
+    }
+    const violation =
+      declared && declaredText && declaredText !== "[NO_REPLY]" ? checkShape(declaredText, shape) : null;
+    if (violation) {
+      log.warn("shape budget exceeded — rejecting delivery for one retry", {
+        trigger, shape: violation.shape, budget: violation.budget, actual: violation.actual,
+      });
+      void trackEvent(userId, "shape_violation", {
+        trigger, shape: violation.shape, budget: violation.budget, actual: violation.actual,
+      });
+      const allToolUses = response.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use"
+      );
+      convo.push({ role: "assistant", content: response.content });
+      convo.push({
+        role: "user",
+        content: allToolUses.map((tu) => ({
+          type: "tool_result" as const,
+          tool_use_id: tu.id,
+          content: tu.id === deliverBlock!.id ? buildShapeCorrection(violation) : "(not evaluated)",
+          ...(tu.id === deliverBlock!.id ? { is_error: true as const } : {}),
+        })),
+      });
+      try {
+        const retryResponse = await callCoach();
+        const retryBlock = findDeliverBlock(retryResponse);
+        const retryText = String((retryBlock?.input as { message?: unknown })?.message ?? "").trim();
+        if (retryBlock && retryText) {
+          response = retryResponse;
+          deliverBlock = retryBlock;
+          const retryShape = resolveShape((retryBlock.input as { shape?: unknown }).shape);
+          const stillOver = checkShape(retryText, retryShape.shape);
+          if (stillOver) {
+            log.warn("shape still over budget after retry — sending anyway (fail-open)", {
+              trigger, shape: stillOver.shape, actual: stillOver.actual,
+            });
+            void trackEvent(userId, "shape_violation_after_retry", { trigger, shape: stillOver.shape, actual: stillOver.actual });
+          } else {
+            log.info("shape corrected on retry", { trigger, shape: retryShape.shape, chars: retryText.length });
+            void trackEvent(userId, "shape_corrected", { trigger, shape: retryShape.shape, chars: retryText.length });
+          }
+        } else {
+          log.warn("shape-gate retry did not re-deliver — keeping original message", { trigger });
+        }
+      } catch (err) {
+        log.error("shape-gate retry call failed — keeping original message", { trigger, error: String(err) });
+      }
+    } else if (declared && declaredText && declaredText !== "[NO_REPLY]") {
+      void trackEvent(userId, "shape_declared", { trigger, shape, chars: declaredText.length });
     }
   }
 
@@ -7386,8 +7481,8 @@ Do not explain your reasoning. Do not describe what you would have said. Just ca
 ` : ""}
 
 LENGTH — this is the most important rule:
-- Keep responses under 480 characters. Most replies should be a single short text.
-- If you genuinely need more space, you can split into 2–3 messages by separating them with a blank line — the system will send each as its own bubble. For post-run feedback and weekly plans, 2–3 bubbles is fine. For back-and-forth Q&A (user_message with an active conversation), 1 bubble is almost always right — 2 max.
+- Set the "shape" argument on deliver_message BEFORE you write the message, then write to it. Pick the smallest shape that does the job; the system checks the message against the budget you declared and sends it back if you overshoot.
+- Blank lines are bubble boundaries at any length — separate paragraphs with a blank line and the system sends each as its own text. 1 bubble is almost always right for back-and-forth Q&A; 2-3 is for plans and recaps.
 - When in doubt, cut it. A short reply that nails the key point beats a long reply that covers everything.
 - Do not volunteer information the athlete didn't ask for just to fill space. Answer what was asked, then stop.
 - If the athlete's message asks more than one thing, keep each answer to a sentence or two — do not give one part a full paragraph. Depth on every part is not the goal; a fast, complete answer is.

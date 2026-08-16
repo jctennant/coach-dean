@@ -2825,3 +2825,139 @@ describe("coach/respond — weekly recap schedule surface", () => {
     expect(sent.some((t: string) => t.includes("Want to see how any of these look?"))).toBe(true);
   });
 });
+
+describe("coach/respond — shape gate (deliver_message declared length budget)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    afterQueue.splice(0);
+  });
+
+  const setupUser = () =>
+    setupSupabase({ user: baseUser(), profile: baseProfile(), state: baseState() });
+
+  it("exposes shape as a required argument on deliver_message", async () => {
+    (anthropic.messages.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        shape: "brief", message: "Legs feeling alright after that one?",
+      } }],
+    });
+    setupUser();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message", message: "hey" }));
+    await flush();
+
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    const sonnetCall = create.mock.calls.find((c: unknown[]) =>
+      systemText((c[0] as Record<string, unknown>).system).length > 200
+    );
+    const tools = (sonnetCall![0] as { tools?: Array<{ name?: string; input_schema?: { required?: string[]; properties?: Record<string, unknown> } }> }).tools ?? [];
+    const deliverTool = tools.find((t) => t.name === "deliver_message");
+    expect(deliverTool?.input_schema?.required).toContain("shape");
+    expect(deliverTool?.input_schema?.properties).toHaveProperty("shape");
+  });
+
+  it("sends a within-budget message without a retry call", async () => {
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create.mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        shape: "ack", message: "Nice one. How'd the calf feel?",
+      } }],
+    });
+    setupUser();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message", message: "ran 5" }));
+    await flush();
+
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("How'd the calf feel?");
+    // Exactly one coaching generation — no rejection round-trip.
+    const coachCalls = create.mock.calls.filter((c: unknown[]) =>
+      systemText((c[0] as Record<string, unknown>).system).length > 200
+    );
+    expect(coachCalls).toHaveLength(1);
+  });
+
+  it("rejects an over-budget message once and sends the corrected re-delivery", async () => {
+    const bloated = "You ran well today and I want to walk you through it. ".repeat(6);
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    let coachTurn = 0;
+    create.mockImplementation(async (args: Record<string, unknown>) => {
+      if (systemText(args.system).length <= 200) {
+        return { stop_reason: "end_turn", content: [{ type: "text", text: "{}" }] };
+      }
+      coachTurn++;
+      return {
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: `tu-${coachTurn}`, name: "deliver_message", input: {
+          shape: "ack",
+          message: coachTurn === 1 ? bloated : "Solid run. How'd it feel?",
+        } }],
+      };
+    });
+    setupUser();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message", message: "ran 5" }));
+    await flush();
+
+    expect(coachTurn).toBe(2);
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join("\n");
+    expect(sent).toContain("Solid run. How'd it feel?");
+    expect(sent).not.toContain("walk you through it");
+  });
+
+  it("fails open and sends the original when the re-delivery is still over budget", async () => {
+    const bloated = "You ran well today and I want to walk you through it. ".repeat(6);
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create.mockImplementation(async (args: Record<string, unknown>) => {
+      if (systemText(args.system).length <= 200) {
+        return { stop_reason: "end_turn", content: [{ type: "text", text: "{}" }] };
+      }
+      return {
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+          shape: "ack", message: bloated,
+        } }],
+      };
+    });
+    setupUser();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message", message: "ran 5" }));
+    await flush();
+
+    // Never truncated or dropped — an over-long message beats a silent no-send.
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join(" ");
+    expect(sent).toContain("walk you through it");
+  });
+
+  it("skips the gate entirely when shape is absent (no retry, message still sends)", async () => {
+    const bloated = "You ran well today and I want to walk you through it. ".repeat(6);
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create.mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: { message: bloated } }],
+    });
+    setupUser();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message", message: "ran 5" }));
+    await flush();
+
+    // An undeclared shape resolves to the loosest budget and is never enforced — no
+    // rejection is ever handed back, so the over-long message sends as written.
+    const everySentMessage = JSON.stringify(create.mock.calls);
+    expect(everySentMessage).not.toContain("Rejected: you declared shape");
+    const sent = (sendSMS as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => c[1] as string).join(" ");
+    expect(sent).toContain("walk you through it");
+  });
+
+  it("does not gate [NO_REPLY]", async () => {
+    const create = anthropic.messages.create as ReturnType<typeof vi.fn>;
+    create.mockResolvedValue({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu-1", name: "deliver_message", input: {
+        shape: "ack", message: "[NO_REPLY]",
+      } }],
+    });
+    setupUser();
+    await POST(mockRequest({ userId: "user-001", trigger: "user_message", message: "thanks!" }));
+    await flush();
+
+    expect((sendSMS as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+});

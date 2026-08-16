@@ -93,6 +93,19 @@ function makeRequest(body: unknown) {
   return { json: () => Promise.resolve(body) } as unknown as Request;
 }
 
+/**
+ * All text sent across every SMS bubble this turn, joined back together.
+ *
+ * Use this instead of indexing smsCalls[0] whenever an assertion is about the CONTENT
+ * of a turn rather than its bubble layout. splitIntoMessages honors blank lines as
+ * bubble boundaries at any length (since 2026-08-16), so a message built with "\n\n"
+ * separators — like the Strava pitch/URL/explainer — lands as several texts, and
+ * asserting on the first one only sees the first paragraph.
+ */
+function allSentText(smsCalls: unknown[][]): string {
+  return smsCalls.map((c) => String(c[1] ?? "")).join("\n\n");
+}
+
 /** Mirrors lockFingerprint in onboarding/handle/route.ts — the lock is message-scoped. */
 function lockFingerprint(message: string) {
   return createHash("sha256").update(message).digest("hex").slice(0, 16);
@@ -407,14 +420,17 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     await POST(makeRequest({ userId: "user-001", message: "I run marathons" }));
 
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    // Standalone Strava turn: pitch + URL in one message (no pre-Strava context to split out)
-    const stravaMsg = smsCalls[0]?.[1] as string;
+    // Standalone Strava turn: transition, URL, and pitch are one logical response, sent as
+    // separate bubbles (the URL gets its own text so the link preview renders on its own).
+    const stravaMsg = allSentText(smsCalls);
     expect(stravaMsg).not.toContain("[STRAVA_LINK]");
     expect(stravaMsg).toContain("https://coachdean.ai/api/auth/strava");
     // No "skip" option in the message — Strava is now required
     expect(stravaMsg).not.toContain('"skip"');
-    // Only one SMS sent (no separate pre-Strava response)
-    expect(smsCalls.length).toBe(1);
+    // The bare URL is always its own bubble, never buried in a paragraph.
+    expect(smsCalls.map((c) => String(c[1]).trim())).toContain(
+      "https://coachdean.ai/api/auth/strava/write?userId=user-001"
+    );
 
     // Step should be set to awaiting_strava
     const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls;
@@ -442,7 +458,7 @@ describe("POST /api/onboarding/handle — onboarding step (unified conversation)
     await POST(makeRequest({ userId: "user-001", message: "It hurts sporadically during runs." }));
 
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const stravaMsg = smsCalls[0]?.[1] as string;
+    const stravaMsg = allSentText(smsCalls);
     expect(stravaMsg).not.toContain("[STRAVA_LINK]");
     expect(stravaMsg.toLowerCase()).toContain("posterior shin");
     expect(stravaMsg).toContain("https://coachdean.ai/api/auth/strava");
@@ -660,7 +676,7 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
 
     // Should re-send the Strava link (not proceed without Strava)
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
+    const textSent = allSentText(smsCalls);
     expect(textSent).toContain("https://coachdean.ai/api/auth/strava");
     // Should NOT contain "skip" option since Strava is required
     expect(textSent).not.toContain('"skip"');
@@ -677,7 +693,7 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
     await POST(makeRequest({ userId: "user-001", message: "I'm not sure" }));
 
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
+    const textSent = allSentText(smsCalls);
     expect(textSent).toContain("https://coachdean.ai/api/auth/strava");
     // No skip option — Strava is required
     expect(textSent).not.toContain('"skip"');
@@ -694,7 +710,7 @@ describe("POST /api/onboarding/handle — awaiting_strava step", () => {
     await POST(makeRequest({ userId: "user-001", message: "What is Strava?" }));
 
     const smsCalls = (sendSMS as ReturnType<typeof vi.fn>).mock.calls;
-    const textSent = smsCalls[0]?.[1] as string;
+    const textSent = allSentText(smsCalls);
     expect(textSent).toContain("Strava is a free app");
     expect(textSent).toContain("https://coachdean.ai/api/auth/strava");
   });

@@ -8,6 +8,41 @@ All notable changes to Coach Dean are tracked here. Each entry includes the user
 
 ---
 
+## 2026-08-16 — Paired em dashes were being shattered into sentence fragments
+
+**Type:** Bug Fix
+**Reported by:** Jake
+**User feedback:** "Why do you think it did that weird sentence structure at the end? That any sore note is still hanging around?"
+**Root cause:** `normalizeEmDashes` treated every em dash as the "clause — payoff" pattern and split it into two sentences with the second recapitalized. That's right for a *terminal* dash but wrong for a *paired* one, where the dashes bracket an interruption and the sentence continues afterward. Dean wrote "If there's any soreness still hanging around — even at rest — cross-training only this week."; the athlete received "If there's any soreness still hanging around. Even at rest. Cross-training only this week." — a subordinate fragment plus two orphans. Every parenthetical Dean has ever written has been mangled this way since the function shipped, which is a large share of the clipped, oddly-formal register in his messages.
+**Fix / Change:** `normalizeEmDashes` now counts dashes per sentence (and per line, so session lists keep their structure). Dashes are consumed in pairs → commas, keeping the sentence whole and NOT recapitalizing; a leftover odd dash takes the existing terminal path → period split + recapitalize. A message mixing both shapes gets each right. Zero em dashes in output is still structurally guaranteed. Also fixed: a leading dash ("— solid week") now capitalizes the clause that becomes the sentence opener.
+**Files changed:** `src/lib/text-format.ts`, `src/__tests__/lib/text-format.test.ts` (new)
+
+---
+
+## 2026-08-16 — Poke-style brevity: blank lines always split bubbles, and reply length is now a declared, enforced argument
+
+**Type:** Improvement
+**Reported by:** Jake (internal — direction-setting, informed by Poke's leaked system prompt)
+**User feedback:** "I'd like to make coach Dean's personality more like poke (friendly, shorter messages, like texting a friend)… for Coach Dean this means the Interaction Agent needs its own judgment call on 'is this a 4-word nice run 🔥 or a 3-message breakdown of why pace dropped'… Worth writing that as an explicit output-shaping step rather than trusting the persona prompt alone to compress a wall of training-plan data."
+
+**Root cause:** Two separate gaps, both variations on "brevity was an instruction, not a mechanism."
+
+1. `splitIntoMessages` early-returned the whole string whenever it was under `MAX_MSG_CHARS`. The coaching prompt tells Dean he can split into 2-3 texts with a blank line, but for any reply under the limit — i.e. most of them — the transport silently merged his paragraph breaks back into one bubble. `onboarding/handle` had already grown a local `forceParagraphSplit` flag to work around exactly this for its first message, which was the tell that the default was wrong rather than that onboarding was special.
+2. Reply length was governed only by the prompt line "Keep responses under 480 characters" with nothing checking it. Contrast `stated_facts`, where the model echoes its numbers, code compares them to ground truth, and a mismatch costs one retry — facts got a mechanism, length got a sentence, and the uncheckable instruction degraded the way uncheckable instructions do.
+
+**Fix / Change:**
+- `message-split.ts`: blank lines are now bubble boundaries at *any* length, and paragraphs are never merged. `MAX_MSG_CHARS` lowered 480 → 320 (480 is 3-4 SMS segments — a wall on a phone) and demoted to a fallback that only sentence-splits overlong *single-paragraph* prose. Multi-line blocks (the one-session-per-line schedule format) are never sentence-split, since a schedule fragmented mid-list is worse than one long bubble. Removed the now-redundant `forceParagraphSplit` option from `onboarding/handle`.
+- New `src/lib/message-shape.ts`: `deliver_message` takes a required `shape` argument (`ack` 120 / `brief` 320 / `full` 700 chars), declared *before* `message` in the schema so the model commits to a size before writing rather than labelling what it already wrote. `checkShape` compares the delivered text to its own declared budget (10% grace band) and `buildShapeCorrection` hands back a focused rejection; `route.ts` retries once, same mechanics as the Phase B fact gate. Fail-open throughout — an over-long message sends as written rather than risking a truncation that drops an injury instruction, and the correction text explicitly protects paces/dates/injury questions from the cut. An absent or unrecognized `shape` resolves to the *loosest* budget, never the strictest.
+- `inferAthleteStyle` computes the athlete's texting register (terse / conversational / long-form, plus whether they use emoji) from their recent inbound messages and injects it into the prompt. Poke states "match response length to the user's messaging style" as an instruction; the input is sitting in the `conversations` table, so it's passed in as a fact instead of a vibe.
+- The prompt's LENGTH block now points at the `shape` argument instead of restating a character count it couldn't enforce.
+- Telemetry: `shape_declared`, `shape_violation`, `shape_corrected`, `shape_violation_after_retry`, `shape_missing`.
+
+**Behavior change worth noting:** the onboarding Strava turn is built with `\n\n` separators (transition / URL / pitch), so it now lands as three texts instead of one. The bare URL getting its own bubble is an improvement — link previews render on their own. Five `onboarding-handle` tests asserted on `smsCalls[0]` only and were updated to a new `allSentText()` helper that joins all bubbles; they were encoding the old merge behavior, not catching a regression.
+
+**Files changed:** `src/lib/message-split.ts`, `src/lib/message-shape.ts` (new), `src/app/api/coach/respond/route.ts`, `src/app/api/onboarding/handle/route.ts`, `src/__tests__/lib/message-split.test.ts` (new), `src/__tests__/lib/message-shape.test.ts` (new), `src/__tests__/api/coach-respond.test.ts`, `src/__tests__/api/onboarding-handle.test.ts`
+
+---
+
 ## 2026-08-15 — Three test-suite failures traced to hardcoded calendar dates aging past "now"
 
 **Type:** Bug Fix (test infra)

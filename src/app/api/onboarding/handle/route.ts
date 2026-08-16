@@ -97,17 +97,14 @@ async function sendAndStore(
   userId: string,
   phone: string,
   message: string,
-  messageType?: MessageType,
-  options?: { forceParagraphSplit?: boolean }
+  messageType?: MessageType
 ): Promise<{ chatId: string | null }> {
   const isDryRun = dryRunUsers.has(userId);
   const normalized = normalizeEmDashes(message);
-  // Onboarding's first message is short enough that splitIntoMessages' length gate
-  // never kicks in, but it's still meant to land as two texts (intro, then the
-  // name/goal question) — force the paragraph split regardless of length here.
-  const parts = options?.forceParagraphSplit
-    ? normalized.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)
-    : splitIntoMessages(normalized);
+  // splitIntoMessages honors blank lines as bubble boundaries at any length, so the
+  // first onboarding message still lands as two texts (intro, then the name/goal
+  // question) without a special case here.
+  const parts = splitIntoMessages(normalized);
   let chatId: string | null = null;
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
@@ -1343,9 +1340,7 @@ For return_to_running or injury_recovery goals: you MUST ask about the injury/li
   await supabase.from("users")
     .update({ onboarding_data: mergedData as unknown as Json })
     .eq("id", user.id);
-  await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding", {
-    forceParagraphSplit: isFirstResponse,
-  });
+  await sendAndStore(user.id, user.phone_number, responseText.trimEnd(), "onboarding");
   return NextResponse.json({ ok: true });
 }
 
